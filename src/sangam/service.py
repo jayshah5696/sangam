@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import sqlite3
-import tempfile
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any
 
 from sangam.config import Settings
@@ -15,7 +13,6 @@ from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
     IdempotencyError,
-    InvalidPathError,
     MaterializationError,
     NotFoundError,
     ValidationError,
@@ -28,6 +25,7 @@ from sangam.schemas import (
     Revision,
     Tag,
 )
+from sangam.workspace import DiskWorkspaceFilesystem, WorkspaceFilesystem
 
 
 def _content_hash(content: str) -> str:
@@ -40,9 +38,15 @@ def _request_hash(payload: dict[str, Any]) -> str:
 
 
 class DocumentService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        workspace: WorkspaceFilesystem | None = None,
+    ) -> None:
         self.settings = settings
         self.settings.prepare()
+        self.workspace = workspace or DiskWorkspaceFilesystem(settings.workspace_root)
         self.database = Database(settings.database_path)
         self.database.migrate()
         self._bootstrap_actors()
@@ -72,54 +76,10 @@ class DocumentService:
             raise ValidationError(f"Unknown actor: {actor_id}")
 
     def _normalize_path(self, raw_path: str) -> str:
-        if "\\" in raw_path:
-            raise InvalidPathError("Document paths must use forward slashes")
-        stripped_path = raw_path.strip()
-        raw_parts = stripped_path.split("/")
-        path = PurePosixPath(stripped_path)
-        if (
-            not stripped_path
-            or path.is_absolute()
-            or any(part in {"", ".", ".."} for part in raw_parts)
-        ):
-            raise InvalidPathError("Path must be a relative path inside the workspace")
-        if path.suffix.lower() != ".md":
-            raise InvalidPathError("Phase 1 supports only .md document paths")
-        normalized = path.as_posix()
-        root = self.settings.workspace_root.resolve()
-        candidate = (root / normalized).resolve(strict=False)
-        if not candidate.is_relative_to(root):
-            raise InvalidPathError("Path escapes the configured workspace root")
-        return normalized
+        return self.workspace.normalize_document_path(raw_path)
 
     def _normalize_folder_path(self, raw_path: str) -> str:
-        if "\\" in raw_path:
-            raise InvalidPathError("Folder paths must use forward slashes")
-        if raw_path.strip().startswith("/"):
-            raise InvalidPathError("Folder path must stay inside the workspace")
-        stripped_path = raw_path.strip().strip("/")
-        raw_parts = stripped_path.split("/")
-        path = PurePosixPath(stripped_path)
-        if (
-            not stripped_path
-            or path.is_absolute()
-            or any(part in {"", ".", ".."} for part in raw_parts)
-        ):
-            raise InvalidPathError("Folder path must stay inside the workspace")
-        root = self.settings.workspace_root.resolve()
-        candidate = (root / path.as_posix()).resolve(strict=False)
-        if not candidate.is_relative_to(root):
-            raise InvalidPathError("Folder path escapes the configured workspace root")
-        return path.as_posix()
-
-    def _absolute_path(self, path: str) -> Path:
-        normalized = self._normalize_path(path)
-        root = self.settings.workspace_root.resolve()
-        candidate = root / normalized
-        resolved = candidate.resolve(strict=False)
-        if not resolved.is_relative_to(root):
-            raise InvalidPathError("Path escapes the configured workspace root")
-        return candidate
+        return self.workspace.normalize_folder_path(raw_path)
 
     def _document_query(self) -> str:
         return """
@@ -512,15 +472,9 @@ class DocumentService:
         self._finish_if_current(*result)
         current_result = self.get_document(document_id, include_deleted=True)
         if old_path and old_path != current_result.path:
-            old_file = self._absolute_path(old_path)
-            if old_file.exists():
-                old_file.unlink()
-                self._fsync_directory(old_file.parent)
+            self.workspace.delete_document(old_path)
         if current_result.deleted and current_result.path:
-            deleted_file = self._absolute_path(current_result.path)
-            if deleted_file.exists():
-                deleted_file.unlink()
-                self._fsync_directory(deleted_file.parent)
+            self.workspace.delete_document(current_result.path)
         self._sync_search_index(document_id)
         return current_result, old_path
 
@@ -666,42 +620,12 @@ class DocumentService:
         )
         return document
 
-    def _write_atomic(self, destination: Path, content: str) -> str:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{destination.name}.sangam-", dir=destination.parent
-        )
-        temporary = Path(temporary_name)
-        try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(content.encode("utf-8"))
-                output.flush()
-                os.fsync(output.fileno())
-            os.replace(temporary, destination)
-            self._fsync_directory(destination.parent)
-        finally:
-            temporary.unlink(missing_ok=True)
-        actual_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        expected_hash = _content_hash(content)
-        if actual_hash != expected_hash:
-            raise OSError("Materialized file hash does not match the committed revision")
-        return actual_hash
-
-    @staticmethod
-    def _fsync_directory(directory: Path) -> None:
-        descriptor = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-
     def _finish_materialization(self, document_id: str) -> None:
         document = self.get_document(document_id, include_deleted=True)
         if document.deleted or not document.path:
             return
-        destination = self._absolute_path(document.path)
         try:
-            file_hash = self._write_atomic(destination, document.content)
+            file_hash = self.workspace.write_atomic(document.path, document.content)
         except Exception as error:
             raise MaterializationError(
                 "The revision was committed, but its workspace file is still pending",
@@ -776,11 +700,7 @@ class DocumentService:
 
         documents = [document for document in self.list_documents() if document.path]
         known_paths = {document.path for document in documents if document.path}
-        disk_files: dict[str, str] = {}
-        for file_path in self.settings.workspace_root.rglob("*.md"):
-            if file_path.is_file() and ".sangam-" not in file_path.name:
-                relative = file_path.relative_to(self.settings.workspace_root).as_posix()
-                disk_files[relative] = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        disk_files = self.workspace.scan_markdown()
 
         missing = [document for document in documents if document.path not in disk_files]
         unknown_paths = [path for path in disk_files if path not in known_paths]
@@ -828,8 +748,7 @@ class DocumentService:
 
     def reindex_path(self, path: str) -> Document:
         normalized = self._normalize_path(path)
-        absolute = self._absolute_path(normalized)
-        if not absolute.is_file():
+        if not self.workspace.is_document_file(normalized):
             raise NotFoundError(f"Workspace file not found: {normalized}")
         with self.database.connection() as connection:
             registered = connection.execute(
@@ -837,10 +756,10 @@ class DocumentService:
             ).fetchone()
             if registered:
                 raise ValidationError("That path is already registered")
-        content = absolute.read_text(encoding="utf-8")
+        content = self.workspace.read_document(normalized)
         fingerprint = _content_hash(content)
         document = self.create_document(
-            title=absolute.stem.replace("-", " ").strip().title() or absolute.name,
+            title=self.workspace.title_from_path(normalized),
             content=content,
             path=normalized,
             actor_id="system:reconcile",
@@ -873,8 +792,7 @@ class DocumentService:
         ):
             raise NotFoundError("Open unexpected-hash conflict not found")
         document = self.get_document(conflict["document_id"])
-        absolute = self._absolute_path(conflict["path"])
-        content = absolute.read_text(encoding="utf-8")
+        content = self.workspace.read_document(conflict["path"])
         result, _ = self._append_revision(
             document_id=document.document_id,
             expected_revision_id=document.current_revision_id,
@@ -1175,8 +1093,7 @@ class DocumentService:
                     now,
                 ),
             )
-        absolute = self.settings.workspace_root / normalized_path
-        absolute.mkdir(parents=True, exist_ok=True)
+        self.workspace.create_folder(normalized_path)
         with self.database.connection() as connection:
             row = connection.execute(
                 "SELECT * FROM folders WHERE folder_id = ?", (target_id,)

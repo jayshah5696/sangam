@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from conftest import headers
 from fastapi.testclient import TestClient
@@ -15,14 +13,14 @@ def test_committed_revision_recovers_after_interrupted_atomic_write(
     client: TestClient, settings, monkeypatch: pytest.MonkeyPatch, write_then_fail: bool
 ) -> None:
     service: DocumentService = client.app.state.service
-    original_write = service._write_atomic
+    original_write = service.workspace.write_atomic
 
-    def fail_write(destination: Path, content: str) -> str:
+    def fail_write(path: str, content: str) -> str:
         if write_then_fail:
-            original_write(destination, content)
+            original_write(path, content)
         raise OSError("injected failure after commit")
 
-    monkeypatch.setattr(service, "_write_atomic", fail_write)
+    monkeypatch.setattr(service.workspace, "write_atomic", fail_write)
     body = {
         "title": "Recoverable",
         "content": "committed",
@@ -41,7 +39,7 @@ def test_committed_revision_recovers_after_interrupted_atomic_write(
     assert pending.materialization_state == "pending"
     assert len(service.history(document_id)) == 1
 
-    monkeypatch.setattr(service, "_write_atomic", original_write)
+    monkeypatch.setattr(service.workspace, "write_atomic", original_write)
     retried = client.post("/api/v1/documents", json=body, headers=retry_headers)
     assert retried.status_code == 201
     recovered = service.get_document(document_id)
@@ -78,10 +76,10 @@ def test_app_startup_completes_pending_materialization(
 ) -> None:
     service: DocumentService = client.app.state.service
 
-    def fail_write(_destination: Path, _content: str) -> str:
+    def fail_write(_path: str, _content: str) -> str:
         raise OSError("injected")
 
-    monkeypatch.setattr(service, "_write_atomic", fail_write)
+    monkeypatch.setattr(service.workspace, "write_atomic", fail_write)
     failed = client.post(
         "/api/v1/documents",
         json={"title": "Startup", "content": "recover on startup", "path": "startup.md"},
