@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import sqlite3
 import uuid
 from pathlib import PurePosixPath
@@ -26,6 +25,7 @@ from sangam.schemas import (
     Revision,
     Tag,
 )
+from sangam.search import SearchIndex
 from sangam.workspace import DiskWorkspaceFilesystem, WorkspaceFilesystem
 
 
@@ -51,9 +51,10 @@ class DocumentService:
         self.workspace = workspace or DiskWorkspaceFilesystem(settings.workspace_root)
         self.reconciliation_planner = reconciliation_planner or ReconciliationPlanner()
         self.database = Database(settings.database_path)
-        self.database.migrate()
+        self.database.initialize()
         self._bootstrap_actors()
-        self._rebuild_search_index()
+        self.search_index = SearchIndex(self.database)
+        self.search_index.rebuild(self.list_documents(include_deleted=True))
 
     def _bootstrap_actors(self) -> None:
         actors = (
@@ -144,33 +145,6 @@ class DocumentService:
                 (str(uuid.uuid4()), folder_path, part, now, now),
             )
 
-    def _sync_search_index(self, document_id: str) -> None:
-        document = self.get_document(document_id, include_deleted=True)
-        with self.database.transaction() as connection:
-            connection.execute("DELETE FROM document_search WHERE document_id = ?", (document_id,))
-            if not document.deleted:
-                connection.execute(
-                    """
-                    INSERT INTO document_search(
-                        document_id, title, path, content, tags, category
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        document.document_id,
-                        document.title,
-                        document.path or "",
-                        document.content,
-                        " ".join(tag.name for tag in document.tags),
-                        document.category or "",
-                    ),
-                )
-
-    def _rebuild_search_index(self) -> None:
-        with self.database.transaction() as connection:
-            connection.execute("DELETE FROM document_search")
-        for document in self.list_documents(include_deleted=True):
-            self._sync_search_index(document.document_id)
-
     def _get_document_in_connection(
         self, connection: sqlite3.Connection, document_id: str, *, include_deleted: bool = True
     ) -> Document:
@@ -198,6 +172,19 @@ class DocumentService:
                 + " ORDER BY d.updated_at DESC, d.document_id"
             ).fetchall()
         return [self._document_from_row(row) for row in rows]
+
+    def _get_documents_by_ids(self, document_ids: list[str]) -> list[Document]:
+        if not document_ids:
+            return []
+        placeholders = ",".join("?" for _ in document_ids)
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                self._document_query()
+                + f" WHERE d.deleted = 0 AND d.document_id IN ({placeholders})",
+                document_ids,
+            ).fetchall()
+        documents = {row["document_id"]: self._document_from_row(row) for row in rows}
+        return [documents[document_id] for document_id in document_ids if document_id in documents]
 
     def _idempotent_result(
         self,
@@ -253,7 +240,7 @@ class DocumentService:
             and document.materialization_state == "pending"
             and not document.deleted
         ):
-            self._finish_materialization(document_id)
+            self._finish_materialization(document)
 
     def create_document(
         self,
@@ -339,10 +326,12 @@ class DocumentService:
                     duplicate = (document_id, revision_id)
         except sqlite3.IntegrityError as error:
             raise ValidationError("A document already uses that path") from error
-        assert duplicate is not None
+        if duplicate is None:
+            raise RuntimeError("Document creation completed without an idempotent result")
         self._finish_if_current(*duplicate)
-        self._sync_search_index(duplicate[0])
-        return self.get_document(duplicate[0], include_deleted=True)
+        result = self.get_document(duplicate[0], include_deleted=True)
+        self.search_index.sync(result)
+        return result
 
     def _append_revision(
         self,
@@ -471,14 +460,15 @@ class DocumentService:
                     result = (document_id, revision_id)
         except sqlite3.IntegrityError as error:
             raise ValidationError("A document already uses that path") from error
-        assert result is not None
+        if result is None:
+            raise RuntimeError("Revision append completed without a result")
         self._finish_if_current(*result)
         current_result = self.get_document(document_id, include_deleted=True)
         if old_path and old_path != current_result.path:
             self.workspace.delete_document(old_path)
         if current_result.deleted and current_result.path:
             self.workspace.delete_document(current_result.path)
-        self._sync_search_index(document_id)
+        self.search_index.sync(current_result)
         return current_result, old_path
 
     def update_document(
@@ -623,8 +613,7 @@ class DocumentService:
         )
         return document
 
-    def _finish_materialization(self, document_id: str) -> None:
-        document = self.get_document(document_id, include_deleted=True)
+    def _finish_materialization(self, document: Document) -> None:
         if document.deleted or not document.path:
             return
         try:
@@ -633,7 +622,7 @@ class DocumentService:
             raise MaterializationError(
                 "The revision was committed, but its workspace file is still pending",
                 details={
-                    "document_id": document_id,
+                    "document_id": document.document_id,
                     "revision_id": document.current_revision_id,
                     "path": document.path,
                 },
@@ -645,7 +634,7 @@ class DocumentService:
                 SET materialization_state = 'clean', file_hash = ?
                 WHERE document_id = ? AND current_revision_id = ?
                 """,
-                (file_hash, document_id, document.current_revision_id),
+                (file_hash, document.document_id, document.current_revision_id),
             )
 
     def _record_conflict(
@@ -698,6 +687,7 @@ class DocumentService:
         repaired = self._recover_pending_materializations()
 
         documents = [document for document in self.list_documents() if document.path]
+        documents_by_id = {document.document_id: document for document in documents}
         snapshots = [
             MaterializedDocumentSnapshot(
                 document_id=document.document_id,
@@ -709,7 +699,7 @@ class DocumentService:
         ]
         plan = self.reconciliation_planner.plan(snapshots, self.workspace.scan_markdown())
         for document_id in plan.rematerialize_document_ids:
-            self._finish_materialization(document_id)
+            self._finish_materialization(documents_by_id[document_id])
             repaired.append(document_id)
         for conflict in plan.conflicts:
             self._record_conflict(
@@ -726,7 +716,7 @@ class DocumentService:
         repaired: list[str] = []
         for document in self.list_documents():
             if document.path and document.materialization_state == "pending":
-                self._finish_materialization(document.document_id)
+                self._finish_materialization(document)
                 repaired.append(document.document_id)
         return repaired
 
@@ -944,8 +934,9 @@ class DocumentService:
                     document_id=document_id,
                     revision_id=current.current_revision_id,
                 )
-        self._sync_search_index(document_id)
-        return self.get_document(document_id)
+        updated = self.get_document(document_id)
+        self.search_index.sync(updated)
+        return updated
 
     def search_documents(
         self,
@@ -954,21 +945,12 @@ class DocumentService:
         tag_id: str | None = None,
         category: str | None = None,
     ) -> list[Document]:
-        terms = re.findall(r"[\w-]+", query, flags=re.UNICODE)
-        if terms:
-            expression = " AND ".join(f'"{term}"*' for term in terms)
-            with self.database.connection() as connection:
-                rows = connection.execute(
-                    """
-                    SELECT document_id FROM document_search
-                    WHERE document_search MATCH ?
-                    ORDER BY bm25(document_search)
-                    """,
-                    (expression,),
-                ).fetchall()
-            documents = [self.get_document(row["document_id"]) for row in rows]
-        else:
-            documents = self.list_documents()
+        document_ids = self.search_index.search_document_ids(query)
+        documents = (
+            self.list_documents()
+            if document_ids is None
+            else self._get_documents_by_ids(document_ids)
+        )
         normalized_category = category.casefold() if category else None
         return [
             document
@@ -1034,7 +1016,8 @@ class DocumentService:
             row = connection.execute(
                 "SELECT * FROM folders WHERE path = ?", (normalized_path,)
             ).fetchone()
-            assert row is not None
+            if row is None:
+                raise RuntimeError("Folder hierarchy creation did not return its target")
             target_id = row["folder_id"]
             before = {
                 "category": row["category"],
@@ -1082,7 +1065,8 @@ class DocumentService:
             row = connection.execute(
                 "SELECT * FROM folders WHERE folder_id = ?", (target_id,)
             ).fetchone()
-            assert row is not None
+            if row is None:
+                raise RuntimeError("Created folder could not be reloaded")
             return self._folder_from_row(connection, row)
 
     def update_folder_metadata(
@@ -1159,5 +1143,6 @@ class DocumentService:
             updated = connection.execute(
                 "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
             ).fetchone()
-            assert updated is not None
+            if updated is None:
+                raise RuntimeError("Updated folder could not be reloaded")
             return self._folder_from_row(connection, updated)
