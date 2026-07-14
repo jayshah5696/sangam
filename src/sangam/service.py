@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import sqlite3
@@ -7,6 +8,7 @@ import uuid
 from pathlib import PurePosixPath
 from typing import Any
 
+from sangam.backup import BackupManager
 from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.errors import (
@@ -18,11 +20,14 @@ from sangam.errors import (
 )
 from sangam.reconciliation import MaterializedDocumentSnapshot, ReconciliationPlanner
 from sangam.schemas import (
+    BackupSet,
+    BackupVerification,
     Document,
     Folder,
     ReconciliationConflict,
     ReconciliationReport,
     Revision,
+    RevisionDiff,
     Tag,
 )
 from sangam.search import SearchIndex
@@ -55,6 +60,12 @@ class DocumentService:
         self._bootstrap_actors()
         self.search_index = SearchIndex(self.database)
         self.search_index.rebuild(self.list_documents(include_deleted=True))
+        self.backups = BackupManager(
+            database=self.database,
+            workspace_root=settings.workspace_root,
+            backup_root=settings.backup_root,
+            retention_count=settings.backup_retention_count,
+        )
 
     def _bootstrap_actors(self) -> None:
         actors = (
@@ -87,7 +98,8 @@ class DocumentService:
 
     def _document_query(self) -> str:
         return """
-            SELECT d.*, r.content,
+            SELECT d.*, r.content, r.actor_id AS updated_by,
+                r.summary AS revision_summary, a.display_name AS updated_by_name,
                 COALESCE((
                     SELECT json_group_array(json_object(
                         'tag_id', ordered_tags.tag_id,
@@ -104,6 +116,7 @@ class DocumentService:
                 ), '[]') AS tags_json
             FROM documents d
             JOIN revisions r ON r.revision_id = d.current_revision_id
+            JOIN actors a ON a.actor_id = r.actor_id
         """
 
     def _document_from_row(self, row: sqlite3.Row) -> Document:
@@ -122,6 +135,9 @@ class DocumentService:
             created_by=row["created_by"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            updated_by=row["updated_by"],
+            updated_by_name=row["updated_by_name"],
+            revision_summary=row["revision_summary"],
             category=row["category"],
             metadata_version=row["metadata_version"],
             tags=[Tag.model_validate(tag) for tag in json.loads(row["tags_json"])],
@@ -495,6 +511,34 @@ class DocumentService:
         )
         return document
 
+    def duplicate_document(
+        self,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        title: str | None,
+        path: str | None,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        source = self.get_document(document_id)
+        if source.current_revision_id != expected_revision_id:
+            raise ConflictError(
+                "The source document changed since it was read",
+                details={
+                    "document_id": document_id,
+                    "expected_revision_id": expected_revision_id,
+                    "current_revision_id": source.current_revision_id,
+                },
+            )
+        return self.create_document(
+            title=title or f"{source.title} copy",
+            content=source.content,
+            path=path,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
+
     def materialize_document(
         self,
         *,
@@ -581,6 +625,45 @@ class DocumentService:
                 (document_id,),
             ).fetchall()
         return [Revision.model_validate(dict(row)) for row in rows]
+
+    def revision_diff(
+        self, *, document_id: str, from_revision_id: str, to_revision_id: str | None
+    ) -> RevisionDiff:
+        document = self.get_document(document_id, include_deleted=True)
+        resolved_to = to_revision_id or document.current_revision_id
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT revision_id, content FROM revisions
+                WHERE document_id = ? AND revision_id IN (?, ?)
+                """,
+                (document_id, from_revision_id, resolved_to),
+            ).fetchall()
+        contents = {row["revision_id"]: row["content"] for row in rows}
+        missing = [
+            revision for revision in (from_revision_id, resolved_to) if revision not in contents
+        ]
+        if missing:
+            raise NotFoundError("One or more revisions do not belong to this document")
+        lines = list(
+            difflib.unified_diff(
+                contents[from_revision_id].splitlines(),
+                contents[resolved_to].splitlines(),
+                fromfile=from_revision_id,
+                tofile=resolved_to,
+                lineterm="",
+            )
+        )
+        additions = sum(line.startswith("+") and not line.startswith("+++") for line in lines)
+        deletions = sum(line.startswith("-") and not line.startswith("---") for line in lines)
+        return RevisionDiff(
+            document_id=document_id,
+            from_revision_id=from_revision_id,
+            to_revision_id=resolved_to,
+            unified_diff="\n".join(lines),
+            additions=additions,
+            deletions=deletions,
+        )
 
     def restore_document(
         self,
@@ -697,7 +780,19 @@ class DocumentService:
             for document in documents
             if document.path is not None
         ]
-        plan = self.reconciliation_planner.plan(snapshots, self.workspace.scan_markdown())
+        disk_state = self.workspace.scan_markdown()
+        with self.database.transaction() as connection:
+            ignored_rows = connection.execute(
+                "SELECT path, content_hash FROM ignored_workspace_files"
+            ).fetchall()
+            for ignored in ignored_rows:
+                if disk_state.get(ignored["path"]) == ignored["content_hash"]:
+                    disk_state.pop(ignored["path"], None)
+                else:
+                    connection.execute(
+                        "DELETE FROM ignored_workspace_files WHERE path = ?", (ignored["path"],)
+                    )
+        plan = self.reconciliation_planner.plan(snapshots, disk_state)
         for document_id in plan.rematerialize_document_ids:
             self._finish_materialization(documents_by_id[document_id])
             repaired.append(document_id)
@@ -788,6 +883,71 @@ class DocumentService:
                 (utc_now(), conflict_id),
             )
         return result
+
+    def restore_database_content(self, conflict_id: str) -> Document:
+        conflict = self._get_open_conflict(conflict_id, "unexpected_hash")
+        if not conflict["document_id"]:
+            raise NotFoundError("Open unexpected-hash conflict not found")
+        document = self.get_document(conflict["document_id"])
+        self._finish_materialization(document)
+        self._resolve_conflict(conflict_id)
+        return self.get_document(document.document_id)
+
+    def recognize_move(self, conflict_id: str) -> Document:
+        conflict = self._get_open_conflict(conflict_id, "possible_move")
+        if not conflict["document_id"] or not conflict["candidate_path"]:
+            raise NotFoundError("Open unambiguous move conflict not found")
+        document = self.get_document(conflict["document_id"])
+        moved = self.move_document(
+            document_id=document.document_id,
+            expected_revision_id=document.current_revision_id,
+            path=conflict["candidate_path"],
+            summary="Recognized out-of-band workspace move",
+            actor_id="system:reconcile",
+            idempotency_key=f"recognize-move:{conflict_id}",
+        )
+        self._resolve_conflict(conflict_id)
+        return moved
+
+    def ignore_unknown_file(self, conflict_id: str) -> ReconciliationReport:
+        conflict = self._get_open_conflict(conflict_id, "unknown_file")
+        actual_hash = conflict["actual_hash"]
+        if not actual_hash:
+            raise ValidationError("Unknown file conflict is missing its content hash")
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO ignored_workspace_files(path, content_hash, ignored_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET
+                    content_hash = excluded.content_hash,
+                    ignored_at = excluded.ignored_at
+                """,
+                (conflict["path"], actual_hash, utc_now()),
+            )
+        self._resolve_conflict(conflict_id)
+        return ReconciliationReport(repaired_document_ids=[], conflicts=self.list_conflicts())
+
+    def _get_open_conflict(self, conflict_id: str, expected_type: str) -> sqlite3.Row:
+        with self.database.connection() as connection:
+            conflict = connection.execute(
+                "SELECT * FROM reconciliation_conflicts WHERE conflict_id = ? AND status = 'open'",
+                (conflict_id,),
+            ).fetchone()
+        if not conflict or conflict["conflict_type"] != expected_type:
+            raise NotFoundError(f"Open {expected_type} conflict not found")
+        return conflict
+
+    def _resolve_conflict(self, conflict_id: str) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                UPDATE reconciliation_conflicts
+                SET status = 'resolved', resolved_at = ?
+                WHERE conflict_id = ?
+                """,
+                (utc_now(), conflict_id),
+            )
 
     def _validate_tag_ids(self, connection: sqlite3.Connection, tag_ids: list[str]) -> list[str]:
         unique_ids = list(dict.fromkeys(tag_ids))
@@ -944,15 +1104,20 @@ class DocumentService:
         query: str = "",
         tag_id: str | None = None,
         category: str | None = None,
+        sort: str = "relevance",
+        actor_id: str | None = None,
     ) -> list[Document]:
-        document_ids = self.search_index.search_document_ids(query)
+        matches = self.search_index.search(query)
         documents = (
             self.list_documents()
-            if document_ids is None
-            else self._get_documents_by_ids(document_ids)
+            if matches is None
+            else self._get_documents_by_ids([match.document_id for match in matches])
+        )
+        snippets = (
+            {} if matches is None else {match.document_id: match.snippet for match in matches}
         )
         normalized_category = category.casefold() if category else None
-        return [
+        filtered = [
             document
             for document in documents
             if (not tag_id or any(tag.tag_id == tag_id for tag in document.tags))
@@ -960,7 +1125,43 @@ class DocumentService:
                 not normalized_category
                 or (document.category or "").casefold() == normalized_category
             )
+            and (not actor_id or self._document_has_actor(document.document_id, actor_id))
         ]
+        if sort == "title":
+            filtered.sort(key=lambda item: (item.title.casefold(), item.document_id))
+        elif sort == "path":
+            filtered.sort(key=lambda item: ((item.path or "").casefold(), item.document_id))
+        elif sort == "updated":
+            filtered.sort(key=lambda item: (item.updated_at, item.document_id), reverse=True)
+        elif sort != "relevance":
+            raise ValidationError(f"Unsupported search sort: {sort}")
+        return [
+            document.model_copy(update={"search_snippet": snippets.get(document.document_id)})
+            for document in filtered
+        ]
+
+    def _document_has_actor(self, document_id: str, actor_id: str) -> bool:
+        with self.database.connection() as connection:
+            return bool(
+                connection.execute(
+                    "SELECT 1 FROM revisions WHERE document_id = ? AND actor_id = ? LIMIT 1",
+                    (document_id, actor_id),
+                ).fetchone()
+            )
+
+    def rebuild_search_index(self) -> int:
+        documents = self.list_documents(include_deleted=True)
+        self.search_index.rebuild(documents)
+        return sum(not document.deleted for document in documents)
+
+    def list_backups(self) -> list[BackupSet]:
+        return self.backups.list()
+
+    def create_backup(self) -> BackupSet:
+        return self.backups.create()
+
+    def verify_backup(self, backup_id: str) -> BackupVerification:
+        return self.backups.verify(backup_id)
 
     def _folder_from_row(self, connection: sqlite3.Connection, row: sqlite3.Row) -> Folder:
         tag_rows = connection.execute(

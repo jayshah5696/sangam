@@ -39,4 +39,7 @@ This increment builds on the completed Phase 1 document core without bypassing i
 
 ![Workspace settings in Cobalt](./assets/workspace-settings.png)
 
-These enhancements establish part of the Phase 2 workspace experience. They do not claim completion of Phase 2 features such as revision diffs, backup automation, rendered Markdown preview, or a reconciliation-conflict UI.
+These enhancements were the base of the now-complete Phase 2 workspace. See
+[Phase 2 implementation and verification](./PHASE_2.md) for revision diffs,
+backup automation, rendered Markdown and Mermaid preview, stable links, and the
+reconciliation UI.

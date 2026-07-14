@@ -1,6 +1,6 @@
 set dotenv-load
 
-image := "sangam:phase1"
+image := "sangam:phase2"
 container := "sangam"
 port := "8000"
 
@@ -8,11 +8,34 @@ port := "8000"
 default:
     @just --list
 
-# Run the backend tests and frontend verification.
+# Run the complete fast local verification suite.
 test:
+    uv run ruff check .
+    uv run ruff format --check .
     uv run pytest
     npm --prefix frontend run build
     npm --prefix frontend run lint
+    npm --prefix frontend run test
+
+# Run only the Python service and API tests.
+test-backend:
+    uv run pytest
+
+# Run only the browser client build, lint, and unit tests.
+test-frontend:
+    npm --prefix frontend run build
+    npm --prefix frontend run lint
+    npm --prefix frontend run test
+
+# Format Python sources and tests.
+format:
+    uv run ruff format .
+
+# Verify documentation links, Markdown style, and Mermaid fences.
+test-docs:
+    uv run python scripts/verify-docs.py
+    node frontend/scripts/verify-mermaid.mjs
+    npm --prefix frontend exec markdownlint-cli2 "README.md" "docs/**/*.md"
 
 # Serve the API and frontend development server with live reload.
 serve:
@@ -28,7 +51,7 @@ serve:
     }
     trap cleanup EXIT INT TERM
 
-    npm --prefix frontend run dev
+    npm --prefix frontend run dev -- --host 127.0.0.1
 
 # Build the production Docker image.
 docker-build:
@@ -42,3 +65,7 @@ docker-serve: docker-build
       --volume "{{ justfile_directory() }}/data/workspace:/data/workspace" \
       --volume "{{ justfile_directory() }}/data/backups:/data/backups" \
       "{{ image }}"
+
+# Build and exercise the production image with persistent state and restart recovery.
+docker-smoke:
+    ./scripts/docker-smoke.sh

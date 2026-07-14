@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useNavigate } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
@@ -14,13 +15,15 @@ function RootLayout() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { preferences, updatePreferences } = useTheme()
+  const searchRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
   const [selectedTag, setSelectedTag] = useState<string | undefined>()
+  const [sort, setSort] = useState<'relevance' | 'updated' | 'title' | 'path'>('relevance')
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [folderPath, setFolderPath] = useState('')
   const documents = useQuery({
-    queryKey: ['documents', search, selectedTag],
-    queryFn: () => api.searchDocuments(search, selectedTag),
+    queryKey: ['documents', search, selectedTag, sort],
+    queryFn: () => api.searchDocuments(search, selectedTag, sort),
   })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
@@ -42,6 +45,21 @@ function RootLayout() {
       await queryClient.invalidateQueries({ queryKey: ['folders'] })
     },
   })
+  useEffect(() => {
+    const shortcuts = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchRef.current?.focus()
+      }
+      if (event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        createDocument.mutate()
+      }
+    }
+    window.addEventListener('keydown', shortcuts)
+    return () => window.removeEventListener('keydown', shortcuts)
+  }, [createDocument])
 
   if (!preferences.leftVisible) {
     return (
@@ -57,6 +75,7 @@ function RootLayout() {
           <Link to="/settings/appearance" className="rail-link" aria-label="Workspace settings">
             ⚙
           </Link>
+          <Link to="/reconciliation" className="rail-link" aria-label="Reconciliation conflicts">!</Link>
         </aside>
         <main className="main-panel"><Outlet /></main>
       </div>
@@ -111,12 +130,24 @@ function RootLayout() {
         <div className="search-box">
           <span aria-hidden="true">⌕</span>
           <input
+            ref={searchRef}
             type="search"
             aria-label="Search documents"
             placeholder="Search title, text, path…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          <kbd>⌘K</kbd>
+        </div>
+        <div className="workspace-controls">
+          <label>Sort
+            <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
+              <option value="relevance">Relevance</option>
+              <option value="updated">Recently updated</option>
+              <option value="title">Title</option>
+              <option value="path">Path</option>
+            </select>
+          </label>
         </div>
         {tags.data && tags.data.length > 0 && (
           <div className="tag-filters" aria-label="Filter by tag">
@@ -131,7 +162,7 @@ function RootLayout() {
             ))}
           </div>
         )}
-        <nav aria-label="Files" className="workspace-tree">
+        <nav aria-label="Files" className="workspace-tree" onKeyDown={navigateFileLinks}>
           <div className="section-heading">
             <p className="eyebrow">Workspace</p>
             <small>{documents.data?.length ?? 0}</small>
@@ -139,7 +170,10 @@ function RootLayout() {
           {documents.isLoading && <p className="muted">Loading…</p>}
           {documents.isError && <p className="error-text">Could not load files.</p>}
           {documents.data && (
-            <FolderTree documents={documents.data} folders={folders.data ?? []} />
+            <>
+              {!search && !selectedTag && <RecentDocuments documents={documents.data} />}
+              <FolderTree documents={documents.data} folders={folders.data ?? []} />
+            </>
           )}
         </nav>
         <div className="sidebar-footer">
@@ -156,6 +190,9 @@ function RootLayout() {
             </select>
           </label>
           <Link to="/settings/appearance" className="settings-link">⚙ Workspace settings</Link>
+          <Link to="/reconciliation" className="settings-link">↻ Reconciliation</Link>
+          <Link to="/backups" className="settings-link">◫ Backups</Link>
+          <Link to="/trash" className="settings-link">♲ Trash</Link>
         </div>
       </aside>
       <ResizeHandle
@@ -232,7 +269,51 @@ function DocumentLink({ document }: { document: Document }) {
       activeProps={{ className: 'file-link active' }}
     >
       <span>▤ {label}</span>
-      {!document.path && <small>draft</small>}
+      <small>{!document.path ? 'draft' : relativeTime(document.updated_at)}</small>
+      {document.search_snippet && <Snippet value={document.search_snippet} />}
     </Link>
   )
+}
+
+function RecentDocuments({ documents }: { documents: Document[] }) {
+  const recent = [...documents]
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+    .slice(0, 5)
+  if (recent.length === 0) return null
+  return (
+    <details className="folder-node recent-documents">
+      <summary><span>◷</span> Recent <small>{recent.length}</small></summary>
+      <div className="folder-contents">{recent.map((document) => <DocumentLink key={document.document_id} document={document} />)}</div>
+    </details>
+  )
+}
+
+function Snippet({ value }: { value: string }) {
+  const pieces = value.split(/\[\[(.*?)\]\]/g)
+  return <span className="search-snippet">{pieces.map((piece, index) => (
+    index % 2 === 1 ? <mark key={index}>{piece}</mark> : <span key={index}>{piece}</span>
+  ))}</span>
+}
+
+function relativeTime(value: string) {
+  const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60_000)
+  if (minutes < 1) return 'now'
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+function navigateFileLinks(event: ReactKeyboardEvent<HTMLElement>) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+  const links = Array.from(event.currentTarget.querySelectorAll<HTMLAnchorElement>('.file-link'))
+    .filter((link) => link.offsetParent !== null)
+  if (links.length === 0) return
+  const current = links.indexOf(document.activeElement as HTMLAnchorElement)
+  const direction = event.key === 'ArrowDown' ? 1 : -1
+  const next = current < 0
+    ? (direction === 1 ? 0 : links.length - 1)
+    : (current + direction + links.length) % links.length
+  event.preventDefault()
+  links[next]?.focus()
 }

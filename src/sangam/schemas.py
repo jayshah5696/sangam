@@ -22,9 +22,13 @@ class Document(BaseModel):
     created_by: str
     created_at: str
     updated_at: str
+    updated_by: str
+    updated_by_name: str
+    revision_summary: str | None
     category: str | None
     metadata_version: int
     tags: list[Tag] = Field(default_factory=list)
+    search_snippet: str | None = None
 
 
 class Tag(BaseModel):
@@ -112,6 +116,21 @@ class RestoreDocument(BaseModel):
     summary: str | None = Field(default=None, max_length=500)
 
 
+class DuplicateDocument(BaseModel):
+    expected_revision_id: str
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    path: str | None = Field(default=None, max_length=500)
+
+
+class RevisionDiff(BaseModel):
+    document_id: str
+    from_revision_id: str
+    to_revision_id: str
+    unified_diff: str
+    additions: int
+    deletions: int
+
+
 class ReindexPath(BaseModel):
     path: str
 
@@ -132,6 +151,29 @@ class ReconciliationConflict(BaseModel):
 class ReconciliationReport(BaseModel):
     repaired_document_ids: list[str]
     conflicts: list[ReconciliationConflict]
+
+
+class BackupArtifact(BaseModel):
+    name: str
+    sha256: str
+    size_bytes: int
+
+
+class BackupSet(BaseModel):
+    backup_id: str
+    created_at: str
+    document_count: int
+    revision_count: int
+    artifacts: list[BackupArtifact]
+    verified_at: str | None = None
+
+
+class BackupVerification(BaseModel):
+    backup_id: str
+    valid: bool
+    database_integrity: str
+    workspace_members: int
+    verified_at: str
 
 
 class ErrorBody(BaseModel):

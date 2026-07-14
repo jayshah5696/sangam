@@ -15,9 +15,13 @@ export const documentSchema = z.object({
   created_by: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
+  updated_by: z.string(),
+  updated_by_name: z.string(),
+  revision_summary: z.string().nullable(),
   category: z.string().nullable(),
   metadata_version: z.number(),
   tags: z.array(z.lazy(() => tagSchema)),
+  search_snippet: z.string().nullable().optional(),
 })
 
 export type Document = z.infer<typeof documentSchema>
@@ -59,6 +63,56 @@ export const revisionSchema = z.object({
 })
 
 export type Revision = z.infer<typeof revisionSchema>
+
+export const revisionDiffSchema = z.object({
+  document_id: z.string(),
+  from_revision_id: z.string(),
+  to_revision_id: z.string(),
+  unified_diff: z.string(),
+  additions: z.number(),
+  deletions: z.number(),
+})
+
+export type RevisionDiff = z.infer<typeof revisionDiffSchema>
+
+export const reconciliationConflictSchema = z.object({
+  conflict_id: z.string(),
+  conflict_type: z.enum(['unexpected_hash', 'possible_move', 'unknown_file']),
+  document_id: z.string().nullable(),
+  path: z.string(),
+  candidate_path: z.string().nullable(),
+  expected_hash: z.string().nullable(),
+  actual_hash: z.string().nullable(),
+  status: z.string(),
+  created_at: z.string(),
+  resolved_at: z.string().nullable(),
+})
+
+export type ReconciliationConflict = z.infer<typeof reconciliationConflictSchema>
+
+export const reconciliationReportSchema = z.object({
+  repaired_document_ids: z.array(z.string()),
+  conflicts: z.array(reconciliationConflictSchema),
+})
+
+export const backupSetSchema = z.object({
+  backup_id: z.string(),
+  created_at: z.string(),
+  document_count: z.number(),
+  revision_count: z.number(),
+  artifacts: z.array(z.object({ name: z.string(), sha256: z.string(), size_bytes: z.number() })),
+  verified_at: z.string().nullable(),
+})
+
+export type BackupSet = z.infer<typeof backupSetSchema>
+
+export const backupVerificationSchema = z.object({
+  backup_id: z.string(),
+  valid: z.boolean(),
+  database_integrity: z.string(),
+  workspace_members: z.number(),
+  verified_at: z.string(),
+})
 
 const errorSchema = z.object({
   error: z.object({
@@ -102,10 +156,19 @@ export const api = {
   async listDocuments(): Promise<Document[]> {
     return z.array(documentSchema).parse(await request('/documents'))
   },
-  async searchDocuments(query = '', tagId?: string): Promise<Document[]> {
+  async listDeletedDocuments(): Promise<Document[]> {
+    const documents = z.array(documentSchema).parse(await request('/documents?include_deleted=true'))
+    return documents.filter((document) => document.deleted)
+  },
+  async searchDocuments(
+    query = '',
+    tagId?: string,
+    sort: 'relevance' | 'updated' | 'title' | 'path' = 'relevance',
+  ): Promise<Document[]> {
     const params = new URLSearchParams()
     if (query.trim()) params.set('q', query.trim())
     if (tagId) params.set('tag_id', tagId)
+    params.set('sort', sort)
     return z.array(documentSchema).parse(await request(`/search?${params.toString()}`))
   },
   async listTags(): Promise<Tag[]> {
@@ -151,13 +214,14 @@ export const api = {
       }),
     )
   },
-  async updateDocument(document: Document, content: string): Promise<Document> {
+  async updateDocument(document: Document, content: string, title?: string): Promise<Document> {
     return documentSchema.parse(
       await request(`/documents/${document.document_id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           expected_revision_id: document.current_revision_id,
           content,
+          title,
           summary: 'Browser autosave',
         }),
       }),
@@ -191,8 +255,54 @@ export const api = {
       }),
     )
   },
+  async moveDocument(document: Document, path: string): Promise<Document> {
+    return documentSchema.parse(
+      await request(`/documents/${document.document_id}/move`, {
+        method: 'POST',
+        body: JSON.stringify({
+          expected_revision_id: document.current_revision_id,
+          path,
+          summary: `Moved to ${path}`,
+        }),
+      }),
+    )
+  },
+  async duplicateDocument(document: Document, title?: string, path?: string): Promise<Document> {
+    return documentSchema.parse(
+      await request(`/documents/${document.document_id}/duplicate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          expected_revision_id: document.current_revision_id,
+          title,
+          path,
+        }),
+      }),
+    )
+  },
+  async deleteDocument(document: Document): Promise<Document> {
+    return documentSchema.parse(
+      await request(`/documents/${document.document_id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({
+          expected_revision_id: document.current_revision_id,
+          summary: 'Moved to trash from browser',
+        }),
+      }),
+    )
+  },
   async history(documentId: string): Promise<Revision[]> {
     return z.array(revisionSchema).parse(await request(`/documents/${documentId}/history`))
+  },
+  async revisionDiff(
+    documentId: string,
+    fromRevisionId: string,
+    toRevisionId?: string,
+  ): Promise<RevisionDiff> {
+    const params = new URLSearchParams({ from_revision_id: fromRevisionId })
+    if (toRevisionId) params.set('to_revision_id', toRevisionId)
+    return revisionDiffSchema.parse(
+      await request(`/documents/${documentId}/diff?${params.toString()}`),
+    )
   },
   async restore(document: Document, revisionId: string): Promise<Document> {
     return documentSchema.parse(
@@ -203,6 +313,57 @@ export const api = {
           revision_id: revisionId,
         }),
       }),
+    )
+  },
+  async reconciliation(): Promise<z.infer<typeof reconciliationReportSchema>> {
+    return reconciliationReportSchema.parse(await request('/reconciliation'))
+  },
+  async scanWorkspace(): Promise<z.infer<typeof reconciliationReportSchema>> {
+    return reconciliationReportSchema.parse(await request('/reconciliation/scan', { method: 'POST' }))
+  },
+  async importUnknown(path: string): Promise<Document> {
+    return documentSchema.parse(
+      await request('/reconciliation/reindex', {
+        method: 'POST',
+        body: JSON.stringify({ path }),
+      }),
+    )
+  },
+  async acceptDisk(conflictId: string): Promise<Document> {
+    return documentSchema.parse(
+      await request(`/reconciliation/${conflictId}/accept-disk`, { method: 'POST' }),
+    )
+  },
+  async restoreDatabase(conflictId: string): Promise<Document> {
+    return documentSchema.parse(
+      await request(`/reconciliation/${conflictId}/restore-database`, { method: 'POST' }),
+    )
+  },
+  async recognizeMove(conflictId: string): Promise<Document> {
+    return documentSchema.parse(
+      await request(`/reconciliation/${conflictId}/recognize-move`, { method: 'POST' }),
+    )
+  },
+  async ignoreUnknown(conflictId: string): Promise<z.infer<typeof reconciliationReportSchema>> {
+    return reconciliationReportSchema.parse(
+      await request(`/reconciliation/${conflictId}/ignore`, { method: 'POST' }),
+    )
+  },
+  async rebuildSearch(): Promise<number> {
+    const result = z.object({ indexed_documents: z.number() }).parse(
+      await request('/search/reindex', { method: 'POST' }),
+    )
+    return result.indexed_documents
+  },
+  async listBackups(): Promise<BackupSet[]> {
+    return z.array(backupSetSchema).parse(await request('/backups'))
+  },
+  async createBackup(): Promise<BackupSet> {
+    return backupSetSchema.parse(await request('/backups', { method: 'POST' }))
+  },
+  async verifyBackup(backupId: string): Promise<z.infer<typeof backupVerificationSchema>> {
+    return backupVerificationSchema.parse(
+      await request(`/backups/${backupId}/verify`, { method: 'POST' }),
     )
   },
 }

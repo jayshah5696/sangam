@@ -57,8 +57,7 @@ class ReconciliationPlanner:
                 continue
             move_candidate_paths.update(matches)
             unambiguous = (
-                len(matches) == 1
-                and len(missing_documents_by_hash[document.content_hash]) == 1
+                len(matches) == 1 and len(missing_documents_by_hash[document.content_hash]) == 1
             )
             conflicts.append(
                 PlannedConflict(

@@ -37,7 +37,7 @@ class DiskWorkspaceFilesystem:
     def normalize_document_path(self, raw_path: str) -> str:
         normalized = self._normalize_relative_path(raw_path, kind="Document")
         if PurePosixPath(normalized).suffix.lower() != ".md":
-            raise InvalidPathError("Phase 1 supports only .md document paths")
+            raise InvalidPathError("Sangam supports only .md document paths")
         return normalized
 
     def normalize_folder_path(self, raw_path: str) -> str:

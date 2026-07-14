@@ -56,4 +56,7 @@ The smoke test builds the image and verifies the API, CLI, host-mounted material
 
 ## Phase boundary
 
-Search, tags, diffs, rendered Markdown preview, agent tokens, publishing, HTML, PDFs, Karakeep, and chat remain deferred. File-tree refinement and reconciliation UI belong to Phase 2; Phase 1 exposes reconciliation through the API.
+Search, tags, diffs, rendered Markdown preview, file-tree refinement, backup
+automation, and reconciliation UI were delivered in
+[Phase 2](./PHASE_2.md). Agent tokens, publishing, editable HTML, PDFs,
+Karakeep, and chat remain deferred to later phases.

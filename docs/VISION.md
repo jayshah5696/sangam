@@ -314,12 +314,14 @@ Preview must support: CSS · images · tables · local workspace assets · relat
 ### Policy is driven by the document's `trusted` flag
 
 **Untrusted / imported HTML (default):**
+
 - Sanitized with DOMPurify
 - Rendered in a sandboxed iframe with **scripts disabled**
 - Relative workspace asset URLs rewritten
 - Internal links intercepted
 
 **Trusted HTML (created by the human or trusted agents):**
+
 - May execute JavaScript
 - Rendered under a **separate origin** with a restrictive Content Security Policy
 - `sandbox="allow-scripts"` deliberately **without** `allow-same-origin` (scripts get an opaque origin)
@@ -367,7 +369,7 @@ Because Cloudflare Access blocks unauthenticated requests before they reach the 
 Three auth zones:
 
 | Zone | Route / host | Auth mechanism |
-|---|---|---|
+| --- | --- | --- |
 | App + admin | Tailscale (primary) · `app.` via Cloudflare Access | Cloudflare Access (Google / email OTP), Tailscale identity |
 | Agent API | `app./api` | Sangam-issued scoped tokens (optionally + Access service token) |
 | Publications (public/unlisted) | separate public host, e.g. `pub.` — **outside Access** | none (public) or Sangam publish token (unlisted) |
@@ -478,6 +480,7 @@ search_index
 ```
 
 Notes:
+
 - Head content of an unmaterialized document = its latest revision; a separate `virtual_document_content` table is intentionally avoided as redundant.
 - A standalone `operations` audit table is folded into revisions' actor/operation fields unless a separate audit trail proves necessary.
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,17 +21,21 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.schemas import (
+    BackupSet,
+    BackupVerification,
     CreateDocument,
     CreateFolder,
     CreateTag,
     DeleteDocument,
     Document,
+    DuplicateDocument,
     Folder,
     PathMutation,
     ReconciliationReport,
     ReindexPath,
     RestoreDocument,
     Revision,
+    RevisionDiff,
     Tag,
     UpdateDocument,
     UpdateDocumentMetadata,
@@ -52,7 +57,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except MaterializationError as error:
             logger.exception("Startup materialization remains pending: %s", error.message)
             application.state.startup_reconciliation_error = error
+
+        async def maintain_backups() -> None:
+            while True:
+                try:
+                    await asyncio.to_thread(service.backups.create_if_due)
+                except Exception:
+                    logger.exception("Scheduled backup failed")
+                await asyncio.sleep(resolved_settings.backup_check_interval_seconds)
+
+        backup_task: asyncio.Task[None] | None = None
+        if resolved_settings.backups_enabled:
+            backup_task = asyncio.create_task(maintain_backups())
         yield
+        if backup_task:
+            backup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await backup_task
 
     app = FastAPI(
         title="Sangam API",
@@ -104,8 +125,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: str = Query(default="", max_length=500),
         tag_id: str | None = Query(default=None),
         category: str | None = Query(default=None, max_length=120),
+        actor_id: str | None = Query(default=None, max_length=120),
+        sort: str = Query(default="relevance", pattern="^(relevance|updated|title|path)$"),
     ) -> list[Document]:
-        return service.search_documents(query=q, tag_id=tag_id, category=category)
+        return service.search_documents(
+            query=q, tag_id=tag_id, category=category, actor_id=actor_id, sort=sort
+        )
+
+    @app.post("/api/v1/search/reindex")
+    def rebuild_search_index() -> dict[str, int]:
+        return {"indexed_documents": service.rebuild_search_index()}
 
     @app.get("/api/v1/tags", response_model=list[Tag])
     def list_tags() -> list[Tag]:
@@ -183,6 +212,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             idempotency_key=idempotency_key,
         )
 
+    @app.post("/api/v1/documents/{document_id}/duplicate", response_model=Document, status_code=201)
+    def duplicate_document(
+        document_id: str,
+        body: DuplicateDocument,
+        actor_id: str = Header(default="human:jay", alias="X-Actor"),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+    ) -> Document:
+        return service.duplicate_document(
+            document_id=document_id,
+            expected_revision_id=body.expected_revision_id,
+            title=body.title,
+            path=body.path,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
+
     @app.patch("/api/v1/documents/{document_id}/metadata", response_model=Document)
     def update_document_metadata(
         document_id: str,
@@ -250,6 +295,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def history(document_id: str) -> list[Revision]:
         return service.history(document_id)
 
+    @app.get("/api/v1/documents/{document_id}/diff", response_model=RevisionDiff)
+    def revision_diff(
+        document_id: str,
+        from_revision_id: str = Query(),
+        to_revision_id: str | None = Query(default=None),
+    ) -> RevisionDiff:
+        return service.revision_diff(
+            document_id=document_id,
+            from_revision_id=from_revision_id,
+            to_revision_id=to_revision_id,
+        )
+
     @app.post("/api/v1/documents/{document_id}/restore", response_model=Document)
     def restore_document(
         document_id: str,
@@ -281,6 +338,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/v1/reconciliation/{conflict_id}/accept-disk", response_model=Document)
     def reconciliation_accept_disk(conflict_id: str) -> Document:
         return service.accept_disk_content(conflict_id)
+
+    @app.post("/api/v1/reconciliation/{conflict_id}/restore-database", response_model=Document)
+    def reconciliation_restore_database(conflict_id: str) -> Document:
+        return service.restore_database_content(conflict_id)
+
+    @app.post("/api/v1/reconciliation/{conflict_id}/recognize-move", response_model=Document)
+    def reconciliation_recognize_move(conflict_id: str) -> Document:
+        return service.recognize_move(conflict_id)
+
+    @app.post("/api/v1/reconciliation/{conflict_id}/ignore", response_model=ReconciliationReport)
+    def reconciliation_ignore(conflict_id: str) -> ReconciliationReport:
+        return service.ignore_unknown_file(conflict_id)
+
+    @app.get("/api/v1/backups", response_model=list[BackupSet])
+    def list_backups() -> list[BackupSet]:
+        return service.list_backups()
+
+    @app.post("/api/v1/backups", response_model=BackupSet, status_code=201)
+    def create_backup() -> BackupSet:
+        return service.create_backup()
+
+    @app.post("/api/v1/backups/{backup_id}/verify", response_model=BackupVerification)
+    def verify_backup(backup_id: str) -> BackupVerification:
+        return service.verify_backup(backup_id)
 
     frontend_dist = resolved_settings.frontend_dist
     if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():

@@ -16,6 +16,7 @@ def settings(tmp_path: Path) -> Settings:
         database_path=tmp_path / "database" / "sangam.sqlite3",
         workspace_root=tmp_path / "workspace",
         backup_root=tmp_path / "backups",
+        backups_enabled=False,
         frontend_dist=tmp_path / "missing-frontend",
     )
 

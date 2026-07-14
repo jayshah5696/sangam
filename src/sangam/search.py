@@ -3,9 +3,16 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from sangam.db import Database
 from sangam.schemas import Document
+
+
+@dataclass(frozen=True)
+class SearchMatch:
+    document_id: str
+    snippet: str
 
 
 class SearchIndex:
@@ -26,7 +33,7 @@ class SearchIndex:
             )
             self._replace(connection, document)
 
-    def search_document_ids(self, query: str) -> list[str] | None:
+    def search(self, query: str) -> list[SearchMatch] | None:
         terms = re.findall(r"[\w-]+", query, flags=re.UNICODE)
         if not terms:
             return None
@@ -34,23 +41,36 @@ class SearchIndex:
         with self.database.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT document_id FROM document_search
+                SELECT document_id,
+                    snippet(document_search, -1, '[[', ']]', ' … ', 24) AS snippet
+                FROM document_search
                 WHERE document_search MATCH ?
                 ORDER BY bm25(document_search)
                 """,
                 (expression,),
             ).fetchall()
-        return [row["document_id"] for row in rows]
+        return [SearchMatch(document_id=row["document_id"], snippet=row["snippet"]) for row in rows]
 
     @staticmethod
     def _replace(connection: sqlite3.Connection, document: Document) -> None:
         if document.deleted:
             return
+        revision_search = connection.execute(
+            """
+            SELECT
+                group_concat(DISTINCT r.actor_id || ' ' || a.display_name) AS authors,
+                group_concat(r.summary, ' ') AS summaries
+            FROM revisions r
+            JOIN actors a ON a.actor_id = r.actor_id
+            WHERE r.document_id = ?
+            """,
+            (document.document_id,),
+        ).fetchone()
         connection.execute(
             """
             INSERT INTO document_search(
-                document_id, title, path, content, tags, category
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                document_id, title, path, content, tags, category, authors, revision_summaries
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 document.document_id,
@@ -59,5 +79,7 @@ class SearchIndex:
                 document.content,
                 " ".join(tag.name for tag in document.tags),
                 document.category or "",
+                revision_search["authors"] or "",
+                revision_search["summaries"] or "",
             ),
         )
