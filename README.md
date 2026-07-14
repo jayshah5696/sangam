@@ -6,6 +6,27 @@ Phase 1 is implemented: one Markdown document can move end to end through the br
 
 The workspace base now adds nested folders, tags, categories, full-text search, resizable sidebars, and four selectable themes.
 
+## Screenshots
+
+### River workspace
+
+![Sangam workspace using the River theme](./docs/assets/workspace-river.png)
+
+| Midnight | Parchment |
+| --- | --- |
+| ![Sangam workspace using the Midnight theme](./docs/assets/workspace-midnight.png) | ![Sangam workspace using the Parchment theme](./docs/assets/workspace-parchment.png) |
+
+### Cobalt workspace settings
+
+![Sangam workspace settings using the Cobalt theme](./docs/assets/workspace-settings.png)
+
+<details>
+<summary>Phase 1 baseline</summary>
+
+![Sangam Phase 1 document editor](./docs/assets/phase-1-ui.png)
+
+</details>
+
 ## Project documents
 
 - [Product vision and technical decisions](./docs/VISION.md)
