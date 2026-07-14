@@ -46,7 +46,8 @@ class Database:
         finally:
             connection.close()
 
-    def migrate(self) -> None:
+    def initialize(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
             connection.execute(
                 """
@@ -66,8 +67,16 @@ class Database:
                 ).fetchone()
                 if applied:
                     continue
-                connection.executescript(migration.read_text(encoding="utf-8"))
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-                    (version, utc_now()),
-                )
+                try:
+                    connection.executescript(
+                        "BEGIN IMMEDIATE;\n" + migration.read_text(encoding="utf-8")
+                    )
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                        (version, utc_now()),
+                    )
+                    connection.commit()
+                except Exception:
+                    if connection.in_transaction:
+                        connection.rollback()
+                    raise
