@@ -39,15 +39,23 @@ The workspace base now adds nested folders, tags, categories, full-text search, 
 
 ```bash
 uv sync --all-groups
-uv run uvicorn sangam.main:app --reload
+npm --prefix frontend ci
+just serve
 ```
 
-Run the frontend in a second terminal:
+The development server runs the API on `http://127.0.0.1:8000` and the Vite frontend on the URL it prints.
+
+Run the backend tests and frontend verification:
 
 ```bash
-cd frontend
-npm ci
-npm run dev
+just test
 ```
 
-Or build and run the production container with `docker compose up --build`.
+Build or serve the production container:
+
+```bash
+just docker-build
+just docker-serve
+```
+
+`just docker-serve` rebuilds the image, binds Sangam to `http://127.0.0.1:8000`, and mounts the three persistent `data/` directories. Override its defaults when needed, for example: `just port=8080 image=sangam:dev docker-serve`.
