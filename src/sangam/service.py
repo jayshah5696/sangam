@@ -1012,6 +1012,12 @@ class DocumentService:
         with self.database.transaction() as connection:
             self._ensure_actor(connection, actor_id)
             valid_tag_ids = self._validate_tag_ids(connection, tag_ids)
+            target_existed = (
+                connection.execute(
+                    "SELECT 1 FROM folders WHERE path = ?", (normalized_path,)
+                ).fetchone()
+                is not None
+            )
             self._ensure_folder_hierarchy(connection, f"{normalized_path}/.placeholder.md")
             row = connection.execute(
                 "SELECT * FROM folders WHERE path = ?", (normalized_path,)
@@ -1019,47 +1025,58 @@ class DocumentService:
             if row is None:
                 raise RuntimeError("Folder hierarchy creation did not return its target")
             target_id = row["folder_id"]
-            before = {
-                "category": row["category"],
-                "tag_ids": [],
-                "metadata_version": row["metadata_version"],
-            }
-            now = utc_now()
-            connection.execute(
-                """
-                UPDATE folders
-                SET category = ?, metadata_version = metadata_version + 1, updated_at = ?
-                WHERE folder_id = ?
-                """,
-                (normalized_category, now, target_id),
+            current_tag_rows = connection.execute(
+                "SELECT tag_id FROM folder_tags WHERE folder_id = ? ORDER BY tag_id",
+                (target_id,),
+            ).fetchall()
+            current_tag_ids = [tag_row["tag_id"] for tag_row in current_tag_rows]
+            metadata_unchanged = (
+                target_existed
+                and row["category"] == normalized_category
+                and set(current_tag_ids) == set(valid_tag_ids)
             )
-            connection.execute("DELETE FROM folder_tags WHERE folder_id = ?", (target_id,))
-            connection.executemany(
-                "INSERT INTO folder_tags(folder_id, tag_id) VALUES (?, ?)",
-                [(target_id, tag_id) for tag_id in valid_tag_ids],
-            )
-            after = {
-                "path": normalized_path,
-                "category": normalized_category,
-                "tag_ids": valid_tag_ids,
-                "metadata_version": row["metadata_version"] + 1,
-            }
-            connection.execute(
-                """
-                INSERT INTO metadata_events(
-                    event_id, entity_type, entity_id, actor_id,
-                    operation, before_json, after_json, created_at
-                ) VALUES (?, 'folder', ?, ?, 'create_or_organize', ?, ?, ?)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    target_id,
-                    actor_id,
-                    json.dumps(before),
-                    json.dumps(after),
-                    now,
-                ),
-            )
+            if not metadata_unchanged:
+                before = {
+                    "category": row["category"],
+                    "tag_ids": current_tag_ids,
+                    "metadata_version": row["metadata_version"],
+                }
+                now = utc_now()
+                connection.execute(
+                    """
+                    UPDATE folders
+                    SET category = ?, metadata_version = metadata_version + 1, updated_at = ?
+                    WHERE folder_id = ?
+                    """,
+                    (normalized_category, now, target_id),
+                )
+                connection.execute("DELETE FROM folder_tags WHERE folder_id = ?", (target_id,))
+                connection.executemany(
+                    "INSERT INTO folder_tags(folder_id, tag_id) VALUES (?, ?)",
+                    [(target_id, tag_id) for tag_id in valid_tag_ids],
+                )
+                after = {
+                    "path": normalized_path,
+                    "category": normalized_category,
+                    "tag_ids": valid_tag_ids,
+                    "metadata_version": row["metadata_version"] + 1,
+                }
+                connection.execute(
+                    """
+                    INSERT INTO metadata_events(
+                        event_id, entity_type, entity_id, actor_id,
+                        operation, before_json, after_json, created_at
+                    ) VALUES (?, 'folder', ?, ?, 'create_or_organize', ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        target_id,
+                        actor_id,
+                        json.dumps(before),
+                        json.dumps(after),
+                        now,
+                    ),
+                )
         self.workspace.create_folder(normalized_path)
         with self.database.connection() as connection:
             row = connection.execute(
