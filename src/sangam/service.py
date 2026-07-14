@@ -17,6 +17,7 @@ from sangam.errors import (
     NotFoundError,
     ValidationError,
 )
+from sangam.reconciliation import MaterializedDocumentSnapshot, ReconciliationPlanner
 from sangam.schemas import (
     Document,
     Folder,
@@ -43,10 +44,12 @@ class DocumentService:
         settings: Settings,
         *,
         workspace: WorkspaceFilesystem | None = None,
+        reconciliation_planner: ReconciliationPlanner | None = None,
     ) -> None:
         self.settings = settings
         self.settings.prepare()
         self.workspace = workspace or DiskWorkspaceFilesystem(settings.workspace_root)
+        self.reconciliation_planner = reconciliation_planner or ReconciliationPlanner()
         self.database = Database(settings.database_path)
         self.database.migrate()
         self._bootstrap_actors()
@@ -692,59 +695,40 @@ class DocumentService:
         return [ReconciliationConflict.model_validate(dict(row)) for row in rows]
 
     def reconcile(self) -> ReconciliationReport:
+        repaired = self._recover_pending_materializations()
+
+        documents = [document for document in self.list_documents() if document.path]
+        snapshots = [
+            MaterializedDocumentSnapshot(
+                document_id=document.document_id,
+                path=document.path,
+                content_hash=document.content_hash,
+            )
+            for document in documents
+            if document.path is not None
+        ]
+        plan = self.reconciliation_planner.plan(snapshots, self.workspace.scan_markdown())
+        for document_id in plan.rematerialize_document_ids:
+            self._finish_materialization(document_id)
+            repaired.append(document_id)
+        for conflict in plan.conflicts:
+            self._record_conflict(
+                conflict_type=conflict.conflict_type,
+                document_id=conflict.document_id,
+                path=conflict.path,
+                candidate_path=conflict.candidate_path,
+                expected_hash=conflict.expected_hash,
+                actual_hash=conflict.actual_hash,
+            )
+        return ReconciliationReport(repaired_document_ids=repaired, conflicts=self.list_conflicts())
+
+    def _recover_pending_materializations(self) -> list[str]:
         repaired: list[str] = []
         for document in self.list_documents():
             if document.path and document.materialization_state == "pending":
                 self._finish_materialization(document.document_id)
                 repaired.append(document.document_id)
-
-        documents = [document for document in self.list_documents() if document.path]
-        known_paths = {document.path for document in documents if document.path}
-        disk_files = self.workspace.scan_markdown()
-
-        missing = [document for document in documents if document.path not in disk_files]
-        unknown_paths = [path for path in disk_files if path not in known_paths]
-        candidate_paths: set[str] = set()
-        for document in missing:
-            matches = [path for path in unknown_paths if disk_files[path] == document.content_hash]
-            if matches:
-                for match in matches:
-                    candidate_paths.add(match)
-                self._record_conflict(
-                    conflict_type="possible_move",
-                    document_id=document.document_id,
-                    path=document.path or "",
-                    candidate_path=matches[0] if len(matches) == 1 else None,
-                    expected_hash=document.content_hash,
-                    actual_hash=document.content_hash,
-                )
-            else:
-                self._finish_materialization(document.document_id)
-                repaired.append(document.document_id)
-
-        for document in documents:
-            if not document.path or document.path not in disk_files:
-                continue
-            actual_hash = disk_files[document.path]
-            if actual_hash != document.content_hash:
-                self._record_conflict(
-                    conflict_type="unexpected_hash",
-                    document_id=document.document_id,
-                    path=document.path,
-                    expected_hash=document.content_hash,
-                    actual_hash=actual_hash,
-                )
-
-        for path in unknown_paths:
-            if path in candidate_paths:
-                continue
-            self._record_conflict(
-                conflict_type="unknown_file",
-                document_id=None,
-                path=path,
-                actual_hash=disk_files[path],
-            )
-        return ReconciliationReport(repaired_document_ids=repaired, conflicts=self.list_conflicts())
+        return repaired
 
     def reindex_path(self, path: str) -> Document:
         normalized = self._normalize_path(path)

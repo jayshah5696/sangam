@@ -170,3 +170,14 @@ def test_unknown_file_requires_explicit_reindex(client: TestClient, settings) ->
     assert imported["content"] == "# Imported explicitly\n"
     assert imported["created_by"] == "system:reconcile"
     assert client.get("/api/v1/reconciliation").json()["conflicts"] == []
+
+
+def test_repeated_scan_does_not_duplicate_open_conflicts(client: TestClient, settings) -> None:
+    unknown = settings.workspace_root / "outside.md"
+    unknown.write_text("outside", encoding="utf-8")
+
+    first = client.post("/api/v1/reconciliation/scan").json()
+    second = client.post("/api/v1/reconciliation/scan").json()
+
+    assert len(first["conflicts"]) == 1
+    assert second["conflicts"] == first["conflicts"]
