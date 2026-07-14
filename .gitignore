@@ -1,0 +1,68 @@
+# Operating system and editor state
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+
+# Python environments, bytecode, caches, and reports
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Frontend dependencies, generated files, and caches
+frontend/node_modules/
+frontend/dist/
+frontend/src/routeTree.gen.ts
+frontend/.vite/
+frontend/.eslintcache
+*.tsbuildinfo
+
+# Logs and local process state
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.pid.lock
+
+# Local databases and SQLite sidecar files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Runtime data and disposable smoke-test state
+.sangam-smoke.*/
+data/database/*
+data/workspace/*
+data/backups/*
+!data/database/.gitkeep
+!data/workspace/.gitkeep
+!data/backups/.gitkeep
