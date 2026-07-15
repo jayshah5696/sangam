@@ -3,10 +3,30 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
 
 export const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
-  { id: 'river', name: 'River', description: 'Calm green and warm paper', colors: ['#202b26', '#f3f0e7', '#d8f0df'] },
-  { id: 'midnight', name: 'Midnight', description: 'Deep navy for focused work', colors: ['#111827', '#182235', '#76a7ff'] },
-  { id: 'parchment', name: 'Parchment', description: 'Editorial sepia and ink', colors: ['#4a3728', '#f1e5cc', '#b85c38'] },
-  { id: 'cobalt', name: 'Cobalt', description: 'Crisp blue and cool white', colors: ['#102a43', '#edf4fb', '#2f80ed'] },
+  {
+    id: 'river',
+    name: 'River',
+    description: 'Calm green and warm paper',
+    colors: ['#202b26', '#f3f0e7', '#d8f0df'],
+  },
+  {
+    id: 'midnight',
+    name: 'Midnight',
+    description: 'Deep navy for focused work',
+    colors: ['#111827', '#182235', '#76a7ff'],
+  },
+  {
+    id: 'parchment',
+    name: 'Parchment',
+    description: 'Editorial sepia and ink',
+    colors: ['#4a3728', '#f1e5cc', '#b85c38'],
+  },
+  {
+    id: 'cobalt',
+    name: 'Cobalt',
+    description: 'Crisp blue and cool white',
+    colors: ['#102a43', '#edf4fb', '#2f80ed'],
+  },
 ]
 
 type WorkspacePreferences = {
@@ -54,11 +74,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setPreferences((current) => ({ ...current, ...patch }))
   }
 
-  return (
-    <ThemeContext.Provider value={{ preferences, updatePreferences }}>
-      {children}
-    </ThemeContext.Provider>
-  )
+  return <ThemeContext.Provider value={{ preferences, updatePreferences }}>{children}</ThemeContext.Provider>
 }
 
 export function useTheme() {

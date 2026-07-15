@@ -89,9 +89,12 @@ export function adjacentVisibleNodeId(
 ): string | null {
   if (nodes.length === 0) return null
   const currentIndex = nodes.findIndex((node) => node.id === currentId)
-  const nextIndex = currentIndex < 0
-    ? direction > 0 ? 0 : nodes.length - 1
-    : Math.max(0, Math.min(nodes.length - 1, currentIndex + direction))
+  const nextIndex =
+    currentIndex < 0
+      ? direction > 0
+        ? 0
+        : nodes.length - 1
+      : Math.max(0, Math.min(nodes.length - 1, currentIndex + direction))
   return nodes[nextIndex]?.id ?? null
 }
 
@@ -105,7 +108,11 @@ export function parentNodeId(nodes: ExplorerNode[], childId: string): string | n
   return null
 }
 
-export function typeaheadNodeId(nodes: ExplorerNode[], currentId: string | null, query: string): string | null {
+export function typeaheadNodeId(
+  nodes: ExplorerNode[],
+  currentId: string | null,
+  query: string,
+): string | null {
   if (!query) return null
   const currentIndex = nodes.findIndex((node) => node.id === currentId)
   const candidates = nodes.slice(currentIndex + 1).concat(nodes.slice(0, currentIndex + 1))
@@ -121,6 +128,6 @@ function parentPathOf(path: string) {
 }
 
 function sortNodes(nodes: ExplorerNode[]) {
-  nodes.sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'folder' ? -1 : 1)
+  nodes.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'folder' ? -1 : 1))
   for (const node of nodes) if (node.type === 'folder') sortNodes(node.children)
 }

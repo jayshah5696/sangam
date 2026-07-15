@@ -8,7 +8,13 @@ export function RevisionMergeView({ original, modified }: { original: string; mo
   const hostRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!hostRef.current) return
-    const extensions = [lineNumbers(), markdown(), EditorState.readOnly.of(true), EditorView.editable.of(false), EditorView.lineWrapping]
+    const extensions = [
+      lineNumbers(),
+      markdown(),
+      EditorState.readOnly.of(true),
+      EditorView.editable.of(false),
+      EditorView.lineWrapping,
+    ]
     const view = new MergeView({
       parent: hostRef.current,
       a: { doc: original, extensions },

@@ -145,7 +145,12 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   if (!response.ok) {
     const parsed = errorSchema.safeParse(payload)
     if (parsed.success) {
-      throw new ApiError(response.status, parsed.data.error.code, parsed.data.error.message, parsed.data.error.details)
+      throw new ApiError(
+        response.status,
+        parsed.data.error.code,
+        parsed.data.error.message,
+        parsed.data.error.details,
+      )
     }
     throw new ApiError(response.status, 'request_failed', `Request failed (${response.status})`, {})
   }
@@ -175,23 +180,15 @@ export const api = {
     return z.array(tagSchema).parse(await request('/tags'))
   },
   async createTag(name: string, color: string): Promise<Tag> {
-    return tagSchema.parse(
-      await request('/tags', { method: 'POST', body: JSON.stringify({ name, color }) }),
-    )
+    return tagSchema.parse(await request('/tags', { method: 'POST', body: JSON.stringify({ name, color }) }))
   },
   async listFolders(): Promise<Folder[]> {
     return z.array(folderSchema).parse(await request('/folders'))
   },
   async createFolder(path: string): Promise<Folder> {
-    return folderSchema.parse(
-      await request('/folders', { method: 'POST', body: JSON.stringify({ path }) }),
-    )
+    return folderSchema.parse(await request('/folders', { method: 'POST', body: JSON.stringify({ path }) }))
   },
-  async updateFolderMetadata(
-    folder: Folder,
-    category: string | null,
-    tagIds: string[],
-  ): Promise<Folder> {
+  async updateFolderMetadata(folder: Folder, category: string | null, tagIds: string[]): Promise<Folder> {
     return folderSchema.parse(
       await request(`/folders/${folder.folder_id}`, {
         method: 'PATCH',
@@ -300,9 +297,7 @@ export const api = {
   ): Promise<RevisionDiff> {
     const params = new URLSearchParams({ from_revision_id: fromRevisionId })
     if (toRevisionId) params.set('to_revision_id', toRevisionId)
-    return revisionDiffSchema.parse(
-      await request(`/documents/${documentId}/diff?${params.toString()}`),
-    )
+    return revisionDiffSchema.parse(await request(`/documents/${documentId}/diff?${params.toString()}`))
   },
   async restore(document: Document, revisionId: string): Promise<Document> {
     return documentSchema.parse(
@@ -350,9 +345,9 @@ export const api = {
     )
   },
   async rebuildSearch(): Promise<number> {
-    const result = z.object({ indexed_documents: z.number() }).parse(
-      await request('/search/reindex', { method: 'POST' }),
-    )
+    const result = z
+      .object({ indexed_documents: z.number() })
+      .parse(await request('/search/reindex', { method: 'POST' }))
     return result.indexed_documents
   },
   async listBackups(): Promise<BackupSet[]> {
@@ -362,8 +357,6 @@ export const api = {
     return backupSetSchema.parse(await request('/backups', { method: 'POST' }))
   },
   async verifyBackup(backupId: string): Promise<z.infer<typeof backupVerificationSchema>> {
-    return backupVerificationSchema.parse(
-      await request(`/backups/${backupId}/verify`, { method: 'POST' }),
-    )
+    return backupVerificationSchema.parse(await request(`/backups/${backupId}/verify`, { method: 'POST' }))
   },
 }

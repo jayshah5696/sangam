@@ -1,13 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  createRootRouteWithContext,
-  Link,
-  Outlet,
-  useLocation,
-  useNavigate,
-} from '@tanstack/react-router'
+import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import {
   ArchiveRestore,
@@ -61,7 +55,9 @@ function RootLayout() {
           <PrimarySidebar
             activity={activity}
             onCollapse={() => updatePreferences({ leftVisible: false })}
-            onActivity={(next) => { if (next === 'files' || next === 'search') setWorkspaceActivity(next) }}
+            onActivity={(next) => {
+              if (next === 'files' || next === 'search') setWorkspaceActivity(next)
+            }}
             style={{ width: preferences.leftWidth }}
           />
           <ResizeHandle
@@ -83,15 +79,30 @@ function RootLayout() {
         </button>
       )}
       <div className="workbench-center">
-        <main className="workbench-main" aria-label="Workspace content"><Outlet /></main>
+        <main className="workbench-main" aria-label="Workspace content">
+          <Outlet />
+        </main>
         <StatusBar />
       </div>
-      <CommandPalette onFiles={() => { setWorkspaceActivity('files'); if (routedActivity !== 'files') void navigate({ to: '/' }) }} onSearch={() => { setWorkspaceActivity('search'); if (routedActivity !== 'files') void navigate({ to: '/' }) }} />
+      <CommandPalette
+        onFiles={() => {
+          setWorkspaceActivity('files')
+          if (routedActivity !== 'files') void navigate({ to: '/' })
+        }}
+        onSearch={() => {
+          setWorkspaceActivity('search')
+          if (routedActivity !== 'files') void navigate({ to: '/' })
+        }}
+      />
     </div>
   )
 }
 
-function ActivityBar({ active, onActivity, onSettings }: {
+function ActivityBar({
+  active,
+  onActivity,
+  onSettings,
+}: {
   active: Activity
   onActivity: (activity: Activity) => void
   onSettings: () => void
@@ -105,7 +116,9 @@ function ActivityBar({ active, onActivity, onSettings }: {
   ]
   return (
     <aside className="activity-bar" aria-label="Workspace activities">
-      <Link to="/" className="activity-mark" aria-label="Sangam home" title="Sangam"><img src="/sangam-mark.svg" alt="" /></Link>
+      <Link to="/" className="activity-mark" aria-label="Sangam home" title="Sangam">
+        <img src="/sangam-mark.svg" alt="" />
+      </Link>
       <nav>
         {activities.map(({ id, label, icon: Icon }) => (
           <button
@@ -120,14 +133,24 @@ function ActivityBar({ active, onActivity, onSettings }: {
           </button>
         ))}
       </nav>
-      <button className="activity-button activity-settings" aria-label="Settings" title="Settings" onClick={onSettings}>
+      <button
+        className="activity-button activity-settings"
+        aria-label="Settings"
+        title="Settings"
+        onClick={onSettings}
+      >
         <Settings size={20} strokeWidth={1.8} />
       </button>
     </aside>
   )
 }
 
-function PrimarySidebar({ activity, onCollapse, onActivity, style }: {
+function PrimarySidebar({
+  activity,
+  onCollapse,
+  onActivity,
+  style,
+}: {
   activity: Activity
   onCollapse: () => void
   onActivity: (activity: Activity) => void
@@ -140,15 +163,44 @@ function PrimarySidebar({ activity, onCollapse, onActivity, style }: {
           <strong>{activityTitle(activity)}</strong>
           <span>Sangam workspace</span>
         </div>
-        <button className="quiet-icon" aria-label="Hide workspace sidebar" title="Hide sidebar" onClick={onCollapse}>
+        <button
+          className="quiet-icon"
+          aria-label="Hide workspace sidebar"
+          title="Hide sidebar"
+          onClick={onCollapse}
+        >
           <PanelLeftClose size={16} />
         </button>
       </header>
       {activity === 'files' && <FileExplorerPanel onSearch={() => onActivity('search')} />}
       {activity === 'search' && <SearchPanel />}
-      {activity === 'reconciliation' && <ActivitySummary icon={ShieldCheck} title="Workspace integrity" text="Scan and resolve changes made outside Sangam." href="/reconciliation" action="Open reconciliation" />}
-      {activity === 'backups' && <ActivitySummary icon={ArchiveRestore} title="Recovery sets" text="Create, inspect, and verify database and workspace backups." href="/backups" action="Open backups" />}
-      {activity === 'trash' && <ActivitySummary icon={Trash2} title="Recoverable deletion" text="Restore documents without losing stable identity or history." href="/trash" action="Open trash" />}
+      {activity === 'reconciliation' && (
+        <ActivitySummary
+          icon={ShieldCheck}
+          title="Workspace integrity"
+          text="Scan and resolve changes made outside Sangam."
+          href="/reconciliation"
+          action="Open reconciliation"
+        />
+      )}
+      {activity === 'backups' && (
+        <ActivitySummary
+          icon={ArchiveRestore}
+          title="Recovery sets"
+          text="Create, inspect, and verify database and workspace backups."
+          href="/backups"
+          action="Open backups"
+        />
+      )}
+      {activity === 'trash' && (
+        <ActivitySummary
+          icon={Trash2}
+          title="Recoverable deletion"
+          text="Restore documents without losing stable identity or history."
+          href="/trash"
+          action="Open trash"
+        />
+      )}
     </aside>
   )
 }
@@ -162,18 +214,47 @@ function SearchPanel() {
   })
   return (
     <div className="sidebar-content search-panel">
-      <label className="sidebar-search-input"><Search size={14} /><input autoFocus type="search" aria-label="Search documents" placeholder="Title, text, path, actor…" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-      <label className="sidebar-sort">Sort<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="relevance">Relevance</option><option value="updated">Updated</option><option value="title">Title</option><option value="path">Path</option></select></label>
-      <div className="sidebar-section-title"><span>Results</span><small>{results.data?.length ?? 0}</small></div>
+      <label className="sidebar-search-input">
+        <Search size={14} />
+        <input
+          autoFocus
+          type="search"
+          aria-label="Search documents"
+          placeholder="Title, text, path, actor…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+      <label className="sidebar-sort">
+        Sort
+        <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
+          <option value="relevance">Relevance</option>
+          <option value="updated">Updated</option>
+          <option value="title">Title</option>
+          <option value="path">Path</option>
+        </select>
+      </label>
+      <div className="sidebar-section-title">
+        <span>Results</span>
+        <small>{results.data?.length ?? 0}</small>
+      </div>
       <div className="search-results">
-        {results.data?.map((document) => <DocumentLink key={document.document_id} document={document} showPath />)}
+        {results.data?.map((document) => (
+          <DocumentLink key={document.document_id} document={document} showPath />
+        ))}
         {results.data?.length === 0 && <p className="sidebar-message">No matching documents.</p>}
       </div>
     </div>
   )
 }
 
-function ActivitySummary({ icon: Icon, title, text, href, action }: {
+function ActivitySummary({
+  icon: Icon,
+  title,
+  text,
+  href,
+  action,
+}: {
   icon: typeof ShieldCheck
   title: string
   text: string
@@ -193,10 +274,18 @@ function ActivitySummary({ icon: Icon, title, text, href, action }: {
 function DocumentLink({ document, showPath = false }: { document: Document; showPath?: boolean }) {
   const label = document.path?.split('/').at(-1) ?? document.title
   return (
-    <Link to="/documents/$documentId" params={{ documentId: document.document_id }} className="file-link" activeProps={{ className: 'file-link active' }}>
-      <Files size={13} /><span>{label}</span>
+    <Link
+      to="/documents/$documentId"
+      params={{ documentId: document.document_id }}
+      className="file-link"
+      activeProps={{ className: 'file-link active' }}
+    >
+      <Files size={13} />
+      <span>{label}</span>
       {showPath && <small>{document.path ?? 'Draft'}</small>}
-      {document.search_snippet && <span className="search-snippet">{plainSnippet(document.search_snippet)}</span>}
+      {document.search_snippet && (
+        <span className="search-snippet">{plainSnippet(document.search_snippet)}</span>
+      )}
     </Link>
   )
 }
@@ -213,5 +302,11 @@ function activityForPath(pathname: string): Activity {
 }
 
 function activityTitle(activity: Activity) {
-  return { files: 'Files', search: 'Search', reconciliation: 'Reconciliation', backups: 'Backups', trash: 'Trash' }[activity]
+  return {
+    files: 'Files',
+    search: 'Search',
+    reconciliation: 'Reconciliation',
+    backups: 'Backups',
+    trash: 'Trash',
+  }[activity]
 }

@@ -31,11 +31,18 @@ function documentAt(revision: string, content: string): Document {
 }
 
 function memoryStorage() {
-  const drafts = new Map<string, { documentId: string; content: string; baseRevisionId?: string; updatedAt: number }>()
+  const drafts = new Map<
+    string,
+    { documentId: string; content: string; baseRevisionId?: string; updatedAt: number }
+  >()
   const storage: DraftStorage = {
     get: vi.fn(async (documentId) => drafts.get(documentId)),
-    set: vi.fn(async (draft) => { drafts.set(draft.documentId, draft) }),
-    delete: vi.fn(async (documentId) => { drafts.delete(documentId) }),
+    set: vi.fn(async (draft) => {
+      drafts.set(draft.documentId, draft)
+    }),
+    delete: vi.fn(async (documentId) => {
+      drafts.delete(documentId)
+    }),
   }
   return { drafts, storage }
 }
@@ -47,9 +54,12 @@ describe('document session autosave', () => {
     vi.useFakeTimers()
     const { storage } = memoryStorage()
     const pending: Array<{ content: string; resolve: (document: Document) => void }> = []
-    const saveDocument = vi.fn((_base: Document, content: string) => new Promise<Document>((resolve) => {
-      pending.push({ content, resolve })
-    }))
+    const saveDocument = vi.fn(
+      (_base: Document, content: string) =>
+        new Promise<Document>((resolve) => {
+          pending.push({ content, resolve })
+        }),
+    )
     const store = new DocumentSessionStore({ storage, saveDocument, saveDelay: 20, persistDelay: 5 })
     await store.initializeDocument(documentAt('rev-1', 'original'))
 
@@ -67,7 +77,11 @@ describe('document session autosave', () => {
     expect(pending[1]?.content).toBe('newer edit')
     pending[1]!.resolve(documentAt('rev-3', 'newer edit'))
     await vi.advanceTimersByTimeAsync(0)
-    expect(store.getSession('doc-1')).toMatchObject({ content: 'newer edit', saveState: 'saved', baseRevisionId: 'rev-3' })
+    expect(store.getSession('doc-1')).toMatchObject({
+      content: 'newer edit',
+      saveState: 'saved',
+      baseRevisionId: 'rev-3',
+    })
   })
 
   it('does not restart draft or save debounce for selection-only updates', async () => {
@@ -89,9 +103,16 @@ describe('document session autosave', () => {
   it('recovers a separately persisted draft without putting it in layout state', async () => {
     const { drafts, storage } = memoryStorage()
     drafts.set('doc-1', { documentId: 'doc-1', content: 'recovered', baseRevisionId: 'rev-1', updatedAt: 1 })
-    const store = new DocumentSessionStore({ storage, saveDocument: vi.fn(async (_base, content) => documentAt('rev-2', content)) })
+    const store = new DocumentSessionStore({
+      storage,
+      saveDocument: vi.fn(async (_base, content) => documentAt('rev-2', content)),
+    })
     await store.initializeDocument(documentAt('rev-1', 'original'))
-    expect(store.getSession('doc-1')).toMatchObject({ content: 'recovered', baseRevisionId: 'rev-1', saveState: 'dirty' })
+    expect(store.getSession('doc-1')).toMatchObject({
+      content: 'recovered',
+      baseRevisionId: 'rev-1',
+      saveState: 'dirty',
+    })
     store.dispose()
   })
 })

@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react'
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, type Document } from './api'
 import type { EditorSelection, EditorViewState } from './components/MarkdownEditor'
@@ -90,8 +83,10 @@ export class DocumentSessionStore {
     const existingRuntime = this.runtimes.get(document.document_id)
     const session = this.getSession(document.document_id)
     if (existingRuntime) {
-      if (existingRuntime.document.current_revision_id !== document.current_revision_id
-        && (session.content === undefined || session.content === existingRuntime.savedContent)) {
+      if (
+        existingRuntime.document.current_revision_id !== document.current_revision_id &&
+        (session.content === undefined || session.content === existingRuntime.savedContent)
+      ) {
         existingRuntime.document = document
         existingRuntime.savedContent = document.content
         this.setSession(document.document_id, {
@@ -139,11 +134,14 @@ export class DocumentSessionStore {
     if (patch.content !== undefined && runtime && patch.saveState === undefined) {
       next = {
         ...next,
-        saveState: patch.content === runtime.savedContent
-          ? 'saved'
-          : current.saveState === 'conflict'
-            ? 'conflict'
-            : this.online ? 'dirty' : 'offline',
+        saveState:
+          patch.content === runtime.savedContent
+            ? 'saved'
+            : current.saveState === 'conflict'
+              ? 'conflict'
+              : this.online
+                ? 'dirty'
+                : 'offline',
       }
     }
     this.setSession(documentId, next)
@@ -169,7 +167,8 @@ export class DocumentSessionStore {
         queued: false,
       })
     }
-    const shouldReplace = replaceContent || current.content === undefined || current.content === previousSavedContent
+    const shouldReplace =
+      replaceContent || current.content === undefined || current.content === previousSavedContent
     const content = shouldReplace ? document.content : current.content
     this.setSession(documentId, {
       ...current,
@@ -223,8 +222,15 @@ export class DocumentSessionStore {
   private async save(documentId: string) {
     const runtime = this.runtimes.get(documentId)
     const session = this.getSession(documentId)
-    if (!runtime || runtime.inFlight || !this.online || session.content === undefined
-      || session.content === runtime.savedContent || session.saveState === 'conflict') return
+    if (
+      !runtime ||
+      runtime.inFlight ||
+      !this.online ||
+      session.content === undefined ||
+      session.content === runtime.savedContent ||
+      session.saveState === 'conflict'
+    )
+      return
     const submittedContent = session.content
     const base = session.baseRevisionId
       ? { ...runtime.document, current_revision_id: session.baseRevisionId }
@@ -250,15 +256,17 @@ export class DocumentSessionStore {
       const current = this.getSession(documentId)
       this.setSession(documentId, {
         ...current,
-        saveState: error instanceof ApiError && error.status === 409
-          ? 'conflict'
-          : this.online ? 'failed' : 'offline',
+        saveState:
+          error instanceof ApiError && error.status === 409 ? 'conflict' : this.online ? 'failed' : 'offline',
       })
     } finally {
       runtime.inFlight = false
       const current = this.getSession(documentId)
-      if ((runtime.queued || current.content !== runtime.savedContent)
-        && current.saveState !== 'conflict' && this.online) {
+      if (
+        (runtime.queued || current.content !== runtime.savedContent) &&
+        current.saveState !== 'conflict' &&
+        this.online
+      ) {
         this.scheduleSave(documentId)
       }
     }
@@ -360,19 +368,20 @@ const DocumentSessionsContext = createContext<DocumentSessionStore | null>(null)
 
 export function DocumentSessionsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
-  const [store] = useState(() => (
-    new DocumentSessionStore({
-      storage: new IndexedDbDraftStorage(),
-      saveDocument: api.updateDocument,
-      isOnline: () => navigator.onLine,
-      onSaved: (document) => {
-        queryClient.setQueryData(['document', document.document_id], document)
-        void queryClient.invalidateQueries({ queryKey: ['documents'] })
-        void queryClient.invalidateQueries({ queryKey: ['history', document.document_id] })
-        void queryClient.invalidateQueries({ queryKey: ['folders'] })
-      },
-    })
-  ))
+  const [store] = useState(
+    () =>
+      new DocumentSessionStore({
+        storage: new IndexedDbDraftStorage(),
+        saveDocument: api.updateDocument,
+        isOnline: () => navigator.onLine,
+        onSaved: (document) => {
+          queryClient.setQueryData(['document', document.document_id], document)
+          void queryClient.invalidateQueries({ queryKey: ['documents'] })
+          void queryClient.invalidateQueries({ queryKey: ['history', document.document_id] })
+          void queryClient.invalidateQueries({ queryKey: ['folders'] })
+        },
+      }),
+  )
 
   useEffect(() => {
     const online = () => store.setOnline(true)

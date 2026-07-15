@@ -31,7 +31,11 @@ export type WorkbenchLayoutState = {
   recentlyClosed: ClosedTab[]
 }
 
-export function createGroup(id: string, tabs: WorkbenchTab[] = [], activeTabId: string | null = null): GroupNode {
+export function createGroup(
+  id: string,
+  tabs: WorkbenchTab[] = [],
+  activeTabId: string | null = null,
+): GroupNode {
   return { kind: 'group', id, tabs, activeTabId }
 }
 
@@ -47,9 +51,10 @@ export function ensureDocumentOpen(
 ): WorkbenchLayoutState {
   const existing = findGroupWithDocument(state.root, documentId)
   const active = findGroup(state.root, state.activeGroupId)
-  const groupId = requestedGroupId
-    ?? (active?.tabs.some((tab) => tab.documentId === documentId) ? active.id : existing?.id)
-    ?? state.activeGroupId
+  const groupId =
+    requestedGroupId ??
+    (active?.tabs.some((tab) => tab.documentId === documentId) ? active.id : existing?.id) ??
+    state.activeGroupId
   return {
     ...state,
     root: updateGroup(state.root, groupId, (group) => {
@@ -64,7 +69,11 @@ export function ensureDocumentOpen(
   }
 }
 
-export function activateTab(state: WorkbenchLayoutState, groupId: string, documentId: string): WorkbenchLayoutState {
+export function activateTab(
+  state: WorkbenchLayoutState,
+  groupId: string,
+  documentId: string,
+): WorkbenchLayoutState {
   return {
     ...state,
     root: updateGroup(state.root, groupId, (group) => ({ ...group, activeTabId: documentId })),
@@ -72,25 +81,36 @@ export function activateTab(state: WorkbenchLayoutState, groupId: string, docume
   }
 }
 
-export function closeTab(state: WorkbenchLayoutState, groupId: string, documentId: string): WorkbenchLayoutState {
+export function closeTab(
+  state: WorkbenchLayoutState,
+  groupId: string,
+  documentId: string,
+): WorkbenchLayoutState {
   let closed: WorkbenchTab | undefined
   const root = updateGroup(state.root, groupId, (group) => {
     closed = group.tabs.find((tab) => tab.documentId === documentId)
     const tabs = group.tabs.filter((tab) => tab.documentId !== documentId)
     const previousIndex = group.tabs.findIndex((tab) => tab.documentId === documentId)
-    const activeTabId = group.activeTabId === documentId
-      ? tabs[Math.max(0, previousIndex - 1)]?.documentId ?? tabs[0]?.documentId ?? null
-      : group.activeTabId
+    const activeTabId =
+      group.activeTabId === documentId
+        ? (tabs[Math.max(0, previousIndex - 1)]?.documentId ?? tabs[0]?.documentId ?? null)
+        : group.activeTabId
     return { ...group, tabs, activeTabId }
   })
   return {
     ...state,
     root,
-    recentlyClosed: closed ? [{ tab: closed, groupId }, ...state.recentlyClosed].slice(0, 12) : state.recentlyClosed,
+    recentlyClosed: closed
+      ? [{ tab: closed, groupId }, ...state.recentlyClosed].slice(0, 12)
+      : state.recentlyClosed,
   }
 }
 
-export function closeOtherTabs(state: WorkbenchLayoutState, groupId: string, documentId: string): WorkbenchLayoutState {
+export function closeOtherTabs(
+  state: WorkbenchLayoutState,
+  groupId: string,
+  documentId: string,
+): WorkbenchLayoutState {
   return {
     ...state,
     root: updateGroup(state.root, groupId, (group) => ({
@@ -101,7 +121,10 @@ export function closeOtherTabs(state: WorkbenchLayoutState, groupId: string, doc
   }
 }
 
-export function reopenClosedTab(state: WorkbenchLayoutState): { state: WorkbenchLayoutState; documentId: string | null } {
+export function reopenClosedTab(state: WorkbenchLayoutState): {
+  state: WorkbenchLayoutState
+  documentId: string | null
+} {
   const closed = state.recentlyClosed[0]
   if (!closed) return { state, documentId: null }
   const targetGroupId = collectGroups(state.root).some((group) => group.id === closed.groupId)
@@ -124,17 +147,25 @@ export function reopenClosedTab(state: WorkbenchLayoutState): { state: Workbench
   }
 }
 
-export function togglePinned(state: WorkbenchLayoutState, groupId: string, documentId: string): WorkbenchLayoutState {
+export function togglePinned(
+  state: WorkbenchLayoutState,
+  groupId: string,
+  documentId: string,
+): WorkbenchLayoutState {
   return {
     ...state,
     root: updateGroup(state.root, groupId, (group) => ({
       ...group,
-      tabs: group.tabs.map((tab) => tab.documentId === documentId ? { ...tab, pinned: !tab.pinned } : tab),
+      tabs: group.tabs.map((tab) => (tab.documentId === documentId ? { ...tab, pinned: !tab.pinned } : tab)),
     })),
   }
 }
 
-export function updateDocumentTitle(state: WorkbenchLayoutState, documentId: string, title: string): WorkbenchLayoutState {
+export function updateDocumentTitle(
+  state: WorkbenchLayoutState,
+  documentId: string,
+  title: string,
+): WorkbenchLayoutState {
   let changed = false
   const root = mapGroups(state.root, (group) => ({
     ...group,
@@ -190,7 +221,11 @@ export function closeGroup(state: WorkbenchLayoutState, groupId: string): Workbe
   return { ...state, root, activeGroupId }
 }
 
-export function setSplitRatio(state: WorkbenchLayoutState, splitId: string, ratio: number): WorkbenchLayoutState {
+export function setSplitRatio(
+  state: WorkbenchLayoutState,
+  splitId: string,
+  ratio: number,
+): WorkbenchLayoutState {
   let changed = false
   const boundedRatio = Math.max(10, Math.min(90, ratio))
   const root = replaceNode(state.root, splitId, (node) => {
@@ -221,7 +256,7 @@ function findGroupWithDocument(root: LayoutNode, documentId: string) {
 }
 
 function updateGroup(root: LayoutNode, id: string, update: (group: GroupNode) => GroupNode): LayoutNode {
-  return mapGroups(root, (group) => group.id === id ? update(group) : group)
+  return mapGroups(root, (group) => (group.id === id ? update(group) : group))
 }
 
 function mapGroups(root: LayoutNode, update: (group: GroupNode) => GroupNode): LayoutNode {
@@ -249,10 +284,12 @@ export function isLayoutNode(value: unknown): value is LayoutNode {
   const node = value as Partial<LayoutNode>
   if (node.kind === 'group') return typeof node.id === 'string' && Array.isArray(node.tabs)
   if (node.kind === 'split') {
-    return typeof node.id === 'string'
-      && (node.direction === 'horizontal' || node.direction === 'vertical')
-      && isLayoutNode(node.first)
-      && isLayoutNode(node.second)
+    return (
+      typeof node.id === 'string' &&
+      (node.direction === 'horizontal' || node.direction === 'vertical') &&
+      isLayoutNode(node.first) &&
+      isLayoutNode(node.second)
+    )
   }
   return false
 }
