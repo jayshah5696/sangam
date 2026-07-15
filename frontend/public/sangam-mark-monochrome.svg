@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="sangam-mark-mono-title">
+  <title id="sangam-mark-mono-title">Sangam</title>
+  <defs>
+    <mask id="sangam-document-cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="white" />
+      <path
+        fill="black"
+        d="M23 14h15l6 6v17c0 3-2 5-5 6-4 2-6 5-7 9-1-4-3-7-7-9-3-1-5-3-5-6V18c0-2 1-4 3-4Z"
+      />
+    </mask>
+  </defs>
+  <path
+    d="M32 4c12 0 22 8 22 20 0 7-4 11-10 14-4 2-6 4-5 8 1 4 8 7 17 10v6H44c-6-3-10-6-12-10-2 4-6 7-12 10H8v-6c9-3 16-6 17-10 1-4-1-6-5-8-6-3-10-7-10-14C10 12 20 4 32 4Z"
+    fill="#20241F"
+    mask="url(#sangam-document-cutout)"
+  />
+</svg>
