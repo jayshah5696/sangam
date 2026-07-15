@@ -104,7 +104,7 @@ function ActivityBar({ active, onActivity, onSettings }: {
   ]
   return (
     <aside className="activity-bar" aria-label="Workspace activities">
-      <Link to="/" className="activity-mark" aria-label="Sangam home" title="Sangam">S</Link>
+      <Link to="/" className="activity-mark" aria-label="Sangam home" title="Sangam"><img src="/sangam-mark.svg" alt="" /></Link>
       <nav>
         {activities.map(({ id, label, icon: Icon }) => (
           <button
