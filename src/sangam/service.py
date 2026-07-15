@@ -6,8 +6,6 @@ import json
 import sqlite3
 import uuid
 
-from sangam.backup import BackupManager
-from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
@@ -18,20 +16,14 @@ from sangam.errors import (
 )
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.organization import WorkspaceOrganizationService
-from sangam.reconciliation import MaterializedDocumentSnapshot, ReconciliationPlanner
 from sangam.schemas import (
-    BackupSet,
-    BackupVerification,
     Document,
-    Folder,
-    ReconciliationConflict,
-    ReconciliationReport,
     Revision,
     RevisionDiff,
     Tag,
 )
 from sangam.search import SearchIndex
-from sangam.workspace import DiskWorkspaceFilesystem, WorkspaceFilesystem
+from sangam.workspace import WorkspaceFilesystem
 
 
 def _content_hash(content: str) -> str:
@@ -41,49 +33,18 @@ def _content_hash(content: str) -> str:
 class DocumentService:
     def __init__(
         self,
-        settings: Settings,
         *,
-        workspace: WorkspaceFilesystem | None = None,
-        reconciliation_planner: ReconciliationPlanner | None = None,
+        database: Database,
+        workspace: WorkspaceFilesystem,
+        idempotency: IdempotencyStore,
+        organization: WorkspaceOrganizationService,
+        search_index: SearchIndex,
     ) -> None:
-        self.settings = settings
-        self.settings.prepare()
-        self.workspace = workspace or DiskWorkspaceFilesystem(settings.workspace_root)
-        self.reconciliation_planner = reconciliation_planner or ReconciliationPlanner()
-        self.database = Database(settings.database_path)
-        self.database.initialize()
-        self._bootstrap_actors()
-        self.idempotency = IdempotencyStore(self.database)
-        self.organization = WorkspaceOrganizationService(
-            database=self.database,
-            workspace=self.workspace,
-            idempotency=self.idempotency,
-        )
-        self.search_index = SearchIndex(self.database)
-        self.search_index.rebuild(self.list_documents(include_deleted=True))
-        self.backups = BackupManager(
-            database=self.database,
-            workspace_root=settings.workspace_root,
-            backup_root=settings.backup_root,
-            retention_count=settings.backup_retention_count,
-        )
-
-    def _bootstrap_actors(self) -> None:
-        actors = (
-            ("human:jay", "Jay", "human"),
-            ("client:cli", "Sangam CLI", "client"),
-            ("system", "Sangam system", "system"),
-            ("system:reconcile", "Filesystem reconciliation", "system"),
-        )
-        with self.database.transaction() as connection:
-            for actor_id, display_name, actor_type in actors:
-                connection.execute(
-                    """
-                    INSERT OR IGNORE INTO actors(actor_id, display_name, actor_type, created_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (actor_id, display_name, actor_type, utc_now()),
-                )
+        self.database = database
+        self.workspace = workspace
+        self.idempotency = idempotency
+        self.organization = organization
+        self.search_index = search_index
 
     def _ensure_actor(self, connection: sqlite3.Connection, actor_id: str) -> None:
         if not connection.execute(
@@ -93,9 +54,6 @@ class DocumentService:
 
     def _normalize_path(self, raw_path: str) -> str:
         return self.workspace.normalize_document_path(raw_path)
-
-    def _normalize_folder_path(self, raw_path: str) -> str:
-        return self.organization.normalize_folder_path(raw_path)
 
     def _document_query(self) -> str:
         return """
@@ -143,9 +101,6 @@ class DocumentService:
             metadata_version=row["metadata_version"],
             tags=[Tag.model_validate(tag) for tag in json.loads(row["tags_json"])],
         )
-
-    def _ensure_folder_hierarchy(self, connection: sqlite3.Connection, document_path: str) -> None:
-        self.organization.ensure_document_folder_hierarchy(connection, document_path)
 
     def _get_document_in_connection(
         self, connection: sqlite3.Connection, document_id: str, *, include_deleted: bool = True
@@ -295,7 +250,9 @@ class DocumentService:
                         ),
                     )
                     if normalized_path:
-                        self._ensure_folder_hierarchy(connection, normalized_path)
+                        self.organization.ensure_document_folder_hierarchy(
+                            connection, normalized_path
+                        )
                     connection.execute(
                         """
                         INSERT INTO revisions(
@@ -429,7 +386,7 @@ class DocumentService:
                         ),
                     )
                     if next_path:
-                        self._ensure_folder_hierarchy(connection, next_path)
+                        self.organization.ensure_document_folder_hierarchy(connection, next_path)
                     connection.execute(
                         """
                         UPDATE documents
@@ -494,6 +451,29 @@ class DocumentService:
             operation="update",
             summary=summary,
             actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
+        return document
+
+    def reconcile_content(
+        self,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        content: str,
+        summary: str,
+        idempotency_key: str,
+    ) -> Document:
+        """Record accepted workspace content through the normal revision protocol."""
+        document, _ = self._append_revision(
+            document_id=document_id,
+            expected_revision_id=expected_revision_id,
+            content=content,
+            title=None,
+            path=None,
+            operation="reconcile",
+            summary=summary,
+            actor_id="system:reconcile",
             idempotency_key=idempotency_key,
         )
         return document
@@ -707,248 +687,11 @@ class DocumentService:
                 (file_hash, document.document_id, document.current_revision_id),
             )
 
-    def _record_conflict(
-        self,
-        *,
-        conflict_type: str,
-        document_id: str | None,
-        path: str,
-        candidate_path: str | None = None,
-        expected_hash: str | None = None,
-        actual_hash: str | None = None,
-    ) -> None:
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO reconciliation_conflicts(
-                    conflict_id, conflict_type, document_id, path, candidate_path,
-                    expected_hash, actual_hash, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    conflict_type,
-                    document_id,
-                    path,
-                    candidate_path,
-                    expected_hash,
-                    actual_hash,
-                    utc_now(),
-                ),
-            )
-            if document_id:
-                connection.execute(
-                    "UPDATE documents SET materialization_state = 'conflict' WHERE document_id = ?",
-                    (document_id,),
-                )
-
-    def list_conflicts(self) -> list[ReconciliationConflict]:
-        with self.database.connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT * FROM reconciliation_conflicts
-                WHERE status = 'open'
-                ORDER BY created_at, conflict_id
-                """
-            ).fetchall()
-        return [ReconciliationConflict.model_validate(dict(row)) for row in rows]
-
-    def reconcile(self) -> ReconciliationReport:
-        repaired = self._recover_pending_materializations()
-
-        documents = [document for document in self.list_documents() if document.path]
-        documents_by_id = {document.document_id: document for document in documents}
-        snapshots = [
-            MaterializedDocumentSnapshot(
-                document_id=document.document_id,
-                path=document.path,
-                content_hash=document.content_hash,
-            )
-            for document in documents
-            if document.path is not None
-        ]
-        disk_state = self.workspace.scan_markdown()
-        with self.database.transaction() as connection:
-            ignored_rows = connection.execute(
-                "SELECT path, content_hash FROM ignored_workspace_files"
-            ).fetchall()
-            for ignored in ignored_rows:
-                if disk_state.get(ignored["path"]) == ignored["content_hash"]:
-                    disk_state.pop(ignored["path"], None)
-                else:
-                    connection.execute(
-                        "DELETE FROM ignored_workspace_files WHERE path = ?", (ignored["path"],)
-                    )
-        plan = self.reconciliation_planner.plan(snapshots, disk_state)
-        for document_id in plan.rematerialize_document_ids:
-            self._finish_materialization(documents_by_id[document_id])
-            repaired.append(document_id)
-        for conflict in plan.conflicts:
-            self._record_conflict(
-                conflict_type=conflict.conflict_type,
-                document_id=conflict.document_id,
-                path=conflict.path,
-                candidate_path=conflict.candidate_path,
-                expected_hash=conflict.expected_hash,
-                actual_hash=conflict.actual_hash,
-            )
-        return ReconciliationReport(repaired_document_ids=repaired, conflicts=self.list_conflicts())
-
-    def _recover_pending_materializations(self) -> list[str]:
-        repaired: list[str] = []
-        for document in self.list_documents():
-            if document.path and document.materialization_state == "pending":
-                self._finish_materialization(document)
-                repaired.append(document.document_id)
-        return repaired
-
-    def reindex_path(self, path: str) -> Document:
-        normalized = self._normalize_path(path)
-        if not self.workspace.is_document_file(normalized):
-            raise NotFoundError(f"Workspace file not found: {normalized}")
-        with self.database.connection() as connection:
-            registered = connection.execute(
-                "SELECT 1 FROM documents WHERE path = ?", (normalized,)
-            ).fetchone()
-            if registered:
-                raise ValidationError("That path is already registered")
-        content = self.workspace.read_document(normalized)
-        fingerprint = _content_hash(content)
-        document = self.create_document(
-            title=self.workspace.title_from_path(normalized),
-            content=content,
-            path=normalized,
-            actor_id="system:reconcile",
-            idempotency_key=f"reindex:{normalized}:{fingerprint}",
-        )
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                UPDATE reconciliation_conflicts
-                SET status = 'resolved', resolved_at = ?
-                WHERE status = 'open' AND conflict_type = 'unknown_file' AND path = ?
-                """,
-                (utc_now(), normalized),
-            )
-        return document
-
-    def accept_disk_content(self, conflict_id: str) -> Document:
-        with self.database.connection() as connection:
-            conflict = connection.execute(
-                """
-                SELECT * FROM reconciliation_conflicts
-                WHERE conflict_id = ? AND status = 'open'
-                """,
-                (conflict_id,),
-            ).fetchone()
-        if (
-            not conflict
-            or conflict["conflict_type"] != "unexpected_hash"
-            or not conflict["document_id"]
-        ):
-            raise NotFoundError("Open unexpected-hash conflict not found")
-        document = self.get_document(conflict["document_id"])
-        content = self.workspace.read_document(conflict["path"])
-        result, _ = self._append_revision(
-            document_id=document.document_id,
-            expected_revision_id=document.current_revision_id,
-            content=content,
-            title=None,
-            path=None,
-            operation="reconcile",
-            summary="Accepted out-of-band workspace content",
-            actor_id="system:reconcile",
-            idempotency_key=f"accept-disk:{conflict_id}:{_content_hash(content)}",
-        )
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                UPDATE reconciliation_conflicts
-                SET status = 'resolved', resolved_at = ?
-                WHERE conflict_id = ?
-                """,
-                (utc_now(), conflict_id),
-            )
-        return result
-
-    def restore_database_content(self, conflict_id: str) -> Document:
-        conflict = self._get_open_conflict(conflict_id, "unexpected_hash")
-        if not conflict["document_id"]:
-            raise NotFoundError("Open unexpected-hash conflict not found")
-        document = self.get_document(conflict["document_id"])
+    def rematerialize_document(self, document_id: str) -> Document:
+        """Rewrite a materialized document from the canonical database head."""
+        document = self.get_document(document_id)
         self._finish_materialization(document)
-        self._resolve_conflict(conflict_id)
-        return self.get_document(document.document_id)
-
-    def recognize_move(self, conflict_id: str) -> Document:
-        conflict = self._get_open_conflict(conflict_id, "possible_move")
-        if not conflict["document_id"] or not conflict["candidate_path"]:
-            raise NotFoundError("Open unambiguous move conflict not found")
-        document = self.get_document(conflict["document_id"])
-        moved = self.move_document(
-            document_id=document.document_id,
-            expected_revision_id=document.current_revision_id,
-            path=conflict["candidate_path"],
-            summary="Recognized out-of-band workspace move",
-            actor_id="system:reconcile",
-            idempotency_key=f"recognize-move:{conflict_id}",
-        )
-        self._resolve_conflict(conflict_id)
-        return moved
-
-    def ignore_unknown_file(self, conflict_id: str) -> ReconciliationReport:
-        conflict = self._get_open_conflict(conflict_id, "unknown_file")
-        actual_hash = conflict["actual_hash"]
-        if not actual_hash:
-            raise ValidationError("Unknown file conflict is missing its content hash")
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                INSERT INTO ignored_workspace_files(path, content_hash, ignored_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(path) DO UPDATE SET
-                    content_hash = excluded.content_hash,
-                    ignored_at = excluded.ignored_at
-                """,
-                (conflict["path"], actual_hash, utc_now()),
-            )
-        self._resolve_conflict(conflict_id)
-        return ReconciliationReport(repaired_document_ids=[], conflicts=self.list_conflicts())
-
-    def _get_open_conflict(self, conflict_id: str, expected_type: str) -> sqlite3.Row:
-        with self.database.connection() as connection:
-            conflict = connection.execute(
-                "SELECT * FROM reconciliation_conflicts WHERE conflict_id = ? AND status = 'open'",
-                (conflict_id,),
-            ).fetchone()
-        if not conflict or conflict["conflict_type"] != expected_type:
-            raise NotFoundError(f"Open {expected_type} conflict not found")
-        return conflict
-
-    def _resolve_conflict(self, conflict_id: str) -> None:
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                UPDATE reconciliation_conflicts
-                SET status = 'resolved', resolved_at = ?
-                WHERE conflict_id = ?
-                """,
-                (utc_now(), conflict_id),
-            )
-
-    def _validate_tag_ids(self, connection: sqlite3.Connection, tag_ids: list[str]) -> list[str]:
-        return self.organization.validate_tag_ids(connection, tag_ids)
-
-    def list_tags(self) -> list[Tag]:
-        return self.organization.list_tags()
-
-    def create_tag(self, *, name: str, color: str, actor_id: str, idempotency_key: str) -> Tag:
-        return self.organization.create_tag(
-            name=name,
-            color=color,
-            actor_id=actor_id,
-            idempotency_key=idempotency_key,
-        )
+        return self.get_document(document_id)
 
     def update_document_metadata(
         self,
@@ -990,7 +733,7 @@ class DocumentService:
                             "current_metadata_version": current.metadata_version,
                         },
                     )
-                valid_tag_ids = self._validate_tag_ids(connection, tag_ids)
+                valid_tag_ids = self.organization.validate_tag_ids(connection, tag_ids)
                 before = {
                     "category": current.category,
                     "tag_ids": [tag.tag_id for tag in current.tags],
@@ -1100,90 +843,3 @@ class DocumentService:
         documents = self.list_documents(include_deleted=True)
         self.search_index.rebuild(documents)
         return sum(not document.deleted for document in documents)
-
-    def list_backups(self) -> list[BackupSet]:
-        return self.backups.list()
-
-    def create_backup(self, *, actor_id: str, idempotency_key: str) -> BackupSet:
-        fingerprint = request_hash({"operation": "create_backup"})
-        with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
-            duplicate = self.idempotency.mutation_record(
-                connection,
-                actor_id=actor_id,
-                key=idempotency_key,
-                operation="create_backup",
-                request_hash=fingerprint,
-            )
-            if duplicate:
-                backup_id = duplicate.resource_id
-                completed = duplicate.completed_at is not None
-            else:
-                backup_id = self.backups.new_backup_id()
-                completed = False
-                self.idempotency.record_mutation(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation="create_backup",
-                    request_hash=fingerprint,
-                    resource_type="backup",
-                    resource_id=backup_id,
-                    completed=False,
-                )
-        try:
-            backup = self.backups.get(backup_id)
-        except NotFoundError:
-            if completed:
-                raise NotFoundError("Idempotent backup result is no longer retained") from None
-            backup = self.backups.create(backup_id=backup_id)
-        if backup.verified_at is None:
-            self.backups.verify(backup_id)
-            backup = self.backups.get(backup_id)
-        if not completed:
-            self.idempotency.complete_mutation(
-                actor_id=actor_id, key=idempotency_key, resource_id=backup_id
-            )
-        return backup
-
-    def verify_backup(self, backup_id: str) -> BackupVerification:
-        return self.backups.verify(backup_id)
-
-    def list_folders(self) -> list[Folder]:
-        return self.organization.list_folders()
-
-    def create_folder(
-        self,
-        *,
-        path: str,
-        category: str | None,
-        tag_ids: list[str],
-        actor_id: str,
-        idempotency_key: str,
-    ) -> Folder:
-        return self.organization.create_folder(
-            path=path,
-            category=category,
-            tag_ids=tag_ids,
-            actor_id=actor_id,
-            idempotency_key=idempotency_key,
-        )
-
-    def update_folder_metadata(
-        self,
-        *,
-        folder_id: str,
-        expected_metadata_version: int,
-        category: str | None,
-        tag_ids: list[str],
-        actor_id: str,
-        idempotency_key: str,
-    ) -> Folder:
-        return self.organization.update_folder_metadata(
-            folder_id=folder_id,
-            expected_metadata_version=expected_metadata_version,
-            category=category,
-            tag_ids=tag_ids,
-            actor_id=actor_id,
-            idempotency_key=idempotency_key,
-        )

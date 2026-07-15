@@ -35,17 +35,26 @@ flowchart LR
     Human["Human in browser"] --> Routes["File-based React routes"]
     Routes --> API["Versioned HTTP API"]
     CLI["CLI"] --> API
-    API --> Service["DocumentService"]
-    Service --> Organization["WorkspaceOrganizationService"]
-    Service --> Idempotency["IdempotencyStore"]
-    Service --> Revisions["SQLite canonical state"]
+    API --> Composition["ApplicationServices composition root"]
+    Composition --> Documents["DocumentService"]
+    Composition --> Organization["WorkspaceOrganizationService"]
+    Composition --> Reconcile["ReconciliationService"]
+    Composition --> Backups["BackupService"]
+    Documents --> Idempotency["IdempotencyStore"]
+    Documents --> Revisions["SQLite canonical state"]
+    Documents --> Search["Rebuildable FTS5 index"]
+    Documents --> Files["Atomic workspace projection"]
+    Organization --> Idempotency
     Organization --> Revisions
-    Idempotency --> Revisions
-    Service --> Search["Rebuildable FTS5 index"]
-    Service --> Files["Atomic workspace projection"]
     Organization --> Files
-    Service --> Reconcile["Conservative reconciliation"]
-    Service --> Backup["Verified backup sets"]
+    Reconcile --> Planner["Pure reconciliation planner"]
+    Reconcile --> Documents
+    Reconcile --> Revisions
+    Reconcile --> Files
+    Backups --> Idempotency
+    Backups --> Manager["BackupManager artifact adapter"]
+    Manager --> Revisions
+    Manager --> Files
     Routes --> Preview["Markdown + DOMPurify + Mermaid"]
     Preview --> Routes
 ```
@@ -56,6 +65,16 @@ remain durable projections. Backup artifacts never replace revision history, and
 revision history never replaces backups. Folder and tag transactions live behind
 `WorkspaceOrganizationService`; actor-scoped retry keys are coordinated by
 `IdempotencyStore` across document and workspace-resource mutations.
+
+`ApplicationServices` is the process composition root: it constructs the
+database, workspace, indexes, adapters, and application services once, then
+routes each API family to the service that owns its policy. `ReconciliationService`
+owns conflict persistence and recovery orchestration but can mutate documents
+only through a narrow lifecycle protocol, preserving revision attribution and
+optimistic concurrency. `BackupService` owns actor and retry semantics while
+`BackupManager` remains limited to creating, verifying, retaining, and restoring
+backup artifacts. The FTS5 adapter stays derived and rebuildable; canonical
+document hydration and sorting do not move into the index.
 
 ## Rendering and link safety
 
@@ -131,7 +150,8 @@ Automated backend coverage includes:
 - Historical actor and revision-summary search, snippets, filters, sorting, and
   explicit index rebuild, including a constant database-connection count for
   actor filtering.
-- Every reconciliation decision, including hash-bound ignore behavior.
+- Every reconciliation decision, including hash-bound ignore behavior and safe
+  retries after a document mutation succeeds but conflict resolution is interrupted.
 - Online backup creation, checksums, SQLite integrity, safe extraction, restore
   into empty targets, successful service boot from the restored set, and
   idempotent manual-backup retries.

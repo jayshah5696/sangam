@@ -6,6 +6,7 @@ import pytest
 from conftest import headers
 from fastapi.testclient import TestClient
 
+from sangam.application import build_application_services
 from sangam.config import Settings
 from sangam.service import DocumentService
 
@@ -126,7 +127,7 @@ def test_actor_filter_uses_a_constant_number_of_database_connections(
 ) -> None:
     create_document(client, title="First", path="first.md", key="first-actor-filter")
     create_document(client, title="Second", path="second.md", key="second-actor-filter")
-    service: DocumentService = client.app.state.service
+    service: DocumentService = client.app.state.services.documents
     original_connect = service.database.connect
     connection_count = 0
 
@@ -208,38 +209,38 @@ def test_backup_set_is_verified_and_restores_a_bootable_workspace(
     assert verification.json()["database_integrity"] == "ok"
     assert verification.json()["valid"] is True
 
-    service: DocumentService = client.app.state.service
+    backups = client.app.state.services.backups
     restored_database = tmp_path / "restored" / "database.sqlite3"
     restored_workspace = tmp_path / "restored-workspace"
-    service.backups.restore_to(
+    backups.manager.restore_to(
         manifest["backup_id"],
         database_path=restored_database,
         workspace_root=restored_workspace,
     )
-    restored_service = DocumentService(
+    restored_service = build_application_services(
         Settings(
             database_path=restored_database,
             workspace_root=restored_workspace,
             backup_root=tmp_path / "restored-backups",
             backups_enabled=False,
         )
-    )
+    ).documents
     restored = restored_service.get_document(created["document_id"])
     assert restored.content == created["content"]
     assert (restored_workspace / "recovery" / "kept.md").read_text() == created["content"]
 
-    service.backups.retention_count = 2
-    service.backups.create()
-    service.backups.create()
-    assert len(service.backups.list()) == 2
-    assert service.backups.create_if_due() is None
+    backups.manager.retention_count = 2
+    backups.manager.create()
+    backups.manager.create()
+    assert len(backups.list()) == 2
+    assert backups.create_if_due() is None
 
 
 def test_backup_retry_recovers_an_incomplete_idempotency_reservation(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    service: DocumentService = client.app.state.service
-    original_create = service.backups.create
+    backups = client.app.state.services.backups
+    original_create = backups.manager.create
     attempts = 0
 
     def fail_once(*, backup_id: str | None = None):
@@ -249,7 +250,7 @@ def test_backup_retry_recovers_an_incomplete_idempotency_reservation(
             raise RuntimeError("simulated interruption before backup creation")
         return original_create(backup_id=backup_id)
 
-    monkeypatch.setattr(service.backups, "create", fail_once)
+    monkeypatch.setattr(backups.manager, "create", fail_once)
     retry_headers = headers("interrupted-backup")
     with pytest.raises(RuntimeError, match="simulated interruption"):
         client.post("/api/v1/backups", headers=retry_headers)
