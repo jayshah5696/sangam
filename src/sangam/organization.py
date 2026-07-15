@@ -169,6 +169,12 @@ class WorkspaceOrganizationService:
                 folder_id = duplicate.resource_id
             else:
                 valid_tag_ids = self.validate_tag_ids(connection, tag_ids)
+                target_existed = (
+                    connection.execute(
+                        "SELECT 1 FROM folders WHERE path = ?", (normalized_path,)
+                    ).fetchone()
+                    is not None
+                )
                 self.ensure_folder_path_hierarchy(connection, normalized_path)
                 row = connection.execute(
                     "SELECT * FROM folders WHERE path = ?", (normalized_path,)
@@ -176,14 +182,25 @@ class WorkspaceOrganizationService:
                 if row is None:
                     raise RuntimeError("Folder hierarchy creation did not return its target")
                 folder_id = row["folder_id"]
-                self._write_folder_metadata(
-                    connection,
-                    row=row,
-                    category=normalized_category,
-                    tag_ids=valid_tag_ids,
-                    actor_id=actor_id,
-                    operation="create_or_organize",
+                current_tag_rows = connection.execute(
+                    "SELECT tag_id FROM folder_tags WHERE folder_id = ? ORDER BY tag_id",
+                    (folder_id,),
+                ).fetchall()
+                current_tag_ids = [tag_row["tag_id"] for tag_row in current_tag_rows]
+                metadata_unchanged = (
+                    target_existed
+                    and row["category"] == normalized_category
+                    and set(current_tag_ids) == set(valid_tag_ids)
                 )
+                if not metadata_unchanged:
+                    self._write_folder_metadata(
+                        connection,
+                        row=row,
+                        category=normalized_category,
+                        tag_ids=valid_tag_ids,
+                        actor_id=actor_id,
+                        operation="create_or_organize",
+                    )
                 self.idempotency.record_mutation(
                     connection,
                     actor_id=actor_id,
@@ -319,7 +336,7 @@ class WorkspaceOrganizationService:
     ) -> None:
         folder_id = row["folder_id"]
         current_tags = connection.execute(
-            "SELECT tag_id FROM folder_tags WHERE folder_id = ?", (folder_id,)
+            "SELECT tag_id FROM folder_tags WHERE folder_id = ? ORDER BY tag_id", (folder_id,)
         ).fetchall()
         before = {
             "path": row["path"],

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from conftest import headers
 from fastapi.testclient import TestClient
 
@@ -186,3 +188,83 @@ def test_tag_and_folder_mutation_retries_are_idempotent(client: TestClient) -> N
     )
     assert first_update.status_code == retried_update.status_code == 200
     assert retried_update.json() == first_update.json()
+
+
+def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
+    client: TestClient,
+) -> None:
+    first_tag = client.post(
+        "/api/v1/tags",
+        json={"name": "First", "color": "#327a62"},
+        headers=headers("audit-first-tag"),
+    ).json()
+    second_tag = client.post(
+        "/api/v1/tags",
+        json={"name": "Second", "color": "#b94b3d"},
+        headers=headers("audit-second-tag"),
+    ).json()
+
+    created = client.post(
+        "/api/v1/folders",
+        json={
+            "path": "projects",
+            "category": "One",
+            "tag_ids": [first_tag["tag_id"]],
+        },
+        headers=headers("audit-create-folder"),
+    ).json()
+    organized = client.post(
+        "/api/v1/folders",
+        json={
+            "path": "projects",
+            "category": "Two",
+            "tag_ids": [second_tag["tag_id"]],
+        },
+        headers=headers("audit-organize-folder"),
+    ).json()
+
+    assert organized["folder_id"] == created["folder_id"]
+    assert organized["metadata_version"] == created["metadata_version"] + 1
+
+    database = client.app.state.services.documents.database
+    with database.connection() as connection:
+        events = connection.execute(
+            """
+            SELECT before_json, after_json
+            FROM metadata_events
+            WHERE entity_type = 'folder' AND entity_id = ?
+            """,
+            (created["folder_id"],),
+        ).fetchall()
+    events_by_version = {
+        json.loads(event["after_json"])["metadata_version"]: event for event in events
+    }
+    second_event = events_by_version[organized["metadata_version"]]
+    assert json.loads(second_event["before_json"]) == {
+        "path": "projects",
+        "category": "One",
+        "tag_ids": [first_tag["tag_id"]],
+        "metadata_version": created["metadata_version"],
+    }
+
+    retried = client.post(
+        "/api/v1/folders",
+        json={
+            "path": "projects",
+            "category": "Two",
+            "tag_ids": [second_tag["tag_id"], second_tag["tag_id"]],
+        },
+        headers=headers("audit-exact-folder-retry"),
+    ).json()
+    assert retried == organized
+
+    with database.connection() as connection:
+        event_count = connection.execute(
+            """
+            SELECT count(*)
+            FROM metadata_events
+            WHERE entity_type = 'folder' AND entity_id = ?
+            """,
+            (created["folder_id"],),
+        ).fetchone()[0]
+    assert event_count == 2
