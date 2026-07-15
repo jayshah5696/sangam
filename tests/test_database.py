@@ -18,7 +18,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         versions = connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-    assert [row["version"] for row in versions] == ["001", "002", "003"]
+    assert [row["version"] for row in versions] == ["001", "002", "003", "004"]
 
 
 def test_failing_migration_rolls_back_the_whole_file(

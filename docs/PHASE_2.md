@@ -36,9 +36,14 @@ flowchart LR
     Routes --> API["Versioned HTTP API"]
     CLI["CLI"] --> API
     API --> Service["DocumentService"]
-    Service --> Revisions["SQLite identity and revisions"]
+    Service --> Organization["WorkspaceOrganizationService"]
+    Service --> Idempotency["IdempotencyStore"]
+    Service --> Revisions["SQLite canonical state"]
+    Organization --> Revisions
+    Idempotency --> Revisions
     Service --> Search["Rebuildable FTS5 index"]
     Service --> Files["Atomic workspace projection"]
+    Organization --> Files
     Service --> Reconcile["Conservative reconciliation"]
     Service --> Backup["Verified backup sets"]
     Routes --> Preview["Markdown + DOMPurify + Mermaid"]
@@ -48,7 +53,9 @@ flowchart LR
 This preserves the vision's load-bearing boundary: browser routes are clients,
 not alternate writers. The FTS index is derived and rebuildable. Workspace files
 remain durable projections. Backup artifacts never replace revision history, and
-revision history never replaces backups.
+revision history never replaces backups. Folder and tag transactions live behind
+`WorkspaceOrganizationService`; actor-scoped retry keys are coordinated by
+`IdempotencyStore` across document and workspace-resource mutations.
 
 ## Rendering and link safety
 
@@ -80,12 +87,13 @@ disabled by default. See the [DOMPurify project documentation][dompurify] and
 
 ## Search design
 
-The Phase 2 migration rebuilds the FTS5 table with title, path, content, tags,
+The Phase 2 migrations rebuild the FTS5 table with title, path, content, tags,
 category, revision actors, and revision summaries. Search uses prefix terms,
-`bm25()` ordering, and `snippet()` markers. Results remain ordinary `Document`
-responses with an optional snippet, so existing API clients retain the document
-shape. The index is synchronized after accepted mutations and can be rebuilt
-explicitly with `POST /api/v1/search/reindex`.
+`bm25()` ordering, and `snippet()` markers. Actor filtering resolves all matching
+document IDs through one indexed query rather than per-result lookups. Results
+remain ordinary `Document` responses with an optional snippet, so existing API
+clients retain the document shape. The index is synchronized after accepted
+mutations and can be rebuilt explicitly with `POST /api/v1/search/reindex`.
 
 The ranking and snippet behavior is based on the official [SQLite FTS5
 documentation][sqlite-fts5].
@@ -107,6 +115,10 @@ is supported by Python's documented guarantee that `Connection.backup()` works
 while the database is being accessed; see the [Python `sqlite3` backup
 reference][python-sqlite-backup].
 
+Manual backup creation, tag creation, and folder mutations require idempotency
+keys. A retry returns the reserved resource instead of duplicating backup sets or
+metadata events; reusing a key for different input returns `409`.
+
 Restore is deliberately offline and operational rather than an in-app mutation.
 See [Phase 2 operations](./operations/PHASE_2_OPERATIONS.md) for the verified
 stop, stage, restore, and boot procedure.
@@ -117,10 +129,13 @@ Automated backend coverage includes:
 
 - Duplicate, rename/update, diff, recoverable delete, and undelete behavior.
 - Historical actor and revision-summary search, snippets, filters, sorting, and
-  explicit index rebuild.
+  explicit index rebuild, including a constant database-connection count for
+  actor filtering.
 - Every reconciliation decision, including hash-bound ignore behavior.
 - Online backup creation, checksums, SQLite integrity, safe extraction, restore
-  into empty targets, and successful service boot from the restored set.
+  into empty targets, successful service boot from the restored set, and
+  idempotent manual-backup retries.
+- Idempotent tag and folder creation and folder-metadata retries.
 - All Phase 1 lifecycle, concurrency, idempotency, path, recovery, and
   reconciliation cases.
 

@@ -144,8 +144,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def create_tag(
         body: CreateTag,
         actor_id: str = Header(default="human:jay", alias="X-Actor"),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
     ) -> Tag:
-        return service.create_tag(name=body.name, color=body.color, actor_id=actor_id)
+        return service.create_tag(
+            name=body.name,
+            color=body.color,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
 
     @app.get("/api/v1/folders", response_model=list[Folder])
     def list_folders() -> list[Folder]:
@@ -155,12 +161,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def create_folder(
         body: CreateFolder,
         actor_id: str = Header(default="human:jay", alias="X-Actor"),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
     ) -> Folder:
         return service.create_folder(
             path=body.path,
             category=body.category,
             tag_ids=body.tag_ids,
             actor_id=actor_id,
+            idempotency_key=idempotency_key,
         )
 
     @app.patch("/api/v1/folders/{folder_id}", response_model=Folder)
@@ -168,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         folder_id: str,
         body: UpdateFolderMetadata,
         actor_id: str = Header(default="human:jay", alias="X-Actor"),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
     ) -> Folder:
         return service.update_folder_metadata(
             folder_id=folder_id,
@@ -175,6 +184,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             category=body.category,
             tag_ids=body.tag_ids,
             actor_id=actor_id,
+            idempotency_key=idempotency_key,
         )
 
     @app.post("/api/v1/documents", response_model=Document, status_code=201)
@@ -356,8 +366,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return service.list_backups()
 
     @app.post("/api/v1/backups", response_model=BackupSet, status_code=201)
-    def create_backup() -> BackupSet:
-        return service.create_backup()
+    def create_backup(
+        actor_id: str = Header(default="human:jay", alias="X-Actor"),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+    ) -> BackupSet:
+        return service.create_backup(actor_id=actor_id, idempotency_key=idempotency_key)
 
     @app.post("/api/v1/backups/{backup_id}/verify", response_model=BackupVerification)
     def verify_backup(backup_id: str) -> BackupVerification:

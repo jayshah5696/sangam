@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from conftest import headers
 from fastapi.testclient import TestClient
 
@@ -120,6 +121,27 @@ def test_search_includes_history_actor_summary_snippets_filters_and_rebuild(
     )
 
 
+def test_actor_filter_uses_a_constant_number_of_database_connections(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_document(client, title="First", path="first.md", key="first-actor-filter")
+    create_document(client, title="Second", path="second.md", key="second-actor-filter")
+    service: DocumentService = client.app.state.service
+    original_connect = service.database.connect
+    connection_count = 0
+
+    def counted_connect():
+        nonlocal connection_count
+        connection_count += 1
+        return original_connect()
+
+    monkeypatch.setattr(service.database, "connect", counted_connect)
+    response = client.get("/api/v1/search", params={"actor_id": "human:jay"})
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    assert connection_count == 2
+
+
 def test_every_reconciliation_choice_is_explicit_and_repeatable(
     client: TestClient, settings: Settings
 ) -> None:
@@ -165,7 +187,8 @@ def test_backup_set_is_verified_and_restores_a_bootable_workspace(
     client: TestClient, settings: Settings, tmp_path: Path
 ) -> None:
     created = create_document(client, path="recovery/kept.md", key="backup-document")
-    backup = client.post("/api/v1/backups")
+    backup_headers = headers("phase-two-backup")
+    backup = client.post("/api/v1/backups", headers=backup_headers)
     assert backup.status_code == 201
     manifest = backup.json()
     assert manifest["document_count"] == 1
@@ -175,6 +198,10 @@ def test_backup_set_is_verified_and_restores_a_bootable_workspace(
         "database.sqlite3",
         "workspace.tar.gz",
     }
+    retried = client.post("/api/v1/backups", headers=backup_headers)
+    assert retried.status_code == 201
+    assert retried.json()["backup_id"] == manifest["backup_id"]
+    assert len(client.get("/api/v1/backups").json()) == 1
 
     verification = client.post(f"/api/v1/backups/{manifest['backup_id']}/verify")
     assert verification.status_code == 200
@@ -206,3 +233,28 @@ def test_backup_set_is_verified_and_restores_a_bootable_workspace(
     service.backups.create()
     assert len(service.backups.list()) == 2
     assert service.backups.create_if_due() is None
+
+
+def test_backup_retry_recovers_an_incomplete_idempotency_reservation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service: DocumentService = client.app.state.service
+    original_create = service.backups.create
+    attempts = 0
+
+    def fail_once(*, backup_id: str | None = None):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("simulated interruption before backup creation")
+        return original_create(backup_id=backup_id)
+
+    monkeypatch.setattr(service.backups, "create", fail_once)
+    retry_headers = headers("interrupted-backup")
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        client.post("/api/v1/backups", headers=retry_headers)
+
+    recovered = client.post("/api/v1/backups", headers=retry_headers)
+    assert recovered.status_code == 201
+    assert recovered.json()["verified_at"] is not None
+    assert len(client.get("/api/v1/backups").json()) == 1

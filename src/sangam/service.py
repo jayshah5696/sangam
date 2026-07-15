@@ -5,8 +5,6 @@ import hashlib
 import json
 import sqlite3
 import uuid
-from pathlib import PurePosixPath
-from typing import Any
 
 from sangam.backup import BackupManager
 from sangam.config import Settings
@@ -18,6 +16,8 @@ from sangam.errors import (
     NotFoundError,
     ValidationError,
 )
+from sangam.idempotency import IdempotencyStore, request_hash
+from sangam.organization import WorkspaceOrganizationService
 from sangam.reconciliation import MaterializedDocumentSnapshot, ReconciliationPlanner
 from sangam.schemas import (
     BackupSet,
@@ -38,11 +38,6 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _request_hash(payload: dict[str, Any]) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 class DocumentService:
     def __init__(
         self,
@@ -58,6 +53,12 @@ class DocumentService:
         self.database = Database(settings.database_path)
         self.database.initialize()
         self._bootstrap_actors()
+        self.idempotency = IdempotencyStore(self.database)
+        self.organization = WorkspaceOrganizationService(
+            database=self.database,
+            workspace=self.workspace,
+            idempotency=self.idempotency,
+        )
         self.search_index = SearchIndex(self.database)
         self.search_index.rebuild(self.list_documents(include_deleted=True))
         self.backups = BackupManager(
@@ -94,7 +95,7 @@ class DocumentService:
         return self.workspace.normalize_document_path(raw_path)
 
     def _normalize_folder_path(self, raw_path: str) -> str:
-        return self.workspace.normalize_folder_path(raw_path)
+        return self.organization.normalize_folder_path(raw_path)
 
     def _document_query(self) -> str:
         return """
@@ -144,22 +145,7 @@ class DocumentService:
         )
 
     def _ensure_folder_hierarchy(self, connection: sqlite3.Connection, document_path: str) -> None:
-        parent = PurePosixPath(document_path).parent
-        if parent == PurePosixPath("."):
-            return
-        now = utc_now()
-        parts: list[str] = []
-        for part in parent.parts:
-            parts.append(part)
-            folder_path = "/".join(parts)
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO folders(
-                    folder_id, path, name, category, metadata_version, created_at, updated_at
-                ) VALUES (?, ?, ?, NULL, 0, ?, ?)
-                """,
-                (str(uuid.uuid4()), folder_path, part, now, now),
-            )
+        self.organization.ensure_document_folder_hierarchy(connection, document_path)
 
     def _get_document_in_connection(
         self, connection: sqlite3.Connection, document_id: str, *, include_deleted: bool = True
@@ -211,6 +197,7 @@ class DocumentService:
         operation: str,
         request_hash: str,
     ) -> tuple[str, str] | None:
+        self.idempotency.ensure_document_key_available(connection, actor_id=actor_id, key=key)
         row = connection.execute(
             """
             SELECT operation, request_hash, document_id, revision_id
@@ -269,7 +256,7 @@ class DocumentService:
     ) -> Document:
         normalized_path = self._normalize_path(path) if path is not None else None
         payload = {"title": title, "content": content, "path": normalized_path}
-        fingerprint = _request_hash(payload)
+        fingerprint = request_hash(payload)
         duplicate: tuple[str, str] | None = None
         try:
             with self.database.transaction() as connection:
@@ -373,7 +360,7 @@ class DocumentService:
             "summary": summary,
             "deleted": deleted,
         }
-        fingerprint = _request_hash(payload)
+        fingerprint = request_hash(payload)
         old_path: str | None = None
         result: tuple[str, str] | None = None
         try:
@@ -950,57 +937,18 @@ class DocumentService:
             )
 
     def _validate_tag_ids(self, connection: sqlite3.Connection, tag_ids: list[str]) -> list[str]:
-        unique_ids = list(dict.fromkeys(tag_ids))
-        if not unique_ids:
-            return []
-        placeholders = ",".join("?" for _ in unique_ids)
-        rows = connection.execute(
-            f"SELECT tag_id FROM tags WHERE tag_id IN ({placeholders})", unique_ids
-        ).fetchall()
-        found = {row["tag_id"] for row in rows}
-        missing = [tag_id for tag_id in unique_ids if tag_id not in found]
-        if missing:
-            raise ValidationError("One or more tags do not exist", details={"tag_ids": missing})
-        return unique_ids
+        return self.organization.validate_tag_ids(connection, tag_ids)
 
     def list_tags(self) -> list[Tag]:
-        with self.database.connection() as connection:
-            rows = connection.execute("SELECT * FROM tags ORDER BY name COLLATE NOCASE").fetchall()
-        return [Tag.model_validate(dict(row)) for row in rows]
+        return self.organization.list_tags()
 
-    def create_tag(self, *, name: str, color: str, actor_id: str) -> Tag:
-        normalized_name = " ".join(name.strip().split())
-        if not normalized_name:
-            raise ValidationError("Tag name cannot be blank")
-        with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
-            existing = connection.execute(
-                "SELECT * FROM tags WHERE name = ? COLLATE NOCASE", (normalized_name,)
-            ).fetchone()
-            if existing:
-                return Tag.model_validate(dict(existing))
-            now = utc_now()
-            tag_id = str(uuid.uuid4())
-            connection.execute(
-                "INSERT INTO tags(tag_id, name, color, created_at) VALUES (?, ?, ?, ?)",
-                (tag_id, normalized_name, color.lower(), now),
-            )
-            after = {
-                "tag_id": tag_id,
-                "name": normalized_name,
-                "color": color.lower(),
-                "created_at": now,
-            }
-            connection.execute(
-                """
-                INSERT INTO metadata_events(
-                    event_id, entity_type, entity_id, actor_id,
-                    operation, before_json, after_json, created_at
-                ) VALUES (?, 'tag', ?, ?, 'create', NULL, ?, ?)
-                """,
-                (str(uuid.uuid4()), tag_id, actor_id, json.dumps(after), now),
-            )
-        return Tag.model_validate(after)
+    def create_tag(self, *, name: str, color: str, actor_id: str, idempotency_key: str) -> Tag:
+        return self.organization.create_tag(
+            name=name,
+            color=color,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
 
     def update_document_metadata(
         self,
@@ -1019,7 +967,7 @@ class DocumentService:
             "category": normalized_category,
             "tag_ids": sorted(set(tag_ids)),
         }
-        fingerprint = _request_hash(payload)
+        fingerprint = request_hash(payload)
         with self.database.transaction() as connection:
             self._ensure_actor(connection, actor_id)
             duplicate = self._idempotent_result(
@@ -1117,6 +1065,7 @@ class DocumentService:
             {} if matches is None else {match.document_id: match.snippet for match in matches}
         )
         normalized_category = category.casefold() if category else None
+        actor_document_ids = self._document_ids_for_actor(actor_id) if actor_id else None
         filtered = [
             document
             for document in documents
@@ -1125,7 +1074,7 @@ class DocumentService:
                 not normalized_category
                 or (document.category or "").casefold() == normalized_category
             )
-            and (not actor_id or self._document_has_actor(document.document_id, actor_id))
+            and (actor_document_ids is None or document.document_id in actor_document_ids)
         ]
         if sort == "title":
             filtered.sort(key=lambda item: (item.title.casefold(), item.document_id))
@@ -1140,14 +1089,12 @@ class DocumentService:
             for document in filtered
         ]
 
-    def _document_has_actor(self, document_id: str, actor_id: str) -> bool:
+    def _document_ids_for_actor(self, actor_id: str) -> set[str]:
         with self.database.connection() as connection:
-            return bool(
-                connection.execute(
-                    "SELECT 1 FROM revisions WHERE document_id = ? AND actor_id = ? LIMIT 1",
-                    (document_id, actor_id),
-                ).fetchone()
-            )
+            rows = connection.execute(
+                "SELECT DISTINCT document_id FROM revisions WHERE actor_id = ?", (actor_id,)
+            ).fetchall()
+        return {row["document_id"] for row in rows}
 
     def rebuild_search_index(self) -> int:
         documents = self.list_documents(include_deleted=True)
@@ -1157,47 +1104,53 @@ class DocumentService:
     def list_backups(self) -> list[BackupSet]:
         return self.backups.list()
 
-    def create_backup(self) -> BackupSet:
-        return self.backups.create()
+    def create_backup(self, *, actor_id: str, idempotency_key: str) -> BackupSet:
+        fingerprint = request_hash({"operation": "create_backup"})
+        with self.database.transaction() as connection:
+            self._ensure_actor(connection, actor_id)
+            duplicate = self.idempotency.mutation_record(
+                connection,
+                actor_id=actor_id,
+                key=idempotency_key,
+                operation="create_backup",
+                request_hash=fingerprint,
+            )
+            if duplicate:
+                backup_id = duplicate.resource_id
+                completed = duplicate.completed_at is not None
+            else:
+                backup_id = self.backups.new_backup_id()
+                completed = False
+                self.idempotency.record_mutation(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation="create_backup",
+                    request_hash=fingerprint,
+                    resource_type="backup",
+                    resource_id=backup_id,
+                    completed=False,
+                )
+        try:
+            backup = self.backups.get(backup_id)
+        except NotFoundError:
+            if completed:
+                raise NotFoundError("Idempotent backup result is no longer retained") from None
+            backup = self.backups.create(backup_id=backup_id)
+        if backup.verified_at is None:
+            self.backups.verify(backup_id)
+            backup = self.backups.get(backup_id)
+        if not completed:
+            self.idempotency.complete_mutation(
+                actor_id=actor_id, key=idempotency_key, resource_id=backup_id
+            )
+        return backup
 
     def verify_backup(self, backup_id: str) -> BackupVerification:
         return self.backups.verify(backup_id)
 
-    def _folder_from_row(self, connection: sqlite3.Connection, row: sqlite3.Row) -> Folder:
-        tag_rows = connection.execute(
-            """
-            SELECT t.* FROM tags t
-            JOIN folder_tags ft ON ft.tag_id = t.tag_id
-            WHERE ft.folder_id = ?
-            ORDER BY t.name COLLATE NOCASE
-            """,
-            (row["folder_id"],),
-        ).fetchall()
-        count = connection.execute(
-            """
-            SELECT count(*) FROM documents
-            WHERE deleted = 0 AND path LIKE ?
-            """,
-            (f"{row['path']}/%",),
-        ).fetchone()[0]
-        return Folder(
-            folder_id=row["folder_id"],
-            path=row["path"],
-            name=row["name"],
-            category=row["category"],
-            metadata_version=row["metadata_version"],
-            tags=[Tag.model_validate(dict(tag_row)) for tag_row in tag_rows],
-            document_count=count,
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
-
     def list_folders(self) -> list[Folder]:
-        with self.database.connection() as connection:
-            rows = connection.execute(
-                "SELECT * FROM folders ORDER BY path COLLATE NOCASE"
-            ).fetchall()
-            return [self._folder_from_row(connection, row) for row in rows]
+        return self.organization.list_folders()
 
     def create_folder(
         self,
@@ -1206,69 +1159,15 @@ class DocumentService:
         category: str | None,
         tag_ids: list[str],
         actor_id: str,
+        idempotency_key: str,
     ) -> Folder:
-        normalized_path = self._normalize_folder_path(path)
-        normalized_category = category.strip() if category and category.strip() else None
-        target_id: str
-        with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
-            valid_tag_ids = self._validate_tag_ids(connection, tag_ids)
-            self._ensure_folder_hierarchy(connection, f"{normalized_path}/.placeholder.md")
-            row = connection.execute(
-                "SELECT * FROM folders WHERE path = ?", (normalized_path,)
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("Folder hierarchy creation did not return its target")
-            target_id = row["folder_id"]
-            before = {
-                "category": row["category"],
-                "tag_ids": [],
-                "metadata_version": row["metadata_version"],
-            }
-            now = utc_now()
-            connection.execute(
-                """
-                UPDATE folders
-                SET category = ?, metadata_version = metadata_version + 1, updated_at = ?
-                WHERE folder_id = ?
-                """,
-                (normalized_category, now, target_id),
-            )
-            connection.execute("DELETE FROM folder_tags WHERE folder_id = ?", (target_id,))
-            connection.executemany(
-                "INSERT INTO folder_tags(folder_id, tag_id) VALUES (?, ?)",
-                [(target_id, tag_id) for tag_id in valid_tag_ids],
-            )
-            after = {
-                "path": normalized_path,
-                "category": normalized_category,
-                "tag_ids": valid_tag_ids,
-                "metadata_version": row["metadata_version"] + 1,
-            }
-            connection.execute(
-                """
-                INSERT INTO metadata_events(
-                    event_id, entity_type, entity_id, actor_id,
-                    operation, before_json, after_json, created_at
-                ) VALUES (?, 'folder', ?, ?, 'create_or_organize', ?, ?, ?)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    target_id,
-                    actor_id,
-                    json.dumps(before),
-                    json.dumps(after),
-                    now,
-                ),
-            )
-        self.workspace.create_folder(normalized_path)
-        with self.database.connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM folders WHERE folder_id = ?", (target_id,)
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("Created folder could not be reloaded")
-            return self._folder_from_row(connection, row)
+        return self.organization.create_folder(
+            path=path,
+            category=category,
+            tag_ids=tag_ids,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
 
     def update_folder_metadata(
         self,
@@ -1278,72 +1177,13 @@ class DocumentService:
         category: str | None,
         tag_ids: list[str],
         actor_id: str,
+        idempotency_key: str,
     ) -> Folder:
-        normalized_category = category.strip() if category and category.strip() else None
-        with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
-            row = connection.execute(
-                "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
-            ).fetchone()
-            if not row:
-                raise NotFoundError(f"Folder not found: {folder_id}")
-            if row["metadata_version"] != expected_metadata_version:
-                raise ConflictError(
-                    "Folder metadata changed since it was read",
-                    details={
-                        "folder_id": folder_id,
-                        "expected_metadata_version": expected_metadata_version,
-                        "current_metadata_version": row["metadata_version"],
-                    },
-                )
-            valid_tag_ids = self._validate_tag_ids(connection, tag_ids)
-            current_tags = connection.execute(
-                "SELECT tag_id FROM folder_tags WHERE folder_id = ?", (folder_id,)
-            ).fetchall()
-            before = {
-                "category": row["category"],
-                "tag_ids": [tag["tag_id"] for tag in current_tags],
-                "metadata_version": row["metadata_version"],
-            }
-            now = utc_now()
-            connection.execute(
-                """
-                UPDATE folders
-                SET category = ?, metadata_version = metadata_version + 1, updated_at = ?
-                WHERE folder_id = ?
-                """,
-                (normalized_category, now, folder_id),
-            )
-            connection.execute("DELETE FROM folder_tags WHERE folder_id = ?", (folder_id,))
-            connection.executemany(
-                "INSERT INTO folder_tags(folder_id, tag_id) VALUES (?, ?)",
-                [(folder_id, tag_id) for tag_id in valid_tag_ids],
-            )
-            after = {
-                "category": normalized_category,
-                "tag_ids": valid_tag_ids,
-                "metadata_version": row["metadata_version"] + 1,
-            }
-            connection.execute(
-                """
-                INSERT INTO metadata_events(
-                    event_id, entity_type, entity_id, actor_id,
-                    operation, before_json, after_json, created_at
-                ) VALUES (?, 'folder', ?, ?, 'organize', ?, ?, ?)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    folder_id,
-                    actor_id,
-                    json.dumps(before),
-                    json.dumps(after),
-                    now,
-                ),
-            )
-        with self.database.connection() as connection:
-            updated = connection.execute(
-                "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
-            ).fetchone()
-            if updated is None:
-                raise RuntimeError("Updated folder could not be reloaded")
-            return self._folder_from_row(connection, updated)
+        return self.organization.update_folder_metadata(
+            folder_id=folder_id,
+            expected_metadata_version=expected_metadata_version,
+            category=category,
+            tag_ids=tag_ids,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )

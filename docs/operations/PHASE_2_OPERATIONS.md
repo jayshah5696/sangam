@@ -22,7 +22,8 @@ operations are available over the API:
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/backups
-curl -X POST http://127.0.0.1:8000/api/v1/backups
+curl -X POST -H 'Idempotency-Key: manual-backup-2026-07-14' \
+  http://127.0.0.1:8000/api/v1/backups
 curl -X POST http://127.0.0.1:8000/api/v1/backups/BACKUP_ID/verify
 ```
 

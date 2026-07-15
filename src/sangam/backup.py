@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import tarfile
 import tempfile
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -61,6 +62,12 @@ class BackupManager:
         self.backup_root = backup_root
         self.retention_count = retention_count
         self.backup_root.mkdir(parents=True, exist_ok=True)
+        self._create_lock = threading.Lock()
+
+    @staticmethod
+    def new_backup_id() -> str:
+        now = datetime.now(UTC)
+        return f"{now:%Y%m%dT%H%M%S%fZ}-{uuid.uuid4().hex[:8]}"
 
     def list(self) -> list[BackupSet]:
         backups: list[BackupSet] = []
@@ -82,11 +89,20 @@ class BackupManager:
             return None
         return self.create()
 
-    def create(self) -> BackupSet:
+    def create(self, *, backup_id: str | None = None) -> BackupSet:
+        with self._create_lock:
+            return self._create(backup_id=backup_id)
+
+    def _create(self, *, backup_id: str | None) -> BackupSet:
         now = datetime.now(UTC)
-        backup_id = f"{now:%Y%m%dT%H%M%S%fZ}-{uuid.uuid4().hex[:8]}"
-        staging = Path(tempfile.mkdtemp(prefix=".sangam-backup-", dir=self.backup_root))
+        backup_id = backup_id or self.new_backup_id()
+        if not _BACKUP_ID.fullmatch(backup_id):
+            raise ValidationError("Backup ID is invalid")
         destination = self.backup_root / backup_id
+        if destination.exists():
+            self.verify(backup_id)
+            return self.get(backup_id)
+        staging = Path(tempfile.mkdtemp(prefix=".sangam-backup-", dir=self.backup_root))
         try:
             database_path = staging / "database.sqlite3"
             source = self.database.connect()

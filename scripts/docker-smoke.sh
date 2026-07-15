@@ -52,6 +52,7 @@ SEARCHED_ID=$(curl --fail --silent \
 test "$SEARCHED_ID" = "$DOCUMENT_ID"
 
 BACKUP_ID=$(curl --fail --silent -X POST \
+  -H 'Idempotency-Key: docker-smoke-backup' \
   "http://127.0.0.1:$PORT/api/v1/backups" \
   | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["verified_at"]; print(data["backup_id"])')
 curl --fail --silent -X POST \
