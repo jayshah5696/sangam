@@ -1,4 +1,8 @@
-# Sangam
+<p align="center">
+  <img src="./frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
+</p>
+
+<h1 align="center">Sangam</h1>
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
@@ -39,6 +43,7 @@ four selectable themes.
 ## Project documents
 
 - [Product vision and technical decisions](./docs/VISION.md)
+- [Brand identity and logo usage](./docs/BRAND.md)
 - [Seven-phase vertical implementation](./docs/IMPLEMENTATION_PHASES.md)
 - [Phase 1 implementation and verification](./docs/PHASE_1.md)
 - [Phase 2 implementation and verification](./docs/PHASE_2.md)

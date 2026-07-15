@@ -65,6 +65,9 @@ function RootLayout() {
     return (
       <div className="app-shell sidebar-collapsed">
         <aside className="sidebar-rail">
+          <Link to="/" className="rail-brand" aria-label="Sangam home">
+            <img src="/sangam-mark.svg" alt="" />
+          </Link>
           <button
             className="icon-button"
             aria-label="Open file sidebar"
@@ -86,9 +89,14 @@ function RootLayout() {
     <div className="app-shell">
       <aside className="sidebar" style={{ width: preferences.leftWidth }}>
         <div className="brand-row">
-          <div className="brand">
-            <Link to="/" className="brand-link">Sangam</Link>
-            <span>Documents, plainly.</span>
+          <div className="brand-lockup">
+            <Link to="/" className="brand-mark-link" aria-label="Sangam home">
+              <img src="/sangam-mark.svg" alt="" />
+            </Link>
+            <div className="brand">
+              <Link to="/" className="brand-link">Sangam</Link>
+              <span>Documents, plainly.</span>
+            </div>
           </div>
           <button
             className="icon-button sidebar-icon"
