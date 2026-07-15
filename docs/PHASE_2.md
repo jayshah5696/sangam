@@ -17,7 +17,8 @@ A human can now:
 - Insert links whose labels use familiar paths while their targets use stable
   document IDs.
 - Edit with syntax highlighting, selection position, search and replace,
-  debounced autosave, conflict retention, and explicit offline/error states.
+  serialized per-document autosave, conflict retention, explicit offline/error
+  states, and reload recovery from browser-local draft storage.
 - Switch between editor, split, and preview modes.
 - Render CommonMark-style Markdown, tables, external links, internal document
   links, and Mermaid diagrams through a sanitized preview.

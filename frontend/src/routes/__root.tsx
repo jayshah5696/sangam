@@ -21,8 +21,9 @@ import {
 } from 'lucide-react'
 import { api, type Document } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
-import { CommandPalette, StatusBar } from '../components/WorkbenchChrome'
+import { CommandPalette } from '../components/CommandPalette'
 import { ResizeHandle } from '../components/ResizeHandle'
+import { StatusBar } from '../components/StatusBar'
 import { useTheme } from '../theme'
 
 type RouterContext = { queryClient: QueryClient }

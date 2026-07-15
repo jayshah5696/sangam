@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
   ArchiveRestore,
@@ -16,7 +16,14 @@ import {
 import { api } from '../api'
 import { findGroup, useWorkbench } from '../workbench'
 
-type Command = { id: string; label: string; detail: string; icon: typeof Files; run: () => void; enabled?: boolean }
+type Command = {
+  id: string
+  label: string
+  detail: string
+  icon: typeof Files
+  run: () => void
+  enabled?: boolean
+}
 
 export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onSearch: () => void }) {
   const navigate = useNavigate()
@@ -47,13 +54,22 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
     { id: 'view.trash', label: 'Open trash', detail: 'Restore deleted documents', icon: Trash2, run: () => void navigate({ to: '/trash' }) },
     { id: 'view.settings', label: 'Open settings', detail: 'Configure Sangam', icon: Settings, run: () => void navigate({ to: '/settings/appearance' }) },
   ], [activeDocumentId, createDocument, navigate, onFiles, onSearch, workbench])
-  const results = commands.filter((command) => command.enabled !== false && `${command.label} ${command.detail} ${command.id}`.toLowerCase().includes(query.toLowerCase()))
+  const results = commands.filter((command) => command.enabled !== false
+    && `${command.label} ${command.detail} ${command.id}`.toLowerCase().includes(query.toLowerCase()))
 
   useEffect(() => {
     const keyboard = (event: globalThis.KeyboardEvent) => {
-      const editable = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setOpen(true) }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n' && !editable) { event.preventDefault(); createDocument.mutate() }
+      const editable = event.target instanceof HTMLInputElement
+        || event.target instanceof HTMLTextAreaElement
+        || (event.target instanceof HTMLElement && event.target.isContentEditable)
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setOpen(true)
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n' && !editable) {
+        event.preventDefault()
+        createDocument.mutate()
+      }
       if (event.key === 'Escape') setOpen(false)
     }
     window.addEventListener('keydown', keyboard)
@@ -63,7 +79,11 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
   useEffect(() => { if (open) requestAnimationFrame(() => inputRef.current?.focus()) }, [open])
 
   if (!open) return null
-  const run = (command: Command) => { setOpen(false); setQuery(''); command.run() }
+  const run = (command: Command) => {
+    setOpen(false)
+    setQuery('')
+    command.run()
+  }
   return (
     <div className="command-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}>
       <section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
@@ -76,25 +96,4 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
       </section>
     </div>
   )
-}
-
-export function StatusBar() {
-  const workbench = useWorkbench()
-  const activeGroup = findGroup(workbench.root, workbench.activeGroupId)
-  const documentId = activeGroup?.activeTabId
-  const session = documentId ? workbench.sessions[documentId] : undefined
-  const documentQuery = useQuery({ queryKey: ['document', documentId], queryFn: () => api.getDocument(documentId!), enabled: Boolean(documentId) })
-  const reconciliation = useQuery({ queryKey: ['reconciliation', 'status'], queryFn: api.reconciliation, staleTime: 30_000 })
-  const state = session?.saveState ?? (documentId ? 'saved' : 'ready')
-  const selection = session?.selection
-  return (
-    <footer className={`workbench-status ${state}`} aria-label="Workspace status">
-      <div><span className="status-dot" /> <strong>{statusLabel(state)}</strong>{documentQuery.data && <span>{documentQuery.data.updated_by_name}</span>}</div>
-      <div>{(reconciliation.data?.conflicts.length ?? 0) > 0 && <span>{reconciliation.data!.conflicts.length} conflicts</span>}{selection && <span>Ln {selection.line}, Col {selection.column}{selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}</span>}<span>Markdown</span></div>
-    </footer>
-  )
-}
-
-function statusLabel(state: string) {
-  return { ready: 'Ready', saved: 'Saved', dirty: 'Unsaved', saving: 'Saving…', conflict: 'Conflict', failed: 'Save failed', offline: 'Offline' }[state] ?? state
 }

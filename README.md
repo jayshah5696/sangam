@@ -14,7 +14,10 @@ horizontal or vertical editor groups as needed. It also includes document tabs,
 a keyboard-accessible file explorer, rich FTS5 search, stable internal links,
 rendered Markdown and Mermaid preview, two-revision comparison, explicit
 reconciliation, trash/restore, verified nightly backups, a command palette,
-resizable panels, and four selectable themes.
+resizable panels, and four selectable themes. Editor groups and tabs persist as
+layout state, while unsaved document drafts use separate browser storage.
+Per-document saves are serialized so a slow response can never replace newer
+text in the editor.
 
 ## Screenshots
 

@@ -206,11 +206,11 @@ export const api = {
   async getDocument(documentId: string): Promise<Document> {
     return documentSchema.parse(await request(`/documents/${documentId}`))
   },
-  async createDocument(title: string): Promise<Document> {
+  async createDocument(title: string, path?: string): Promise<Document> {
     return documentSchema.parse(
       await request('/documents', {
         method: 'POST',
-        body: JSON.stringify({ title, content: `# ${title}\n\n` }),
+        body: JSON.stringify({ title, content: `# ${title}\n\n`, path }),
       }),
     )
   },
