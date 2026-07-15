@@ -1,6 +1,6 @@
 # Sangam: Vertical Implementation Phases
 
-> Status: Phase 1 implemented and verified; Phase 2 workspace base in progress; Phases 3–7 remain proposed
+> Status: Phases 1–2 implemented and verified; Phases 3–7 remain proposed
 >
 > Related: [Product vision and technical decisions](./VISION.md)
 
@@ -123,7 +123,9 @@ Workspace search, tags, polished diffs, agents, HTML rendering, publishing, PDFs
 
 ## Phase 2 — A useful Markdown workspace
 
-> Current base: [Workspace organization and theming enhancements](./WORKSPACE_BASE.md)
+> Implementation: [Phase 2 implementation and verification](./PHASE_2.md)
+>
+> Earlier base: [Workspace organization and theming enhancements](./WORKSPACE_BASE.md)
 
 ### Outcome
 
@@ -489,4 +491,4 @@ General-purpose agent orchestration, autonomous background agents, multi-agent w
 
 After Phase 7, Sangam satisfies the product capabilities in the vision: ordinary-file documents, stable identity, versioned human and agent collaboration, workspace search, safe and trusted rendering, PDF research, Karakeep import, publishing, and grounded chat through one document API.
 
-This document defines direction and phase boundaries. Before implementation begins, Phase 1 should be converted into concrete repository tasks and technical decisions only as far as needed to build and verify that first vertical slice. Later phases should remain directional until evidence from the running system makes their detailed planning timely.
+This document defines direction and phase boundaries. Phases 1 and 2 now have concrete implementation documents linked from their sections. Phases 3–7 remain directional until evidence from the running system makes their detailed planning timely.

@@ -10,12 +10,12 @@ def test_folders_tags_categories_and_fts_search(client: TestClient, settings) ->
     research = client.post(
         "/api/v1/tags",
         json={"name": "Research", "color": "#327a62"},
-        headers={"X-Actor": "human:jay"},
+        headers=headers("research-tag"),
     )
     urgent = client.post(
         "/api/v1/tags",
         json={"name": "Urgent", "color": "#b94b3d"},
-        headers={"X-Actor": "human:jay"},
+        headers=headers("urgent-tag"),
     )
     assert research.status_code == urgent.status_code == 201
     research_tag = research.json()
@@ -28,7 +28,7 @@ def test_folders_tags_categories_and_fts_search(client: TestClient, settings) ->
             "category": "Knowledge",
             "tag_ids": [research_tag["tag_id"]],
         },
-        headers={"X-Actor": "human:jay"},
+        headers=headers("research-folder"),
     )
     assert folder_response.status_code == 201
     folder = folder_response.json()
@@ -94,6 +94,7 @@ def test_folder_metadata_concurrency_and_path_validation(client: TestClient) -> 
     folder = client.post(
         "/api/v1/folders",
         json={"path": "projects/active", "category": "Projects"},
+        headers=headers("active-folder"),
     ).json()
     updated = client.patch(
         f"/api/v1/folders/{folder['folder_id']}",
@@ -102,6 +103,7 @@ def test_folder_metadata_concurrency_and_path_validation(client: TestClient) -> 
             "category": "Active projects",
             "tag_ids": [],
         },
+        headers=headers("active-folder-update"),
     )
     assert updated.status_code == 200
     assert updated.json()["category"] == "Active projects"
@@ -112,12 +114,80 @@ def test_folder_metadata_concurrency_and_path_validation(client: TestClient) -> 
             "category": "Stale",
             "tag_ids": [],
         },
+        headers=headers("active-folder-stale"),
     )
     assert stale.status_code == 409
 
-    for invalid_path in ("../outside", "/absolute", "projects/../outside", "bad\\path"):
-        response = client.post("/api/v1/folders", json={"path": invalid_path})
+    for index, invalid_path in enumerate(
+        ("../outside", "/absolute", "projects/../outside", "bad\\path")
+    ):
+        response = client.post(
+            "/api/v1/folders",
+            json={"path": invalid_path},
+            headers=headers(f"invalid-folder-{index}"),
+        )
         assert response.status_code == 422
+
+
+def test_tag_and_folder_mutation_retries_are_idempotent(client: TestClient) -> None:
+    tag_headers = headers("retry-tag")
+    first_tag = client.post(
+        "/api/v1/tags",
+        json={"name": "Reviewed", "color": "#327a62"},
+        headers=tag_headers,
+    )
+    retried_tag = client.post(
+        "/api/v1/tags",
+        json={"name": "Reviewed", "color": "#327a62"},
+        headers=tag_headers,
+    )
+    assert first_tag.status_code == retried_tag.status_code == 201
+    assert retried_tag.json() == first_tag.json()
+    conflicting_tag = client.post(
+        "/api/v1/tags",
+        json={"name": "Different", "color": "#327a62"},
+        headers=tag_headers,
+    )
+    assert conflicting_tag.status_code == 409
+    assert conflicting_tag.json()["error"]["code"] == "idempotency_conflict"
+    cross_namespace = client.post(
+        "/api/v1/documents",
+        json={"title": "Must not reuse a tag key", "content": ""},
+        headers=tag_headers,
+    )
+    assert cross_namespace.status_code == 409
+    assert cross_namespace.json()["error"]["code"] == "idempotency_conflict"
+
+    folder_headers = headers("retry-folder")
+    payload = {
+        "path": "review/follow-up",
+        "category": "Review",
+        "tag_ids": [first_tag.json()["tag_id"]],
+    }
+    first_folder = client.post("/api/v1/folders", json=payload, headers=folder_headers)
+    retried_folder = client.post("/api/v1/folders", json=payload, headers=folder_headers)
+    assert first_folder.status_code == retried_folder.status_code == 201
+    assert retried_folder.json() == first_folder.json()
+
+    folder = first_folder.json()
+    update_headers = headers("retry-folder-update")
+    update_payload = {
+        "expected_metadata_version": folder["metadata_version"],
+        "category": "Reviewed",
+        "tag_ids": [],
+    }
+    first_update = client.patch(
+        f"/api/v1/folders/{folder['folder_id']}",
+        json=update_payload,
+        headers=update_headers,
+    )
+    retried_update = client.patch(
+        f"/api/v1/folders/{folder['folder_id']}",
+        json=update_payload,
+        headers=update_headers,
+    )
+    assert first_update.status_code == retried_update.status_code == 200
+    assert retried_update.json() == first_update.json()
 
 
 def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
@@ -126,10 +196,12 @@ def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
     first_tag = client.post(
         "/api/v1/tags",
         json={"name": "First", "color": "#327a62"},
+        headers=headers("audit-first-tag"),
     ).json()
     second_tag = client.post(
         "/api/v1/tags",
         json={"name": "Second", "color": "#b94b3d"},
+        headers=headers("audit-second-tag"),
     ).json()
 
     created = client.post(
@@ -139,6 +211,7 @@ def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
             "category": "One",
             "tag_ids": [first_tag["tag_id"]],
         },
+        headers=headers("audit-create-folder"),
     ).json()
     organized = client.post(
         "/api/v1/folders",
@@ -147,12 +220,13 @@ def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
             "category": "Two",
             "tag_ids": [second_tag["tag_id"]],
         },
+        headers=headers("audit-organize-folder"),
     ).json()
 
     assert organized["folder_id"] == created["folder_id"]
     assert organized["metadata_version"] == created["metadata_version"] + 1
 
-    database = client.app.state.service.database
+    database = client.app.state.services.documents.database
     with database.connection() as connection:
         events = connection.execute(
             """
@@ -167,6 +241,7 @@ def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
     }
     second_event = events_by_version[organized["metadata_version"]]
     assert json.loads(second_event["before_json"]) == {
+        "path": "projects",
         "category": "One",
         "tag_ids": [first_tag["tag_id"]],
         "metadata_version": created["metadata_version"],
@@ -179,6 +254,7 @@ def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
             "category": "Two",
             "tag_ids": [second_tag["tag_id"], second_tag["tag_id"]],
         },
+        headers=headers("audit-exact-folder-retry"),
     ).json()
     assert retried == organized
 

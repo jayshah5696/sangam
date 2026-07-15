@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     database_path: Path = Field(default=Path("data/database/sangam.sqlite3"))
     workspace_root: Path = Field(default=Path("data/workspace"))
     backup_root: Path = Field(default=Path("data/backups"))
+    backup_retention_count: int = Field(default=14, ge=2, le=365)
+    backup_check_interval_seconds: int = Field(default=3600, ge=60)
+    backups_enabled: bool = True
     frontend_dist: Path = Field(default=Path("frontend/dist"))
 
     def prepare(self) -> None:

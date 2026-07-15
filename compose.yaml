@@ -1,7 +1,7 @@
 services:
   sangam:
     build: .
-    image: sangam:phase1
+    image: sangam:phase2
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"

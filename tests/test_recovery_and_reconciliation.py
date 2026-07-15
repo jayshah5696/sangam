@@ -12,7 +12,7 @@ from sangam.service import DocumentService
 def test_committed_revision_recovers_after_interrupted_atomic_write(
     client: TestClient, settings, monkeypatch: pytest.MonkeyPatch, write_then_fail: bool
 ) -> None:
-    service: DocumentService = client.app.state.service
+    service: DocumentService = client.app.state.services.documents
     original_write = service.workspace.write_atomic
 
     def fail_write(path: str, content: str) -> str:
@@ -53,7 +53,7 @@ def test_committed_revision_recovers_after_interrupted_atomic_write(
 def test_failure_before_database_commit_rolls_back_everything(
     client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    service: DocumentService = client.app.state.service
+    service: DocumentService = client.app.state.services.documents
 
     def fail_before_commit(*_args, **_kwargs) -> None:
         raise RuntimeError("injected before commit")
@@ -74,7 +74,7 @@ def test_failure_before_database_commit_rolls_back_everything(
 def test_app_startup_completes_pending_materialization(
     client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    service: DocumentService = client.app.state.service
+    service: DocumentService = client.app.state.services.documents
 
     def fail_write(_path: str, _content: str) -> str:
         raise OSError("injected")
