@@ -5,7 +5,7 @@ import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } fr
 import type { QueryClient } from '@tanstack/react-query'
 import {
   ArchiveRestore,
-  Files,
+  FileText,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -17,12 +17,12 @@ import { api, type Document } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
 import { ResizeHandle } from '../components/ResizeHandle'
-import { StatusBar } from '../components/StatusBar'
 import { workspaceBasename } from '../workspaceTree'
 import { useTheme } from '../theme'
+import { useWorkbenchRecovery } from '../workbench'
 
 type RouterContext = { queryClient: QueryClient }
-type Activity = 'files' | 'search' | 'reconciliation' | 'backups' | 'trash'
+type SidebarMode = 'files' | 'search'
 
 export const Route = createRootRouteWithContext<RouterContext>()({ component: RootLayout })
 
@@ -30,35 +30,23 @@ function RootLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { preferences, updatePreferences } = useTheme()
-  const [workspaceActivity, setWorkspaceActivity] = useState<'files' | 'search'>('files')
-  const routedActivity = activityForPath(location.pathname)
-  const activity = routedActivity === 'files' ? workspaceActivity : routedActivity
+  const layoutRecovery = useWorkbenchRecovery()
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('files')
+  const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
 
-  const chooseActivity = async (next: Activity) => {
-    if (next === 'files' || next === 'search') {
-      setWorkspaceActivity(next)
-      if (routedActivity !== 'files') await navigate({ to: '/' })
-    }
-    if (next === 'reconciliation') await navigate({ to: '/reconciliation' })
-    if (next === 'backups') await navigate({ to: '/backups' })
-    if (next === 'trash') await navigate({ to: '/trash' })
+  const chooseSidebarMode = async (next: SidebarMode) => {
+    setSidebarMode(next)
+    if (!isDocumentWorkspace) await navigate({ to: '/' })
   }
 
   return (
     <div className="workbench-shell">
-      <ActivityBar
-        active={activity}
-        onActivity={(next) => void chooseActivity(next)}
-        onSettings={() => void navigate({ to: '/settings/appearance' })}
-      />
       {preferences.leftVisible ? (
         <>
           <PrimarySidebar
-            activity={activity}
+            mode={sidebarMode}
             onCollapse={() => updatePreferences({ leftVisible: false })}
-            onActivity={(next) => {
-              if (next === 'files' || next === 'search') setWorkspaceActivity(next)
-            }}
+            onMode={(next) => void chooseSidebarMode(next)}
             style={{ width: preferences.leftWidth }}
           />
           <ResizeHandle
@@ -80,90 +68,51 @@ function RootLayout() {
         </button>
       )}
       <div className="workbench-center">
+        {layoutRecovery.recovered && (
+          <div className="layout-recovery-notice" role="status">
+            <span>The saved editor layout was invalid, so Sangam restored one clean group.</span>
+            <button onClick={layoutRecovery.dismiss}>Dismiss</button>
+          </div>
+        )}
         <main className="workbench-main" aria-label="Workspace content">
           <Outlet />
         </main>
-        <StatusBar />
       </div>
       <CommandPalette
         onFiles={() => {
-          setWorkspaceActivity('files')
-          if (routedActivity !== 'files') void navigate({ to: '/' })
+          setSidebarMode('files')
+          if (!isDocumentWorkspace) void navigate({ to: '/' })
         }}
         onSearch={() => {
-          setWorkspaceActivity('search')
-          if (routedActivity !== 'files') void navigate({ to: '/' })
+          setSidebarMode('search')
+          if (!isDocumentWorkspace) void navigate({ to: '/' })
         }}
       />
     </div>
   )
 }
 
-function ActivityBar({
-  active,
-  onActivity,
-  onSettings,
-}: {
-  active: Activity
-  onActivity: (activity: Activity) => void
-  onSettings: () => void
-}) {
-  const activities: Array<{ id: Activity; label: string; icon: typeof Files }> = [
-    { id: 'files', label: 'Files', icon: Files },
-    { id: 'search', label: 'Search', icon: Search },
-    { id: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck },
-    { id: 'backups', label: 'Backups', icon: ArchiveRestore },
-    { id: 'trash', label: 'Trash', icon: Trash2 },
-  ]
-  return (
-    <aside className="activity-bar" aria-label="Workspace activities">
-      <Link to="/" className="activity-mark" aria-label="Sangam home" title="Sangam">
-        <img src="/sangam-mark.svg" alt="" />
-      </Link>
-      <nav>
-        {activities.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            className={active === id ? 'activity-button active' : 'activity-button'}
-            aria-label={label}
-            aria-pressed={active === id}
-            title={label}
-            onClick={() => onActivity(id)}
-          >
-            <Icon size={20} strokeWidth={1.8} />
-          </button>
-        ))}
-      </nav>
-      <button
-        className="activity-button activity-settings"
-        aria-label="Settings"
-        title="Settings"
-        onClick={onSettings}
-      >
-        <Settings size={20} strokeWidth={1.8} />
-      </button>
-    </aside>
-  )
-}
-
 function PrimarySidebar({
-  activity,
+  mode,
   onCollapse,
-  onActivity,
+  onMode,
   style,
 }: {
-  activity: Activity
+  mode: SidebarMode
   onCollapse: () => void
-  onActivity: (activity: Activity) => void
+  onMode: (mode: SidebarMode) => void
   style: CSSProperties
 }) {
   return (
     <aside className="primary-sidebar" style={style}>
-      <header className="sidebar-titlebar">
-        <div>
-          <strong>{activityTitle(activity)}</strong>
-          <span>Sangam workspace</span>
-        </div>
+      <header className="sidebar-brandbar">
+        <Link to="/" className="sidebar-brand" aria-label="Sangam home">
+          <img src="/sangam-mark.svg" alt="" />
+          <span>
+            <strong>Sangam</strong>
+            <small>Documents, plainly.</small>
+          </span>
+        </Link>
         <button
           className="quiet-icon"
           aria-label="Hide workspace sidebar"
@@ -173,36 +122,47 @@ function PrimarySidebar({
           <PanelLeftClose size={16} />
         </button>
       </header>
-      {activity === 'files' && <FileExplorerPanel onSearch={() => onActivity('search')} />}
-      {activity === 'search' && <SearchPanel />}
-      {activity === 'reconciliation' && (
-        <ActivitySummary
-          icon={ShieldCheck}
-          title="Workspace integrity"
-          text="Scan and resolve changes made outside Sangam."
-          href="/reconciliation"
-          action="Open reconciliation"
-        />
-      )}
-      {activity === 'backups' && (
-        <ActivitySummary
-          icon={ArchiveRestore}
-          title="Recovery sets"
-          text="Create, inspect, and verify database and workspace backups."
-          href="/backups"
-          action="Open backups"
-        />
-      )}
-      {activity === 'trash' && (
-        <ActivitySummary
-          icon={Trash2}
-          title="Recoverable deletion"
-          text="Restore documents without losing stable identity or history."
-          href="/trash"
-          action="Open trash"
-        />
-      )}
+      <div className="sidebar-mode-switch" role="tablist" aria-label="Workspace navigation">
+        <button
+          role="tab"
+          aria-selected={mode === 'files'}
+          className={mode === 'files' ? 'active' : ''}
+          onClick={() => onMode('files')}
+        >
+          <FileText size={14} /> Files
+        </button>
+        <button
+          role="tab"
+          aria-selected={mode === 'search'}
+          className={mode === 'search' ? 'active' : ''}
+          onClick={() => onMode('search')}
+        >
+          <Search size={14} /> Search
+        </button>
+      </div>
+      {mode === 'files' && <FileExplorerPanel onSearch={() => onMode('search')} />}
+      {mode === 'search' && <SearchPanel />}
+      <SidebarLinks />
     </aside>
+  )
+}
+
+function SidebarLinks() {
+  const links = [
+    { to: '/reconciliation' as const, label: 'Workspace integrity', icon: ShieldCheck },
+    { to: '/backups' as const, label: 'Backups', icon: ArchiveRestore },
+    { to: '/trash' as const, label: 'Trash', icon: Trash2 },
+    { to: '/settings' as const, label: 'Settings', icon: Settings },
+  ]
+  return (
+    <nav className="sidebar-footer-nav" aria-label="Workspace tools">
+      {links.map(({ to, label, icon: Icon }) => (
+        <Link key={to} to={to} activeProps={{ className: 'active' }}>
+          <Icon size={14} />
+          <span>{label}</span>
+        </Link>
+      ))}
+    </nav>
   )
 }
 
@@ -249,29 +209,6 @@ function SearchPanel() {
   )
 }
 
-function ActivitySummary({
-  icon: Icon,
-  title,
-  text,
-  href,
-  action,
-}: {
-  icon: typeof ShieldCheck
-  title: string
-  text: string
-  href: '/reconciliation' | '/backups' | '/trash'
-  action: string
-}) {
-  return (
-    <div className="activity-summary">
-      <Icon size={24} />
-      <h2>{title}</h2>
-      <p>{text}</p>
-      <Link to={href}>{action}</Link>
-    </div>
-  )
-}
-
 function DocumentLink({ document, showPath = false }: { document: Document; showPath?: boolean }) {
   const label = document.path ? workspaceBasename(document.path) : document.title
   return (
@@ -281,7 +218,7 @@ function DocumentLink({ document, showPath = false }: { document: Document; show
       className="file-link"
       activeProps={{ className: 'file-link active' }}
     >
-      <Files size={13} />
+      <FileText size={13} />
       <span>{label}</span>
       {showPath && <small>{document.path ?? 'Draft'}</small>}
       {document.search_snippet && (
@@ -293,21 +230,4 @@ function DocumentLink({ document, showPath = false }: { document: Document; show
 
 function plainSnippet(value: string) {
   return value.replaceAll('[[', '').replaceAll(']]', '')
-}
-
-function activityForPath(pathname: string): Activity {
-  if (pathname.startsWith('/reconciliation')) return 'reconciliation'
-  if (pathname.startsWith('/backups')) return 'backups'
-  if (pathname.startsWith('/trash')) return 'trash'
-  return 'files'
-}
-
-function activityTitle(activity: Activity) {
-  return {
-    files: 'Files',
-    search: 'Search',
-    reconciliation: 'Reconciliation',
-    backups: 'Backups',
-    trash: 'Trash',
-  }[activity]
 }

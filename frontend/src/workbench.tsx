@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { DebouncedStorageWriter } from './browserState/debouncedStorage'
 import { workbenchStorageKey } from './browserState/legacyDraftMigration'
 import {
@@ -6,10 +6,9 @@ import {
   closeGroup as closeGroupInLayout,
   closeOtherTabs as closeOtherTabsInLayout,
   closeTab as closeTabInLayout,
-  collectGroups,
   createDefaultLayoutState,
   ensureDocumentOpen as ensureDocumentOpenInLayout,
-  isLayoutNode,
+  parseWorkbenchLayoutState,
   reopenClosedTab as reopenClosedTabInLayout,
   resetLayout as resetLayoutState,
   setSplitRatio as setSplitRatioInLayout,
@@ -22,7 +21,7 @@ import {
 
 export type { GroupNode, LayoutNode, SplitDirection, WorkbenchTab } from './workbenchLayout'
 
-type WorkbenchContextValue = WorkbenchLayoutState & {
+type WorkbenchActions = {
   ensureDocumentOpen: (documentId: string, title?: string, groupId?: string) => void
   activateTab: (groupId: string, documentId: string) => void
   closeTab: (groupId: string, documentId: string) => void
@@ -41,30 +40,28 @@ function defaultState(): WorkbenchLayoutState {
   return createDefaultLayoutState(crypto.randomUUID())
 }
 
-function loadState(): WorkbenchLayoutState {
+function loadState(): { state: WorkbenchLayoutState; recovered: boolean } {
+  const raw = localStorage.getItem(workbenchStorageKey)
+  if (!raw) return { state: defaultState(), recovered: false }
   try {
-    const value = JSON.parse(
-      localStorage.getItem(workbenchStorageKey) ?? 'null',
-    ) as Partial<WorkbenchLayoutState> | null
-    if (!value?.root || !isLayoutNode(value.root)) return defaultState()
-    const groups = collectGroups(value.root)
-    const activeGroupId = groups.some((group) => group.id === value.activeGroupId)
-      ? value.activeGroupId!
-      : groups[0]!.id
-    return {
-      root: value.root,
-      activeGroupId,
-      recentlyClosed: Array.isArray(value.recentlyClosed) ? value.recentlyClosed.slice(0, 12) : [],
-    }
+    const state = parseWorkbenchLayoutState(JSON.parse(raw) as unknown)
+    return state ? { state, recovered: false } : { state: defaultState(), recovered: true }
   } catch {
-    return defaultState()
+    return { state: defaultState(), recovered: true }
   }
 }
 
-const WorkbenchContext = createContext<WorkbenchContextValue | null>(null)
+const WorkbenchStateContext = createContext<WorkbenchLayoutState | null>(null)
+const WorkbenchActionsContext = createContext<WorkbenchActions | null>(null)
+const WorkbenchRecoveryContext = createContext<{
+  recovered: boolean
+  dismiss: () => void
+} | null>(null)
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState(loadState)
+  const [initialState] = useState(loadState)
+  const [state, setState] = useState(initialState.state)
+  const [recovered, setRecovered] = useState(initialState.recovered)
   const [storageWriter] = useState(
     () => new DebouncedStorageWriter<WorkbenchLayoutState>(localStorage, workbenchStorageKey),
   )
@@ -84,66 +81,108 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     }
   }, [storageWriter])
 
-  const value = useMemo<WorkbenchContextValue>(
+  const ensureDocumentOpen = useCallback((documentId: string, title?: string, groupId?: string) => {
+    setState((current) => ensureDocumentOpenInLayout(current, documentId, title, groupId))
+  }, [])
+  const activateTab = useCallback((groupId: string, documentId: string) => {
+    setState((current) => activateTabInLayout(current, groupId, documentId))
+  }, [])
+  const closeTab = useCallback((groupId: string, documentId: string) => {
+    setState((current) => closeTabInLayout(current, groupId, documentId))
+  }, [])
+  const closeOtherTabs = useCallback((groupId: string, documentId: string) => {
+    setState((current) => closeOtherTabsInLayout(current, groupId, documentId))
+  }, [])
+  const reopenClosedTab = useCallback(() => {
+    const result = reopenClosedTabInLayout(state)
+    if (result.documentId) setState(result.state)
+    return result.documentId
+  }, [state])
+  const togglePinned = useCallback((groupId: string, documentId: string) => {
+    setState((current) => togglePinnedInLayout(current, groupId, documentId))
+  }, [])
+  const setActiveGroup = useCallback((activeGroupId: string) => {
+    setState((current) => (current.activeGroupId === activeGroupId ? current : { ...current, activeGroupId }))
+  }, [])
+  const updateDocumentTitle = useCallback((documentId: string, title: string) => {
+    setState((current) => updateDocumentTitleInLayout(current, documentId, title))
+  }, [])
+  const splitGroup = useCallback((groupId: string, direction: SplitDirection, documentId?: string) => {
+    const newGroupId = crypto.randomUUID()
+    const splitId = crypto.randomUUID()
+    setState((current) => splitGroupInLayout(current, groupId, direction, splitId, newGroupId, documentId))
+    return newGroupId
+  }, [])
+  const closeGroup = useCallback((groupId: string) => {
+    setState((current) => closeGroupInLayout(current, groupId))
+  }, [])
+  const setSplitRatio = useCallback((splitId: string, ratio: number) => {
+    setState((current) => setSplitRatioInLayout(current, splitId, ratio))
+  }, [])
+  const resetLayout = useCallback(() => {
+    const groupId = crypto.randomUUID()
+    setState((current) => resetLayoutState(current, groupId))
+  }, [])
+
+  const actions = useMemo<WorkbenchActions>(
     () => ({
-      ...state,
-      ensureDocumentOpen(documentId, title, groupId) {
-        setState((current) => ensureDocumentOpenInLayout(current, documentId, title, groupId))
-      },
-      activateTab(groupId, documentId) {
-        setState((current) => activateTabInLayout(current, groupId, documentId))
-      },
-      closeTab(groupId, documentId) {
-        setState((current) => closeTabInLayout(current, groupId, documentId))
-      },
-      closeOtherTabs(groupId, documentId) {
-        setState((current) => closeOtherTabsInLayout(current, groupId, documentId))
-      },
-      reopenClosedTab() {
-        const result = reopenClosedTabInLayout(state)
-        if (result.documentId) setState(result.state)
-        return result.documentId
-      },
-      togglePinned(groupId, documentId) {
-        setState((current) => togglePinnedInLayout(current, groupId, documentId))
-      },
-      setActiveGroup(activeGroupId) {
-        setState((current) =>
-          current.activeGroupId === activeGroupId ? current : { ...current, activeGroupId },
-        )
-      },
-      updateDocumentTitle(documentId, title) {
-        setState((current) => updateDocumentTitleInLayout(current, documentId, title))
-      },
-      splitGroup(groupId, direction, documentId) {
-        const newGroupId = crypto.randomUUID()
-        const splitId = crypto.randomUUID()
-        setState((current) =>
-          splitGroupInLayout(current, groupId, direction, splitId, newGroupId, documentId),
-        )
-        return newGroupId
-      },
-      closeGroup(groupId) {
-        setState((current) => closeGroupInLayout(current, groupId))
-      },
-      setSplitRatio(splitId, ratio) {
-        setState((current) => setSplitRatioInLayout(current, splitId, ratio))
-      },
-      resetLayout() {
-        const groupId = crypto.randomUUID()
-        setState((current) => resetLayoutState(current, groupId))
-      },
+      ensureDocumentOpen,
+      activateTab,
+      closeTab,
+      closeOtherTabs,
+      reopenClosedTab,
+      togglePinned,
+      setActiveGroup,
+      updateDocumentTitle,
+      splitGroup,
+      closeGroup,
+      setSplitRatio,
+      resetLayout,
     }),
-    [state],
+    [
+      activateTab,
+      closeGroup,
+      closeOtherTabs,
+      closeTab,
+      ensureDocumentOpen,
+      reopenClosedTab,
+      resetLayout,
+      setActiveGroup,
+      setSplitRatio,
+      splitGroup,
+      togglePinned,
+      updateDocumentTitle,
+    ],
   )
 
-  return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>
+  return (
+    <WorkbenchStateContext.Provider value={state}>
+      <WorkbenchActionsContext.Provider value={actions}>
+        <WorkbenchRecoveryContext.Provider value={{ recovered, dismiss: () => setRecovered(false) }}>
+          {children}
+        </WorkbenchRecoveryContext.Provider>
+      </WorkbenchActionsContext.Provider>
+    </WorkbenchStateContext.Provider>
+  )
 }
 
 export function useWorkbench() {
-  const value = useContext(WorkbenchContext)
-  if (!value) throw new Error('useWorkbench must be used inside WorkbenchProvider')
-  return value
+  const state = useContext(WorkbenchStateContext)
+  const actions = useContext(WorkbenchActionsContext)
+  if (!state || !actions) throw new Error('useWorkbench must be used inside WorkbenchProvider')
+  return { ...state, ...actions }
+}
+
+export function useWorkbenchActions() {
+  const actions = useContext(WorkbenchActionsContext)
+  if (!actions) throw new Error('useWorkbenchActions must be used inside WorkbenchProvider')
+  return actions
+}
+
+export function useWorkbenchRecovery() {
+  const recovery = useContext(WorkbenchRecoveryContext)
+  if (!recovery) throw new Error('useWorkbenchRecovery must be used inside WorkbenchProvider')
+  return recovery
 }
 
 export { collectGroups, findGroup } from './workbenchLayout'

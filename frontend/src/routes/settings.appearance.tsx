@@ -1,40 +1,27 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import {
-  ArchiveRestore,
   Check,
-  FileKey,
   FolderTree,
-  Info,
-  Keyboard,
   MonitorCog,
   Paintbrush,
-  PanelLeft,
   RefreshCw,
   RotateCcw,
   SearchCheck,
-  ShieldCheck,
   Tags,
-  Trash2,
 } from 'lucide-react'
 import { api, type Folder, type Tag } from '../api'
 import { themes, useTheme } from '../theme'
 import { useWorkbench } from '../workbench'
 
-export const Route = createFileRoute('/settings/appearance')({ component: WorkspaceSettings })
+export const Route = createFileRoute('/settings/appearance')({
+  beforeLoad: () => {
+    throw redirect({ to: '/settings' })
+  },
+})
 
-const sections = [
-  ['appearance', 'Appearance', Paintbrush],
-  ['editor', 'Editor', FileKey],
-  ['workbench', 'Workbench', MonitorCog],
-  ['organization', 'Files & organization', FolderTree],
-  ['recovery', 'Data & recovery', ArchiveRestore],
-  ['keyboard', 'Keyboard', Keyboard],
-  ['about', 'About', Info],
-] as const
-
-function WorkspaceSettings() {
+export function WorkspaceSettings() {
   const { preferences, updatePreferences } = useTheme()
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
@@ -52,25 +39,12 @@ function WorkspaceSettings() {
   const reindex = useMutation({ mutationFn: api.rebuildSearch })
 
   return (
-    <div className="settings-control-center">
-      <nav className="settings-nav" aria-label="Settings sections">
-        <div className="settings-nav-title">
-          <strong>Settings</strong>
-          <span>Configuration & maintenance</span>
-        </div>
-        {sections.map(([id, label, Icon]) => (
-          <a key={id} href={`#${id}`}>
-            <Icon size={14} />
-            {label}
-          </a>
-        ))}
-      </nav>
-
+    <div className="settings-control-center simplified-settings">
       <div className="settings-content">
         <header className="settings-compact-header">
           <div>
             <p className="eyebrow">Sangam settings</p>
-            <h1>Workspace controls</h1>
+            <h1>Settings</h1>
           </div>
           <ScopeBadge scope="browser" />
         </header>
@@ -105,35 +79,6 @@ function WorkspaceSettings() {
         </SettingsSection>
 
         <SettingsSection
-          id="editor"
-          icon={FileKey}
-          title="Editor"
-          description="Document editing follows Markdown and keeps unsaved buffers in this browser."
-          scope="browser"
-        >
-          <div className="settings-rows">
-            <SettingRow
-              label="Format"
-              detail="Markdown with live preview, links, diagrams, math, and revisions"
-            >
-              <span className="setting-value">Markdown</span>
-            </SettingRow>
-            <SettingRow
-              label="Autosave"
-              detail="Changes are saved after a short pause; local buffers survive reload"
-            >
-              <span className="setting-value">On</span>
-            </SettingRow>
-            <SettingRow
-              label="Revision comparison"
-              detail="Choose any two revisions from the document inspector"
-            >
-              <span className="setting-value">Side by side</span>
-            </SettingRow>
-          </div>
-        </SettingsSection>
-
-        <SettingsSection
           id="workbench"
           icon={MonitorCog}
           title="Workbench"
@@ -141,7 +86,7 @@ function WorkspaceSettings() {
           scope="browser"
         >
           <div className="settings-rows">
-            <SettingRow label="Workspace sidebar" detail="Files, search, integrity, backups, and trash">
+            <SettingRow label="Workspace sidebar" detail="Show files and search beside your document">
               <label className="compact-switch">
                 <input
                   type="checkbox"
@@ -159,12 +104,6 @@ function WorkspaceSettings() {
                 <RotateCcw size={14} />
                 Reset layout
               </button>
-            </SettingRow>
-            <SettingRow label="Panel sizing" detail="Drag sidebar and inspector edges in the workbench">
-              <span className="setting-value">
-                <PanelLeft size={13} />
-                Direct resize
-              </span>
             </SettingRow>
           </div>
         </SettingsSection>
@@ -238,35 +177,12 @@ function WorkspaceSettings() {
         </SettingsSection>
 
         <SettingsSection
-          id="recovery"
-          icon={ArchiveRestore}
-          title="Data & recovery"
-          description="Workspace-wide operations are explicit, inspectable, and kept out of everyday editing."
+          id="maintenance"
+          icon={SearchCheck}
+          title="Maintenance"
+          description="Rebuild derived search data from the canonical workspace."
           scope="workspace"
         >
-          <div className="operation-grid">
-            <OperationCard
-              icon={ShieldCheck}
-              title="Reconciliation"
-              text="Scan for files changed outside Sangam and resolve conflicts."
-              to="/reconciliation"
-              action="Review integrity"
-            />
-            <OperationCard
-              icon={ArchiveRestore}
-              title="Backups"
-              text="Create and verify recovery sets for content, identity, and history."
-              to="/backups"
-              action="Manage backups"
-            />
-            <OperationCard
-              icon={Trash2}
-              title="Trash"
-              text="Restore deleted documents without losing identity or revisions."
-              to="/trash"
-              action="Open trash"
-            />
-          </div>
           <div className="maintenance-row">
             <div>
               <SearchCheck size={17} />
@@ -295,40 +211,6 @@ function WorkspaceSettings() {
               Search index could not be rebuilt: {reindex.error.message}
             </p>
           )}
-        </SettingsSection>
-
-        <SettingsSection
-          id="keyboard"
-          icon={Keyboard}
-          title="Keyboard"
-          description="Small, predictable shortcuts for common workbench actions."
-          scope="browser"
-        >
-          <div className="shortcut-list">
-            <Shortcut keys="⌘ K" action="Open command palette" />
-            <Shortcut keys="⌘ N" action="New document (outside text fields)" />
-            <Shortcut keys="Esc" action="Close command palette or menu" />
-          </div>
-        </SettingsSection>
-
-        <SettingsSection
-          id="about"
-          icon={Info}
-          title="About"
-          description="Local-first knowledge work with stable document identity."
-          scope="workspace"
-        >
-          <div className="settings-rows">
-            <SettingRow label="Sangam" detail="Workspace application">
-              <span className="setting-value">v0.1.0</span>
-            </SettingRow>
-            <SettingRow
-              label="Storage model"
-              detail="SQLite is canonical for identity and revisions; Markdown files are materialized content"
-            >
-              <span className="setting-value">Local first</span>
-            </SettingRow>
-          </div>
         </SettingsSection>
       </div>
     </div>
@@ -389,38 +271,6 @@ function SettingRow({
         <small>{detail}</small>
       </div>
       {children}
-    </div>
-  )
-}
-
-function OperationCard({
-  icon: Icon,
-  title,
-  text,
-  to,
-  action,
-}: {
-  icon: typeof ShieldCheck
-  title: string
-  text: string
-  to: '/reconciliation' | '/backups' | '/trash'
-  action: string
-}) {
-  return (
-    <article className="operation-card">
-      <Icon size={18} />
-      <strong>{title}</strong>
-      <p>{text}</p>
-      <Link to={to}>{action} →</Link>
-    </article>
-  )
-}
-
-function Shortcut({ keys, action }: { keys: string; action: string }) {
-  return (
-    <div>
-      <kbd>{keys}</kbd>
-      <span>{action}</span>
     </div>
   )
 }

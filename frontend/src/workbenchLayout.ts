@@ -26,6 +26,7 @@ export type LayoutNode = GroupNode | SplitNode
 export type ClosedTab = { tab: WorkbenchTab; groupId: string }
 
 export type WorkbenchLayoutState = {
+  schemaVersion: 1
   root: LayoutNode
   activeGroupId: string
   recentlyClosed: ClosedTab[]
@@ -40,7 +41,7 @@ export function createGroup(
 }
 
 export function createDefaultLayoutState(groupId: string): WorkbenchLayoutState {
-  return { root: createGroup(groupId), activeGroupId: groupId, recentlyClosed: [] }
+  return { schemaVersion: 1, root: createGroup(groupId), activeGroupId: groupId, recentlyClosed: [] }
 }
 
 export function ensureDocumentOpen(
@@ -288,16 +289,66 @@ function removeGroup(root: LayoutNode, groupId: string): LayoutNode | null {
 }
 
 export function isLayoutNode(value: unknown): value is LayoutNode {
+  return isValidLayoutNode(value, new Set())
+}
+
+export function parseWorkbenchLayoutState(value: unknown): WorkbenchLayoutState | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Partial<WorkbenchLayoutState> & { schemaVersion?: unknown }
+  if (candidate.schemaVersion !== undefined && candidate.schemaVersion !== 1) return null
+  if (!isLayoutNode(candidate.root)) return null
+  const groups = collectGroups(candidate.root)
+  if (groups.length === 0) return null
+  const activeGroupId = groups.some((group) => group.id === candidate.activeGroupId)
+    ? candidate.activeGroupId!
+    : groups[0]!.id
+  const recentlyClosed = Array.isArray(candidate.recentlyClosed)
+    ? candidate.recentlyClosed.filter(isClosedTab).slice(0, 12)
+    : []
+  return { schemaVersion: 1, root: candidate.root, activeGroupId, recentlyClosed }
+}
+
+function isValidLayoutNode(value: unknown, ids: Set<string>): value is LayoutNode {
   if (!value || typeof value !== 'object') return false
   const node = value as Partial<LayoutNode>
-  if (node.kind === 'group') return typeof node.id === 'string' && Array.isArray(node.tabs)
+  if (typeof node.id !== 'string' || !node.id || ids.has(node.id)) return false
+  ids.add(node.id)
+  if (node.kind === 'group') {
+    if (!Array.isArray(node.tabs) || !node.tabs.every(isWorkbenchTab)) return false
+    const documentIds = new Set(node.tabs.map((tab) => tab.documentId))
+    return (
+      documentIds.size === node.tabs.length &&
+      (node.activeTabId === null ||
+        (typeof node.activeTabId === 'string' && documentIds.has(node.activeTabId)))
+    )
+  }
   if (node.kind === 'split') {
     return (
-      typeof node.id === 'string' &&
       (node.direction === 'horizontal' || node.direction === 'vertical') &&
-      isLayoutNode(node.first) &&
-      isLayoutNode(node.second)
+      typeof node.ratio === 'number' &&
+      Number.isFinite(node.ratio) &&
+      node.ratio >= 10 &&
+      node.ratio <= 90 &&
+      isValidLayoutNode(node.first, ids) &&
+      isValidLayoutNode(node.second, ids)
     )
   }
   return false
+}
+
+function isWorkbenchTab(value: unknown): value is WorkbenchTab {
+  if (!value || typeof value !== 'object') return false
+  const tab = value as Partial<WorkbenchTab>
+  return (
+    typeof tab.documentId === 'string' &&
+    Boolean(tab.documentId) &&
+    typeof tab.title === 'string' &&
+    typeof tab.pinned === 'boolean'
+  )
+}
+
+function isClosedTab(value: unknown): value is ClosedTab {
+  if (!value || typeof value !== 'object') return false
+  const closed = value as Partial<ClosedTab>
+  return typeof closed.groupId === 'string' && isWorkbenchTab(closed.tab)
 }

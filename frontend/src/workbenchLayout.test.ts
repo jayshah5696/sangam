@@ -5,6 +5,7 @@ import {
   collectGroups,
   createDefaultLayoutState,
   ensureDocumentOpen,
+  parseWorkbenchLayoutState,
   reopenClosedTab,
   resetLayout,
   setSplitRatio,
@@ -47,5 +48,31 @@ describe('workbench layout', () => {
 
     const reset = resetLayout(reopened.state, 'group-reset')
     expect(reset.root).toMatchObject({ kind: 'group', id: 'group-reset' })
+  })
+
+  it('accepts legacy unversioned layouts and rejects corrupt or future payloads', () => {
+    const current = ensureDocumentOpen(createDefaultLayoutState('group-1'), 'doc-1', 'First')
+    const legacy = {
+      root: current.root,
+      activeGroupId: current.activeGroupId,
+      recentlyClosed: current.recentlyClosed,
+    }
+
+    expect(parseWorkbenchLayoutState(legacy)).toMatchObject({
+      schemaVersion: 1,
+      activeGroupId: 'group-1',
+    })
+    expect(parseWorkbenchLayoutState({ ...current, schemaVersion: 2 })).toBeNull()
+    expect(
+      parseWorkbenchLayoutState({
+        ...current,
+        root: {
+          kind: 'group',
+          id: 'group-1',
+          tabs: [{ documentId: 'doc-1', title: 42, pinned: false }],
+          activeTabId: 'doc-1',
+        },
+      }),
+    ).toBeNull()
   })
 })

@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { api } from '../api'
+import { canSplitActiveGroup } from '../splitPolicy'
 import { findGroup, useWorkbench } from '../workbench'
 
 type Command = {
@@ -31,10 +32,13 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
   const workbench = useWorkbench()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const dialogRef = useRef<HTMLDialogElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
   const activeGroup = findGroup(workbench.root, workbench.activeGroupId)
   const activeDocumentId = activeGroup?.activeTabId
-  const createDocument = useMutation({
+  const { mutate: createNewDocument } = useMutation({
     mutationFn: () => api.createDocument('Untitled document'),
     onSuccess: async (document) => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -42,6 +46,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
     },
   })
+
   const commands = useMemo<Command[]>(
     () => [
       {
@@ -49,7 +54,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'New document',
         detail: 'Create a new draft',
         icon: FilePlus2,
-        run: () => createDocument.mutate(),
+        run: createNewDocument,
       },
       {
         id: 'view.files',
@@ -70,7 +75,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Split editor right',
         detail: 'Create a group beside the active one',
         icon: Columns2,
-        enabled: Boolean(activeDocumentId),
+        enabled: Boolean(activeDocumentId) && canSplitActiveGroup('horizontal'),
         run: () => workbench.splitGroup(workbench.activeGroupId, 'horizontal', activeDocumentId ?? undefined),
       },
       {
@@ -78,7 +83,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Split editor down',
         detail: 'Create a group below the active one',
         icon: Rows2,
-        enabled: Boolean(activeDocumentId),
+        enabled: Boolean(activeDocumentId) && canSplitActiveGroup('vertical'),
         run: () => workbench.splitGroup(workbench.activeGroupId, 'vertical', activeDocumentId ?? undefined),
       },
       {
@@ -114,16 +119,29 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Open settings',
         detail: 'Configure Sangam',
         icon: Settings,
-        run: () => void navigate({ to: '/settings/appearance' }),
+        run: () => void navigate({ to: '/settings' }),
       },
     ],
-    [activeDocumentId, createDocument, navigate, onFiles, onSearch, workbench],
+    [activeDocumentId, createNewDocument, navigate, onFiles, onSearch, workbench],
   )
   const results = commands.filter(
     (command) =>
       command.enabled !== false &&
       `${command.label} ${command.detail} ${command.id}`.toLowerCase().includes(query.toLowerCase()),
   )
+  const effectiveSelectedIndex = Math.min(selectedIndex, Math.max(0, results.length - 1))
+  const selectedCommand = results[effectiveSelectedIndex]
+
+  const openPalette = () => {
+    returnFocusRef.current = document.activeElement as HTMLElement | null
+    setOpen(true)
+  }
+  const closePalette = () => {
+    setOpen(false)
+    setQuery('')
+    setSelectedIndex(0)
+    requestAnimationFrame(() => returnFocusRef.current?.focus())
+  }
 
   useEffect(() => {
     const keyboard = (event: globalThis.KeyboardEvent) => {
@@ -133,53 +151,89 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         (event.target instanceof HTMLElement && event.target.isContentEditable)
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        setOpen(true)
+        openPalette()
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n' && !editable) {
         event.preventDefault()
-        createDocument.mutate()
+        createNewDocument()
       }
-      if (event.key === 'Escape') setOpen(false)
     }
     window.addEventListener('keydown', keyboard)
     return () => window.removeEventListener('keydown', keyboard)
-  }, [createDocument])
+  }, [createNewDocument])
 
   useEffect(() => {
-    if (open) requestAnimationFrame(() => inputRef.current?.focus())
+    if (!open) return
+    const dialog = dialogRef.current
+    if (dialog && !dialog.open) dialog.showModal()
+    requestAnimationFrame(() => inputRef.current?.focus())
   }, [open])
 
   if (!open) return null
   const run = (command: Command) => {
-    setOpen(false)
-    setQuery('')
+    closePalette()
     command.run()
   }
+  const moveSelection = (key: string) => {
+    if (results.length === 0) return
+    setSelectedIndex((current) => {
+      if (key === 'Home') return 0
+      if (key === 'End') return results.length - 1
+      return key === 'ArrowDown'
+        ? (current + 1) % results.length
+        : (current - 1 + results.length) % results.length
+    })
+  }
   return (
-    <div
-      className="command-backdrop"
-      role="presentation"
+    <dialog
+      ref={dialogRef}
+      className="command-dialog"
+      aria-label="Command palette"
+      onCancel={(event) => {
+        event.preventDefault()
+        closePalette()
+      }}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) setOpen(false)
+        if (event.target === event.currentTarget) closePalette()
       }}
     >
-      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <section className="command-palette">
         <label>
           <Search size={17} />
           <input
             ref={inputRef}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setSelectedIndex(0)
+            }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && results[0]) run(results[0])
+              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                moveSelection(event.key)
+              }
+              if (event.key === 'Enter' && selectedCommand) {
+                event.preventDefault()
+                run(selectedCommand)
+              }
             }}
             placeholder="Type a command…"
             aria-label="Command"
+            aria-controls="command-results"
+            aria-activedescendant={selectedCommand ? `command-${selectedCommand.id}` : undefined}
           />
         </label>
-        <div role="listbox" aria-label="Commands">
-          {results.map((command) => (
-            <button key={command.id} role="option" onClick={() => run(command)}>
+        <div id="command-results" role="listbox" aria-label="Commands">
+          {results.map((command, index) => (
+            <button
+              key={command.id}
+              id={`command-${command.id}`}
+              role="option"
+              aria-selected={index === effectiveSelectedIndex}
+              tabIndex={-1}
+              onMouseMove={() => setSelectedIndex(index)}
+              onClick={() => run(command)}
+            >
               <command.icon size={16} />
               <span>
                 <strong>{command.label}</strong>
@@ -190,9 +244,9 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
           {results.length === 0 && <p>No matching commands.</p>}
         </div>
         <footer>
-          <kbd>↵</kbd> run <kbd>esc</kbd> close
+          <kbd>↑↓</kbd> select <kbd>↵</kbd> run <kbd>esc</kbd> close
         </footer>
       </section>
-    </div>
+    </dialog>
   )
 }

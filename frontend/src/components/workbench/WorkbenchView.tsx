@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { Columns2, MoreHorizontal, PanelRightClose, Pin, PinOff, RotateCcw, Rows2, X } from 'lucide-react'
@@ -8,24 +8,29 @@ import { useDocumentSession } from '../../documentSessions'
 import {
   collectGroups,
   useWorkbench,
+  useWorkbenchActions,
   type GroupNode,
   type LayoutNode,
   type WorkbenchTab,
 } from '../../workbench'
+import {
+  canSplitActiveGroup,
+  minimumHorizontalGroupWidth,
+  minimumVerticalGroupHeight,
+} from '../../splitPolicy'
+import { useMediaQuery } from '../../useMediaQuery'
+import { ActionMenu, ActionMenuItem } from '../ActionMenu'
 import { DocumentWorkspace } from '../document/DocumentWorkspace'
 import { EditorGroupErrorBoundary } from './EditorGroupErrorBoundary'
 
 export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) {
   const workbench = useWorkbench()
-  const workbenchRef = useRef(workbench)
+  const { ensureDocumentOpen } = useWorkbenchActions()
   const isHydrated = collectGroups(workbench.root).some((group) =>
     group.tabs.some((tab) => tab.documentId === routeDocumentId),
   )
 
-  useLayoutEffect(() => {
-    workbenchRef.current = workbench
-  }, [workbench])
-  useLayoutEffect(() => workbenchRef.current.ensureDocumentOpen(routeDocumentId), [routeDocumentId])
+  useEffect(() => ensureDocumentOpen(routeDocumentId), [ensureDocumentOpen, routeDocumentId])
 
   if (!isHydrated) return <div className="center-message">Opening document…</div>
   return (
@@ -38,6 +43,7 @@ export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) 
 function LayoutRenderer({ node }: { node: LayoutNode }) {
   const navigate = useNavigate()
   const workbench = useWorkbench()
+  const stackNarrowHorizontalSplit = useMediaQuery('(max-width: 859px)')
   if (node.kind === 'group') {
     const resetKey = `${node.id}:${node.activeTabId ?? 'empty'}`
     const recover = async () => {
@@ -62,10 +68,12 @@ function LayoutRenderer({ node }: { node: LayoutNode }) {
       </EditorGroupErrorBoundary>
     )
   }
+  const renderedDirection =
+    node.direction === 'horizontal' && stackNarrowHorizontalSplit ? 'vertical' : node.direction
   return (
     <PanelGroup
       className="split-panel-group"
-      orientation={node.direction}
+      orientation={renderedDirection}
       onLayoutChanged={(layout) => {
         const first = layout[node.first.id]
         const second = layout[node.second.id]
@@ -77,20 +85,20 @@ function LayoutRenderer({ node }: { node: LayoutNode }) {
       <Panel
         id={node.first.id}
         defaultSize={`${node.ratio}%`}
-        minSize={node.direction === 'horizontal' ? '280px' : '220px'}
+        minSize={`${renderedDirection === 'horizontal' ? minimumHorizontalGroupWidth : minimumVerticalGroupHeight}px`}
       >
         <LayoutRenderer node={node.first} />
       </Panel>
       <Separator
-        className={`split-separator ${node.direction}`}
-        aria-label={`Resize ${node.direction} split`}
+        className={`split-separator ${renderedDirection}`}
+        aria-label={`Resize ${renderedDirection} split`}
       >
         <span />
       </Separator>
       <Panel
         id={node.second.id}
         defaultSize={`${100 - node.ratio}%`}
-        minSize={node.direction === 'horizontal' ? '280px' : '220px'}
+        minSize={`${renderedDirection === 'horizontal' ? minimumHorizontalGroupWidth : minimumVerticalGroupHeight}px`}
       >
         <LayoutRenderer node={node.second} />
       </Panel>
@@ -102,6 +110,7 @@ function EditorGroupView({ group }: { group: GroupNode }) {
   const navigate = useNavigate()
   const workbench = useWorkbench()
   const groups = collectGroups(workbench.root)
+  const showTabStrip = group.tabs.length > 1
   const activeDocumentId = group.activeTabId
   const activate = async (documentId: string) => {
     workbench.activateTab(group.id, documentId)
@@ -137,24 +146,37 @@ function EditorGroupView({ group }: { group: GroupNode }) {
       className={group.id === workbench.activeGroupId ? 'editor-group active' : 'editor-group'}
       onPointerDown={() => workbench.setActiveGroup(group.id)}
     >
-      <TabStrip
-        tabs={group.tabs}
-        activeDocumentId={activeDocumentId ?? ''}
-        canReopen={workbench.recentlyClosed.length > 0}
-        canCloseGroup={groups.length > 1}
-        onActivate={(documentId) => void activate(documentId)}
-        onClose={(documentId) => void close(documentId)}
-        onCloseOthers={(documentId) => workbench.closeOtherTabs(group.id, documentId)}
-        onPin={(documentId) => workbench.togglePinned(group.id, documentId)}
-        onReopen={() => void reopen()}
-        onSplit={(direction) => workbench.splitGroup(group.id, direction, activeDocumentId ?? undefined)}
-        onCloseGroup={() => void closeGroup()}
-      />
+      {showTabStrip && (
+        <TabStrip
+          tabs={group.tabs}
+          activeDocumentId={activeDocumentId ?? ''}
+          canReopen={workbench.recentlyClosed.length > 0}
+          canCloseGroup={groups.length > 1}
+          onActivate={(documentId) => void activate(documentId)}
+          onClose={(documentId) => void close(documentId)}
+          onCloseOthers={(documentId) => workbench.closeOtherTabs(group.id, documentId)}
+          onPin={(documentId) => workbench.togglePinned(group.id, documentId)}
+          onReopen={() => void reopen()}
+          onSplit={(direction) => {
+            if (canSplitActiveGroup(direction)) {
+              workbench.splitGroup(group.id, direction, activeDocumentId ?? undefined)
+            }
+          }}
+          onCloseGroup={() => void closeGroup()}
+        />
+      )}
       {activeDocumentId ? (
         <DocumentLoader
           key={`${group.id}:${activeDocumentId}`}
           documentId={activeDocumentId}
-          showInspector={group.id === workbench.activeGroupId}
+          showInspector={group.id === workbench.activeGroupId && groups.length === 1}
+          canCloseGroup={groups.length > 1}
+          onSplit={(direction) => {
+            if (canSplitActiveGroup(direction)) {
+              workbench.splitGroup(group.id, direction, activeDocumentId)
+            }
+          }}
+          onCloseGroup={() => void closeGroup()}
           onDeleted={() => void close(activeDocumentId)}
         />
       ) : (
@@ -206,36 +228,73 @@ function TabStrip({
           />
         ))}
       </div>
-      <div className="group-actions">
-        <button aria-label="Split right" title="Split right" onClick={() => onSplit('horizontal')}>
-          <Columns2 size={14} />
-        </button>
-        <button aria-label="Split down" title="Split down" onClick={() => onSplit('vertical')}>
-          <Rows2 size={14} />
-        </button>
-        {canCloseGroup && (
-          <button aria-label="Close editor group" title="Close editor group" onClick={onCloseGroup}>
-            <PanelRightClose size={14} />
-          </button>
+      <ActionMenu
+        label="Editor group actions"
+        icon={<MoreHorizontal size={16} />}
+        className="tab-actions-trigger"
+      >
+        {(close) => (
+          <>
+            <ActionMenuItem
+              disabled={!activeTab}
+              onSelect={() => {
+                onPin(activeDocumentId)
+                close()
+              }}
+            >
+              {activeTab?.pinned ? <PinOff size={13} /> : <Pin size={13} />}{' '}
+              {activeTab?.pinned ? 'Unpin tab' : 'Pin tab'}
+            </ActionMenuItem>
+            <ActionMenuItem
+              disabled={!activeTab}
+              onSelect={() => {
+                onCloseOthers(activeDocumentId)
+                close()
+              }}
+            >
+              Close other tabs
+            </ActionMenuItem>
+            <ActionMenuItem
+              disabled={!canReopen}
+              onSelect={() => {
+                onReopen()
+                close()
+              }}
+            >
+              <RotateCcw size={13} /> Reopen closed tab
+            </ActionMenuItem>
+            <hr />
+            <ActionMenuItem
+              disabled={!canSplitActiveGroup('horizontal')}
+              onSelect={() => {
+                onSplit('horizontal')
+                close()
+              }}
+            >
+              <Columns2 size={13} /> Split right
+            </ActionMenuItem>
+            <ActionMenuItem
+              disabled={!canSplitActiveGroup('vertical')}
+              onSelect={() => {
+                onSplit('vertical')
+                close()
+              }}
+            >
+              <Rows2 size={13} /> Split down
+            </ActionMenuItem>
+            {canCloseGroup && (
+              <ActionMenuItem
+                onSelect={() => {
+                  onCloseGroup()
+                  close()
+                }}
+              >
+                <PanelRightClose size={13} /> Close editor group
+              </ActionMenuItem>
+            )}
+          </>
         )}
-      </div>
-      <details className="tab-actions">
-        <summary aria-label="Tab actions" title="Tab actions">
-          <MoreHorizontal size={16} />
-        </summary>
-        <div>
-          <button disabled={!activeTab} onClick={() => onPin(activeDocumentId)}>
-            {activeTab?.pinned ? <PinOff size={13} /> : <Pin size={13} />}{' '}
-            {activeTab?.pinned ? 'Unpin tab' : 'Pin tab'}
-          </button>
-          <button disabled={!activeTab} onClick={() => onCloseOthers(activeDocumentId)}>
-            Close other tabs
-          </button>
-          <button disabled={!canReopen} onClick={onReopen}>
-            <RotateCcw size={13} /> Reopen closed tab
-          </button>
-        </div>
-      </details>
+      </ActionMenu>
     </div>
   )
 }
@@ -277,10 +336,16 @@ function DocumentTab({
 function DocumentLoader({
   documentId,
   showInspector,
+  canCloseGroup,
+  onSplit,
+  onCloseGroup,
   onDeleted,
 }: {
   documentId: string
   showInspector: boolean
+  canCloseGroup: boolean
+  onSplit: (direction: 'horizontal' | 'vertical') => void
+  onCloseGroup: () => void
   onDeleted: () => void
 }) {
   const documentQuery = useQuery({
@@ -295,6 +360,9 @@ function DocumentLoader({
     <DocumentWorkspace
       initialDocument={documentQuery.data}
       showInspector={showInspector}
+      canCloseGroup={canCloseGroup}
+      onSplit={onSplit}
+      onCloseGroup={onCloseGroup}
       onDeleted={onDeleted}
     />
   )

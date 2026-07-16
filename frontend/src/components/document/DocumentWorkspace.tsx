@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { Columns2, MoreHorizontal, PanelRightClose, Rows2 } from 'lucide-react'
 import { api, type Document } from '../../api'
 import {
   useDocumentSession,
@@ -10,7 +11,9 @@ import {
 } from '../../documentSessions'
 import { internalDocumentMarkdown } from '../../internalLinks'
 import { useTheme } from '../../theme'
-import { useWorkbench } from '../../workbench'
+import { useWorkbenchActions } from '../../workbench'
+import { canSplitActiveGroup } from '../../splitPolicy'
+import { ActionMenu, ActionMenuItem } from '../ActionMenu'
 import type { MarkdownEditorHandle } from '../MarkdownEditor'
 import { ResizeHandle } from '../ResizeHandle'
 import { DocumentInspector } from './DocumentInspector'
@@ -25,23 +28,25 @@ const MarkdownEditor = lazy(() =>
 export function DocumentWorkspace({
   initialDocument,
   showInspector,
+  canCloseGroup,
+  onSplit,
+  onCloseGroup,
   onDeleted,
 }: {
   initialDocument: Document
   showInspector: boolean
+  canCloseGroup: boolean
+  onSplit: (direction: 'horizontal' | 'vertical') => void
+  onCloseGroup: () => void
   onDeleted: () => void
 }) {
   const documentId = initialDocument.document_id
   const queryClient = useQueryClient()
   const { preferences, updatePreferences } = useTheme()
-  const workbench = useWorkbench()
+  const { updateDocumentTitle } = useWorkbenchActions()
   const sessions = useDocumentSessions()
   const session = useDocumentSession(documentId)
   const editorRef = useRef<MarkdownEditorHandle>(null)
-  const workbenchRef = useRef(workbench)
-  useEffect(() => {
-    workbenchRef.current = workbench
-  }, [workbench])
   const document = queryClient.getQueryData<Document>(['document', documentId]) ?? initialDocument
   const content = session.content ?? document.content
   const saveState = session.saveState
@@ -55,14 +60,14 @@ export function DocumentWorkspace({
     void sessions.initializeDocument(initialDocument)
   }, [initialDocument, sessions])
   useEffect(
-    () => workbenchRef.current.updateDocumentTitle(documentId, document.title),
-    [documentId, document.title],
+    () => updateDocumentTitle(documentId, document.title),
+    [document.title, documentId, updateDocumentTitle],
   )
 
   const updateCachedDocument = (nextDocument: Document, replaceContent = false) => {
     queryClient.setQueryData(['document', documentId], nextDocument)
     sessions.acceptServerDocument(nextDocument, replaceContent)
-    workbench.updateDocumentTitle(documentId, nextDocument.title)
+    updateDocumentTitle(documentId, nextDocument.title)
     void queryClient.invalidateQueries({ queryKey: ['documents'] })
     void queryClient.invalidateQueries({ queryKey: ['history', documentId] })
     void queryClient.invalidateQueries({ queryKey: ['folders'] })
@@ -121,6 +126,9 @@ export function DocumentWorkspace({
           saveState={saveState}
           mode={mode}
           onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
+          canCloseGroup={canCloseGroup}
+          onSplit={onSplit}
+          onCloseGroup={onCloseGroup}
           onUpdated={(updated) => updateCachedDocument(updated)}
           onDeleted={async () => {
             await queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -249,6 +257,9 @@ function DocumentToolbar({
   saveState,
   mode,
   onMode,
+  canCloseGroup,
+  onSplit,
+  onCloseGroup,
   onUpdated,
   onDeleted,
 }: {
@@ -257,6 +268,9 @@ function DocumentToolbar({
   saveState: SaveState
   mode: EditorMode
   onMode: (mode: EditorMode) => void
+  canCloseGroup: boolean
+  onSplit: (direction: 'horizontal' | 'vertical') => void
+  onCloseGroup: () => void
   onUpdated: (document: Document) => void
   onDeleted: () => Promise<void>
 }) {
@@ -289,47 +303,94 @@ function DocumentToolbar({
           </button>
         ))}
       </div>
-      <details className="document-actions">
-        <summary>Document actions</summary>
-        <div className="action-popover">
-          <label>
-            Title
-            <input value={title} onChange={(event) => setTitle(event.target.value)} />
-          </label>
-          <button
-            disabled={busy || !title.trim() || title === document.title}
-            onClick={() => rename.mutate()}
-          >
-            Rename
-          </button>
-          {document.path && (
-            <>
-              <label>
-                Path
-                <input value={path} onChange={(event) => setPath(event.target.value)} />
-              </label>
-              <button disabled={busy || path === document.path} onClick={() => move.mutate()}>
-                Move
-              </button>
-            </>
-          )}
-          <button disabled={busy} onClick={() => duplicate.mutate()}>
-            Duplicate as draft
-          </button>
-          <button
-            className="danger-button"
-            disabled={busy}
-            onClick={() => {
-              if (window.confirm(`Move “${document.title}” to trash?`)) remove.mutate()
-            }}
-          >
-            Move to trash
-          </button>
-          {(rename.isError || move.isError || duplicate.isError || remove.isError) && (
-            <p className="error-text">The document action could not be completed.</p>
-          )}
-        </div>
-      </details>
+      <ActionMenu
+        label="Document actions"
+        icon={<MoreHorizontal size={16} />}
+        className="document-actions-trigger"
+        role="dialog"
+      >
+        {(close) => (
+          <div className="document-actions-form">
+            <div className="document-layout-actions">
+              <ActionMenuItem
+                disabled={!canSplitActiveGroup('horizontal')}
+                onSelect={() => {
+                  onSplit('horizontal')
+                  close()
+                }}
+              >
+                <Columns2 size={13} /> Split right
+              </ActionMenuItem>
+              <ActionMenuItem
+                disabled={!canSplitActiveGroup('vertical')}
+                onSelect={() => {
+                  onSplit('vertical')
+                  close()
+                }}
+              >
+                <Rows2 size={13} /> Split down
+              </ActionMenuItem>
+              {canCloseGroup && (
+                <ActionMenuItem
+                  onSelect={() => {
+                    onCloseGroup()
+                    close()
+                  }}
+                >
+                  <PanelRightClose size={13} /> Close group
+                </ActionMenuItem>
+              )}
+            </div>
+            <hr />
+            <label>
+              Title
+              <input value={title} onChange={(event) => setTitle(event.target.value)} />
+            </label>
+            <button
+              disabled={busy || !title.trim() || title === document.title}
+              onClick={() => rename.mutate(undefined, { onSuccess: close })}
+            >
+              Rename
+            </button>
+            {document.path && (
+              <>
+                <label>
+                  Path
+                  <input value={path} onChange={(event) => setPath(event.target.value)} />
+                </label>
+                <button
+                  disabled={busy || path === document.path}
+                  onClick={() => move.mutate(undefined, { onSuccess: close })}
+                >
+                  Move
+                </button>
+              </>
+            )}
+            <button
+              disabled={busy}
+              onClick={() => {
+                duplicate.mutate()
+                close()
+              }}
+            >
+              Duplicate as draft
+            </button>
+            <button
+              className="danger-button"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm(`Move “${document.title}” to trash?`)) remove.mutate()
+                close()
+              }}
+            >
+              Move to trash
+            </button>
+            {(rename.isError || move.isError || duplicate.isError || remove.isError) && (
+              <p className="error-text">The document action could not be completed.</p>
+            )}
+          </div>
+        )}
+      </ActionMenu>
     </div>
   )
 }

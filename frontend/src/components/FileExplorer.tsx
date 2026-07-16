@@ -26,7 +26,9 @@ import {
   Trash2,
 } from 'lucide-react'
 import { api, type Document } from '../api'
+import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench } from '../workbench'
+import { ActionMenu, ActionMenuItem } from './ActionMenu'
 import {
   adjacentVisibleNodeId,
   buildWorkspaceTree,
@@ -200,7 +202,8 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   })
 
   const openDocument = async (node: ExplorerDocument, toSide = false) => {
-    if (toSide) workbench.splitGroup(workbench.activeGroupId, 'horizontal', node.document.document_id)
+    if (toSide)
+      workbench.splitGroup(workbench.activeGroupId, preferredSplitDirection(), node.document.document_id)
     else workbench.ensureDocumentOpen(node.document.document_id, node.document.title, workbench.activeGroupId)
     await navigate({ to: '/documents/$documentId', params: { documentId: node.document.document_id } })
   }
@@ -329,7 +332,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         <button className="sidebar-search-trigger" onClick={onSearch}>
           <Search size={14} />
           <span>Search workspace</span>
-          <kbd>⌘K</kbd>
         </button>
         <div className="sidebar-section-title">
           <span>Workspace</span>
@@ -402,21 +404,34 @@ function ExplorerNodeView({ node, level }: { node: ExplorerNode; level: number }
             <small>{node.documentCount}</small>
           </button>
           {!node.virtual && (
-            <details className="tree-menu">
-              <summary aria-label={`Actions for ${node.name}`}>
-                <MoreHorizontal size={13} />
-              </summary>
-              <div>
-                <button onClick={() => actions.create('file', node.path)}>
-                  <FilePlus2 size={12} />
-                  New file
-                </button>
-                <button onClick={() => actions.create('folder', node.path)}>
-                  <FolderPlus size={12} />
-                  New folder
-                </button>
-              </div>
-            </details>
+            <ActionMenu
+              label={`Actions for ${node.name}`}
+              icon={<MoreHorizontal size={13} />}
+              className="tree-menu-trigger"
+            >
+              {(close) => (
+                <>
+                  <ActionMenuItem
+                    onSelect={() => {
+                      actions.create('file', node.path)
+                      close()
+                    }}
+                  >
+                    <FilePlus2 size={12} />
+                    New file
+                  </ActionMenuItem>
+                  <ActionMenuItem
+                    onSelect={() => {
+                      actions.create('folder', node.path)
+                      close()
+                    }}
+                  >
+                    <FolderPlus size={12} />
+                    New folder
+                  </ActionMenuItem>
+                </>
+              )}
+            </ActionMenu>
           )}
         </div>
         {isExpanded && (
@@ -480,29 +495,53 @@ function ExplorerNodeView({ node, level }: { node: ExplorerNode; level: number }
           <span>{node.name}</span>
         </button>
       )}
-      <details className="tree-menu">
-        <summary aria-label={`Actions for ${node.name}`}>
-          <MoreHorizontal size={13} />
-        </summary>
-        <div>
-          <button onClick={() => actions.openToSide(node)}>
-            <PanelRightOpen size={12} />
-            Open to side
-          </button>
-          <button onClick={() => actions.startRename(node)}>
-            <Pencil size={12} />
-            Rename
-          </button>
-          <button onClick={() => actions.duplicate(node)}>
-            <Copy size={12} />
-            Duplicate
-          </button>
-          <button className="danger" onClick={() => actions.trash(node)}>
-            <Trash2 size={12} />
-            Move to trash
-          </button>
-        </div>
-      </details>
+      <ActionMenu
+        label={`Actions for ${node.name}`}
+        icon={<MoreHorizontal size={13} />}
+        className="tree-menu-trigger"
+      >
+        {(close) => (
+          <>
+            <ActionMenuItem
+              onSelect={() => {
+                actions.openToSide(node)
+                close()
+              }}
+            >
+              <PanelRightOpen size={12} />
+              Open in split
+            </ActionMenuItem>
+            <ActionMenuItem
+              onSelect={() => {
+                actions.startRename(node)
+                close()
+              }}
+            >
+              <Pencil size={12} />
+              Rename
+            </ActionMenuItem>
+            <ActionMenuItem
+              onSelect={() => {
+                actions.duplicate(node)
+                close()
+              }}
+            >
+              <Copy size={12} />
+              Duplicate
+            </ActionMenuItem>
+            <ActionMenuItem
+              className="danger"
+              onSelect={() => {
+                actions.trash(node)
+                close()
+              }}
+            >
+              <Trash2 size={12} />
+              Move to trash
+            </ActionMenuItem>
+          </>
+        )}
+      </ActionMenu>
     </div>
   )
 }
