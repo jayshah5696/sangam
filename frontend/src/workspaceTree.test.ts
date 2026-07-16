@@ -3,10 +3,13 @@ import type { Document, Folder } from './api'
 import {
   adjacentVisibleNodeId,
   buildWorkspaceTree,
+  ensureMarkdownExtension,
   flattenVisibleNodes,
   joinWorkspacePath,
+  parentWorkspacePath,
   parentNodeId,
   typeaheadNodeId,
+  workspaceBasename,
 } from './workspaceTree'
 
 const folder: Folder = {
@@ -40,5 +43,10 @@ describe('workspace tree model', () => {
 
   it('normalizes workspace paths', () => {
     expect(joinWorkspacePath('/projects/', '/new.md')).toBe('projects/new.md')
+    expect(parentWorkspacePath('/projects/nested/file.md/')).toBe('projects/nested')
+    expect(parentWorkspacePath('file.md')).toBe('')
+    expect(workspaceBasename('/projects/nested/file.md/')).toBe('file.md')
+    expect(ensureMarkdownExtension(' release notes ')).toBe('release notes.md')
+    expect(ensureMarkdownExtension('README.MD')).toBe('README.MD')
   })
 })

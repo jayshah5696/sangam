@@ -18,6 +18,7 @@ import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { StatusBar } from '../components/StatusBar'
+import { workspaceBasename } from '../workspaceTree'
 import { useTheme } from '../theme'
 
 type RouterContext = { queryClient: QueryClient }
@@ -272,7 +273,7 @@ function ActivitySummary({
 }
 
 function DocumentLink({ document, showPath = false }: { document: Document; showPath?: boolean }) {
-  const label = document.path?.split('/').at(-1) ?? document.title
+  const label = document.path ? workspaceBasename(document.path) : document.title
   return (
     <Link
       to="/documents/$documentId"

@@ -1,7 +1,10 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, type Document } from './api'
+import { IndexedDbDraftStorage, type DraftStorage } from './browserState/draftStorage'
 import type { EditorSelection, EditorViewState } from './components/MarkdownEditor'
+
+export type { DraftStorage } from './browserState/draftStorage'
 
 export type EditorMode = 'edit' | 'split' | 'preview'
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'failed' | 'offline'
@@ -15,19 +18,6 @@ export type DocumentSession = {
   viewState?: EditorViewState
   compareFrom?: string
   compareTo?: string
-}
-
-type DraftRecord = {
-  documentId: string
-  content: string
-  baseRevisionId?: string
-  updatedAt: number
-}
-
-export interface DraftStorage {
-  get(documentId: string): Promise<DraftRecord | undefined>
-  set(draft: DraftRecord): Promise<void>
-  delete(documentId: string): Promise<void>
 }
 
 type SessionRuntime = {
@@ -49,6 +39,17 @@ type StoreOptions = {
 }
 
 const initialSelection: EditorSelection = { line: 1, column: 1, selectedCharacters: 0 }
+
+export function deriveSaveState(
+  content: string | undefined,
+  savedContent: string,
+  previous: SaveState,
+  online: boolean,
+): SaveState {
+  if (content === savedContent) return 'saved'
+  if (previous === 'conflict') return 'conflict'
+  return online ? 'dirty' : 'offline'
+}
 
 export class DocumentSessionStore {
   private readonly sessions = new Map<string, DocumentSession>()
@@ -134,14 +135,7 @@ export class DocumentSessionStore {
     if (patch.content !== undefined && runtime && patch.saveState === undefined) {
       next = {
         ...next,
-        saveState:
-          patch.content === runtime.savedContent
-            ? 'saved'
-            : current.saveState === 'conflict'
-              ? 'conflict'
-              : this.online
-                ? 'dirty'
-                : 'offline',
+        saveState: deriveSaveState(patch.content, runtime.savedContent, current.saveState, this.online),
       }
     }
     this.setSession(documentId, next)
@@ -174,7 +168,7 @@ export class DocumentSessionStore {
       ...current,
       content,
       baseRevisionId: document.current_revision_id,
-      saveState: content === document.content ? 'saved' : this.online ? 'dirty' : 'offline',
+      saveState: deriveSaveState(content, document.content, current.saveState, this.online),
     })
     if (content === document.content) void this.options.storage.delete(documentId)
     else {
@@ -248,7 +242,7 @@ export class DocumentSessionStore {
       this.setSession(documentId, {
         ...current,
         baseRevisionId: savedDocument.current_revision_id,
-        saveState: isCurrent ? 'saved' : this.online ? 'dirty' : 'offline',
+        saveState: deriveSaveState(current.content, runtime.savedContent, current.saveState, this.online),
       })
       if (isCurrent) void this.options.storage.delete(documentId)
       else this.scheduleDraftPersistence(documentId)
@@ -293,85 +287,20 @@ export class DocumentSessionStore {
   }
 }
 
-const databaseName = 'sangam-browser-state'
-const storeName = 'document-drafts'
-const migrationKey = 'sangam.document-drafts.migration.v1'
-
-export class IndexedDbDraftStorage implements DraftStorage {
-  async get(documentId: string) {
-    const migrated = this.readMigrated(documentId)
-    if (migrated) {
-      await this.set(migrated)
-      this.removeMigrated(documentId)
-      return migrated
-    }
-    return this.request<DraftRecord | undefined>('readonly', (store) => store.get(documentId))
-  }
-
-  async set(draft: DraftRecord) {
-    await this.request('readwrite', (store) => store.put(draft))
-  }
-
-  async delete(documentId: string) {
-    await this.request('readwrite', (store) => store.delete(documentId))
-    this.removeMigrated(documentId)
-  }
-
-  private async request<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>) {
-    const database = await openDraftDatabase()
-    return new Promise<T>((resolve, reject) => {
-      const transaction = database.transaction(storeName, mode)
-      const request = operation(transaction.objectStore(storeName))
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error ?? new Error('Browser draft storage failed.'))
-    })
-  }
-
-  private readMigrated(documentId: string): DraftRecord | undefined {
-    try {
-      const drafts = JSON.parse(localStorage.getItem(migrationKey) ?? '{}') as Record<string, DraftRecord>
-      return drafts[documentId]
-    } catch {
-      return undefined
-    }
-  }
-
-  private removeMigrated(documentId: string) {
-    try {
-      const drafts = JSON.parse(localStorage.getItem(migrationKey) ?? '{}') as Record<string, DraftRecord>
-      delete drafts[documentId]
-      if (Object.keys(drafts).length === 0) localStorage.removeItem(migrationKey)
-      else localStorage.setItem(migrationKey, JSON.stringify(drafts))
-    } catch {
-      localStorage.removeItem(migrationKey)
-    }
-  }
-}
-
-let databasePromise: Promise<IDBDatabase> | undefined
-
-function openDraftDatabase() {
-  databasePromise ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(databaseName, 1)
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(storeName)) {
-        request.result.createObjectStore(storeName, { keyPath: 'documentId' })
-      }
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('Browser draft storage could not be opened.'))
-  })
-  return databasePromise
-}
-
 const DocumentSessionsContext = createContext<DocumentSessionStore | null>(null)
 
-export function DocumentSessionsProvider({ children }: { children: ReactNode }) {
+export function DocumentSessionsProvider({
+  children,
+  storage,
+}: {
+  children: ReactNode
+  storage?: DraftStorage
+}) {
   const queryClient = useQueryClient()
   const [store] = useState(
     () =>
       new DocumentSessionStore({
-        storage: new IndexedDbDraftStorage(),
+        storage: storage ?? new IndexedDbDraftStorage(),
         saveDocument: api.updateDocument,
         isOnline: () => navigator.onLine,
         onSaved: (document) => {
@@ -404,11 +333,17 @@ export function useDocumentSessions() {
   return store
 }
 
-export function useDocumentSession(documentId: string) {
+const subscribeToNothing = () => () => undefined
+const getNoSession = () => null
+
+export function useDocumentSession(documentId: string): DocumentSession
+export function useDocumentSession(documentId: null): null
+export function useDocumentSession(documentId: string | null): DocumentSession | null
+export function useDocumentSession(documentId: string | null) {
   const store = useDocumentSessions()
   return useSyncExternalStore(
-    (listener) => store.subscribe(documentId, listener),
-    () => store.getSession(documentId),
-    () => store.getSession(documentId),
+    documentId ? (listener) => store.subscribe(documentId, listener) : subscribeToNothing,
+    documentId ? () => store.getSession(documentId) : getNoSession,
+    documentId ? () => store.getSession(documentId) : getNoSession,
   )
 }

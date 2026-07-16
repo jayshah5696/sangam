@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Document } from './api'
-import { DocumentSessionStore, type DraftStorage } from './documentSessions'
+import { deriveSaveState, DocumentSessionStore, type DraftStorage } from './documentSessions'
 
 function documentAt(revision: string, content: string): Document {
   return {
@@ -50,6 +50,13 @@ function memoryStorage() {
 afterEach(() => vi.useRealTimers())
 
 describe('document session autosave', () => {
+  it('derives save state from content, conflict, and connectivity without branching drift', () => {
+    expect(deriveSaveState('saved', 'saved', 'failed', false)).toBe('saved')
+    expect(deriveSaveState('changed', 'saved', 'conflict', true)).toBe('conflict')
+    expect(deriveSaveState('changed', 'saved', 'saved', true)).toBe('dirty')
+    expect(deriveSaveState('changed', 'saved', 'failed', false)).toBe('offline')
+  })
+
   it('never lets an older save response replace newer editor content', async () => {
     vi.useFakeTimers()
     const { storage } = memoryStorage()

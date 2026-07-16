@@ -34,7 +34,7 @@ export function buildWorkspaceTree(documents: Document[], folders: WorkspaceFold
   }
   const roots: ExplorerNode[] = []
   for (const folder of folderNodes.values()) {
-    const parentPath = parentPathOf(folder.path)
+    const parentPath = parentWorkspacePath(folder.path)
     const parent = folderNodes.get(parentPath)
     if (parent) parent.children.push(folder)
     else roots.push(folder)
@@ -44,7 +44,7 @@ export function buildWorkspaceTree(documents: Document[], folders: WorkspaceFold
     const node: ExplorerDocument = {
       type: 'document',
       id: `document:${document.document_id}`,
-      name: document.path?.split('/').at(-1) ?? document.title,
+      name: document.path ? workspaceBasename(document.path) : document.title,
       path: document.path,
       document,
     }
@@ -52,7 +52,7 @@ export function buildWorkspaceTree(documents: Document[], folders: WorkspaceFold
       drafts.push(node)
       continue
     }
-    const parent = folderNodes.get(parentPathOf(document.path))
+    const parent = folderNodes.get(parentWorkspacePath(document.path))
     if (parent) parent.children.push(node)
     else roots.push(node)
   }
@@ -123,8 +123,19 @@ export function joinWorkspacePath(parent: string, child: string) {
   return [parent.replace(/^\/+|\/+$/g, ''), child.replace(/^\/+|\/+$/g, '')].filter(Boolean).join('/')
 }
 
-function parentPathOf(path: string) {
-  return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+export function parentWorkspacePath(path: string) {
+  const normalized = path.replace(/^\/+|\/+$/g, '')
+  return normalized.includes('/') ? normalized.slice(0, normalized.lastIndexOf('/')) : ''
+}
+
+export function workspaceBasename(path: string) {
+  const normalized = path.replace(/\/+$/g, '')
+  return normalized.slice(normalized.lastIndexOf('/') + 1)
+}
+
+export function ensureMarkdownExtension(name: string) {
+  const normalized = name.trim()
+  return normalized.toLowerCase().endsWith('.md') ? normalized : `${normalized}.md`
 }
 
 function sortNodes(nodes: ExplorerNode[]) {

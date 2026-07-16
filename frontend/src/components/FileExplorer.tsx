@@ -26,14 +26,17 @@ import {
   Trash2,
 } from 'lucide-react'
 import { api, type Document } from '../api'
-import { useWorkbench } from '../workbench'
+import { findGroup, useWorkbench } from '../workbench'
 import {
   adjacentVisibleNodeId,
   buildWorkspaceTree,
+  ensureMarkdownExtension,
   flattenVisibleNodes,
   joinWorkspacePath,
+  parentWorkspacePath,
   parentNodeId,
   typeaheadNodeId,
+  workspaceBasename,
   type ExplorerDocument,
   type ExplorerNode,
 } from '../workspaceTree'
@@ -67,10 +70,22 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const activeDocumentId = findGroup(workbench.root, workbench.activeGroupId)?.activeTabId
   const documents = useQuery({ queryKey: ['documents', 'explorer'], queryFn: api.listDocuments })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
   const [expanded, setExpanded] = useState<Set<string>>(loadExpanded)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selection, setSelection] = useState<{
+    activeDocumentId: string | null | undefined
+    selectedId: string | null
+  }>({ activeDocumentId, selectedId: activeDocumentId ? `document:${activeDocumentId}` : null })
+  const selectedId =
+    selection.activeDocumentId === activeDocumentId
+      ? selection.selectedId
+      : activeDocumentId
+        ? `document:${activeDocumentId}`
+        : selection.selectedId
+  const setSelectedId = (nextSelectedId: string | null) =>
+    setSelection({ activeDocumentId, selectedId: nextSelectedId })
   const [createMode, setCreateMode] = useState<CreateMode>(null)
   const [createName, setCreateName] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -84,11 +99,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const flatNodes = useMemo(() => flattenVisibleNodes(tree, expanded), [tree, expanded])
   const selected = flatNodes.find((node) => node.id === selectedId)
   const selectedFolderPath =
-    selected?.type === 'folder'
-      ? selected.path
-      : selected?.path?.includes('/')
-        ? selected.path.slice(0, selected.path.lastIndexOf('/'))
-        : ''
+    selected?.type === 'folder' ? selected.path : selected?.path ? parentWorkspacePath(selected.path) : ''
 
   useEffect(() => localStorage.setItem(expandedStorageKey, JSON.stringify([...expanded])), [expanded])
 
@@ -103,7 +114,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     mutationFn: async ({ mode, name }: { mode: Exclude<CreateMode, null>; name: string }) => {
       if (mode.kind === 'folder')
         return { folder: await api.createFolder(joinWorkspacePath(mode.parentPath, name)) }
-      const filename = name.toLowerCase().endsWith('.md') ? name : `${name}.md`
+      const filename = ensureMarkdownExtension(name)
       const title = name.replace(/\.md$/i, '').trim() || 'Untitled document'
       return { document: await api.createDocument(title, joinWorkspacePath(mode.parentPath, filename)) }
     },
@@ -114,7 +125,11 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       await refresh()
       if (result.folder) setExpanded((current) => new Set(current).add(result.folder!.path))
       if (result.document) {
-        workbench.openDocument(result.document.document_id, result.document.title, workbench.activeGroupId)
+        workbench.ensureDocumentOpen(
+          result.document.document_id,
+          result.document.title,
+          workbench.activeGroupId,
+        )
         await navigate({ to: '/documents/$documentId', params: { documentId: result.document.document_id } })
       }
     },
@@ -124,10 +139,8 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const rename = useMutation({
     mutationFn: async ({ node, value }: { node: ExplorerDocument; value: string }) => {
       if (node.document.path) {
-        const parent = node.document.path.includes('/')
-          ? node.document.path.slice(0, node.document.path.lastIndexOf('/'))
-          : ''
-        const filename = value.toLowerCase().endsWith('.md') ? value : `${value}.md`
+        const parent = parentWorkspacePath(node.document.path)
+        const filename = ensureMarkdownExtension(value)
         return api.moveDocument(node.document, joinWorkspacePath(parent, filename))
       }
       return api.updateDocument(node.document, node.document.content, value)
@@ -145,7 +158,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     mutationFn: (document: Document) => api.duplicateDocument(document),
     onSuccess: async (created) => {
       await refresh()
-      workbench.openDocument(created.document_id, created.title, workbench.activeGroupId)
+      workbench.ensureDocumentOpen(created.document_id, created.title, workbench.activeGroupId)
       await navigate({ to: '/documents/$documentId', params: { documentId: created.document_id } })
     },
     onError: (cause) =>
@@ -162,13 +175,13 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const move = useMutation({
     mutationFn: ({ document, folderPath }: { document: Document; folderPath: string }) => {
       if (!document.path) throw new Error('Save this draft to the workspace before moving it.')
-      const filename = document.path.split('/').at(-1)!
+      const filename = workspaceBasename(document.path)
       return api.moveDocument(document, joinWorkspacePath(folderPath, filename))
     },
     onMutate: async ({ document, folderPath }) => {
       await queryClient.cancelQueries({ queryKey: ['documents', 'explorer'] })
       const previous = queryClient.getQueryData<Document[]>(['documents', 'explorer'])
-      const filename = document.path?.split('/').at(-1)
+      const filename = document.path ? workspaceBasename(document.path) : undefined
       if (filename)
         queryClient.setQueryData<Document[]>(['documents', 'explorer'], (current) =>
           current?.map((candidate) =>
@@ -188,7 +201,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
 
   const openDocument = async (node: ExplorerDocument, toSide = false) => {
     if (toSide) workbench.splitGroup(workbench.activeGroupId, 'horizontal', node.document.document_id)
-    else workbench.openDocument(node.document.document_id, node.document.title, workbench.activeGroupId)
+    else workbench.ensureDocumentOpen(node.document.document_id, node.document.title, workbench.activeGroupId)
     await navigate({ to: '/documents/$documentId', params: { documentId: node.document.document_id } })
   }
 

@@ -55,6 +55,14 @@ export function ensureDocumentOpen(
     requestedGroupId ??
     (active?.tabs.some((tab) => tab.documentId === documentId) ? active.id : existing?.id) ??
     state.activeGroupId
+  const target = findGroup(state.root, groupId)
+  if (
+    target?.activeTabId === documentId &&
+    target.tabs.some((tab) => tab.documentId === documentId) &&
+    state.activeGroupId === groupId
+  ) {
+    return state
+  }
   return {
     ...state,
     root: updateGroup(state.root, groupId, (group) => {

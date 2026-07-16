@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { DebouncedStorageWriter } from './browserState/debouncedStorage'
+import { workbenchStorageKey } from './browserState/legacyDraftMigration'
 import {
   activateTab as activateTabInLayout,
   closeGroup as closeGroupInLayout,
@@ -21,7 +23,6 @@ import {
 export type { GroupNode, LayoutNode, SplitDirection, WorkbenchTab } from './workbenchLayout'
 
 type WorkbenchContextValue = WorkbenchLayoutState & {
-  openDocument: (documentId: string, title?: string, groupId?: string) => void
   ensureDocumentOpen: (documentId: string, title?: string, groupId?: string) => void
   activateTab: (groupId: string, documentId: string) => void
   closeTab: (groupId: string, documentId: string) => void
@@ -36,42 +37,16 @@ type WorkbenchContextValue = WorkbenchLayoutState & {
   resetLayout: () => void
 }
 
-const storageKey = 'sangam.workbench.v1'
-
 function defaultState(): WorkbenchLayoutState {
   return createDefaultLayoutState(crypto.randomUUID())
 }
 
 function loadState(): WorkbenchLayoutState {
   try {
-    const value = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as
-      | (Partial<WorkbenchLayoutState> & {
-          sessions?: Record<string, { content?: string; baseRevisionId?: string }>
-        })
-      | null
+    const value = JSON.parse(
+      localStorage.getItem(workbenchStorageKey) ?? 'null',
+    ) as Partial<WorkbenchLayoutState> | null
     if (!value?.root || !isLayoutNode(value.root)) return defaultState()
-    const legacyDrafts = Object.fromEntries(
-      Object.entries(value.sessions ?? {})
-        .filter(
-          (entry): entry is [string, { content: string; baseRevisionId?: string }] =>
-            typeof entry[1].content === 'string',
-        )
-        .map(([documentId, session]) => [
-          documentId,
-          {
-            documentId,
-            content: session.content,
-            baseRevisionId: session.baseRevisionId,
-            updatedAt: Date.now(),
-          },
-        ]),
-    )
-    if (
-      Object.keys(legacyDrafts).length > 0 &&
-      !localStorage.getItem('sangam.document-drafts.migration.v1')
-    ) {
-      localStorage.setItem('sangam.document-drafts.migration.v1', JSON.stringify(legacyDrafts))
-    }
     const groups = collectGroups(value.root)
     const activeGroupId = groups.some((group) => group.id === value.activeGroupId)
       ? value.activeGroupId!
@@ -90,15 +65,28 @@ const WorkbenchContext = createContext<WorkbenchContextValue | null>(null)
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(loadState)
+  const [storageWriter] = useState(
+    () => new DebouncedStorageWriter<WorkbenchLayoutState>(localStorage, workbenchStorageKey),
+  )
 
-  useEffect(() => localStorage.setItem(storageKey, JSON.stringify(state)), [state])
+  useEffect(() => storageWriter.schedule(state), [state, storageWriter])
+  useEffect(() => {
+    const flush = () => storageWriter.flush()
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', flushWhenHidden)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', flushWhenHidden)
+      storageWriter.dispose()
+    }
+  }, [storageWriter])
 
   const value = useMemo<WorkbenchContextValue>(
     () => ({
       ...state,
-      openDocument(documentId, title, groupId) {
-        setState((current) => ensureDocumentOpenInLayout(current, documentId, title, groupId))
-      },
       ensureDocumentOpen(documentId, title, groupId) {
         setState((current) => ensureDocumentOpenInLayout(current, documentId, title, groupId))
       },

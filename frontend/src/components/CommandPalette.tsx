@@ -38,7 +38,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
     mutationFn: () => api.createDocument('Untitled document'),
     onSuccess: async (document) => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
-      workbench.openDocument(document.document_id, document.title, workbench.activeGroupId)
+      workbench.ensureDocumentOpen(document.document_id, document.title, workbench.activeGroupId)
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
     },
   })

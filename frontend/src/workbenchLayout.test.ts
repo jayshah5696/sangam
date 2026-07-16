@@ -17,6 +17,7 @@ describe('workbench layout', () => {
     expect(collectGroups(initial.root)).toHaveLength(1)
 
     const opened = ensureDocumentOpen(initial, 'doc-1', 'First')
+    expect(ensureDocumentOpen(opened, 'doc-1', 'First')).toBe(opened)
     const split = splitGroup(opened, 'group-1', 'horizontal', 'split-1', 'group-2')
     expect(collectGroups(split.root).map((group) => group.id)).toEqual(['group-1', 'group-2'])
     expect(split.root).toMatchObject({ kind: 'split', id: 'split-1', direction: 'horizontal', ratio: 50 })

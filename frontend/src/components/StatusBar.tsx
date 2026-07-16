@@ -7,7 +7,7 @@ export function StatusBar() {
   const workbench = useWorkbench()
   const activeGroup = findGroup(workbench.root, workbench.activeGroupId)
   const documentId = activeGroup?.activeTabId
-  const session = useDocumentSession(documentId ?? '')
+  const session = useDocumentSession(documentId ?? null)
   const documentQuery = useQuery({
     queryKey: ['document', documentId],
     queryFn: () => api.getDocument(documentId!),
@@ -18,8 +18,8 @@ export function StatusBar() {
     queryFn: api.reconciliation,
     staleTime: 30_000,
   })
-  const state = documentId ? session.saveState : 'ready'
-  const selection = documentId ? session.selection : undefined
+  const state = session?.saveState ?? 'ready'
+  const selection = session?.selection
   return (
     <footer className={`workbench-status ${state}`} aria-label="Workspace status">
       <div>
