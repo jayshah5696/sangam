@@ -64,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     backups = services.backups
     workspace = services.workspace_access
     identity = services.identity
+    authentication = services.authentication
     activity = services.activity
     authorization = services.authorization
 
@@ -112,18 +113,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         authorization_header: str | None = Header(default=None, alias="Authorization"),
     ) -> Principal:
-        operation_id = request.state.operation_id
-        if authorization_header:
-            scheme, separator, credential = authorization_header.partition(" ")
-            if not separator or scheme.casefold() != "bearer" or not credential:
-                raise AuthenticationError("Authorization must use a Bearer token")
-            return identity.authenticate(credential, operation_id=operation_id)
-        if resolved_settings.auth_mode == "single_user":
-            return Principal.trusted_human(operation_id=operation_id)
-        asserted_identity = request.headers.get(resolved_settings.trusted_identity_header)
-        if asserted_identity != resolved_settings.trusted_identity_value:
-            raise AuthenticationError("A trusted human identity assertion is required")
-        return Principal.trusted_human(operation_id=operation_id)
+        return authentication.resolve(
+            authorization_header=authorization_header,
+            trusted_identity_assertion=request.headers.get(
+                resolved_settings.trusted_identity_header
+            ),
+            operation_id=request.state.operation_id,
+        )
 
     principal_dependency = Depends(resolve_principal)
 

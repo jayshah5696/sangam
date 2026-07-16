@@ -209,6 +209,24 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   return payload
 }
 
+const PAGE_SIZE = 200
+const MAX_PAGES = 50
+
+export async function collectPages<T>(
+  loadPage: (offset: number, limit: number) => Promise<T[]>,
+  pageSize = PAGE_SIZE,
+  maxPages = MAX_PAGES,
+): Promise<T[]> {
+  if (pageSize < 1 || maxPages < 1) throw new Error('Pagination bounds must be positive')
+  const items: T[] = []
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const page = await loadPage(pageIndex * pageSize, pageSize)
+    items.push(...page)
+    if (page.length < pageSize) return items
+  }
+  throw new Error(`Pagination exceeded the safety limit of ${maxPages * pageSize} items`)
+}
+
 export const api = {
   async listAgentTokens(): Promise<AgentToken[]> {
     return z.array(agentTokenSchema).parse(await request('/agent-tokens'))
@@ -237,26 +255,16 @@ export const api = {
     return z.array(operationEventSchema).parse(await request(`/activity?${params.toString()}`))
   },
   async listDocuments(): Promise<DocumentSummary[]> {
-    const documents: DocumentSummary[] = []
-    const limit = 200
-    for (let offset = 0; ; offset += limit) {
-      const page = z
-        .array(documentSummarySchema)
-        .parse(await request(`/documents?limit=${limit}&offset=${offset}`))
-      documents.push(...page)
-      if (page.length < limit) return documents
-    }
+    return collectPages(async (offset, limit) =>
+      z.array(documentSummarySchema).parse(await request(`/documents?limit=${limit}&offset=${offset}`)),
+    )
   },
   async listDeletedDocuments(): Promise<DocumentSummary[]> {
-    const documents: DocumentSummary[] = []
-    const limit = 200
-    for (let offset = 0; ; offset += limit) {
-      const page = z
+    const documents = await collectPages(async (offset, limit) =>
+      z
         .array(documentSummarySchema)
-        .parse(await request(`/documents?include_deleted=true&limit=${limit}&offset=${offset}`))
-      documents.push(...page)
-      if (page.length < limit) break
-    }
+        .parse(await request(`/documents?include_deleted=true&limit=${limit}&offset=${offset}`)),
+    )
     return documents.filter((document) => document.deleted)
   },
   async searchDocuments(
@@ -268,7 +276,12 @@ export const api = {
     if (query.trim()) params.set('q', query.trim())
     if (tagId) params.set('tag_id', tagId)
     params.set('sort', sort)
-    return z.array(documentSummarySchema).parse(await request(`/search?${params.toString()}`))
+    return collectPages(async (offset, limit) => {
+      const pageParams = new URLSearchParams(params)
+      pageParams.set('limit', String(limit))
+      pageParams.set('offset', String(offset))
+      return z.array(documentSummarySchema).parse(await request(`/search?${pageParams.toString()}`))
+    })
   },
   async listTags(): Promise<Tag[]> {
     return z.array(tagSchema).parse(await request('/tags'))

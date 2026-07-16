@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from sangam.api import create_app
@@ -13,6 +14,7 @@ def issue_token(
     client: TestClient,
     *,
     actor_id: str = "agent:researcher",
+    display_name: str = "Researcher",
     scopes: list[dict[str, str | None]] | None = None,
     trusted_headers: dict[str, str] | None = None,
 ) -> dict[str, object]:
@@ -21,7 +23,7 @@ def issue_token(
         headers=trusted_headers,
         json={
             "actor_id": actor_id,
-            "display_name": "Researcher",
+            "display_name": display_name,
             "label": "Phase 3 test",
             "scopes": scopes
             or [
@@ -85,6 +87,9 @@ def test_token_secret_is_one_time_hashed_revocable_and_rotatable(
     assert authenticated.headers["X-Operation-ID"]
     refreshed = client.get("/api/v1/agent-tokens").json()[0]
     assert refreshed["last_used_at"] is not None
+    assert client.get("/api/v1/documents", headers=bearer(token)).status_code == 200
+    throttled = client.get("/api/v1/agent-tokens").json()[0]
+    assert throttled["last_used_at"] == refreshed["last_used_at"]
 
     rotated = client.post(f"/api/v1/agent-tokens/{token_id}/rotate")
     assert rotated.status_code == 200
@@ -103,6 +108,45 @@ def test_token_secret_is_one_time_hashed_revocable_and_rotatable(
     repeated_rotation = client.post(f"/api/v1/agent-tokens/{replacement['token_id']}/rotate")
     assert repeated_rotation.status_code == 409
     assert repeated_rotation.json()["error"]["code"] == "credential_conflict"
+
+
+def test_token_listing_bulk_loads_scopes_and_agent_names_are_immutable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    issue_token(client)
+    issue_token(client, actor_id="agent:planner", display_name="Planner")
+    database = client.app.state.services.identity.database
+    statements: list[str] = []
+    original_connect = database.connect
+
+    def traced_connect():
+        connection = original_connect()
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(database, "connect", traced_connect)
+    tokens = client.app.state.services.identity.list_tokens()
+    assert len(tokens) == 2
+    assert sum("FROM token_scopes" in statement for statement in statements) == 1
+
+    conflicting_name = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:researcher",
+            "display_name": "Renamed by credential",
+            "label": "Must fail",
+            "scopes": [{"capability": "read", "path_prefix": None}],
+        },
+    )
+    assert conflicting_name.status_code == 409
+    assert conflicting_name.json()["error"] == {
+        "code": "credential_conflict",
+        "message": "That agent ID already has a different display name",
+        "details": {"actor_id": "agent:researcher"},
+    }
+    actors = client.get("/api/v1/actors").json()
+    researcher = next(actor for actor in actors if actor["actor_id"] == "agent:researcher")
+    assert researcher["display_name"] == "Researcher"
 
 
 def test_agent_scope_enforcement_conflict_and_reviewable_activity(client: TestClient) -> None:
@@ -275,6 +319,58 @@ def test_path_scoped_reads_filter_lists_search_and_unmaterialized_documents(
     assert client.get("/api/v1/tags", headers=bearer(token)).status_code == 403
 
 
+def test_scoped_filters_run_before_pagination_and_intersect_search_authority(
+    client: TestClient,
+) -> None:
+    documents = {
+        path: create_human_document(client, title="Needle", path=path, key=f"page-{index}")
+        for index, path in enumerate(
+            (
+                "agents/one.md",
+                "projects/private-one.md",
+                "agents/research/two.md",
+                "agents-private/not-visible.md",
+                "agents/other/three.md",
+                "projects/private-two.md",
+            )
+        )
+    }
+    issued = issue_token(
+        client,
+        actor_id="agent:paginator",
+        display_name="Paginator",
+        scopes=[
+            {"capability": "read", "path_prefix": "agents"},
+            {"capability": "search", "path_prefix": "agents/research"},
+        ],
+    )
+    token_headers = bearer(issued["token"])
+
+    first_page = client.get(
+        "/api/v1/documents", headers=token_headers, params={"limit": 2, "offset": 0}
+    ).json()
+    second_page = client.get(
+        "/api/v1/documents", headers=token_headers, params={"limit": 2, "offset": 2}
+    ).json()
+    listed_ids = {document["document_id"] for document in first_page + second_page}
+    assert len(first_page) == 2
+    assert listed_ids == {
+        documents["agents/one.md"]["document_id"],
+        documents["agents/research/two.md"]["document_id"],
+        documents["agents/other/three.md"]["document_id"],
+    }
+
+    searched = client.get(
+        "/api/v1/search",
+        headers=token_headers,
+        params={"q": "Needle", "limit": 1, "offset": 0},
+    )
+    assert searched.status_code == 200
+    assert [document["document_id"] for document in searched.json()] == [
+        documents["agents/research/two.md"]["document_id"]
+    ]
+
+
 def test_trusted_proxy_mode_rejects_spoofed_actor_and_agent_admin_access(
     tmp_path: Path,
 ) -> None:
@@ -287,12 +383,21 @@ def test_trusted_proxy_mode_rejects_spoofed_actor_and_agent_admin_access(
         auth_mode="trusted_proxy",
         trusted_identity_header="X-Test-Identity",
         trusted_identity_value="jay@example.com",
+        trusted_human_actor_id="human:proxy",
+        trusted_human_display_name="Proxy Jay",
     )
     trusted = {"X-Test-Identity": "jay@example.com"}
     with TestClient(create_app(settings)) as client:
         assert client.get("/api/v1/documents").status_code == 401
         assert client.get("/api/v1/documents", headers={"X-Actor": "human:jay"}).status_code == 401
         assert client.get("/api/v1/documents", headers=trusted).status_code == 200
+        created = client.post(
+            "/api/v1/documents",
+            headers={**trusted, "Idempotency-Key": "trusted-create"},
+            json={"title": "Trusted", "content": "# Trusted\n"},
+        )
+        assert created.status_code == 201
+        assert created.json()["created_by"] == "human:proxy"
         issued = issue_token(client, trusted_headers=trusted)
         agent_admin = client.get("/api/v1/agent-tokens", headers=bearer(issued["token"]))
         assert agent_admin.status_code == 403

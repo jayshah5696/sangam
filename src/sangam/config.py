@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     auth_mode: Literal["single_user", "trusted_proxy"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"
     trusted_identity_value: str = "human:jay"
+    trusted_human_actor_id: str = Field(
+        default="human:jay", pattern=r"^human:[a-z0-9][a-z0-9._-]{1,63}$"
+    )
+    trusted_human_display_name: str = Field(default="Jay", min_length=1, max_length=120)
 
     def prepare(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)

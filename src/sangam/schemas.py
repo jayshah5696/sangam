@@ -4,31 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class Document(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    document_id: str
-    title: str
-    content_type: Literal["text/markdown"]
-    path: str | None
-    current_revision_id: str
-    content: str
-    content_hash: str
-    size_bytes: int
-    materialization_state: Literal["none", "pending", "clean", "conflict"]
-    file_hash: str | None
-    deleted: bool
-    created_by: str
-    created_at: str
-    updated_at: str
-    updated_by: str
-    updated_by_name: str
-    revision_summary: str | None
-    category: str | None
-    metadata_version: int
-    tags: list[Tag] = Field(default_factory=list)
-    search_snippet: str | None = None
+from sangam.capabilities import Capability
 
 
 class Tag(BaseModel):
@@ -39,6 +15,8 @@ class Tag(BaseModel):
 
 
 class DocumentSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     document_id: str
     title: str
     content_type: Literal["text/markdown"]
@@ -59,6 +37,10 @@ class DocumentSummary(BaseModel):
     metadata_version: int
     tags: list[Tag] = Field(default_factory=list)
     search_snippet: str | None = None
+
+
+class Document(DocumentSummary):
+    content: str
 
 
 class Folder(BaseModel):
@@ -206,9 +188,6 @@ class ErrorBody(BaseModel):
     code: str
     message: str
     details: dict[str, object] = Field(default_factory=dict)
-
-
-Capability = Literal["read", "search", "create", "update", "move", "tag", "restore", "delete"]
 
 
 class TokenScope(BaseModel):

@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import re
 import secrets
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
+from typing import Literal
 
+from sangam.capabilities import Capability
 from sangam.db import Database, utc_now
 from sangam.errors import (
     AuthenticationError,
@@ -20,16 +22,7 @@ from sangam.errors import (
 )
 from sangam.schemas import Actor, AgentToken, IssuedAgentToken, TokenScope
 
-
-class Capability(StrEnum):
-    READ = "read"
-    SEARCH = "search"
-    CREATE = "create"
-    UPDATE = "update"
-    MOVE = "move"
-    TAG = "tag"
-    RESTORE = "restore"
-    DELETE = "delete"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -49,10 +42,10 @@ class Principal:
     administrator: bool = False
 
     @classmethod
-    def trusted_human(cls, *, operation_id: str) -> Principal:
+    def trusted_human(cls, *, actor_id: str, display_name: str, operation_id: str) -> Principal:
         return cls(
-            actor_id="human:jay",
-            display_name="Jay",
+            actor_id=actor_id,
+            display_name=display_name,
             identity_kind="human",
             operation_id=operation_id,
             administrator=True,
@@ -84,6 +77,7 @@ class IdentityService:
     """Owns persistent actors and one-time bearer-token issuance."""
 
     _agent_id = re.compile(r"^agent:[a-z0-9][a-z0-9._-]{1,63}$")
+    _last_used_interval = timedelta(minutes=5)
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -106,7 +100,23 @@ class IdentityService:
                 ORDER BY t.created_at DESC, t.token_id DESC
                 """
             ).fetchall()
-            return [self._token_from_row(connection, row) for row in rows]
+            scope_rows = connection.execute(
+                """
+                SELECT token_id, capability, path_prefix FROM token_scopes
+                ORDER BY token_id, capability, path_prefix
+                """
+            ).fetchall()
+            scopes_by_token: dict[str, list[sqlite3.Row]] = {}
+            for scope in scope_rows:
+                scopes_by_token.setdefault(scope["token_id"], []).append(scope)
+            return [
+                self._token_from_row(
+                    connection,
+                    row,
+                    scopes=scopes_by_token.get(row["token_id"], []),
+                )
+                for row in rows
+            ]
 
     def issue_agent_token(
         self,
@@ -134,16 +144,22 @@ class IdentityService:
         now = utc_now()
         with self.database.transaction() as connection:
             existing = connection.execute(
-                "SELECT identity_kind FROM actors WHERE actor_id = ?", (normalized_actor_id,)
+                "SELECT identity_kind, display_name FROM actors WHERE actor_id = ?",
+                (normalized_actor_id,),
             ).fetchone()
             if existing and existing["identity_kind"] != "agent":
                 raise ValidationError("That actor ID belongs to a non-agent identity")
+            if existing and existing["display_name"] != normalized_name:
+                raise CredentialConflictError(
+                    "That agent ID already has a different display name",
+                    details={"actor_id": normalized_actor_id},
+                )
             connection.execute(
                 """
                 INSERT INTO actors(
                     actor_id, display_name, actor_type, created_at, identity_kind
                 ) VALUES (?, ?, 'client', ?, 'agent')
-                ON CONFLICT(actor_id) DO UPDATE SET display_name = excluded.display_name
+                ON CONFLICT(actor_id) DO NOTHING
                 """,
                 (normalized_actor_id, normalized_name, now),
             )
@@ -246,7 +262,8 @@ class IdentityService:
 
     def authenticate(self, raw_token: str, *, operation_id: str) -> Principal:
         token_id = self._parse_token_id(raw_token)
-        with self.database.transaction() as connection:
+        now = datetime.now(UTC)
+        with self.database.connection() as connection:
             row = connection.execute(
                 """
                 SELECT t.*, a.display_name, a.identity_kind
@@ -261,17 +278,17 @@ class IdentityService:
                 raise AuthenticationError("The bearer token is invalid")
             if row["revoked_at"] is not None:
                 raise AuthenticationError("The bearer token has been revoked")
-            if row["expires_at"] is not None and self._parse_timestamp(
-                row["expires_at"]
-            ) <= datetime.now(UTC):
+            if row["expires_at"] is not None and self._parse_timestamp(row["expires_at"]) <= now:
                 raise AuthenticationError("The bearer token has expired")
             scope_rows = connection.execute(
                 "SELECT capability, path_prefix FROM token_scopes WHERE token_id = ?",
                 (token_id,),
             ).fetchall()
-            connection.execute(
-                "UPDATE actor_tokens SET last_used_at = ? WHERE token_id = ?", (utc_now(), token_id)
-            )
+        last_used_at = row["last_used_at"]
+        if last_used_at is None or self._parse_timestamp(last_used_at) <= (
+            now - self._last_used_interval
+        ):
+            self._touch_last_used(token_id, now=now)
         return Principal(
             actor_id=row["actor_id"],
             display_name=row["display_name"],
@@ -286,6 +303,22 @@ class IdentityService:
                 for scope in scope_rows
             ),
         )
+
+    def _touch_last_used(self, token_id: str, *, now: datetime) -> None:
+        timestamp = now.isoformat(timespec="microseconds")
+        cutoff = (now - self._last_used_interval).isoformat(timespec="microseconds")
+        try:
+            with self.database.connection() as connection:
+                connection.execute(
+                    """
+                    UPDATE actor_tokens SET last_used_at = ?
+                    WHERE token_id = ? AND revoked_at IS NULL
+                        AND (last_used_at IS NULL OR last_used_at <= ?)
+                    """,
+                    (timestamp, token_id, cutoff),
+                )
+        except sqlite3.OperationalError:
+            logger.warning("Could not update agent-token last-use telemetry", exc_info=True)
 
     @staticmethod
     def _parse_token_id(raw_token: str) -> str:
@@ -327,14 +360,20 @@ class IdentityService:
         )
 
     @staticmethod
-    def _token_from_row(connection: sqlite3.Connection, row: sqlite3.Row) -> AgentToken:
-        scopes = connection.execute(
-            """
-            SELECT capability, path_prefix FROM token_scopes
-            WHERE token_id = ? ORDER BY capability, path_prefix
-            """,
-            (row["token_id"],),
-        ).fetchall()
+    def _token_from_row(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        scopes: list[sqlite3.Row] | None = None,
+    ) -> AgentToken:
+        if scopes is None:
+            scopes = connection.execute(
+                """
+                SELECT capability, path_prefix FROM token_scopes
+                WHERE token_id = ? ORDER BY capability, path_prefix
+                """,
+                (row["token_id"],),
+            ).fetchall()
         return AgentToken(
             token_id=row["token_id"],
             actor_id=row["actor_id"],
@@ -349,4 +388,48 @@ class IdentityService:
             revoked_at=row["revoked_at"],
             last_used_at=row["last_used_at"],
             rotated_from_token_id=row["rotated_from_token_id"],
+        )
+
+
+class AuthenticationService:
+    """Resolves transport assertions into one immutable request principal."""
+
+    def __init__(
+        self,
+        *,
+        identity: IdentityService,
+        auth_mode: Literal["single_user", "trusted_proxy"],
+        trusted_identity_value: str,
+        trusted_human_actor_id: str,
+        trusted_human_display_name: str,
+    ) -> None:
+        if auth_mode not in {"single_user", "trusted_proxy"}:
+            raise ValueError(f"Unsupported authentication mode: {auth_mode}")
+        self.identity = identity
+        self.auth_mode = auth_mode
+        self.trusted_identity_value = trusted_identity_value
+        self.trusted_human_actor_id = trusted_human_actor_id
+        self.trusted_human_display_name = trusted_human_display_name
+
+    def resolve(
+        self,
+        *,
+        authorization_header: str | None,
+        trusted_identity_assertion: str | None,
+        operation_id: str,
+    ) -> Principal:
+        if authorization_header:
+            scheme, separator, credential = authorization_header.partition(" ")
+            credential = credential.strip()
+            if not separator or scheme.casefold() != "bearer" or not credential:
+                raise AuthenticationError("Authorization must use a Bearer token")
+            return self.identity.authenticate(credential, operation_id=operation_id)
+        if self.auth_mode == "trusted_proxy" and (
+            trusted_identity_assertion != self.trusted_identity_value
+        ):
+            raise AuthenticationError("A trusted human identity assertion is required")
+        return Principal.trusted_human(
+            actor_id=self.trusted_human_actor_id,
+            display_name=self.trusted_human_display_name,
+            operation_id=operation_id,
         )

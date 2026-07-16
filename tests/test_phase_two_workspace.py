@@ -147,7 +147,7 @@ def test_actor_filter_uses_a_constant_number_of_database_connections(
     response = client.get("/api/v1/search", params={"actor_id": "human:jay"})
     assert response.status_code == 200
     assert len(response.json()) == 2
-    assert connection_count == 2
+    assert connection_count == 1
 
 
 def test_every_reconciliation_choice_is_explicit_and_repeatable(

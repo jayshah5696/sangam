@@ -29,7 +29,7 @@ head and retrying with its revision ID.
 
 ```mermaid
 flowchart LR
-    Browser["Trusted human browser"] --> Resolver["Principal resolver"]
+    Browser["Trusted human browser"] --> Resolver["AuthenticationService"]
     Agent["External agent or CLI"] -->|"Bearer token"| Resolver
     Resolver --> Identity["IdentityService"]
     Identity --> TokenStore["Hashed token + scope rows"]
@@ -49,6 +49,20 @@ an immutable `Principal`, checks capabilities and normalized path prefixes, and
 then delegates to the existing lifecycle and organization services. Internal
 reconciliation keeps its narrow system-attributed lifecycle protocol; it is not
 routed through an agent credential.
+
+This boundary is intentional. `DocumentService` owns canonical revisions,
+materialization, and optimistic concurrency; it does not depend on HTTP
+authentication, bearer tokens, or a `Principal`. Moving authorization into that
+domain service would couple internal recovery and reconciliation to agent
+credentials. The access facade therefore keeps explicit, typed operations while
+shared execution helpers centralize policy outcomes and safe activity recording.
+
+For list and search operations, the access policy reduces the principal's
+grants to an authorized union of path prefixes. When both `read` and `search`
+are required, it computes their intersection. `DocumentService` receives only
+that transport-neutral visibility constraint; SQLite applies it before
+`LIMIT/OFFSET` and before summary rows are materialized. The domain service
+never receives the principal or token.
 
 The API never accepts `X-Actor` as identity. A caller is either the trusted
 single human or an actor resolved from a valid Sangam bearer token.
@@ -75,6 +89,13 @@ Each token records:
 Rotation creates a new random credential and revokes the old token in the same
 database transaction. Revocation does not delete history: activity retains the
 token ID and label for review.
+
+Authentication validates a token through read-only SQLite queries. Last-use is
+operational telemetry rather than an authorization invariant, so Sangam updates
+it at most once every five minutes instead of turning every agent read into a
+database write. Token administration bulk-loads all scope rows in one query.
+Issuing another credential for an existing actor must reuse its display name;
+credential issuance cannot silently rename historical identity presentation.
 
 ## Capability and path semantics
 
@@ -116,6 +137,8 @@ human requests:
 ```text
 SANGAM_TRUSTED_IDENTITY_HEADER=X-Sangam-Trusted-Identity
 SANGAM_TRUSTED_IDENTITY_VALUE=human:jay
+SANGAM_TRUSTED_HUMAN_ACTOR_ID=human:jay
+SANGAM_TRUSTED_HUMAN_DISPLAY_NAME=Jay
 ```
 
 The reverse proxy must remove caller-supplied copies of that header and inject
@@ -136,7 +159,9 @@ shape used here; see [FastAPI security first steps][fastapi-security].
   ceiling; writes above `SANGAM_MAX_DOCUMENT_BYTES` are rejected.
 - Mutations continue to require `Idempotency-Key`.
 
-The frontend walks all bounded list pages for the human workspace. External
+The frontend uses one shared pagination primitive for lists, deleted documents,
+and search. It stops on a partial page and fails closed after 50 pages rather
+than allowing a faulty server to create an infinite request loop. External
 automation chooses explicit limits and offsets.
 
 ## Reviewable activity
@@ -175,6 +200,8 @@ Backend coverage includes:
 
 - Token hashing, one-time disclosure, last use, rotation, revocation,
   expiration, malformed credentials, and secret non-disclosure.
+- Throttled last-use telemetry, bulk scope loading, and actor display-name
+  immutability.
 - Trusted-proxy identity assertions and rejection of spoofed `X-Actor` values.
 - Service-layer path boundaries, including similar-prefix, source/destination
   move, unmaterialized-document, list, search, and administrator cases.
@@ -182,11 +209,14 @@ Backend coverage includes:
 - Agent attribution, optimistic conflict response, and actor-scoped
   idempotency.
 - Bounded list/search contracts and document payload ceilings.
+- SQL-level path filtering before pagination, including intersection of
+  independent read and search scopes.
 - All previous lifecycle, recovery, reconciliation, backup, and workspace tests.
 
 Frontend verification includes:
 
 - Runtime Zod validation for token, scope, activity, and summary contracts.
+- Shared pagination termination and safety-bound tests.
 - Token issue, one-time display, rotation, revocation, and activity review UI.
 - Actor badges and operation IDs in revision history.
 - Production TypeScript build, lint, formatting, unit tests, and browser checks.

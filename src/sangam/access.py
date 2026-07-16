@@ -4,39 +4,15 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from sangam.activity import ActivityService
+from sangam.authorization import AuthorizationPolicy
+from sangam.capabilities import Capability
 from sangam.errors import AuthorizationError, ConflictError, SangamError
 from sangam.organization import WorkspaceOrganizationService
-from sangam.schemas import Document, Folder, Revision, RevisionDiff, Tag
-from sangam.security import Capability, Principal, path_matches
+from sangam.schemas import Document, DocumentSummary, Folder, Revision, RevisionDiff, Tag
+from sangam.security import Principal
 from sangam.service import DocumentService
 
 T = TypeVar("T")
-
-
-class AuthorizationPolicy:
-    """Deny-by-default capability and normalized workspace-prefix policy."""
-
-    @staticmethod
-    def allows(principal: Principal, capability: Capability, path: str | None) -> bool:
-        if principal.administrator or principal.identity_kind == "system":
-            return True
-        return any(
-            grant.capability == capability and path_matches(grant.path_prefix, path)
-            for grant in principal.scopes
-        )
-
-    def require(self, principal: Principal, capability: Capability, path: str | None) -> None:
-        if self.allows(principal, capability, path):
-            return
-        raise AuthorizationError(
-            "The authenticated actor is not allowed to perform this operation",
-            details={"capability": capability.value, "path": path},
-        )
-
-    @staticmethod
-    def require_administrator(principal: Principal) -> None:
-        if not principal.administrator:
-            raise AuthorizationError("This operation requires the trusted human administrator")
 
 
 class WorkspaceAccessService:
@@ -62,15 +38,14 @@ class WorkspaceAccessService:
         include_deleted: bool = False,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[Document]:
-        def operation() -> list[Document]:
-            documents = self.documents.list_documents(include_deleted=include_deleted)
-            visible = [
-                document
-                for document in documents
-                if self.policy.allows(principal, Capability.READ, document.path)
-            ]
-            return visible[offset : offset + limit]
+    ) -> list[DocumentSummary]:
+        def operation() -> list[DocumentSummary]:
+            return self.documents.list_document_summaries(
+                include_deleted=include_deleted,
+                path_prefixes=self.policy.allowed_prefixes(principal, Capability.READ),
+                limit=limit,
+                offset=offset,
+            )
 
         return self._run(principal, "list", "document", operation)
 
@@ -85,22 +60,20 @@ class WorkspaceAccessService:
         sort: str,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[Document]:
-        def operation() -> list[Document]:
-            documents = self.documents.search_documents(
+    ) -> list[DocumentSummary]:
+        def operation() -> list[DocumentSummary]:
+            return self.documents.search_documents(
                 query=query,
                 tag_id=tag_id,
                 category=category,
                 actor_id=actor_id,
                 sort=sort,
+                path_prefixes=self.policy.allowed_prefixes(
+                    principal, Capability.READ, Capability.SEARCH
+                ),
+                limit=limit,
+                offset=offset,
             )
-            visible = [
-                document
-                for document in documents
-                if self.policy.allows(principal, Capability.SEARCH, document.path)
-                and self.policy.allows(principal, Capability.READ, document.path)
-            ]
-            return visible[offset : offset + limit]
 
         return self._run(principal, "search", "document", operation)
 
@@ -108,13 +81,12 @@ class WorkspaceAccessService:
         self, principal: Principal, document_id: str, *, include_deleted: bool = False
     ) -> Document:
         document = self.documents.get_document(document_id, include_deleted=include_deleted)
-        return self._run(
+        return self._document_operation(
             principal,
-            "read",
-            "document",
-            lambda: self._authorized_document(principal, Capability.READ, document),
-            resource_id=document_id,
-            path=document.path,
+            capability=Capability.READ,
+            action="read",
+            current=document,
+            operation=lambda: document,
         )
 
     def create_document(
@@ -150,7 +122,7 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        return self._document_mutation(
+        return self._document_operation(
             principal,
             capability=Capability.UPDATE,
             action="update",
@@ -210,7 +182,7 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        return self._document_mutation(
+        return self._document_operation(
             principal,
             capability=Capability.TAG,
             action="tag",
@@ -301,7 +273,7 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        return self._document_mutation(
+        return self._document_operation(
             principal,
             capability=Capability.DELETE,
             action="delete",
@@ -318,17 +290,12 @@ class WorkspaceAccessService:
     def history(self, principal: Principal, document_id: str) -> list[Revision]:
         current = self.documents.get_document(document_id, include_deleted=True)
 
-        def operation() -> list[Revision]:
-            self.policy.require(principal, Capability.READ, current.path)
-            return self.documents.history(document_id)
-
-        return self._run(
+        return self._document_operation(
             principal,
-            "history",
-            "document",
-            operation,
-            resource_id=document_id,
-            path=current.path,
+            capability=Capability.READ,
+            action="history",
+            current=current,
+            operation=lambda: self.documents.history(document_id),
         )
 
     def revision_diff(
@@ -341,21 +308,16 @@ class WorkspaceAccessService:
     ) -> RevisionDiff:
         current = self.documents.get_document(document_id, include_deleted=True)
 
-        def operation() -> RevisionDiff:
-            self.policy.require(principal, Capability.READ, current.path)
-            return self.documents.revision_diff(
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="diff",
+            current=current,
+            operation=lambda: self.documents.revision_diff(
                 document_id=document_id,
                 from_revision_id=from_revision_id,
                 to_revision_id=to_revision_id,
-            )
-
-        return self._run(
-            principal,
-            "diff",
-            "document",
-            operation,
-            resource_id=document_id,
-            path=current.path,
+            ),
         )
 
     def restore_document(
@@ -369,7 +331,7 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id, include_deleted=True)
-        return self._document_mutation(
+        return self._document_operation(
             principal,
             capability=Capability.RESTORE,
             action="restore",
@@ -456,22 +418,16 @@ class WorkspaceAccessService:
 
         return self._run(principal, "tag", "folder", operation, resource_id=folder_id)
 
-    def _authorized_document(
-        self, principal: Principal, capability: Capability, document: Document
-    ) -> Document:
-        self.policy.require(principal, capability, document.path)
-        return document
-
-    def _document_mutation(
+    def _document_operation(
         self,
         principal: Principal,
         *,
         capability: Capability,
         action: str,
         current: Document,
-        operation: Callable[[], Document],
-    ) -> Document:
-        def authorized() -> Document:
+        operation: Callable[[], T],
+    ) -> T:
+        def authorized() -> T:
             self.policy.require(principal, capability, current.path)
             return operation()
 
@@ -499,38 +455,21 @@ class WorkspaceAccessService:
     ) -> T:
         try:
             result = operation()
-        except AuthorizationError as error:
-            self.activity.record(
-                principal=principal,
-                action=action,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                path=path,
-                outcome="denied",
-                error_code=error.code,
-                details=error.details,
-            )
-            raise
-        except ConflictError as error:
-            self.activity.record(
-                principal=principal,
-                action=action,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                path=path,
-                outcome="conflict",
-                error_code=error.code,
-                details=error.details,
-            )
-            raise
         except SangamError as error:
+            outcome = (
+                "denied"
+                if isinstance(error, AuthorizationError)
+                else "conflict"
+                if isinstance(error, ConflictError)
+                else "failed"
+            )
             self.activity.record(
                 principal=principal,
                 action=action,
                 resource_type=resource_type,
                 resource_id=resource_id,
                 path=path,
-                outcome="failed",
+                outcome=outcome,
                 error_code=error.code,
                 details=error.details,
             )

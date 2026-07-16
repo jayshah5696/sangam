@@ -13,6 +13,8 @@ For a proxy-authenticated deployment, configure:
 SANGAM_AUTH_MODE=trusted_proxy
 SANGAM_TRUSTED_IDENTITY_HEADER=X-Sangam-Trusted-Identity
 SANGAM_TRUSTED_IDENTITY_VALUE=human:jay
+SANGAM_TRUSTED_HUMAN_ACTOR_ID=human:jay
+SANGAM_TRUSTED_HUMAN_DISPLAY_NAME=Jay
 ```
 
 Configure the proxy to remove inbound copies of the trusted identity header and
@@ -27,6 +29,10 @@ curl --fail-with-body http://127.0.0.1:8000/api/v1/documents
 ```
 
 The second request must return `401` in `trusted_proxy` mode.
+
+The trusted identity value is the proxy assertion to compare. The trusted
+human actor ID and display name are the canonical Sangam identity attributed to
+accepted mutations; they need not equal the proxy assertion value.
 
 ## Issue a scoped agent token
 
@@ -43,6 +49,10 @@ Use Settings → Agents & tokens. Recommended first scope:
 
 Copy the token immediately and store it in the external agent's secret store.
 Sangam cannot display it again.
+
+The last-used timestamp is deliberately approximate within five minutes. This
+avoids taking a SQLite write lock for every read-only agent request while still
+providing useful operational evidence.
 
 ## Configure the CLI
 

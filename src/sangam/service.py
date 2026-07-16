@@ -18,6 +18,7 @@ from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.organization import WorkspaceOrganizationService
 from sangam.schemas import (
     Document,
+    DocumentSummary,
     Revision,
     RevisionDiff,
     Tag,
@@ -68,9 +69,20 @@ class DocumentService:
     def _normalize_path(self, raw_path: str) -> str:
         return self.workspace.normalize_document_path(raw_path)
 
-    def _document_query(self) -> str:
-        return """
-            SELECT d.*, r.content, r.actor_id AS updated_by,
+    def _document_query(self, *, include_content: bool = True, include_search: bool = False) -> str:
+        content_projection = ", r.content" if include_content else ""
+        search_projection = (
+            ", snippet(document_search, -1, '[[', ']]', ' … ', 24) AS search_snippet"
+            if include_search
+            else ", NULL AS search_snippet"
+        )
+        search_join = (
+            "JOIN document_search ON document_search.document_id = d.document_id"
+            if include_search
+            else ""
+        )
+        return f"""
+            SELECT d.*{content_projection}, r.actor_id AS updated_by,
                 r.summary AS revision_summary, a.display_name AS updated_by_name,
                 COALESCE((
                     SELECT json_group_array(json_object(
@@ -85,20 +97,20 @@ class DocumentService:
                         WHERE dt.document_id = d.document_id
                         ORDER BY t.name COLLATE NOCASE
                     ) AS ordered_tags
-                ), '[]') AS tags_json
+                ), '[]') AS tags_json{search_projection}
             FROM documents d
             JOIN revisions r ON r.revision_id = d.current_revision_id
             JOIN actors a ON a.actor_id = r.actor_id
+            {search_join}
         """
 
-    def _document_from_row(self, row: sqlite3.Row) -> Document:
-        return Document(
+    def _document_summary_from_row(self, row: sqlite3.Row) -> DocumentSummary:
+        return DocumentSummary(
             document_id=row["document_id"],
             title=row["title"],
             content_type=row["content_type"],
             path=row["path"],
             current_revision_id=row["current_revision_id"],
-            content=row["content"],
             content_hash=row["content_hash"],
             size_bytes=row["size_bytes"],
             materialization_state=row["materialization_state"],
@@ -113,7 +125,12 @@ class DocumentService:
             category=row["category"],
             metadata_version=row["metadata_version"],
             tags=[Tag.model_validate(tag) for tag in json.loads(row["tags_json"])],
+            search_snippet=row["search_snippet"],
         )
+
+    def _document_from_row(self, row: sqlite3.Row) -> Document:
+        summary = self._document_summary_from_row(row)
+        return Document(**summary.model_dump(), content=row["content"])
 
     def _get_document_in_connection(
         self, connection: sqlite3.Connection, document_id: str, *, include_deleted: bool = True
@@ -143,18 +160,46 @@ class DocumentService:
             ).fetchall()
         return [self._document_from_row(row) for row in rows]
 
-    def _get_documents_by_ids(self, document_ids: list[str]) -> list[Document]:
-        if not document_ids:
+    def list_document_summaries(
+        self,
+        *,
+        include_deleted: bool = False,
+        path_prefixes: tuple[str, ...] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[DocumentSummary]:
+        if path_prefixes == ():
             return []
-        placeholders = ",".join("?" for _ in document_ids)
+        conditions = [] if include_deleted else ["d.deleted = 0"]
+        parameters: list[object] = []
+        self._add_path_filter(conditions, parameters, path_prefixes)
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        parameters.extend((limit, offset))
         with self.database.connection() as connection:
             rows = connection.execute(
-                self._document_query()
-                + f" WHERE d.deleted = 0 AND d.document_id IN ({placeholders})",
-                document_ids,
+                self._document_query(include_content=False)
+                + where
+                + " ORDER BY d.updated_at DESC, d.document_id LIMIT ? OFFSET ?",
+                parameters,
             ).fetchall()
-        documents = {row["document_id"]: self._document_from_row(row) for row in rows}
-        return [documents[document_id] for document_id in document_ids if document_id in documents]
+        return [self._document_summary_from_row(row) for row in rows]
+
+    @staticmethod
+    def _add_path_filter(
+        conditions: list[str],
+        parameters: list[object],
+        path_prefixes: tuple[str, ...] | None,
+    ) -> None:
+        if path_prefixes is None:
+            return
+        clauses: list[str] = []
+        for prefix in path_prefixes:
+            # Under SQLite's binary text ordering, every descendant starts in
+            # the half-open ["prefix/", "prefix0") range. This is segment-aware
+            # and treats SQL wildcard characters in paths as ordinary text.
+            clauses.append("(d.path = ? OR (d.path >= ? AND d.path < ?))")
+            parameters.extend((prefix, f"{prefix}/", f"{prefix}0"))
+        conditions.append(f"({' OR '.join(clauses)})")
 
     def _idempotent_result(
         self,
@@ -820,47 +865,58 @@ class DocumentService:
         category: str | None = None,
         sort: str = "relevance",
         actor_id: str | None = None,
-    ) -> list[Document]:
-        matches = self.search_index.search(query)
-        documents = (
-            self.list_documents()
-            if matches is None
-            else self._get_documents_by_ids([match.document_id for match in matches])
-        )
-        snippets = (
-            {} if matches is None else {match.document_id: match.snippet for match in matches}
-        )
-        normalized_category = category.casefold() if category else None
-        actor_document_ids = self._document_ids_for_actor(actor_id) if actor_id else None
-        filtered = [
-            document
-            for document in documents
-            if (not tag_id or any(tag.tag_id == tag_id for tag in document.tags))
-            and (
-                not normalized_category
-                or (document.category or "").casefold() == normalized_category
+        path_prefixes: tuple[str, ...] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[DocumentSummary]:
+        if path_prefixes == ():
+            return []
+        expression = self.search_index.compile_expression(query)
+        conditions = ["d.deleted = 0"]
+        parameters: list[object] = []
+        if expression:
+            conditions.append("document_search MATCH ?")
+            parameters.append(expression)
+        if tag_id:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM document_tags dt "
+                "WHERE dt.document_id = d.document_id AND dt.tag_id = ?)"
             )
-            and (actor_document_ids is None or document.document_id in actor_document_ids)
-        ]
+            parameters.append(tag_id)
+        if category:
+            conditions.append("d.category = ? COLLATE NOCASE")
+            parameters.append(category)
+        if actor_id:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM revisions ar "
+                "WHERE ar.document_id = d.document_id AND ar.actor_id = ?)"
+            )
+            parameters.append(actor_id)
+        self._add_path_filter(conditions, parameters, path_prefixes)
         if sort == "title":
-            filtered.sort(key=lambda item: (item.title.casefold(), item.document_id))
+            ordering = "d.title COLLATE NOCASE, d.document_id"
         elif sort == "path":
-            filtered.sort(key=lambda item: ((item.path or "").casefold(), item.document_id))
+            ordering = "COALESCE(d.path, '') COLLATE NOCASE, d.document_id"
         elif sort == "updated":
-            filtered.sort(key=lambda item: (item.updated_at, item.document_id), reverse=True)
+            ordering = "d.updated_at DESC, d.document_id DESC"
+        elif sort == "relevance" and expression:
+            ordering = "bm25(document_search), d.document_id"
+        elif sort == "relevance":
+            ordering = "d.updated_at DESC, d.document_id"
         elif sort != "relevance":
             raise ValidationError(f"Unsupported search sort: {sort}")
-        return [
-            document.model_copy(update={"search_snippet": snippets.get(document.document_id)})
-            for document in filtered
-        ]
-
-    def _document_ids_for_actor(self, actor_id: str) -> set[str]:
+        parameters.extend((limit, offset))
         with self.database.connection() as connection:
             rows = connection.execute(
-                "SELECT DISTINCT document_id FROM revisions WHERE actor_id = ?", (actor_id,)
+                self._document_query(
+                    include_content=False,
+                    include_search=expression is not None,
+                )
+                + f" WHERE {' AND '.join(conditions)}"
+                + f" ORDER BY {ordering} LIMIT ? OFFSET ?",
+                parameters,
             ).fetchall()
-        return {row["document_id"] for row in rows}
+        return [self._document_summary_from_row(row) for row in rows]
 
     def rebuild_search_index(self) -> int:
         documents = self.list_documents(include_deleted=True)
