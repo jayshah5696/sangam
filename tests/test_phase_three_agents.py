@@ -1,0 +1,356 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from sangam.api import create_app
+from sangam.config import Settings
+
+
+def issue_token(
+    client: TestClient,
+    *,
+    actor_id: str = "agent:researcher",
+    scopes: list[dict[str, str | None]] | None = None,
+    trusted_headers: dict[str, str] | None = None,
+) -> dict[str, object]:
+    response = client.post(
+        "/api/v1/agent-tokens",
+        headers=trusted_headers,
+        json={
+            "actor_id": actor_id,
+            "display_name": "Researcher",
+            "label": "Phase 3 test",
+            "scopes": scopes
+            or [
+                {"capability": "read", "path_prefix": None},
+                {"capability": "search", "path_prefix": None},
+                {"capability": "create", "path_prefix": "/agents/**"},
+                {"capability": "update", "path_prefix": "/agents/**"},
+                {"capability": "move", "path_prefix": "/agents/**"},
+                {"capability": "tag", "path_prefix": "/agents/**"},
+                {"capability": "restore", "path_prefix": "/agents/**"},
+                {"capability": "delete", "path_prefix": "/agents/**"},
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def bearer(token: object, key: str | None = None) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {token}"}
+    if key:
+        headers["Idempotency-Key"] = key
+    return headers
+
+
+def create_human_document(
+    client: TestClient, *, title: str, path: str | None, key: str
+) -> dict[str, object]:
+    response = client.post(
+        "/api/v1/documents",
+        headers={"Idempotency-Key": key},
+        json={"title": title, "content": f"# {title}\n", "path": path},
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_token_secret_is_one_time_hashed_revocable_and_rotatable(
+    client: TestClient,
+) -> None:
+    issued = issue_token(client)
+    token = issued["token"]
+    token_id = issued["token_id"]
+    assert isinstance(token, str) and token.startswith("sgm_agt_")
+    assert issued["scopes"][2]["path_prefix"] == "agents"
+
+    services = client.app.state.services
+    with services.documents.database.connection() as connection:
+        stored = connection.execute(
+            "SELECT secret_hash FROM actor_tokens WHERE token_id = ?", (token_id,)
+        ).fetchone()["secret_hash"]
+    assert stored != token
+    assert token not in stored
+
+    listed = client.get("/api/v1/agent-tokens").json()
+    assert listed[0]["token_id"] == token_id
+    assert "token" not in listed[0]
+
+    authenticated = client.get("/api/v1/documents", headers=bearer(token))
+    assert authenticated.status_code == 200
+    assert authenticated.headers["X-Operation-ID"]
+    refreshed = client.get("/api/v1/agent-tokens").json()[0]
+    assert refreshed["last_used_at"] is not None
+
+    rotated = client.post(f"/api/v1/agent-tokens/{token_id}/rotate")
+    assert rotated.status_code == 200
+    replacement = rotated.json()
+    assert replacement["token"] != token
+    assert replacement["rotated_from_token_id"] == token_id
+    assert client.get("/api/v1/documents", headers=bearer(token)).status_code == 401
+    assert client.get("/api/v1/documents", headers=bearer(replacement["token"])).status_code == 200
+
+    revoked = client.delete(f"/api/v1/agent-tokens/{replacement['token_id']}")
+    assert revoked.status_code == 200
+    assert revoked.json()["revoked_at"] is not None
+    denied = client.get("/api/v1/documents", headers=bearer(replacement["token"]))
+    assert denied.status_code == 401
+    assert denied.json()["error"]["code"] == "authentication_required"
+    repeated_rotation = client.post(f"/api/v1/agent-tokens/{replacement['token_id']}/rotate")
+    assert repeated_rotation.status_code == 409
+    assert repeated_rotation.json()["error"]["code"] == "credential_conflict"
+
+
+def test_agent_scope_enforcement_conflict_and_reviewable_activity(client: TestClient) -> None:
+    private = create_human_document(
+        client, title="Private plan", path="projects/private.md", key="private"
+    )
+    issued = issue_token(client)
+    token = issued["token"]
+
+    report_response = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "agent-create"),
+        json={
+            "title": "Research report",
+            "content": "# Research\n",
+            "path": "agents/research-report.md",
+        },
+    )
+    assert report_response.status_code == 201
+    report = report_response.json()
+    assert report["created_by"] == "agent:researcher"
+    replay = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "agent-create"),
+        json={
+            "title": "Research report",
+            "content": "# Research\n",
+            "path": "agents/research-report.md",
+        },
+    )
+    assert replay.status_code == 201
+    assert replay.json()["document_id"] == report["document_id"]
+
+    outside = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "outside-create"),
+        json={
+            "title": "Outside",
+            "content": "not allowed",
+            "path": "projects/outside.md",
+        },
+    )
+    assert outside.status_code == 403
+    assert outside.json()["error"]["details"] == {
+        "capability": "create",
+        "path": "projects/outside.md",
+    }
+
+    boundary = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "boundary-create"),
+        json={
+            "title": "Boundary",
+            "content": "not allowed",
+            "path": "agents-private/report.md",
+        },
+    )
+    assert boundary.status_code == 403
+
+    updated = client.patch(
+        f"/api/v1/documents/{report['document_id']}",
+        headers=bearer(token, "agent-update"),
+        json={
+            "expected_revision_id": report["current_revision_id"],
+            "content": "# Research\n\nAgent revision.\n",
+            "summary": "Agent research pass",
+        },
+    )
+    assert updated.status_code == 200
+
+    denied_private = client.patch(
+        f"/api/v1/documents/{private['document_id']}",
+        headers=bearer(token, "private-update"),
+        json={
+            "expected_revision_id": private["current_revision_id"],
+            "content": "overwrite",
+        },
+    )
+    assert denied_private.status_code == 403
+
+    denied_move = client.post(
+        f"/api/v1/documents/{report['document_id']}/move",
+        headers=bearer(token, "outside-move"),
+        json={
+            "expected_revision_id": updated.json()["current_revision_id"],
+            "path": "projects/escaped.md",
+        },
+    )
+    assert denied_move.status_code == 403
+
+    stale = client.patch(
+        f"/api/v1/documents/{report['document_id']}",
+        headers=bearer(token, "agent-stale"),
+        json={
+            "expected_revision_id": report["current_revision_id"],
+            "content": "stale",
+        },
+    )
+    assert stale.status_code == 409
+    assert (
+        stale.json()["error"]["details"]["current_revision_id"]
+        == updated.json()["current_revision_id"]
+    )
+    current = client.get(f"/api/v1/documents/{report['document_id']}", headers=bearer(token)).json()
+    retry = client.patch(
+        f"/api/v1/documents/{report['document_id']}",
+        headers=bearer(token, "agent-retry"),
+        json={
+            "expected_revision_id": current["current_revision_id"],
+            "content": f"{current['content']}\nMerged after conflict.\n",
+            "summary": "Rebased agent revision",
+        },
+    )
+    assert retry.status_code == 200
+    history = client.get(
+        f"/api/v1/documents/{report['document_id']}/history", headers=bearer(token)
+    ).json()
+    assert history[0]["actor_id"] == "agent:researcher"
+    assert history[0]["operation_id"]
+    compared = client.get(
+        f"/api/v1/documents/{report['document_id']}/diff",
+        headers=bearer(token),
+        params={
+            "from_revision_id": report["current_revision_id"],
+            "to_revision_id": retry.json()["current_revision_id"],
+        },
+    )
+    assert compared.status_code == 200
+    assert "Merged after conflict" in compared.json()["unified_diff"]
+
+    activity = client.get("/api/v1/activity", params={"actor_id": "agent:researcher"}).json()
+    outcomes = {(event["action"], event["outcome"]) for event in activity}
+    assert ("create", "accepted") in outcomes
+    assert ("create", "denied") in outcomes
+    assert ("update", "denied") in outcomes
+    assert ("move", "denied") in outcomes
+    assert ("update", "conflict") in outcomes
+    serialized = json.dumps(activity)
+    assert token not in serialized
+    assert "Agent revision" not in serialized
+
+
+def test_path_scoped_reads_filter_lists_search_and_unmaterialized_documents(
+    client: TestClient,
+) -> None:
+    visible = create_human_document(
+        client, title="Visible", path="agents/visible.md", key="visible"
+    )
+    create_human_document(client, title="Private", path="projects/private.md", key="private")
+    draft = create_human_document(client, title="Draft", path=None, key="draft")
+    issued = issue_token(
+        client,
+        actor_id="agent:limited",
+        scopes=[
+            {"capability": "read", "path_prefix": "agents"},
+            {"capability": "search", "path_prefix": "agents"},
+        ],
+    )
+    token = issued["token"]
+
+    listed = client.get("/api/v1/documents", headers=bearer(token)).json()
+    assert [document["document_id"] for document in listed] == [visible["document_id"]]
+    searched = client.get("/api/v1/search", headers=bearer(token), params={"q": "Private"})
+    assert searched.status_code == 200
+    assert searched.json() == []
+    assert (
+        client.get(f"/api/v1/documents/{draft['document_id']}", headers=bearer(token)).status_code
+        == 403
+    )
+    assert client.get("/api/v1/tags", headers=bearer(token)).status_code == 403
+
+
+def test_trusted_proxy_mode_rejects_spoofed_actor_and_agent_admin_access(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        database_path=tmp_path / "database" / "sangam.sqlite3",
+        workspace_root=tmp_path / "workspace",
+        backup_root=tmp_path / "backups",
+        backups_enabled=False,
+        frontend_dist=tmp_path / "missing",
+        auth_mode="trusted_proxy",
+        trusted_identity_header="X-Test-Identity",
+        trusted_identity_value="jay@example.com",
+    )
+    trusted = {"X-Test-Identity": "jay@example.com"}
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/v1/documents").status_code == 401
+        assert client.get("/api/v1/documents", headers={"X-Actor": "human:jay"}).status_code == 401
+        assert client.get("/api/v1/documents", headers=trusted).status_code == 200
+        issued = issue_token(client, trusted_headers=trusted)
+        agent_admin = client.get("/api/v1/agent-tokens", headers=bearer(issued["token"]))
+        assert agent_admin.status_code == 403
+
+
+def test_expired_and_malformed_tokens_fail_without_secret_disclosure(client: TestClient) -> None:
+    issued = issue_token(client)
+    services = client.app.state.services
+    with services.documents.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE actor_tokens
+            SET created_at = '2020-01-01T00:00:00+00:00',
+                expires_at = '2021-01-01T00:00:00+00:00'
+            WHERE token_id = ?
+            """,
+            (issued["token_id"],),
+        )
+    expired = client.get("/api/v1/documents", headers=bearer(issued["token"]))
+    assert expired.status_code == 401
+    assert "expired" in expired.json()["error"]["message"].lower()
+
+    malformed = client.get(
+        "/api/v1/documents", headers={"Authorization": "Bearer definitely-not-a-token"}
+    )
+    assert malformed.status_code == 401
+    assert "definitely-not-a-token" not in malformed.text
+    assert malformed.headers["X-Operation-ID"]
+
+
+def test_list_search_and_document_payloads_are_bounded(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "database" / "sangam.sqlite3",
+        workspace_root=tmp_path / "workspace",
+        backup_root=tmp_path / "backups",
+        backups_enabled=False,
+        frontend_dist=tmp_path / "missing",
+        max_document_bytes=1_024,
+    )
+    with TestClient(create_app(settings)) as client:
+        created = [
+            create_human_document(client, title=f"Document {index}", path=None, key=f"d-{index}")
+            for index in range(3)
+        ]
+        page = client.get("/api/v1/documents", params={"limit": 2, "offset": 1})
+        assert page.status_code == 200
+        assert len(page.json()) == 2
+        assert all("content" not in document for document in page.json())
+        assert "content" in client.get(f"/api/v1/documents/{created[0]['document_id']}").json()
+        assert client.get("/api/v1/documents", params={"limit": 201}).status_code == 422
+
+        oversized = client.post(
+            "/api/v1/documents",
+            headers={"Idempotency-Key": "oversized"},
+            json={"title": "Too large", "content": "x" * 1_025},
+        )
+        assert oversized.status_code == 422
+        assert oversized.json()["error"]["details"] == {
+            "size_bytes": 1_025,
+            "max_document_bytes": 1_024,
+        }

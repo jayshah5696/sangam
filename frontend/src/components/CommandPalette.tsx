@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
+  Activity,
   ArchiveRestore,
   Columns2,
   FilePlus2,
@@ -92,6 +93,13 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         detail: 'Return to one editor group',
         icon: RotateCcw,
         run: workbench.resetLayout,
+      },
+      {
+        id: 'view.activity',
+        label: 'Open agent activity',
+        detail: 'Review accepted, denied, and conflicted operations',
+        icon: Activity,
+        run: () => void navigate({ to: '/activity' }),
       },
       {
         id: 'view.reconciliation',

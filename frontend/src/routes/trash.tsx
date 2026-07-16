@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { api, type Document } from '../api'
+import { api, type DocumentSummary } from '../api'
 
 export const Route = createFileRoute('/trash')({ component: TrashPage })
 
@@ -29,7 +29,7 @@ function TrashPage() {
   )
 }
 
-function DeletedDocument({ document }: { document: Document }) {
+function DeletedDocument({ document }: { document: DocumentSummary }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const restore = useMutation({

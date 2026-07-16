@@ -25,7 +25,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { api, type Document } from '../api'
+import { api, type DocumentSummary } from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench } from '../workbench'
 import { ActionMenu, ActionMenuItem } from './ActionMenu'
@@ -145,7 +145,8 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         const filename = ensureMarkdownExtension(value)
         return api.moveDocument(node.document, joinWorkspacePath(parent, filename))
       }
-      return api.updateDocument(node.document, node.document.content, value)
+      const document = await api.getDocument(node.document.document_id)
+      return api.updateDocument(document, document.content, value)
     },
     onSuccess: async () => {
       setRenamingId(null)
@@ -157,7 +158,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   })
 
   const duplicate = useMutation({
-    mutationFn: (document: Document) => api.duplicateDocument(document),
+    mutationFn: (document: DocumentSummary) => api.duplicateDocument(document),
     onSuccess: async (created) => {
       await refresh()
       workbench.ensureDocumentOpen(created.document_id, created.title, workbench.activeGroupId)
@@ -168,24 +169,24 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   })
 
   const remove = useMutation({
-    mutationFn: (document: Document) => api.deleteDocument(document),
+    mutationFn: (document: DocumentSummary) => api.deleteDocument(document),
     onSuccess: refresh,
     onError: (cause) =>
       setError(cause instanceof Error ? cause.message : 'The document could not be moved to trash.'),
   })
 
   const move = useMutation({
-    mutationFn: ({ document, folderPath }: { document: Document; folderPath: string }) => {
+    mutationFn: ({ document, folderPath }: { document: DocumentSummary; folderPath: string }) => {
       if (!document.path) throw new Error('Save this draft to the workspace before moving it.')
       const filename = workspaceBasename(document.path)
       return api.moveDocument(document, joinWorkspacePath(folderPath, filename))
     },
     onMutate: async ({ document, folderPath }) => {
       await queryClient.cancelQueries({ queryKey: ['documents', 'explorer'] })
-      const previous = queryClient.getQueryData<Document[]>(['documents', 'explorer'])
+      const previous = queryClient.getQueryData<DocumentSummary[]>(['documents', 'explorer'])
       const filename = document.path ? workspaceBasename(document.path) : undefined
       if (filename)
-        queryClient.setQueryData<Document[]>(['documents', 'explorer'], (current) =>
+        queryClient.setQueryData<DocumentSummary[]>(['documents', 'explorer'], (current) =>
           current?.map((candidate) =>
             candidate.document_id === document.document_id
               ? { ...candidate, path: joinWorkspacePath(folderPath, filename) }

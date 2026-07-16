@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from conftest import headers
+from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 
@@ -65,13 +65,17 @@ def test_markdown_lifecycle_materialize_conflict_and_restore(client: TestClient,
     }
     assert client.get(f"/api/v1/documents/{document_id}").json()["content"] == updated["content"]
 
+    agent_token = issue_agent_token(client)
     restore_response = client.post(
         f"/api/v1/documents/{document_id}/restore",
         json={
             "expected_revision_id": updated_revision,
             "revision_id": original_revision,
         },
-        headers=headers("restore-original", actor="client:cli"),
+        headers={
+            "Authorization": f"Bearer {agent_token}",
+            "Idempotency-Key": "restore-original",
+        },
     )
     assert restore_response.status_code == 200
     restored = restore_response.json()
@@ -87,7 +91,7 @@ def test_markdown_lifecycle_materialize_conflict_and_restore(client: TestClient,
         "materialize",
         "create",
     ]
-    assert history[0]["actor_id"] == "client:cli"
+    assert history[0]["actor_id"] == "agent:cli"
     assert history[-1]["content"] == "# Original\n"
     assert history[1]["content"] == updated["content"]
 

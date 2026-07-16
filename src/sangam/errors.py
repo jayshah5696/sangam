@@ -18,6 +18,10 @@ class ConflictError(SangamError):
     code = "revision_conflict"
 
 
+class CredentialConflictError(ConflictError):
+    code = "credential_conflict"
+
+
 class IdempotencyError(SangamError):
     code = "idempotency_conflict"
 
@@ -32,3 +36,11 @@ class MaterializationError(SangamError):
 
 class ValidationError(SangamError):
     code = "validation_error"
+
+
+class AuthenticationError(SangamError):
+    code = "authentication_required"
+
+
+class AuthorizationError(SangamError):
+    code = "forbidden"

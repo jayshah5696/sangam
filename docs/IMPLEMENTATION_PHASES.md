@@ -1,6 +1,6 @@
 # Sangam: Vertical Implementation Phases
 
-> Status: Phases 1–2 implemented and verified; Phases 3–7 remain proposed
+> Status: Phases 1–3 implemented and verified; Phases 4–7 remain proposed
 >
 > Related: [Product vision and technical decisions](./VISION.md)
 
@@ -189,6 +189,8 @@ Agent tokens and writes, editable HTML, public publishing, PDF reading, Karakeep
 
 ## Phase 3 — Agents as real collaborators
 
+> Implementation: [Phase 3 implementation and verification](./PHASE_3.md)
+
 ### Outcome
 
 An external agent can safely work with Sangam documents through the same API as the human, with scoped authority, optimistic concurrency, attribution, and reviewable history.
@@ -203,7 +205,8 @@ An external agent searches the workspace, reads source material, creates a repor
 
 - Persistent actor records for humans, agents, integrations, and system operations.
 - Sangam-issued API tokens stored as secure hashes.
-- Capabilities for read, search, create, update, move, tag, restore, publish, and delete.
+- Capabilities for read, search, create, update, move, tag, restore, and delete.
+- Publishing remains non-grantable until Phase 4 provides the operation.
 - Optional path restrictions such as `/agents/**` and `/generated/**`.
 - Expiration, revocation, last-used time, and token labels.
 - Deny-by-default authorization tests at the service layer.

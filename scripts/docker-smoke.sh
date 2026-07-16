@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 STATE=$(mktemp -d "$ROOT/.sangam-smoke.XXXXXX")
-NAME="sangam-phase2-smoke-$$"
+NAME="sangam-phase3-smoke-$$"
 PORT=18080
 
 cleanup() {
@@ -13,14 +13,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$STATE/database" "$STATE/workspace" "$STATE/backups"
-docker build -t sangam:phase2 "$ROOT"
+docker build -t sangam:phase3 "$ROOT"
 docker run -d \
   --name "$NAME" \
   -p "127.0.0.1:$PORT:8000" \
   -v "$STATE/database:/data/database" \
   -v "$STATE/workspace:/data/workspace" \
   -v "$STATE/backups:/data/backups" \
-  sangam:phase2 >/dev/null
+  sangam:phase3 >/dev/null
 
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
@@ -34,7 +34,6 @@ done
 
 CREATED=$(curl --fail --silent \
   -H 'Content-Type: application/json' \
-  -H 'X-Actor: human:jay' \
   -H 'Idempotency-Key: docker-smoke-create' \
   --data '{"title":"Docker smoke","content":"# Through the container\n","path":"projects/docker-smoke.md"}' \
   "http://127.0.0.1:$PORT/api/v1/documents")
@@ -50,6 +49,58 @@ SEARCHED_ID=$(curl --fail --silent \
   "http://127.0.0.1:$PORT/api/v1/search?q=container" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["document_id"])')
 test "$SEARCHED_ID" = "$DOCUMENT_ID"
+
+ISSUED_TOKEN=$(curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  --data '{"actor_id":"agent:docker-smoke","display_name":"Docker Smoke Agent","label":"Docker verification","scopes":[{"capability":"read","path_prefix":null},{"capability":"search","path_prefix":null},{"capability":"create","path_prefix":"agents"}]}' \
+  "http://127.0.0.1:$PORT/api/v1/agent-tokens")
+AGENT_TOKEN=$(printf '%s' "$ISSUED_TOKEN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+TOKEN_ID=$(printf '%s' "$ISSUED_TOKEN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token_id"])')
+echo "Issued scoped agent token."
+
+AGENT_DOCUMENT_ID=$(curl --fail --silent \
+  -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-agent-create' \
+  --data '{"title":"Agent smoke","content":"# Scoped agent write\n","path":"agents/docker-smoke.md"}' \
+  "http://127.0.0.1:$PORT/api/v1/documents" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["document_id"])')
+test -n "$AGENT_DOCUMENT_ID"
+echo "Verified in-scope agent write."
+
+DENIED_STATUS=$(curl --silent \
+  -o "$STATE/denied.json" \
+  -w '%{http_code}' \
+  -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-agent-denied' \
+  --data '{"title":"Denied agent write","content":"# Must not exist\n","path":"projects/denied-agent-write.md"}' \
+  "http://127.0.0.1:$PORT/api/v1/documents")
+if [ "$DENIED_STATUS" != "403" ]; then
+  echo "Expected out-of-scope write to return 403; received $DENIED_STATUS." >&2
+  exit 1
+fi
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error"]["code"] == "forbidden"' "$STATE/denied.json"
+echo "Verified out-of-scope agent denial."
+
+curl --fail --silent \
+  "http://127.0.0.1:$PORT/api/v1/activity?actor_id=agent%3Adocker-smoke" \
+  | python3 -c 'import json,sys; events=json.load(sys.stdin); outcomes={event["outcome"] for event in events}; assert {"accepted", "denied"} <= outcomes'
+echo "Verified accepted and denied activity events."
+
+curl --fail --silent -X DELETE \
+  "http://127.0.0.1:$PORT/api/v1/agent-tokens/$TOKEN_ID" >/dev/null
+REVOKED_STATUS=$(curl --silent \
+  -o "$STATE/revoked.json" \
+  -w '%{http_code}' \
+  -H "Authorization: Bearer $AGENT_TOKEN" \
+  "http://127.0.0.1:$PORT/api/v1/documents")
+if [ "$REVOKED_STATUS" != "401" ]; then
+  echo "Expected revoked token to return 401; received $REVOKED_STATUS." >&2
+  exit 1
+fi
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error"]["code"] == "authentication_required"' "$STATE/revoked.json"
+echo "Verified token revocation."
 
 BACKUP_ID=$(curl --fail --silent -X POST \
   -H 'Idempotency-Key: docker-smoke-backup' \
@@ -86,4 +137,4 @@ CONFLICT_TYPE=$(curl --fail --silent "http://127.0.0.1:$PORT/api/v1/reconciliati
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["conflicts"][0]["conflict_type"])')
 test "$CONFLICT_TYPE" = "unexpected_hash"
 
-echo "Docker smoke passed: API, CLI, search, verified backup, host file, restart, and reconciliation."
+echo "Docker smoke passed: API, scoped agent auth, activity, revocation, CLI, search, verified backup, host file, restart, and reconciliation."

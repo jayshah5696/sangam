@@ -5,7 +5,7 @@
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
-Phases 1 and 2 are implemented. The document core now supports a daily-use
+Phases 1 through 3 are implemented. The document core now supports a daily-use
 Markdown workspace through the browser, HTTP API, CLI, SQLite revision history,
 and ordinary workspace files.
 
@@ -22,6 +22,12 @@ state persists in the browser, while unsaved document drafts use separate
 browser storage.
 Per-document saves are serialized so a slow response can never replace newer
 text in the editor.
+
+External agents can now authenticate with one-time Sangam bearer tokens,
+receive deny-by-default capabilities and path scopes, work through the same
+optimistic document API as the human, and leave reviewable accepted, denied,
+and conflicted activity. Token secrets are stored only as secure hashes and can
+be expired, revoked, or rotated from the browser.
 
 ## Screenshots
 
@@ -56,8 +62,10 @@ of masquerading as settings.
 - [Seven-phase vertical implementation](./docs/IMPLEMENTATION_PHASES.md)
 - [Phase 1 implementation and verification](./docs/PHASE_1.md)
 - [Phase 2 implementation and verification](./docs/PHASE_2.md)
+- [Phase 3 implementation and verification](./docs/PHASE_3.md)
 - [Phase 1 development, deployment, and recovery operations](./docs/operations/PHASE_1_OPERATIONS.md)
 - [Phase 2 development, backup, and restore operations](./docs/operations/PHASE_2_OPERATIONS.md)
+- [Phase 3 agent-token and incident-response operations](./docs/operations/PHASE_3_OPERATIONS.md)
 - [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
 
 ## Quick start

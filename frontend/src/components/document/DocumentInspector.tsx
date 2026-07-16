@@ -182,9 +182,13 @@ function HistoryList({
             <time>{new Date(revision.created_at).toLocaleString()}</time>
           </div>
           <p>
-            {revision.actor_id}
+            <span className="actor-badge">
+              {revision.actor_display_name ?? revision.actor_id}
+              {revision.actor_kind ? ` · ${revision.actor_kind}` : ''}
+            </span>
             {revision.summary ? ` · ${revision.summary}` : ''}
           </p>
+          {revision.operation_id && <small>Operation {revision.operation_id}</small>}
           {revision.revision_id !== currentRevisionId && (
             <div className="revision-actions">
               <button onClick={() => onCompare(revision.revision_id)}>Compare</button>

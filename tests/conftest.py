@@ -27,10 +27,29 @@ def client(settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 
-@pytest.fixture
-def mutation_headers() -> dict[str, str]:
-    return {"X-Actor": "human:jay", "Idempotency-Key": "test-mutation"}
+def headers(key: str) -> dict[str, str]:
+    return {"Idempotency-Key": key}
 
 
-def headers(key: str, actor: str = "human:jay") -> dict[str, str]:
-    return {"X-Actor": actor, "Idempotency-Key": key}
+def issue_agent_token(
+    client: TestClient,
+    *,
+    actor_id: str = "agent:cli",
+    display_name: str = "Sangam CLI",
+    capabilities: tuple[str, ...] = ("read", "search", "restore"),
+    path_prefix: str | None = None,
+) -> str:
+    response = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": actor_id,
+            "display_name": display_name,
+            "label": "test token",
+            "scopes": [
+                {"capability": capability, "path_prefix": path_prefix}
+                for capability in capabilities
+            ],
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["token"]

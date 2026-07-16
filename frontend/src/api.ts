@@ -26,6 +26,10 @@ export const documentSchema = z.object({
 
 export type Document = z.infer<typeof documentSchema>
 
+export const documentSummarySchema = documentSchema.omit({ content: true })
+
+export type DocumentSummary = z.infer<typeof documentSummarySchema>
+
 export const tagSchema = z.object({
   tag_id: z.string(),
   name: z.string(),
@@ -57,6 +61,9 @@ export const revisionSchema = z.object({
   content_hash: z.string(),
   size_bytes: z.number(),
   actor_id: z.string(),
+  actor_display_name: z.string().nullable(),
+  actor_kind: z.string().nullable(),
+  operation_id: z.string().nullable(),
   operation: z.string(),
   summary: z.string().nullable(),
   created_at: z.string(),
@@ -106,6 +113,52 @@ export const backupSetSchema = z.object({
 
 export type BackupSet = z.infer<typeof backupSetSchema>
 
+export const tokenScopeSchema = z.object({
+  capability: z.enum(['read', 'search', 'create', 'update', 'move', 'tag', 'restore', 'delete']),
+  path_prefix: z.string().nullable(),
+})
+
+export type TokenScope = z.infer<typeof tokenScopeSchema>
+
+export const agentTokenSchema = z.object({
+  token_id: z.string(),
+  actor_id: z.string(),
+  actor_display_name: z.string(),
+  label: z.string(),
+  scopes: z.array(tokenScopeSchema),
+  created_at: z.string(),
+  expires_at: z.string().nullable(),
+  revoked_at: z.string().nullable(),
+  last_used_at: z.string().nullable(),
+  rotated_from_token_id: z.string().nullable(),
+})
+
+export type AgentToken = z.infer<typeof agentTokenSchema>
+
+export const issuedAgentTokenSchema = agentTokenSchema.extend({ token: z.string() })
+
+export type IssuedAgentToken = z.infer<typeof issuedAgentTokenSchema>
+
+export const operationEventSchema = z.object({
+  operation_id: z.string(),
+  actor_id: z.string(),
+  actor_display_name: z.string(),
+  actor_kind: z.string(),
+  token_id: z.string().nullable(),
+  token_label: z.string().nullable(),
+  action: z.string(),
+  resource_type: z.string(),
+  resource_id: z.string().nullable(),
+  path: z.string().nullable(),
+  outcome: z.enum(['accepted', 'denied', 'conflict', 'failed']),
+  error_code: z.string().nullable(),
+  revision_id: z.string().nullable(),
+  details: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+})
+
+export type OperationEvent = z.infer<typeof operationEventSchema>
+
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
   valid: z.boolean(),
@@ -138,7 +191,6 @@ export class ApiError extends Error {
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const headers = new Headers(init?.headers)
   if (init?.body) headers.set('Content-Type', 'application/json')
-  headers.set('X-Actor', 'human:jay')
   if (init?.method && init.method !== 'GET') headers.set('Idempotency-Key', crypto.randomUUID())
   const response = await fetch(`/api/v1${path}`, { ...init, headers })
   const payload: unknown = await response.json()
@@ -158,23 +210,65 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 export const api = {
-  async listDocuments(): Promise<Document[]> {
-    return z.array(documentSchema).parse(await request('/documents'))
+  async listAgentTokens(): Promise<AgentToken[]> {
+    return z.array(agentTokenSchema).parse(await request('/agent-tokens'))
   },
-  async listDeletedDocuments(): Promise<Document[]> {
-    const documents = z.array(documentSchema).parse(await request('/documents?include_deleted=true'))
+  async issueAgentToken(input: {
+    actor_id: string
+    display_name: string
+    label: string
+    scopes: TokenScope[]
+    expires_at?: string | null
+  }): Promise<IssuedAgentToken> {
+    return issuedAgentTokenSchema.parse(
+      await request('/agent-tokens', { method: 'POST', body: JSON.stringify(input) }),
+    )
+  },
+  async rotateAgentToken(tokenId: string): Promise<IssuedAgentToken> {
+    return issuedAgentTokenSchema.parse(await request(`/agent-tokens/${tokenId}/rotate`, { method: 'POST' }))
+  },
+  async revokeAgentToken(tokenId: string): Promise<AgentToken> {
+    return agentTokenSchema.parse(await request(`/agent-tokens/${tokenId}`, { method: 'DELETE' }))
+  },
+  async listActivity(actorId?: string, outcome?: OperationEvent['outcome']): Promise<OperationEvent[]> {
+    const params = new URLSearchParams({ limit: '100' })
+    if (actorId) params.set('actor_id', actorId)
+    if (outcome) params.set('outcome', outcome)
+    return z.array(operationEventSchema).parse(await request(`/activity?${params.toString()}`))
+  },
+  async listDocuments(): Promise<DocumentSummary[]> {
+    const documents: DocumentSummary[] = []
+    const limit = 200
+    for (let offset = 0; ; offset += limit) {
+      const page = z
+        .array(documentSummarySchema)
+        .parse(await request(`/documents?limit=${limit}&offset=${offset}`))
+      documents.push(...page)
+      if (page.length < limit) return documents
+    }
+  },
+  async listDeletedDocuments(): Promise<DocumentSummary[]> {
+    const documents: DocumentSummary[] = []
+    const limit = 200
+    for (let offset = 0; ; offset += limit) {
+      const page = z
+        .array(documentSummarySchema)
+        .parse(await request(`/documents?include_deleted=true&limit=${limit}&offset=${offset}`))
+      documents.push(...page)
+      if (page.length < limit) break
+    }
     return documents.filter((document) => document.deleted)
   },
   async searchDocuments(
     query = '',
     tagId?: string,
     sort: 'relevance' | 'updated' | 'title' | 'path' = 'relevance',
-  ): Promise<Document[]> {
+  ): Promise<DocumentSummary[]> {
     const params = new URLSearchParams()
     if (query.trim()) params.set('q', query.trim())
     if (tagId) params.set('tag_id', tagId)
     params.set('sort', sort)
-    return z.array(documentSchema).parse(await request(`/search?${params.toString()}`))
+    return z.array(documentSummarySchema).parse(await request(`/search?${params.toString()}`))
   },
   async listTags(): Promise<Tag[]> {
     return z.array(tagSchema).parse(await request('/tags'))
@@ -225,7 +319,7 @@ export const api = {
     )
   },
   async updateDocumentMetadata(
-    document: Document,
+    document: DocumentSummary,
     category: string | null,
     tagIds: string[],
   ): Promise<Document> {
@@ -240,7 +334,7 @@ export const api = {
       }),
     )
   },
-  async materializeDocument(document: Document, path: string): Promise<Document> {
+  async materializeDocument(document: DocumentSummary, path: string): Promise<Document> {
     return documentSchema.parse(
       await request(`/documents/${document.document_id}/materialize`, {
         method: 'POST',
@@ -252,7 +346,7 @@ export const api = {
       }),
     )
   },
-  async moveDocument(document: Document, path: string): Promise<Document> {
+  async moveDocument(document: DocumentSummary, path: string): Promise<Document> {
     return documentSchema.parse(
       await request(`/documents/${document.document_id}/move`, {
         method: 'POST',
@@ -264,7 +358,7 @@ export const api = {
       }),
     )
   },
-  async duplicateDocument(document: Document, title?: string, path?: string): Promise<Document> {
+  async duplicateDocument(document: DocumentSummary, title?: string, path?: string): Promise<Document> {
     return documentSchema.parse(
       await request(`/documents/${document.document_id}/duplicate`, {
         method: 'POST',
@@ -276,7 +370,7 @@ export const api = {
       }),
     )
   },
-  async deleteDocument(document: Document): Promise<Document> {
+  async deleteDocument(document: DocumentSummary): Promise<Document> {
     return documentSchema.parse(
       await request(`/documents/${document.document_id}`, {
         method: 'DELETE',
@@ -299,7 +393,7 @@ export const api = {
     if (toRevisionId) params.set('to_revision_id', toRevisionId)
     return revisionDiffSchema.parse(await request(`/documents/${documentId}/diff?${params.toString()}`))
   },
-  async restore(document: Document, revisionId: string): Promise<Document> {
+  async restore(document: DocumentSummary, revisionId: string): Promise<Document> {
     return documentSchema.parse(
       await request(`/documents/${document.document_id}/restore`, {
         method: 'POST',

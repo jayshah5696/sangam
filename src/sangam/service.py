@@ -39,12 +39,25 @@ class DocumentService:
         idempotency: IdempotencyStore,
         organization: WorkspaceOrganizationService,
         search_index: SearchIndex,
+        max_document_bytes: int,
     ) -> None:
         self.database = database
         self.workspace = workspace
         self.idempotency = idempotency
         self.organization = organization
         self.search_index = search_index
+        self.max_document_bytes = max_document_bytes
+
+    def _validate_content_size(self, content: str) -> None:
+        size_bytes = len(content.encode("utf-8"))
+        if size_bytes > self.max_document_bytes:
+            raise ValidationError(
+                "Markdown content exceeds the configured size limit",
+                details={
+                    "size_bytes": size_bytes,
+                    "max_document_bytes": self.max_document_bytes,
+                },
+            )
 
     def _ensure_actor(self, connection: sqlite3.Connection, actor_id: str) -> None:
         if not connection.execute(
@@ -209,6 +222,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        self._validate_content_size(content)
         normalized_path = self._normalize_path(path) if path is not None else None
         payload = {"title": title, "content": content, "path": normalized_path}
         fingerprint = request_hash(payload)
@@ -346,6 +360,7 @@ class DocumentService:
                     if current.deleted and operation != "restore":
                         raise NotFoundError(f"Document is deleted: {document_id}")
                     next_content = current.content if content is None else content
+                    self._validate_content_size(next_content)
                     next_title = current.title if title is None else title.strip()
                     next_path = current.path if path is None else path
                     next_deleted = current.deleted if deleted is None else deleted
@@ -585,9 +600,17 @@ class DocumentService:
         with self.database.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM revisions
-                WHERE document_id = ?
-                ORDER BY created_at DESC, revision_id DESC
+                SELECT r.*, a.display_name AS actor_display_name,
+                    a.identity_kind AS actor_kind,
+                    (
+                        SELECT e.operation_id FROM operation_events e
+                        WHERE e.revision_id = r.revision_id AND e.outcome = 'accepted'
+                        ORDER BY e.created_at, e.operation_id LIMIT 1
+                    ) AS operation_id
+                FROM revisions r
+                JOIN actors a ON a.actor_id = r.actor_id
+                WHERE r.document_id = ?
+                ORDER BY r.created_at DESC, r.revision_id DESC
                 """,
                 (document_id,),
             ).fetchall()

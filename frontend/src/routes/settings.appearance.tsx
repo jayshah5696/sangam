@@ -12,6 +12,7 @@ import {
   Tags,
 } from 'lucide-react'
 import { api, type Folder, type Tag } from '../api'
+import { AgentAccessSettings } from '../components/AgentAccessSettings'
 import { themes, useTheme } from '../theme'
 import { useWorkbench } from '../workbench'
 
@@ -77,6 +78,8 @@ export function WorkspaceSettings() {
             ))}
           </div>
         </SettingsSection>
+
+        <AgentAccessSettings />
 
         <SettingsSection
           id="workbench"
