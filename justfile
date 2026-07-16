@@ -13,6 +13,7 @@ test:
     uv run ruff check .
     uv run ruff format --check .
     uv run pytest
+    npm --prefix frontend run format:check
     npm --prefix frontend run build
     npm --prefix frontend run lint
     npm --prefix frontend run test
@@ -30,6 +31,7 @@ test-frontend:
 # Format Python sources and tests.
 format:
     uv run ruff format .
+    npm --prefix frontend run format
 
 # Verify documentation links, Markdown style, and Mermaid fences.
 test-docs:

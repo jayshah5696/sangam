@@ -5,7 +5,11 @@ export function internalDocumentHref(href: string): string | null {
   return match ? `/documents/${match[1]}` : null
 }
 
-export function internalDocumentMarkdown(document: { document_id: string; title: string; path: string | null }) {
+export function internalDocumentMarkdown(document: {
+  document_id: string
+  title: string
+  path: string | null
+}) {
   const label = document.path ?? document.title
   return `[${label}](sangam://document/${document.document_id})`
 }

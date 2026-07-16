@@ -36,10 +36,11 @@ type MarkdownPreviewProps = {
 export function MarkdownPreview({ content }: MarkdownPreviewProps) {
   const previewRef = useRef<HTMLDivElement>(null)
   const safeHtml = useMemo(
-    () => DOMPurify.sanitize(markdown.render(content), {
-      USE_PROFILES: { html: true },
-      ADD_ATTR: ['target'],
-    }),
+    () =>
+      DOMPurify.sanitize(markdown.render(content), {
+        USE_PROFILES: { html: true },
+        ADD_ATTR: ['target'],
+      }),
     [content],
   )
 
@@ -81,10 +82,6 @@ export function MarkdownPreview({ content }: MarkdownPreviewProps) {
   }, [safeHtml])
 
   return (
-    <article
-      className="markdown-preview"
-      ref={previewRef}
-      dangerouslySetInnerHTML={{ __html: safeHtml }}
-    />
+    <article className="markdown-preview" ref={previewRef} dangerouslySetInnerHTML={{ __html: safeHtml }} />
   )
 }

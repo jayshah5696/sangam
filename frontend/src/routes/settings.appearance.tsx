@@ -1,13 +1,29 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import {
+  Check,
+  FolderTree,
+  MonitorCog,
+  Paintbrush,
+  RefreshCw,
+  RotateCcw,
+  SearchCheck,
+  Tags,
+} from 'lucide-react'
 import { api, type Folder, type Tag } from '../api'
 import { themes, useTheme } from '../theme'
+import { useWorkbench } from '../workbench'
 
-export const Route = createFileRoute('/settings/appearance')({ component: WorkspaceSettings })
+export const Route = createFileRoute('/settings/appearance')({
+  beforeLoad: () => {
+    throw redirect({ to: '/settings' })
+  },
+})
 
-function WorkspaceSettings() {
+export function WorkspaceSettings() {
   const { preferences, updatePreferences } = useTheme()
+  const workbench = useWorkbench()
   const queryClient = useQueryClient()
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
@@ -20,68 +36,241 @@ function WorkspaceSettings() {
       await queryClient.invalidateQueries({ queryKey: ['tags'] })
     },
   })
+  const reindex = useMutation({ mutationFn: api.rebuildSearch })
 
   return (
-    <div className="settings-page">
-      <header className="settings-header">
-        <p className="eyebrow">Workspace settings</p>
-        <h1>Make Sangam yours.</h1>
-        <p>Themes and panel layout stay in this browser. Tags, categories, and folders belong to the shared workspace.</p>
-      </header>
-      <section className="settings-section">
-        <div className="settings-title"><div><p className="eyebrow">Appearance</p><h2>Theme</h2></div><span>{themes.length} built in</span></div>
-        <div className="theme-grid">
-          {themes.map((theme) => (
-            <button
-              key={theme.id}
-              className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
-              onClick={() => updatePreferences({ theme: theme.id })}
+    <div className="settings-control-center simplified-settings">
+      <div className="settings-content">
+        <header className="settings-compact-header">
+          <div>
+            <p className="eyebrow">Sangam settings</p>
+            <h1>Settings</h1>
+          </div>
+          <ScopeBadge scope="browser" />
+        </header>
+
+        <SettingsSection
+          id="appearance"
+          icon={Paintbrush}
+          title="Appearance"
+          description="Color and contrast for this browser."
+          scope="browser"
+        >
+          <div className="theme-grid settings-theme-grid">
+            {themes.map((theme) => (
+              <button
+                key={theme.id}
+                className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
+                onClick={() => updatePreferences({ theme: theme.id })}
+              >
+                <span className="theme-swatches">
+                  {theme.colors.map((color) => (
+                    <i key={color} style={{ background: color }} />
+                  ))}
+                </span>
+                <strong>
+                  {theme.name}
+                  {preferences.theme === theme.id && <Check size={13} />}
+                </strong>
+                <small>{theme.description}</small>
+              </button>
+            ))}
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          id="workbench"
+          icon={MonitorCog}
+          title="Workbench"
+          description="Resize panels directly by dragging their edges. Editor groups persist in this browser."
+          scope="browser"
+        >
+          <div className="settings-rows">
+            <SettingRow label="Workspace sidebar" detail="Show files and search beside your document">
+              <label className="compact-switch">
+                <input
+                  type="checkbox"
+                  checked={preferences.leftVisible}
+                  onChange={(event) => updatePreferences({ leftVisible: event.target.checked })}
+                />
+                <span>{preferences.leftVisible ? 'Visible' : 'Hidden'}</span>
+              </label>
+            </SettingRow>
+            <SettingRow
+              label="Editor groups"
+              detail="Return to a single editor and clear the current split arrangement"
             >
-              <span className="theme-swatches">{theme.colors.map((color) => <i key={color} style={{ background: color }} />)}</span>
-              <strong>{theme.name}</strong>
-              <small>{theme.description}</small>
+              <button className="secondary-action" onClick={workbench.resetLayout}>
+                <RotateCcw size={14} />
+                Reset layout
+              </button>
+            </SettingRow>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          id="organization"
+          icon={FolderTree}
+          title="Files & organization"
+          description="Tags, categories, and folder metadata belong to the shared workspace."
+          scope="workspace"
+        >
+          <div className="settings-subsection">
+            <div className="settings-subtitle">
+              <div>
+                <Tags size={15} />
+                <strong>Tags</strong>
+              </div>
+              <span>{tags.data?.length ?? 0}</span>
+            </div>
+            <form
+              className="tag-creator compact-creator"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (tagName.trim()) createTag.mutate()
+              }}
+            >
+              <input
+                aria-label="Tag color"
+                type="color"
+                value={tagColor}
+                onChange={(event) => setTagColor(event.target.value)}
+              />
+              <input
+                aria-label="Tag name"
+                placeholder="New tag name"
+                value={tagName}
+                onChange={(event) => setTagName(event.target.value)}
+              />
+              <button disabled={createTag.isPending}>Add tag</button>
+            </form>
+            <div className="tag-library">
+              {tags.data?.map((tag) => (
+                <span className="library-tag" key={tag.tag_id}>
+                  <i style={{ background: tag.color }} />
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="settings-subsection">
+            <div className="settings-subtitle">
+              <div>
+                <FolderTree size={15} />
+                <strong>Folder metadata</strong>
+              </div>
+              <span>{folders.data?.length ?? 0}</span>
+            </div>
+            <div className="folder-settings-list">
+              {folders.data?.map((folder) => (
+                <FolderSettings
+                  key={`${folder.folder_id}:${folder.metadata_version}`}
+                  folder={folder}
+                  tags={tags.data ?? []}
+                />
+              ))}
+              {folders.data?.length === 0 && (
+                <p className="small-muted">Create a folder from Files to organize it here.</p>
+              )}
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          id="maintenance"
+          icon={SearchCheck}
+          title="Maintenance"
+          description="Rebuild derived search data from the canonical workspace."
+          scope="workspace"
+        >
+          <div className="maintenance-row">
+            <div>
+              <SearchCheck size={17} />
+              <span>
+                <strong>Search index</strong>
+                <small>Rebuild full-text search from canonical workspace data.</small>
+              </span>
+            </div>
+            <button
+              className="secondary-action"
+              disabled={reindex.isPending}
+              onClick={() => reindex.mutate()}
+            >
+              <RefreshCw size={14} className={reindex.isPending ? 'spin' : ''} />
+              {reindex.isPending ? 'Rebuilding…' : 'Rebuild index'}
             </button>
-          ))}
+          </div>
+          {reindex.isSuccess && (
+            <p className="operation-result success">
+              <Check size={14} />
+              Indexed {reindex.data} documents.
+            </p>
+          )}
+          {reindex.isError && (
+            <p className="operation-result error-text">
+              Search index could not be rebuilt: {reindex.error.message}
+            </p>
+          )}
+        </SettingsSection>
+      </div>
+    </div>
+  )
+}
+
+function SettingsSection({
+  id,
+  icon: Icon,
+  title,
+  description,
+  scope,
+  children,
+}: {
+  id: string
+  icon: typeof Paintbrush
+  title: string
+  description: string
+  scope: 'browser' | 'workspace'
+  children: React.ReactNode
+}) {
+  return (
+    <section className="settings-panel" id={id}>
+      <header>
+        <Icon size={18} />
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
         </div>
-      </section>
-      <section className="settings-section">
-        <div className="settings-title"><div><p className="eyebrow">Layout</p><h2>Editable sidebars</h2></div></div>
-        <div className="panel-controls">
-          <label>
-            <span>Left navigation <output>{preferences.leftWidth}px</output></span>
-            <input type="range" min="220" max="440" value={preferences.leftWidth} onChange={(event) => updatePreferences({ leftWidth: Number(event.target.value) })} />
-          </label>
-          <label>
-            <span>Right document panel <output>{preferences.rightWidth}px</output></span>
-            <input type="range" min="270" max="460" value={preferences.rightWidth} onChange={(event) => updatePreferences({ rightWidth: Number(event.target.value) })} />
-          </label>
-          <label className="toggle-row"><input type="checkbox" checked={preferences.leftVisible} onChange={(event) => updatePreferences({ leftVisible: event.target.checked })} /> Show file navigation</label>
-          <label className="toggle-row"><input type="checkbox" checked={preferences.rightVisible} onChange={(event) => updatePreferences({ rightVisible: event.target.checked })} /> Show document panel</label>
-        </div>
-      </section>
-      <section className="settings-section">
-        <div className="settings-title"><div><p className="eyebrow">Organization</p><h2>Tags</h2></div><span>{tags.data?.length ?? 0} tags</span></div>
-        <form className="tag-creator" onSubmit={(event) => {
-          event.preventDefault()
-          if (tagName.trim()) createTag.mutate()
-        }}>
-          <input aria-label="Tag color" type="color" value={tagColor} onChange={(event) => setTagColor(event.target.value)} />
-          <input aria-label="Tag name" placeholder="New tag name" value={tagName} onChange={(event) => setTagName(event.target.value)} />
-          <button disabled={createTag.isPending}>Add tag</button>
-        </form>
-        <div className="tag-library">
-          {tags.data?.map((tag) => <span className="library-tag" key={tag.tag_id}><i style={{ background: tag.color }} />{tag.name}</span>)}
-        </div>
-      </section>
-      <section className="settings-section">
-        <div className="settings-title"><div><p className="eyebrow">Organization</p><h2>Folder categories</h2></div><span>{folders.data?.length ?? 0} folders</span></div>
-        <div className="folder-settings-list">
-          {folders.data?.map((folder) => (
-            <FolderSettings key={`${folder.folder_id}:${folder.metadata_version}`} folder={folder} tags={tags.data ?? []} />
-          ))}
-          {folders.data?.length === 0 && <p className="small-muted">Create a folder from the left sidebar to organize it here.</p>}
-        </div>
-      </section>
+        <ScopeBadge scope={scope} />
+      </header>
+      <div className="settings-panel-body">{children}</div>
+    </section>
+  )
+}
+
+function ScopeBadge({ scope }: { scope: 'browser' | 'workspace' }) {
+  return (
+    <span className={`scope-badge ${scope}`}>
+      {scope === 'browser' ? 'This browser' : 'Shared workspace'}
+    </span>
+  )
+}
+
+function SettingRow({
+  label,
+  detail,
+  children,
+}: {
+  label: string
+  detail: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="setting-row">
+      <div>
+        <strong>{label}</strong>
+        <small>{detail}</small>
+      </div>
+      {children}
     </div>
   )
 }
@@ -95,18 +284,39 @@ function FolderSettings({ folder, tags }: { folder: Folder; tags: Tag[] }) {
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['folders'] }),
   })
   return (
-    <article className="folder-setting">
-      <div><strong>▾ {folder.path}</strong><small>{folder.document_count} documents</small></div>
-      <input aria-label={`Category for ${folder.path}`} placeholder="Category" value={category} onChange={(event) => setCategory(event.target.value)} />
+    <article className="folder-setting compact-folder-setting">
+      <div>
+        <strong>▾ {folder.path}</strong>
+        <small>{folder.document_count} documents</small>
+      </div>
+      <input
+        aria-label={`Category for ${folder.path}`}
+        placeholder="Category"
+        value={category}
+        onChange={(event) => setCategory(event.target.value)}
+      />
       <div className="compact-tags">
         {tags.map((tag) => (
           <label key={tag.tag_id}>
-            <input type="checkbox" checked={selectedTags.includes(tag.tag_id)} onChange={() => setSelectedTags((current) => current.includes(tag.tag_id) ? current.filter((id) => id !== tag.tag_id) : [...current, tag.tag_id])} />
-            <i style={{ background: tag.color }} />{tag.name}
+            <input
+              type="checkbox"
+              checked={selectedTags.includes(tag.tag_id)}
+              onChange={() =>
+                setSelectedTags((current) =>
+                  current.includes(tag.tag_id)
+                    ? current.filter((id) => id !== tag.tag_id)
+                    : [...current, tag.tag_id],
+                )
+              }
+            />
+            <i style={{ background: tag.color }} />
+            {tag.name}
           </label>
         ))}
       </div>
-      <button onClick={() => update.mutate()} disabled={update.isPending}>Save</button>
+      <button onClick={() => update.mutate()} disabled={update.isPending}>
+        {update.isPending ? 'Saving…' : 'Save'}
+      </button>
     </article>
   )
 }

@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="./frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
-</p>
+# Sangam
 
-<h1 align="center">Sangam</h1>
+<!-- markdownlint-disable-next-line MD033 -->
+<img src="./frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
@@ -10,35 +9,45 @@ Phases 1 and 2 are implemented. The document core now supports a daily-use
 Markdown workspace through the browser, HTTP API, CLI, SQLite revision history,
 and ordinary workspace files.
 
-The workspace includes nested navigation, rich FTS5 search, stable internal
-links, rendered Markdown and Mermaid preview, revision diffs, explicit
-reconciliation, trash/restore, verified nightly backups, resizable sidebars, and
-four selectable themes.
+The workspace opens with one focused editor and reveals tabs only when a group
+contains more than one document. Users can add persistent horizontal,
+vertical, or nested editor groups from file actions, document actions, or the
+command palette. Narrow horizontal layouts stack automatically instead of
+crushing the editor. Sangam also includes a keyboard-accessible file explorer,
+rich FTS5 search, stable internal links,
+rendered Markdown and Mermaid preview, two-revision comparison, explicit
+reconciliation, trash/restore, verified nightly backups, a command palette,
+resizable panels, and four selectable themes. Validated editor-group and tab
+state persists in the browser, while unsaved document drafts use separate
+browser storage.
+Per-document saves are serialized so a slow response can never replace newer
+text in the editor.
 
 ## Screenshots
 
-### Phase 2 Markdown workspace
+### Focused single-editor workspace
 
-![Sangam Phase 2 split Markdown editor with rendered preview, Mermaid diagram, file navigation, and revision history](./docs/assets/phase-2-ui.jpg)
+Sangam starts with one editor and no permanent tab or status strip. Files,
+search, maintenance tools, document properties, and save state remain available
+without forcing a split layout.
 
-### River workspace
+![Sangam workbench with one Markdown editor, file explorer, document inspector, and the Sangam logo](./docs/assets/workbench-single.png)
 
-![Sangam workspace using the River theme](./docs/assets/workspace-river.png)
+### User-created editor groups
 
-| Midnight | Parchment |
-| --- | --- |
-| ![Sangam workspace using the Midnight theme](./docs/assets/workspace-midnight.png) | ![Sangam workspace using the Parchment theme](./docs/assets/workspace-parchment.png) |
+Editor groups can be split horizontally or vertically, nested, resized, closed,
+and restored with the browser session. The document inspector steps out of the
+way while multiple groups are open.
 
-### Cobalt workspace settings
+![Sangam workbench with rendered agent review notes beside an editable research brief](./docs/assets/workbench-splits.png)
 
-![Sangam workspace settings using the Cobalt theme](./docs/assets/workspace-settings.png)
+### Settings and recovery controls
 
-<details>
-<summary>Phase 1 baseline</summary>
+Settings distinguish browser-local preferences from shared workspace metadata.
+Reconciliation, backups, and trash remain direct workspace destinations instead
+of masquerading as settings.
 
-![Sangam Phase 1 document editor](./docs/assets/phase-1-ui.png)
-
-</details>
+![Sangam settings page with themes, workbench preferences, organization, and maintenance](./docs/assets/workbench-settings.png)
 
 ## Project documents
 

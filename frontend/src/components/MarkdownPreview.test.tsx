@@ -26,8 +26,9 @@ describe('MarkdownPreview', () => {
     expect(container.querySelector('table')).toBeTruthy()
     expect(container.querySelector('script')).toBeNull()
     expect((window as Window & { __unsafe?: boolean }).__unsafe).toBeUndefined()
-    expect(screen.getByRole('link', { name: 'Linked note' }).getAttribute('href'))
-      .toBe('/documents/123e4567-e89b-12d3-a456-426614174000')
+    expect(screen.getByRole('link', { name: 'Linked note' }).getAttribute('href')).toBe(
+      '/documents/123e4567-e89b-12d3-a456-426614174000',
+    )
   })
 
   it('hardens external links', () => {
