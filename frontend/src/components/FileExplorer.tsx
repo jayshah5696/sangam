@@ -1,72 +1,42 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type DragEvent,
-  type KeyboardEvent,
-} from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import {
-  ChevronDown,
-  ChevronRight,
-  Copy,
-  FilePlus2,
-  FileText,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  MoreHorizontal,
-  PanelRightOpen,
-  Pencil,
-  Search,
-  Trash2,
-} from 'lucide-react'
+import type {
+  ContextMenuItem,
+  ContextMenuOpenContext,
+  FileTreeDropContext,
+  FileTreeDropResult,
+  FileTreeRenameEvent,
+  FileTreeRenamingItem,
+  FileTreeRowDecorationContext,
+} from '@pierre/trees'
+import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react'
+import { Copy, FilePlus2, FolderPlus, PanelRightOpen, Pencil, Search, Trash2 } from 'lucide-react'
 import { api, type DocumentSummary } from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench } from '../workbench'
-import { ActionMenu, ActionMenuItem } from './ActionMenu'
 import {
-  adjacentVisibleNodeId,
-  buildWorkspaceTree,
+  buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
-  flattenVisibleNodes,
   joinWorkspacePath,
   parentWorkspacePath,
-  parentNodeId,
-  typeaheadNodeId,
   workspaceBasename,
-  type ExplorerDocument,
-  type ExplorerNode,
+  type WorkspaceTreeAdapter,
 } from '../workspaceTree'
 
 type CreateMode = { kind: 'file' | 'folder'; parentPath: string } | null
 
-type ExplorerActions = {
-  expanded: Set<string>
-  selectedId: string | null
-  renamingId: string | null
-  renameValue: string
-  select: (id: string) => void
-  toggle: (path: string) => void
-  open: (node: ExplorerDocument) => void
-  openToSide: (node: ExplorerDocument) => void
-  startRename: (node: ExplorerDocument) => void
-  setRenameValue: (value: string) => void
-  commitRename: (node: ExplorerDocument) => void
-  cancelRename: () => void
-  create: (kind: 'file' | 'folder', parentPath: string) => void
-  duplicate: (node: ExplorerDocument) => void
-  trash: (node: ExplorerDocument) => void
-  dropDocument: (event: DragEvent, folderPath: string) => void
+type TreeCallbacks = {
+  onSelectionChange: (paths: readonly string[]) => void
+  canDrag: (paths: readonly string[]) => boolean
+  canDrop: (event: FileTreeDropContext) => boolean
+  onDropComplete: (event: FileTreeDropResult) => void
+  canRename: (item: FileTreeRenamingItem) => boolean
+  onRename: (event: FileTreeRenameEvent) => void
+  renderRowDecoration: (context: FileTreeRowDecorationContext) => { text: string; title: string } | null
 }
 
-const ExplorerActionsContext = createContext<ExplorerActions | null>(null)
-
-const expandedStorageKey = 'sangam.explorer.expanded.v1'
+const expandedStorageKey = 'sangam.explorer.expanded.v2'
 
 export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
@@ -75,35 +45,14 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const activeDocumentId = findGroup(workbench.root, workbench.activeGroupId)?.activeTabId
   const documents = useQuery({ queryKey: ['documents', 'explorer'], queryFn: api.listDocuments })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
-  const [expanded, setExpanded] = useState<Set<string>>(loadExpanded)
-  const [selection, setSelection] = useState<{
-    activeDocumentId: string | null | undefined
-    selectedId: string | null
-  }>({ activeDocumentId, selectedId: activeDocumentId ? `document:${activeDocumentId}` : null })
-  const selectedId =
-    selection.activeDocumentId === activeDocumentId
-      ? selection.selectedId
-      : activeDocumentId
-        ? `document:${activeDocumentId}`
-        : selection.selectedId
-  const setSelectedId = (nextSelectedId: string | null) =>
-    setSelection({ activeDocumentId, selectedId: nextSelectedId })
-  const [createMode, setCreateMode] = useState<CreateMode>(null)
-  const [createName, setCreateName] = useState('')
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const treeRef = useRef<HTMLElement>(null)
-  const tree = useMemo(
-    () => buildWorkspaceTree(documents.data ?? [], folders.data ?? []),
+  const adapter = useMemo(
+    () => buildWorkspaceTreeAdapter(documents.data ?? [], folders.data ?? []),
     [documents.data, folders.data],
   )
-  const flatNodes = useMemo(() => flattenVisibleNodes(tree, expanded), [tree, expanded])
-  const selected = flatNodes.find((node) => node.id === selectedId)
-  const selectedFolderPath =
-    selected?.type === 'folder' ? selected.path : selected?.path ? parentWorkspacePath(selected.path) : ''
-
-  useEffect(() => localStorage.setItem(expandedStorageKey, JSON.stringify([...expanded])), [expanded])
+  const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
+  const [createMode, setCreateMode] = useState<CreateMode>(null)
+  const [createName, setCreateName] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   const refresh = async () => {
     await Promise.all([
@@ -125,7 +74,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       setCreateName('')
       setError(null)
       await refresh()
-      if (result.folder) setExpanded((current) => new Set(current).add(result.folder!.path))
       if (result.document) {
         workbench.ensureDocumentOpen(
           result.document.document_id,
@@ -139,22 +87,30 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   })
 
   const rename = useMutation({
-    mutationFn: async ({ node, value }: { node: ExplorerDocument; value: string }) => {
-      if (node.document.path) {
-        const parent = parentWorkspacePath(node.document.path)
-        const filename = ensureMarkdownExtension(value)
-        return api.moveDocument(node.document, joinWorkspacePath(parent, filename))
+    mutationFn: async ({
+      document,
+      destinationPath,
+    }: {
+      document: DocumentSummary
+      destinationPath: string
+    }) => {
+      if (document.path) {
+        const parent = parentWorkspacePath(destinationPath)
+        const filename = ensureMarkdownExtension(workspaceBasename(destinationPath))
+        return api.moveDocument(document, joinWorkspacePath(parent, filename))
       }
-      const document = await api.getDocument(node.document.document_id)
-      return api.updateDocument(document, document.content, value)
+      const current = await api.getDocument(document.document_id)
+      const title = workspaceBasename(destinationPath).trim() || 'Untitled document'
+      return api.updateDocument(current, current.content, title)
     },
     onSuccess: async () => {
-      setRenamingId(null)
       setError(null)
       await refresh()
     },
-    onError: (cause) =>
-      setError(cause instanceof Error ? cause.message : 'The document could not be renamed.'),
+    onError: async (cause) => {
+      setError(cause instanceof Error ? cause.message : 'The document could not be renamed.')
+      await refresh()
+    },
   })
 
   const duplicate = useMutation({
@@ -178,18 +134,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const move = useMutation({
     mutationFn: ({ document, folderPath }: { document: DocumentSummary; folderPath: string }) => {
       if (!document.path) throw new Error('Save this draft to the workspace before moving it.')
-      const filename = workspaceBasename(document.path)
-      return api.moveDocument(document, joinWorkspacePath(folderPath, filename))
+      return api.moveDocument(document, joinWorkspacePath(folderPath, workspaceBasename(document.path)))
     },
     onMutate: async ({ document, folderPath }) => {
       await queryClient.cancelQueries({ queryKey: ['documents', 'explorer'] })
       const previous = queryClient.getQueryData<DocumentSummary[]>(['documents', 'explorer'])
-      const filename = document.path ? workspaceBasename(document.path) : undefined
-      if (filename)
+      if (document.path)
         queryClient.setQueryData<DocumentSummary[]>(['documents', 'explorer'], (current) =>
           current?.map((candidate) =>
             candidate.document_id === document.document_id
-              ? { ...candidate, path: joinWorkspacePath(folderPath, filename) }
+              ? { ...candidate, path: joinWorkspacePath(folderPath, workspaceBasename(document.path!)) }
               : candidate,
           ),
         )
@@ -202,355 +156,284 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     onSettled: refresh,
   })
 
-  const openDocument = async (node: ExplorerDocument, toSide = false) => {
-    if (toSide)
-      workbench.splitGroup(workbench.activeGroupId, preferredSplitDirection(), node.document.document_id)
-    else workbench.ensureDocumentOpen(node.document.document_id, node.document.title, workbench.activeGroupId)
-    await navigate({ to: '/documents/$documentId', params: { documentId: node.document.document_id } })
+  const openDocument = async (document: DocumentSummary, toSide = false) => {
+    if (toSide) workbench.splitGroup(workbench.activeGroupId, preferredSplitDirection(), document.document_id)
+    else workbench.ensureDocumentOpen(document.document_id, document.title, workbench.activeGroupId)
+    await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
   }
 
-  const startRename = (node: ExplorerDocument) => {
-    setRenamingId(node.id)
-    setRenameValue(node.name.replace(/\.md$/i, ''))
-  }
+  const adapterRef = useRef(adapter)
+  const callbacksRef = useRef<TreeCallbacks | null>(null)
+  const suppressOpenRef = useRef(false)
+  useEffect(() => {
+    adapterRef.current = adapter
+    callbacksRef.current = {
+      onSelectionChange: (paths) => {
+        const path = paths.at(-1) ?? null
+        setSelectedTreePath(path)
+        if (path && !suppressOpenRef.current) {
+          const document = adapterRef.current.documentByTreePath.get(path)
+          if (document) void openDocument(document)
+        }
+      },
+      canDrag: (paths) =>
+        paths.length === 1 && Boolean(adapterRef.current.documentByTreePath.get(paths[0]!)?.path),
+      canDrop: ({ draggedPaths, target }) =>
+        draggedPaths.length === 1 &&
+        target.directoryPath !== adapterRef.current.draftsRootPath &&
+        (target.directoryPath === null || adapterRef.current.folderByTreePath.has(target.directoryPath)),
+      onDropComplete: ({ draggedPaths, target }) => {
+        const document = adapterRef.current.documentByTreePath.get(draggedPaths[0]!)
+        if (document?.path) move.mutate({ document, folderPath: target.directoryPath ?? '' })
+      },
+      canRename: ({ isFolder, path }) => !isFolder && adapterRef.current.documentByTreePath.has(path),
+      onRename: ({ sourcePath, destinationPath }) => {
+        const document = adapterRef.current.documentByTreePath.get(sourcePath)
+        if (document) rename.mutate({ document, destinationPath })
+      },
+      renderRowDecoration: ({ item }) => {
+        const folder = adapterRef.current.folderByTreePath.get(item.path)
+        if (folder)
+          return {
+            text: String(folder.document_count),
+            title: `${folder.document_count} documents`,
+          }
+        if (item.path === adapterRef.current.draftsRootPath) {
+          const count = [...adapterRef.current.documentByTreePath.values()].filter(
+            (document) => !document.path,
+          ).length
+          return { text: String(count), title: `${count} drafts` }
+        }
+        return null
+      },
+    }
+  })
 
-  const onTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    const activeId = (document.activeElement as HTMLElement | null)?.dataset.nodeId ?? selectedId
-    const focusNode = (nodeId: string | null) => {
-      if (!nodeId) return
-      setSelectedId(nodeId)
-      requestAnimationFrame(() =>
-        treeRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`)?.focus(),
-      )
-    }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault()
-      focusNode(adjacentVisibleNodeId(flatNodes, activeId, event.key === 'ArrowDown' ? 1 : -1))
-      return
-    }
-    const node = flatNodes.find((candidate) => candidate.id === activeId)
-    if (!node) return
-    if (event.key === 'ArrowRight' && node.type === 'folder') {
-      event.preventDefault()
-      if (expanded.has(node.path)) focusNode(node.children[0]?.id ?? null)
-      else setExpanded((currentSet) => new Set(currentSet).add(node.path))
-      return
-    }
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault()
-      if (node.type === 'folder' && expanded.has(node.path)) {
-        setExpanded((currentSet) => {
-          const next = new Set(currentSet)
-          next.delete(node.path)
-          return next
+  const { model } = useFileTree({
+    id: 'sangam-workspace-tree',
+    paths: adapter.paths,
+    density: 'compact',
+    icons: 'minimal',
+    initialExpansion: 'closed',
+    initialExpandedPaths: loadExpanded(),
+    initialSelectedPaths: activeDocumentId
+      ? [adapter.treePathByDocumentId.get(activeDocumentId)].filter((path): path is string => Boolean(path))
+      : [],
+    composition: {
+      contextMenu: { enabled: true, triggerMode: 'both', buttonVisibility: 'when-needed' },
+    },
+    dragAndDrop: {
+      canDrag: (paths) => callbacksRef.current?.canDrag(paths) ?? false,
+      canDrop: (event) => callbacksRef.current?.canDrop(event) ?? false,
+      onDropComplete: (event) => callbacksRef.current?.onDropComplete(event),
+      onDropError: (message) => setError(message),
+    },
+    renaming: {
+      canRename: (item) => callbacksRef.current?.canRename(item) ?? false,
+      onRename: (event) => callbacksRef.current?.onRename(event),
+      onError: (message) => setError(message),
+    },
+    onSelectionChange: (paths) => callbacksRef.current?.onSelectionChange(paths),
+    renderRowDecoration: (context) => callbacksRef.current?.renderRowDecoration(context) ?? null,
+  })
+
+  useEffect(() => {
+    model.resetPaths(adapter.paths, {
+      initialExpandedPaths: loadExpanded().filter(
+        (path) => adapter.folderByTreePath.has(path) || path === adapter.draftsRootPath,
+      ),
+    })
+  }, [adapter, model])
+
+  useEffect(() => {
+    if (!activeDocumentId) return
+    const activePath = adapter.treePathByDocumentId.get(activeDocumentId)
+    if (!activePath || model.getSelectedPaths().includes(activePath)) return
+    suppressOpenRef.current = true
+    for (const path of model.getSelectedPaths()) model.getItem(path)?.deselect()
+    model.getItem(activePath)?.select()
+    model.scrollToPath(activePath, { focus: false, offset: 'nearest' })
+    suppressOpenRef.current = false
+  }, [activeDocumentId, adapter, model])
+
+  useEffect(
+    () =>
+      model.subscribe(() => {
+        const candidates = [...adapterRef.current.folderByTreePath.keys()]
+        if (adapterRef.current.draftsRootPath) candidates.push(adapterRef.current.draftsRootPath)
+        const expanded = candidates.filter((path) => {
+          const item = model.getItem(path)
+          return item?.isDirectory() && 'isExpanded' in item ? item.isExpanded() : false
         })
-      } else focusNode(parentNodeId(tree, node.id))
-      return
-    }
-    if (event.key === 'Enter' && node.type === 'document') {
-      event.preventDefault()
-      void openDocument(node)
-      return
-    }
-    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
-      focusNode(typeaheadNodeId(flatNodes, activeId, event.key))
-    }
-  }
-
-  const dropDocument = (event: DragEvent, folderPath: string) => {
-    event.preventDefault()
-    const documentId = event.dataTransfer.getData('application/x-sangam-document')
-    const document = documents.data?.find((candidate) => candidate.document_id === documentId)
-    if (document) move.mutate({ document, folderPath })
-  }
-
-  const actions: ExplorerActions = {
-    expanded,
-    selectedId,
-    renamingId,
-    renameValue,
-    select: setSelectedId,
-    toggle: (path) =>
-      setExpanded((current) => {
-        const next = new Set(current)
-        if (next.has(path)) next.delete(path)
-        else next.add(path)
-        return next
+        localStorage.setItem(expandedStorageKey, JSON.stringify(expanded))
       }),
-    open: (target) => void openDocument(target),
-    openToSide: (target) => void openDocument(target, true),
-    startRename,
-    setRenameValue,
-    commitRename: (target) => {
-      if (renameValue.trim()) rename.mutate({ node: target, value: renameValue.trim() })
-    },
-    cancelRename: () => setRenamingId(null),
-    create: (kind, parentPath) => setCreateMode({ kind, parentPath }),
-    duplicate: (target) => duplicate.mutate(target.document),
-    trash: (target) => {
-      if (window.confirm(`Move “${target.document.title}” to trash?`)) remove.mutate(target.document)
-    },
-    dropDocument,
+    [model],
+  )
+
+  const selectedDocument = selectedTreePath ? adapter.documentByTreePath.get(selectedTreePath) : undefined
+  const selectedFolderPath = selectedTreePath
+    ? adapter.folderByTreePath.has(selectedTreePath)
+      ? selectedTreePath
+      : selectedDocument?.path
+        ? parentWorkspacePath(selectedDocument.path)
+        : ''
+    : ''
+
+  const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.altKey) return
+    const path = model.getFocusedPath()
+    const document = path ? adapterRef.current.documentByTreePath.get(path) : undefined
+    if (!document) return
+    event.preventDefault()
+    void openDocument(document)
   }
 
   return (
-    <ExplorerActionsContext.Provider value={actions}>
-      <div className="sidebar-content file-explorer-panel">
-        <div className="sidebar-actions">
-          <button onClick={() => setCreateMode({ kind: 'file', parentPath: selectedFolderPath ?? '' })}>
-            <FilePlus2 size={14} /> New file
-          </button>
-          <button
-            aria-label="New folder"
-            title="New folder"
-            onClick={() => setCreateMode({ kind: 'folder', parentPath: selectedFolderPath ?? '' })}
-          >
-            <FolderPlus size={15} />
+    <div className="sidebar-content file-explorer-panel">
+      <div className="sidebar-actions">
+        <button onClick={() => setCreateMode({ kind: 'file', parentPath: selectedFolderPath })}>
+          <FilePlus2 size={14} /> New file
+        </button>
+        <button
+          aria-label="New folder"
+          title="New folder"
+          onClick={() => setCreateMode({ kind: 'folder', parentPath: selectedFolderPath })}
+        >
+          <FolderPlus size={15} />
+        </button>
+      </div>
+      {createMode && (
+        <form
+          className="sidebar-inline-form explorer-create"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (createName.trim()) create.mutate({ mode: createMode, name: createName.trim() })
+          }}
+        >
+          <span>{createMode.parentPath || 'workspace'} /</span>
+          <input
+            autoFocus
+            aria-label={`New ${createMode.kind} name`}
+            placeholder={createMode.kind === 'file' ? 'note.md' : 'folder'}
+            value={createName}
+            onChange={(event) => setCreateName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setCreateMode(null)
+            }}
+          />
+          <button disabled={create.isPending}>Create</button>
+        </form>
+      )}
+      <button className="sidebar-search-trigger" onClick={onSearch}>
+        <Search size={14} />
+        <span>Search workspace</span>
+      </button>
+      <div className="sidebar-section-title">
+        <span>Workspace</span>
+        <small>{documents.data?.length ?? 0}</small>
+      </div>
+      {error && (
+        <div className="explorer-error" role="alert">
+          <span>{error}</span>
+          <button aria-label="Dismiss error" onClick={() => setError(null)}>
+            ×
           </button>
         </div>
-        {createMode && (
-          <form
-            className="sidebar-inline-form explorer-create"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (createName.trim()) create.mutate({ mode: createMode, name: createName.trim() })
-            }}
-          >
-            <span>{createMode.parentPath || 'workspace'} /</span>
-            <input
-              autoFocus
-              aria-label={`New ${createMode.kind} name`}
-              placeholder={createMode.kind === 'file' ? 'note.md' : 'folder'}
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') setCreateMode(null)
+      )}
+      {documents.isLoading && <p className="sidebar-message">Loading files…</p>}
+      {documents.isError && <p className="sidebar-message error-text">Files could not be loaded.</p>}
+      <div className="pierre-tree-shell">
+        <PierreFileTree
+          aria-label="Files"
+          className="sangam-file-tree"
+          model={model}
+          onKeyDown={handleTreeKeyDown}
+          onDoubleClick={() => {
+            const path = model.getFocusedPath()
+            if (path && adapterRef.current.documentByTreePath.has(path)) model.startRenaming(path)
+          }}
+          renderContextMenu={(item, context) => (
+            <ExplorerContextMenu
+              adapter={adapterRef.current}
+              context={context}
+              item={item}
+              onCreate={(kind, parentPath) => setCreateMode({ kind, parentPath })}
+              onDuplicate={(document) => duplicate.mutate(document)}
+              onOpenToSide={(document) => void openDocument(document, true)}
+              onRename={(path) => model.startRenaming(path)}
+              onTrash={(document) => {
+                if (window.confirm(`Move “${document.title}” to trash?`)) remove.mutate(document)
               }}
             />
-            <button disabled={create.isPending}>Create</button>
-          </form>
+          )}
+        />
+        {!documents.isLoading && adapter.paths.length === 0 && (
+          <p className="sidebar-message explorer-empty">No documents yet.</p>
         )}
-        <button className="sidebar-search-trigger" onClick={onSearch}>
-          <Search size={14} />
-          <span>Search workspace</span>
-        </button>
-        <div className="sidebar-section-title">
-          <span>Workspace</span>
-          <small>{documents.data?.length ?? 0}</small>
-        </div>
-        {error && (
-          <div className="explorer-error" role="alert">
-            <span>{error}</span>
-            <button aria-label="Dismiss error" onClick={() => setError(null)}>
-              ×
-            </button>
-          </div>
-        )}
-        {documents.isLoading && <p className="sidebar-message">Loading files…</p>}
-        {documents.isError && <p className="sidebar-message error-text">Files could not be loaded.</p>}
-        <nav
-          ref={treeRef}
-          role="tree"
-          aria-label="Files"
-          className="explorer-tree"
-          onKeyDown={onTreeKeyDown}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => dropDocument(event, '')}
-        >
-          {tree.map((node) => (
-            <ExplorerNodeView key={node.id} node={node} level={1} />
-          ))}
-          {tree.length === 0 && <p className="sidebar-message">No documents yet.</p>}
-        </nav>
       </div>
-    </ExplorerActionsContext.Provider>
+    </div>
   )
 }
 
-function ExplorerNodeView({ node, level }: { node: ExplorerNode; level: number }) {
-  const actions = useContext(ExplorerActionsContext)
-  if (!actions) throw new Error('ExplorerNodeView must be rendered inside FileExplorerPanel')
-  const isExpanded = node.type === 'folder' && actions.expanded.has(node.path)
-  if (node.type === 'folder') {
+function ExplorerContextMenu({
+  adapter,
+  context,
+  item,
+  onCreate,
+  onDuplicate,
+  onOpenToSide,
+  onRename,
+  onTrash,
+}: {
+  adapter: WorkspaceTreeAdapter
+  context: ContextMenuOpenContext
+  item: ContextMenuItem
+  onCreate: (kind: 'file' | 'folder', parentPath: string) => void
+  onDuplicate: (document: DocumentSummary) => void
+  onOpenToSide: (document: DocumentSummary) => void
+  onRename: (path: string) => void
+  onTrash: (document: DocumentSummary) => void
+}) {
+  const document = adapter.documentByTreePath.get(item.path)
+  const folder = adapter.folderByTreePath.get(item.path)
+  const run = (action: () => void, restoreFocus = true) => {
+    context.close({ restoreFocus })
+    action()
+  }
+  if (folder)
     return (
-      <div
-        role="treeitem"
-        aria-level={level}
-        aria-expanded={isExpanded}
-        aria-selected={actions.selectedId === node.id}
-        className="explorer-branch"
-      >
-        <div
-          className={actions.selectedId === node.id ? 'explorer-row selected' : 'explorer-row'}
-          style={{ paddingLeft: 5 + (level - 1) * 13 }}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.stopPropagation()
-            actions.dropDocument(event, node.virtual ? '' : node.path)
-          }}
-        >
-          <button
-            data-tree-row
-            data-node-id={node.id}
-            tabIndex={actions.selectedId === node.id ? 0 : -1}
-            className="explorer-label"
-            onClick={() => {
-              actions.select(node.id)
-              actions.toggle(node.path)
-            }}
-          >
-            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {isExpanded ? <FolderOpen size={13} /> : <Folder size={13} />}
-            <span>{node.name}</span>
-            <small>{node.documentCount}</small>
-          </button>
-          {!node.virtual && (
-            <ActionMenu
-              label={`Actions for ${node.name}`}
-              icon={<MoreHorizontal size={13} />}
-              className="tree-menu-trigger"
-            >
-              {(close) => (
-                <>
-                  <ActionMenuItem
-                    onSelect={() => {
-                      actions.create('file', node.path)
-                      close()
-                    }}
-                  >
-                    <FilePlus2 size={12} />
-                    New file
-                  </ActionMenuItem>
-                  <ActionMenuItem
-                    onSelect={() => {
-                      actions.create('folder', node.path)
-                      close()
-                    }}
-                  >
-                    <FolderPlus size={12} />
-                    New folder
-                  </ActionMenuItem>
-                </>
-              )}
-            </ActionMenu>
-          )}
-        </div>
-        {isExpanded && (
-          <div role="group">
-            {node.children.map((child) => (
-              <ExplorerNodeView key={child.id} node={child} level={level + 1} />
-            ))}
-          </div>
-        )}
+      <div className="tree-context-menu" role="menu" aria-label={`Actions for ${item.name}`}>
+        <button type="button" role="menuitem" onClick={() => run(() => onCreate('file', folder.path))}>
+          <FilePlus2 size={12} /> New file
+        </button>
+        <button type="button" role="menuitem" onClick={() => run(() => onCreate('folder', folder.path))}>
+          <FolderPlus size={12} /> New folder
+        </button>
       </div>
     )
-  }
+  if (!document) return null
   return (
-    <div
-      role="treeitem"
-      aria-level={level}
-      aria-selected={actions.selectedId === node.id}
-      className={actions.selectedId === node.id ? 'explorer-row selected' : 'explorer-row'}
-      style={{ paddingLeft: 20 + (level - 1) * 13 }}
-      draggable
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = 'move'
-        event.dataTransfer.setData('application/x-sangam-document', node.document.document_id)
-      }}
-    >
-      {actions.renamingId === node.id ? (
-        <form
-          className="tree-rename"
-          onSubmit={(event) => {
-            event.preventDefault()
-            actions.commitRename(node)
-          }}
-        >
-          <input
-            autoFocus
-            aria-label={`Rename ${node.name}`}
-            value={actions.renameValue}
-            onChange={(event) => actions.setRenameValue(event.target.value)}
-            onBlur={() => actions.commitRename(node)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                actions.cancelRename()
-              }
-            }}
-          />
-        </form>
-      ) : (
-        <button
-          data-tree-row
-          data-node-id={node.id}
-          tabIndex={actions.selectedId === node.id ? 0 : -1}
-          className="explorer-label"
-          onClick={() => {
-            actions.select(node.id)
-            actions.open(node)
-          }}
-          onDoubleClick={() => actions.startRename(node)}
-        >
-          <FileText size={13} />
-          <span>{node.name}</span>
-        </button>
-      )}
-      <ActionMenu
-        label={`Actions for ${node.name}`}
-        icon={<MoreHorizontal size={13} />}
-        className="tree-menu-trigger"
-      >
-        {(close) => (
-          <>
-            <ActionMenuItem
-              onSelect={() => {
-                actions.openToSide(node)
-                close()
-              }}
-            >
-              <PanelRightOpen size={12} />
-              Open in split
-            </ActionMenuItem>
-            <ActionMenuItem
-              onSelect={() => {
-                actions.startRename(node)
-                close()
-              }}
-            >
-              <Pencil size={12} />
-              Rename
-            </ActionMenuItem>
-            <ActionMenuItem
-              onSelect={() => {
-                actions.duplicate(node)
-                close()
-              }}
-            >
-              <Copy size={12} />
-              Duplicate
-            </ActionMenuItem>
-            <ActionMenuItem
-              className="danger"
-              onSelect={() => {
-                actions.trash(node)
-                close()
-              }}
-            >
-              <Trash2 size={12} />
-              Move to trash
-            </ActionMenuItem>
-          </>
-        )}
-      </ActionMenu>
+    <div className="tree-context-menu" role="menu" aria-label={`Actions for ${item.name}`}>
+      <button type="button" role="menuitem" onClick={() => run(() => onOpenToSide(document))}>
+        <PanelRightOpen size={12} /> Open in split
+      </button>
+      <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
+        <Pencil size={12} /> Rename
+      </button>
+      <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(document))}>
+        <Copy size={12} /> Duplicate
+      </button>
+      <button className="danger" type="button" role="menuitem" onClick={() => run(() => onTrash(document))}>
+        <Trash2 size={12} /> Move to trash
+      </button>
     </div>
   )
 }
 
 function loadExpanded() {
   try {
-    return new Set<string>(JSON.parse(localStorage.getItem(expandedStorageKey) ?? '[]') as string[])
+    return JSON.parse(localStorage.getItem(expandedStorageKey) ?? '[]') as string[]
   } catch {
-    return new Set<string>()
+    return []
   }
 }

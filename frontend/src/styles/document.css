@@ -145,10 +145,19 @@ button:disabled { cursor: default; opacity: .55; }
 .compare-controls label { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 9px; }
 .compare-controls select { min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); padding: 5px; font-size: 8px; }
 .compare-controls > button { grid-column: 1 / -1; justify-self: start; border: 0; background: transparent; color: var(--accent); padding: 2px 0; font-size: 9px; }
-.revision-merge-view { max-height: 360px; overflow: auto; margin: 5px -12px 12px; border-block: 1px solid var(--line); background: var(--surface); }
-.revision-merge-view .cm-mergeView { min-width: 560px; }
-.revision-merge-view .cm-editor { min-height: 220px; font-size: 9px; }
-.revision-merge-view .cm-scroller { font-family: "SFMono-Regular", Consolas, monospace; }
+.revision-merge-view {
+  max-height: 420px;
+  overflow: auto;
+  margin: 5px -12px 12px;
+  border-block: 1px solid var(--line);
+  background: var(--surface);
+  --diffs-font-family: "SFMono-Regular", Consolas, monospace;
+  --diffs-font-size: 10px;
+  --diffs-line-height: 17px;
+}
+.revision-diff-loading { min-height: 180px; display: grid; place-items: center; margin: 0; color: var(--muted); font-size: 10px; }
+
+.revision-diff-error { margin: 0; padding: 12px; color: var(--danger); font-size: 10px; }
 .notice { padding: 12px 14px; margin-bottom: 12px; border-radius: 8px; font-size: 12px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .conflict-notice { background: #f2d9ae; color: #633f08; }
 .error-notice { background: var(--danger-soft); color: #812e22; }
