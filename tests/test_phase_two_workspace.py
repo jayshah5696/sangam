@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import headers
+from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.application import build_application_services
@@ -38,7 +38,7 @@ def test_duplicate_diff_and_recoverable_delete_workflows(client: TestClient) -> 
             "title": "Renamed phase two note",
             "summary": "Expanded the daily note",
         },
-        headers=headers("phase-two-update", actor="client:cli"),
+        headers=headers("phase-two-update"),
     ).json()
     assert updated["title"] == "Renamed phase two note"
 
@@ -89,6 +89,10 @@ def test_search_includes_history_actor_summary_snippets_filters_and_rebuild(
     client: TestClient,
 ) -> None:
     created = create_document(client, content="Optimistic concurrency prevents overwrites.")
+    agent_token = issue_agent_token(
+        client,
+        capabilities=("read", "search", "update"),
+    )
     updated = client.patch(
         f"/api/v1/documents/{created['document_id']}",
         json={
@@ -96,9 +100,12 @@ def test_search_includes_history_actor_summary_snippets_filters_and_rebuild(
             "content": "Optimistic concurrency prevents silent overwrites.",
             "summary": "Documented the compare and swap contract",
         },
-        headers=headers("search-update", actor="client:cli"),
+        headers={
+            "Authorization": f"Bearer {agent_token}",
+            "Idempotency-Key": "search-update",
+        },
     ).json()
-    assert updated["updated_by"] == "client:cli"
+    assert updated["updated_by"] == "agent:cli"
     assert updated["updated_by_name"] == "Sangam CLI"
 
     for query in ("silent", "compare swap", "Sangam CLI"):
@@ -108,7 +115,7 @@ def test_search_includes_history_actor_summary_snippets_filters_and_rebuild(
         assert response.json()[0]["search_snippet"]
 
     by_actor = client.get(
-        "/api/v1/search", params={"actor_id": "client:cli", "sort": "title"}
+        "/api/v1/search", params={"actor_id": "agent:cli", "sort": "title"}
     ).json()
     assert [result["document_id"] for result in by_actor] == [created["document_id"]]
     assert client.get("/api/v1/search", params={"actor_id": "system"}).json() == []
@@ -140,7 +147,7 @@ def test_actor_filter_uses_a_constant_number_of_database_connections(
     response = client.get("/api/v1/search", params={"actor_id": "human:jay"})
     assert response.status_code == 200
     assert len(response.json()) == 2
-    assert connection_count == 2
+    assert connection_count == 1
 
 
 def test_every_reconciliation_choice_is_explicit_and_repeatable(

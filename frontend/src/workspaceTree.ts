@@ -1,4 +1,4 @@
-import type { Document, Folder as WorkspaceFolder } from './api'
+import type { DocumentSummary, Folder as WorkspaceFolder } from './api'
 
 export type ExplorerFolder = {
   type: 'folder'
@@ -15,12 +15,12 @@ export type ExplorerDocument = {
   id: string
   name: string
   path: string | null
-  document: Document
+  document: DocumentSummary
 }
 
 export type ExplorerNode = ExplorerFolder | ExplorerDocument
 
-export function buildWorkspaceTree(documents: Document[], folders: WorkspaceFolder[]): ExplorerNode[] {
+export function buildWorkspaceTree(documents: DocumentSummary[], folders: WorkspaceFolder[]): ExplorerNode[] {
   const folderNodes = new Map<string, ExplorerFolder>()
   for (const folder of [...folders].sort((a, b) => a.path.localeCompare(b.path))) {
     folderNodes.set(folder.path, {

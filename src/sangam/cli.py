@@ -17,8 +17,15 @@ def _base_url() -> str:
     return os.getenv("SANGAM_API_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
+def _token() -> str | None:
+    token = os.getenv("SANGAM_TOKEN")
+    return token.strip() if token and token.strip() else None
+
+
 def _request(method: str, path: str, *, body: dict[str, Any] | None = None) -> Any:
-    headers = {"X-Actor": "client:cli"}
+    headers: dict[str, str] = {}
+    if token := _token():
+        headers["Authorization"] = f"Bearer {token}"
     if method != "GET":
         headers["Idempotency-Key"] = str(uuid.uuid4())
     try:
@@ -31,7 +38,10 @@ def _request(method: str, path: str, *, body: dict[str, Any] | None = None) -> A
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as error:
-        typer.echo(json.dumps(error.response.json(), indent=2), err=True)
+        payload = error.response.json()
+        if operation_id := error.response.headers.get("X-Operation-ID"):
+            payload.setdefault("error", {})["operation_id"] = operation_id
+        typer.echo(json.dumps(payload, indent=2), err=True)
         raise typer.Exit(1) from error
     except httpx.HTTPError as error:
         typer.echo(f"Unable to reach Sangam at {_base_url()}: {error}", err=True)
@@ -44,9 +54,12 @@ def _print_json(value: Any) -> None:
 
 
 @app.command("list")
-def list_documents() -> None:
+def list_documents(
+    limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 100,
+    offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
+) -> None:
     """List current documents."""
-    _print_json(_request("GET", "/documents"))
+    _print_json(_request("GET", f"/documents?{urlencode({'limit': limit, 'offset': offset})}"))
 
 
 @app.command()
@@ -63,9 +76,15 @@ def read(
 
 
 @app.command()
-def search(query: str) -> None:
+def search(
+    query: str,
+    limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 50,
+    offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
+) -> None:
     """Search current document titles, paths, content, tags, and categories."""
-    _print_json(_request("GET", f"/search?{urlencode({'q': query})}"))
+    _print_json(
+        _request("GET", f"/search?{urlencode({'q': query, 'limit': limit, 'offset': offset})}")
+    )
 
 
 @app.command()
@@ -108,6 +127,48 @@ def update(
 
 
 @app.command()
+def move(
+    document_id: str,
+    path: str,
+    expected_revision: Annotated[str, typer.Option("--expected-revision")],
+    summary: Annotated[str | None, typer.Option("--summary")] = None,
+) -> None:
+    """Move a materialized document using an explicit expected revision."""
+    _print_json(
+        _request(
+            "POST",
+            f"/documents/{document_id}/move",
+            body={
+                "expected_revision_id": expected_revision,
+                "path": path,
+                "summary": summary,
+            },
+        )
+    )
+
+
+@app.command()
+def tag(
+    document_id: str,
+    expected_metadata_version: Annotated[int, typer.Option("--expected-metadata-version")],
+    tag_id: Annotated[list[str] | None, typer.Option("--tag-id")] = None,
+    category: Annotated[str | None, typer.Option("--category")] = None,
+) -> None:
+    """Replace a document's category and tag assignments."""
+    _print_json(
+        _request(
+            "PATCH",
+            f"/documents/{document_id}/metadata",
+            body={
+                "expected_metadata_version": expected_metadata_version,
+                "category": category,
+                "tag_ids": tag_id or [],
+            },
+        )
+    )
+
+
+@app.command()
 def materialize(
     document_id: str,
     path: str,
@@ -127,6 +188,19 @@ def materialize(
 def history(document_id: str) -> None:
     """Show immutable revision history."""
     _print_json(_request("GET", f"/documents/{document_id}/history"))
+
+
+@app.command()
+def diff(
+    document_id: str,
+    from_revision: Annotated[str, typer.Option("--from-revision")],
+    to_revision: Annotated[str | None, typer.Option("--to-revision")] = None,
+) -> None:
+    """Compare two immutable document revisions."""
+    parameters = {"from_revision_id": from_revision}
+    if to_revision:
+        parameters["to_revision_id"] = to_revision
+    _print_json(_request("GET", f"/documents/{document_id}/diff?{urlencode(parameters)}"))
 
 
 @app.command()

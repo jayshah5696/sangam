@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import {
+  Activity,
   ArchiveRestore,
   FileText,
   PanelLeftClose,
@@ -13,7 +14,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react'
-import { api, type Document } from '../api'
+import { api, type DocumentSummary } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
 import { ResizeHandle } from '../components/ResizeHandle'
@@ -149,6 +150,7 @@ function PrimarySidebar({
 
 function SidebarLinks() {
   const links = [
+    { to: '/activity' as const, label: 'Agent activity', icon: Activity },
     { to: '/reconciliation' as const, label: 'Workspace integrity', icon: ShieldCheck },
     { to: '/backups' as const, label: 'Backups', icon: ArchiveRestore },
     { to: '/trash' as const, label: 'Trash', icon: Trash2 },
@@ -209,7 +211,7 @@ function SearchPanel() {
   )
 }
 
-function DocumentLink({ document, showPath = false }: { document: Document; showPath?: boolean }) {
+function DocumentLink({ document, showPath = false }: { document: DocumentSummary; showPath?: boolean }) {
   const label = document.path ? workspaceBasename(document.path) : document.title
   return (
     <Link

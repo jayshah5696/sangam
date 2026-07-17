@@ -3,16 +3,9 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from sangam.db import Database
 from sangam.schemas import Document
-
-
-@dataclass(frozen=True)
-class SearchMatch:
-    document_id: str
-    snippet: str
 
 
 class SearchIndex:
@@ -33,23 +26,12 @@ class SearchIndex:
             )
             self._replace(connection, document)
 
-    def search(self, query: str) -> list[SearchMatch] | None:
+    @staticmethod
+    def compile_expression(query: str) -> str | None:
         terms = re.findall(r"[\w-]+", query, flags=re.UNICODE)
         if not terms:
             return None
-        expression = " AND ".join(f'"{term}"*' for term in terms)
-        with self.database.connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT document_id,
-                    snippet(document_search, -1, '[[', ']]', ' … ', 24) AS snippet
-                FROM document_search
-                WHERE document_search MATCH ?
-                ORDER BY bm25(document_search)
-                """,
-                (expression,),
-            ).fetchall()
-        return [SearchMatch(document_id=row["document_id"], snippet=row["snippet"]) for row in rows]
+        return " AND ".join(f'"{term}"*' for term in terms)
 
     @staticmethod
     def _replace(connection: sqlite3.Connection, document: Document) -> None:

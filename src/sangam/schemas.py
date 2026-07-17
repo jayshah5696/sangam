@@ -4,8 +4,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from sangam.capabilities import Capability
 
-class Document(BaseModel):
+
+class Tag(BaseModel):
+    tag_id: str
+    name: str
+    color: str
+    created_at: str
+
+
+class DocumentSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     document_id: str
@@ -13,7 +22,6 @@ class Document(BaseModel):
     content_type: Literal["text/markdown"]
     path: str | None
     current_revision_id: str
-    content: str
     content_hash: str
     size_bytes: int
     materialization_state: Literal["none", "pending", "clean", "conflict"]
@@ -31,11 +39,8 @@ class Document(BaseModel):
     search_snippet: str | None = None
 
 
-class Tag(BaseModel):
-    tag_id: str
-    name: str
-    color: str
-    created_at: str
+class Document(DocumentSummary):
+    content: str
 
 
 class Folder(BaseModel):
@@ -58,6 +63,9 @@ class Revision(BaseModel):
     content_hash: str
     size_bytes: int
     actor_id: str
+    actor_display_name: str | None = None
+    actor_kind: str | None = None
+    operation_id: str | None = None
     operation: str
     summary: str | None
     created_at: str
@@ -180,3 +188,58 @@ class ErrorBody(BaseModel):
     code: str
     message: str
     details: dict[str, object] = Field(default_factory=dict)
+
+
+class TokenScope(BaseModel):
+    capability: Capability
+    path_prefix: str | None = None
+
+
+class Actor(BaseModel):
+    actor_id: str
+    display_name: str
+    identity_kind: Literal["human", "agent", "integration", "client", "system"]
+    created_at: str
+
+
+class AgentToken(BaseModel):
+    token_id: str
+    actor_id: str
+    actor_display_name: str
+    label: str
+    scopes: list[TokenScope]
+    created_at: str
+    expires_at: str | None
+    revoked_at: str | None
+    last_used_at: str | None
+    rotated_from_token_id: str | None
+
+
+class IssuedAgentToken(AgentToken):
+    token: str
+
+
+class CreateAgentToken(BaseModel):
+    actor_id: str = Field(pattern=r"^agent:[a-z0-9][a-z0-9._-]{1,63}$")
+    display_name: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=120)
+    scopes: list[TokenScope] = Field(min_length=1, max_length=50)
+    expires_at: str | None = None
+
+
+class OperationEvent(BaseModel):
+    operation_id: str
+    actor_id: str
+    actor_display_name: str
+    actor_kind: str
+    token_id: str | None
+    token_label: str | None
+    action: str
+    resource_type: str
+    resource_id: str | None
+    path: str | None
+    outcome: Literal["accepted", "denied", "conflict", "failed"]
+    error_code: str | None
+    revision_id: str | None
+    details: dict[str, object]
+    created_at: str

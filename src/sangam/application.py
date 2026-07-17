@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sangam.access import WorkspaceAccessService
+from sangam.activity import ActivityService
+from sangam.authorization import AuthorizationPolicy
 from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
 from sangam.config import Settings
@@ -10,6 +13,7 @@ from sangam.idempotency import IdempotencyStore
 from sangam.organization import WorkspaceOrganizationService
 from sangam.reconciliation import ReconciliationPlanner, ReconciliationService
 from sangam.search import SearchIndex
+from sangam.security import AuthenticationService, IdentityService
 from sangam.service import DocumentService
 from sangam.workspace import DiskWorkspaceFilesystem
 
@@ -22,6 +26,11 @@ class ApplicationServices:
     organization: WorkspaceOrganizationService
     reconciliation: ReconciliationService
     backups: BackupService
+    workspace_access: WorkspaceAccessService
+    identity: IdentityService
+    authentication: AuthenticationService
+    activity: ActivityService
+    authorization: AuthorizationPolicy
 
 
 def build_application_services(settings: Settings) -> ApplicationServices:
@@ -29,7 +38,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
     settings.prepare()
     database = Database(settings.database_path)
     database.initialize()
-    _bootstrap_actors(database)
+    _bootstrap_actors(database, settings)
     workspace = DiskWorkspaceFilesystem(settings.workspace_root)
     idempotency = IdempotencyStore(database)
     organization = WorkspaceOrganizationService(
@@ -44,6 +53,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         idempotency=idempotency,
         organization=organization,
         search_index=search_index,
+        max_document_bytes=settings.max_document_bytes,
     )
     search_index.rebuild(documents.list_documents(include_deleted=True))
     backup_manager = BackupManager(
@@ -63,27 +73,57 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         documents=documents,
         planner=ReconciliationPlanner(),
     )
+    identity = IdentityService(database)
+    authentication = AuthenticationService(
+        identity=identity,
+        auth_mode=settings.auth_mode,
+        trusted_identity_value=settings.trusted_identity_value,
+        trusted_human_actor_id=settings.trusted_human_actor_id,
+        trusted_human_display_name=settings.trusted_human_display_name,
+    )
+    activity = ActivityService(database)
+    authorization = AuthorizationPolicy()
+    workspace_access = WorkspaceAccessService(
+        documents=documents,
+        organization=organization,
+        policy=authorization,
+        activity=activity,
+    )
     return ApplicationServices(
         documents=documents,
         organization=organization,
         reconciliation=reconciliation,
         backups=backups,
+        workspace_access=workspace_access,
+        identity=identity,
+        authentication=authentication,
+        activity=activity,
+        authorization=authorization,
     )
 
 
-def _bootstrap_actors(database: Database) -> None:
+def _bootstrap_actors(database: Database, settings: Settings) -> None:
     actors = (
-        ("human:jay", "Jay", "human"),
-        ("client:cli", "Sangam CLI", "client"),
-        ("system", "Sangam system", "system"),
-        ("system:reconcile", "Filesystem reconciliation", "system"),
+        (
+            settings.trusted_human_actor_id,
+            settings.trusted_human_display_name,
+            "human",
+            "human",
+        ),
+        ("client:cli", "Sangam CLI", "client", "client"),
+        ("system", "Sangam system", "system", "system"),
+        ("system:reconcile", "Filesystem reconciliation", "system", "system"),
     )
     with database.transaction() as connection:
-        for actor_id, display_name, actor_type in actors:
+        for actor_id, display_name, actor_type, identity_kind in actors:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO actors(actor_id, display_name, actor_type, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO actors(
+                    actor_id, display_name, actor_type, created_at, identity_kind
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(actor_id) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    identity_kind = excluded.identity_kind
                 """,
-                (actor_id, display_name, actor_type, utc_now()),
+                (actor_id, display_name, actor_type, utc_now(), identity_kind),
             )

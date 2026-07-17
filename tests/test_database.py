@@ -18,7 +18,25 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         versions = connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-    assert [row["version"] for row in versions] == ["001", "002", "003", "004"]
+        indexes = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            ).fetchall()
+        }
+    assert [row["version"] for row in versions] == [
+        "001",
+        "002",
+        "003",
+        "004",
+        "005",
+        "006",
+    ]
+    assert {
+        "operation_events_revision_outcome_created_idx",
+        "documents_deleted_updated_idx",
+        "documents_category_idx",
+    } <= indexes
 
 
 def test_failing_migration_rolls_back_the_whole_file(
