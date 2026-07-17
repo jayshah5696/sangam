@@ -31,29 +31,30 @@ be expired, revoked, or rotated from the browser.
 
 ## Screenshots
 
-### Focused single-editor workspace
+### Focused document workspace
 
 Sangam starts with one editor and no permanent tab or status strip. Files,
-search, maintenance tools, document properties, and save state remain available
-without forcing a split layout.
+search, agent activity, maintenance tools, document properties, and save state
+remain available without forcing a split layout.
 
-![Sangam workbench with one Markdown editor, file explorer, document inspector, and the Sangam logo](./docs/assets/workbench-single.png)
+![Current Sangam document workspace with the file explorer, Markdown editor, document inspector, and Agent activity navigation](./docs/assets/workbench-single.png)
 
-### User-created editor groups
+### Scoped agent access
 
-Editor groups can be split horizontally or vertically, nested, resized, closed,
-and restored with the browser session. The document inspector steps out of the
-way while multiple groups are open.
+The Agents & tokens settings issue one-time credentials with explicit
+capabilities, optional expiry, and workspace path boundaries. Issued tokens can
+be rotated or revoked without erasing their historical attribution.
 
-![Sangam workbench with rendered agent review notes beside an editable research brief](./docs/assets/workbench-splits.png)
+![Current Sangam Agents and tokens settings with appearance choices, scoped capabilities, and path controls](./docs/assets/phase-3-agents.png)
 
-### Settings and recovery controls
+### Reviewable agent activity
 
-Settings distinguish browser-local preferences from shared workspace metadata.
-Reconciliation, backups, and trash remain direct workspace destinations instead
-of masquerading as settings.
+The activity timeline keeps accepted, denied, conflicted, and failed agent
+operations reviewable without exposing credential secrets or document bodies.
+Events retain actor, token label, path, outcome, operation ID, and document links
+where applicable.
 
-![Sangam settings page with themes, workbench preferences, organization, and maintenance](./docs/assets/workbench-settings.png)
+![Current Sangam agent activity timeline showing one denied and one accepted document operation](./docs/assets/phase-3-activity.png)
 
 ## Project documents
 
