@@ -107,7 +107,11 @@ export function DocumentWorkspace({
 
   return (
     <div className="document-layout tab-document-layout">
-      <section className="document-workspace">
+      <section
+        className={`document-workspace ${
+          document.content_type === 'text/html' && mode !== 'edit' ? 'html-preview-workspace' : ''
+        }`}
+      >
         <header className="document-header">
           <div>
             <p className="eyebrow">{document.path ?? 'Unmaterialized draft'}</p>

@@ -22,6 +22,7 @@ from sangam.schemas import (
 )
 from sangam.security import Principal
 from sangam.service import DocumentService
+from sangam.workspace import canonicalize_document_path
 
 T = TypeVar("T")
 
@@ -113,11 +114,13 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         def operation() -> Document:
-            self.policy.require(principal, Capability.CREATE, path)
+            authorized_path = self._authorize_destination_path(
+                principal, capability=Capability.CREATE, path=path
+            )
             return self.documents.create_document(
                 title=title,
                 content=content,
-                path=path,
+                path=authorized_path,
                 content_type=content_type,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
@@ -315,12 +318,14 @@ class WorkspaceAccessService:
 
         def operation() -> Document:
             self.policy.require(principal, Capability.READ, current.path)
-            self.policy.require(principal, Capability.CREATE, path)
+            authorized_path = self._authorize_destination_path(
+                principal, capability=Capability.CREATE, path=path
+            )
             return self.documents.duplicate_document(
                 document_id=document_id,
                 expected_revision_id=expected_revision_id,
                 title=title,
-                path=path,
+                path=authorized_path,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             )
@@ -374,11 +379,13 @@ class WorkspaceAccessService:
 
         def operation() -> Document:
             self.policy.require(principal, Capability.MOVE, current.path)
-            self.policy.require(principal, Capability.MOVE, path)
+            authorized_path = self._authorize_destination_path(
+                principal, capability=Capability.MOVE, path=path
+            )
             return self.documents.materialize_document(
                 document_id=document_id,
                 expected_revision_id=expected_revision_id,
-                path=path,
+                path=authorized_path,
                 summary=summary,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
@@ -407,11 +414,13 @@ class WorkspaceAccessService:
 
         def operation() -> Document:
             self.policy.require(principal, Capability.MOVE, current.path)
-            self.policy.require(principal, Capability.MOVE, path)
+            authorized_path = self._authorize_destination_path(
+                principal, capability=Capability.MOVE, path=path
+            )
             return self.documents.move_document(
                 document_id=document_id,
                 expected_revision_id=expected_revision_id,
-                path=path,
+                path=authorized_path,
                 summary=summary,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
@@ -605,6 +614,17 @@ class WorkspaceAccessService:
 
     def _require_global_read(self, principal: Principal) -> None:
         self.policy.require(principal, Capability.READ, None)
+
+    def _authorize_destination_path(
+        self,
+        principal: Principal,
+        *,
+        capability: Capability,
+        path: str | None,
+    ) -> str | None:
+        normalized_path = canonicalize_document_path(path) if path is not None else None
+        self.policy.require(principal, capability, normalized_path)
+        return normalized_path
 
     def _run(
         self,

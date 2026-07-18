@@ -39,14 +39,15 @@ function PublicationPage() {
       </main>
     )
   }
+  const isHtml = content.content_type === 'text/html'
   return (
-    <main className="publication-page">
+    <main className={`publication-page ${isHtml ? 'html-publication-page' : ''}`}>
       <header>
         <p className="eyebrow">Sangam publication</p>
         <h1>{content.title}</h1>
         <small>{content.is_latest ? 'Latest revision' : `Revision ${content.revision_id}`}</small>
       </header>
-      {content.content_type === 'text/html' ? (
+      {isHtml ? (
         <HtmlPreview content={content.content} resolveAsset={resolveAsset} />
       ) : (
         <MarkdownPreview content={content.content} resolveAsset={resolveAsset} />

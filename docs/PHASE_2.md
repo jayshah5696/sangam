@@ -67,6 +67,13 @@ revision history never replaces backups. Folder and tag transactions live behind
 `WorkspaceOrganizationService`; actor-scoped retry keys are coordinated by
 `IdempotencyStore` across document and workspace-resource mutations.
 
+The file explorer uses [`@pierre/trees`][pierre-trees] for accessible tree
+rendering, selection, keyboard navigation, virtualization, and drag-and-drop.
+Tree paths are a view adapter over Sangam's stable document and folder IDs; the
+existing HTTP API remains the only mutation authority. Revision comparison uses
+the lazy-loaded [`@pierre/diffs`][pierre-diffs] renderer, while revision content
+continues to come from Sangam's canonical API.
+
 `ApplicationServices` is the process composition root: it constructs the
 database, workspace, indexes, adapters, and application services once, then
 routes each API family to the service that owns its policy. `ReconciliationService`
@@ -196,8 +203,12 @@ and non-interactive; Phase 4 owns the separate trusted-HTML execution policy.
 - [Python `sqlite3.Connection.backup()`][python-sqlite-backup]
 - [DOMPurify][dompurify]
 - [Mermaid `securityLevel` configuration][mermaid-security]
+- [`@pierre/trees`][pierre-trees]
+- [`@pierre/diffs`][pierre-diffs]
 
 [sqlite-fts5]: https://www.sqlite.org/fts5.html
 [python-sqlite-backup]: https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.backup
 [dompurify]: https://github.com/cure53/DOMPurify
 [mermaid-security]: https://mermaid.js.org/config/schema-docs/config-properties-securitylevel.html
+[pierre-trees]: https://trees.software/docs
+[pierre-diffs]: https://diffs.com/docs

@@ -10,6 +10,43 @@ from typing import Protocol
 from sangam.errors import InvalidPathError
 
 
+def canonicalize_document_path(raw_path: str) -> str:
+    """Validate document-path syntax without consulting the filesystem."""
+    normalized = _canonicalize_relative_path(raw_path, kind="Document")
+    if PurePosixPath(normalized).suffix.lower() not in {".md", ".html", ".htm"}:
+        raise InvalidPathError("Sangam document paths must end in .md, .html, or .htm")
+    return normalized
+
+
+def _canonicalize_relative_path(
+    raw_path: str,
+    *,
+    kind: str,
+    strip_outer_slashes: bool = False,
+) -> str:
+    if "\\" in raw_path:
+        raise InvalidPathError(f"{kind} paths must use forward slashes")
+    if kind == "Folder" and raw_path.strip().startswith("/"):
+        raise InvalidPathError("Folder path must stay inside the workspace")
+    stripped_path = raw_path.strip()
+    if strip_outer_slashes:
+        stripped_path = stripped_path.strip("/")
+    raw_parts = stripped_path.split("/")
+    path = PurePosixPath(stripped_path)
+    if (
+        not stripped_path
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in raw_parts)
+    ):
+        message = (
+            "Path must be a relative path inside the workspace"
+            if kind == "Document"
+            else "Folder path must stay inside the workspace"
+        )
+        raise InvalidPathError(message)
+    return path.as_posix()
+
+
 class WorkspaceFilesystem(Protocol):
     def normalize_document_path(self, raw_path: str) -> str: ...
 
@@ -38,48 +75,20 @@ class DiskWorkspaceFilesystem:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def normalize_document_path(self, raw_path: str) -> str:
-        normalized = self._normalize_relative_path(raw_path, kind="Document")
-        if PurePosixPath(normalized).suffix.lower() not in {".md", ".html", ".htm"}:
-            raise InvalidPathError("Sangam document paths must end in .md, .html, or .htm")
+        normalized = canonicalize_document_path(raw_path)
+        self._require_inside_workspace(normalized, noun="Path")
         return normalized
 
     def normalize_folder_path(self, raw_path: str) -> str:
-        return self._normalize_relative_path(raw_path, kind="Folder", strip_outer_slashes=True)
+        normalized = _canonicalize_relative_path(raw_path, kind="Folder", strip_outer_slashes=True)
+        self._require_inside_workspace(normalized, noun="Folder path")
+        return normalized
 
-    def _normalize_relative_path(
-        self,
-        raw_path: str,
-        *,
-        kind: str,
-        strip_outer_slashes: bool = False,
-    ) -> str:
-        if "\\" in raw_path:
-            raise InvalidPathError(f"{kind} paths must use forward slashes")
-        if kind == "Folder" and raw_path.strip().startswith("/"):
-            raise InvalidPathError("Folder path must stay inside the workspace")
-        stripped_path = raw_path.strip()
-        if strip_outer_slashes:
-            stripped_path = stripped_path.strip("/")
-        raw_parts = stripped_path.split("/")
-        path = PurePosixPath(stripped_path)
-        if (
-            not stripped_path
-            or path.is_absolute()
-            or any(part in {"", ".", ".."} for part in raw_parts)
-        ):
-            message = (
-                "Path must be a relative path inside the workspace"
-                if kind == "Document"
-                else "Folder path must stay inside the workspace"
-            )
-            raise InvalidPathError(message)
-        normalized = path.as_posix()
+    def _require_inside_workspace(self, normalized: str, *, noun: str) -> None:
         root = self.root.resolve()
         candidate = (root / normalized).resolve(strict=False)
         if not candidate.is_relative_to(root):
-            noun = "Path" if kind == "Document" else "Folder path"
             raise InvalidPathError(f"{noun} escapes the configured workspace root")
-        return normalized
 
     def _document_path(self, path: str) -> Path:
         normalized = self.normalize_document_path(path)
@@ -146,7 +155,8 @@ class DiskWorkspaceFilesystem:
         self._folder_path(path).mkdir(parents=True, exist_ok=True)
 
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]:
-        normalized = self._normalize_relative_path(path, kind="Asset")
+        normalized = _canonicalize_relative_path(path, kind="Asset")
+        self._require_inside_workspace(normalized, noun="Asset path")
         candidate = self.root.resolve() / normalized
         if not candidate.is_file():
             raise InvalidPathError("Publication asset was not found")

@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SANGAM_FRONTEND_DIST=/app/frontend/dist
 
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md LICENSE NOTICE.md ./
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist

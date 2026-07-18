@@ -289,6 +289,140 @@ def test_agent_scope_enforcement_conflict_and_reviewable_activity(client: TestCl
     assert "Agent revision" not in serialized
 
 
+def test_destination_paths_are_validated_before_scoped_authorization(client: TestClient) -> None:
+    issued = issue_token(client)
+    token = issued["token"]
+
+    normalized = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "normalized-create"),
+        json={
+            "title": "Normalized",
+            "content": "# Normalized\n",
+            "path": "  agents/normalized.md  ",
+        },
+    )
+    assert normalized.status_code == 201
+    assert normalized.json()["path"] == "agents/normalized.md"
+    document = normalized.json()
+
+    invalid_operation_ids: set[str] = set()
+    for key, path in (
+        ("absolute-create", "/agents/absolute.md"),
+        ("duplicate-slash-create", "agents//duplicate.md"),
+    ):
+        invalid = client.post(
+            "/api/v1/documents",
+            headers=bearer(token, key),
+            json={"title": "Invalid", "content": "no", "path": path},
+        )
+        assert invalid.status_code == 422
+        assert invalid.json()["error"]["code"] == "invalid_path"
+        invalid_operation_ids.add(invalid.headers["X-Operation-ID"])
+
+    moved = client.post(
+        f"/api/v1/documents/{document['document_id']}/move",
+        headers=bearer(token, "normalized-move"),
+        json={
+            "expected_revision_id": document["current_revision_id"],
+            "path": "  agents/moved.md  ",
+        },
+    )
+    assert moved.status_code == 200
+    assert moved.json()["path"] == "agents/moved.md"
+
+    invalid_move = client.post(
+        f"/api/v1/documents/{document['document_id']}/move",
+        headers=bearer(token, "absolute-move"),
+        json={
+            "expected_revision_id": moved.json()["current_revision_id"],
+            "path": "/agents/moved-again.md",
+        },
+    )
+    assert invalid_move.status_code == 422
+    assert invalid_move.json()["error"]["code"] == "invalid_path"
+
+    invalid_duplicate = client.post(
+        f"/api/v1/documents/{document['document_id']}/duplicate",
+        headers=bearer(token, "absolute-duplicate"),
+        json={
+            "expected_revision_id": moved.json()["current_revision_id"],
+            "path": "/agents/copy.md",
+        },
+    )
+    assert invalid_duplicate.status_code == 422
+    assert invalid_duplicate.json()["error"]["code"] == "invalid_path"
+
+    outside = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "outside-after-validation"),
+        json={"title": "Outside", "content": "no", "path": "projects/outside.md"},
+    )
+    assert outside.status_code == 403
+
+    activity = client.get("/api/v1/activity", params={"actor_id": "agent:researcher"}).json()
+    invalid_operation_ids.update(
+        {
+            invalid_move.headers["X-Operation-ID"],
+            invalid_duplicate.headers["X-Operation-ID"],
+        }
+    )
+    invalid_events = [event for event in activity if event["operation_id"] in invalid_operation_ids]
+    assert len(invalid_events) == 4
+    assert {(event["outcome"], event["error_code"]) for event in invalid_events} == {
+        ("failed", "invalid_path")
+    }
+
+
+def test_destination_authorization_precedes_filesystem_containment(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    for prefix in ("agents", "projects"):
+        parent = settings.workspace_root / prefix
+        parent.mkdir(parents=True, exist_ok=True)
+        (parent / "linked").symlink_to(outside, target_is_directory=True)
+
+    issued = issue_token(client)
+    token = issued["token"]
+    denied = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "out-of-scope-symlink"),
+        json={
+            "title": "Denied probe",
+            "content": "no",
+            "path": "projects/linked/probe.md",
+        },
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "forbidden"
+
+    invalid = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "in-scope-symlink"),
+        json={
+            "title": "Invalid destination",
+            "content": "no",
+            "path": "agents/linked/escape.md",
+        },
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "invalid_path"
+    assert not (outside / "escape.md").exists()
+
+    operation_ids = {
+        denied.headers["X-Operation-ID"],
+        invalid.headers["X-Operation-ID"],
+    }
+    activity = client.get("/api/v1/activity", params={"actor_id": "agent:researcher"}).json()
+    events = [event for event in activity if event["operation_id"] in operation_ids]
+    assert {(event["outcome"], event["error_code"]) for event in events} == {
+        ("denied", "forbidden"),
+        ("failed", "invalid_path"),
+    }
+
+
 def test_path_scoped_reads_filter_lists_search_and_unmaterialized_documents(
     client: TestClient,
 ) -> None:

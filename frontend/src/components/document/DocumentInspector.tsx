@@ -65,8 +65,8 @@ export function DocumentInspector({
     sessions.updateSession(documentId, { compareFrom: from, compareTo: to })
   }
   return (
-    <aside className="history-panel document-inspector" style={{ width }}>
-      <div className="right-panel-header">
+    <aside className="history-panel document-inspector ui-rail ui-rail--surface" style={{ width }}>
+      <div className="right-panel-header ui-rail-header">
         <p className="eyebrow">Inspector</p>
         <button className="icon-button" aria-label="Collapse document inspector" onClick={onCollapse}>
           ›
@@ -237,22 +237,24 @@ function HistoryList({
             </span>
             {revision.summary ? ` · ${revision.summary}` : ''}
           </p>
-          {revision.operation_id && <small>Operation {revision.operation_id}</small>}
+          {revision.operation_id && (
+            <small className="revision-operation-id">Operation {revision.operation_id}</small>
+          )}
           <div className="revision-actions">
             <button onClick={() => onPreview(revision)}>Preview</button>
             {onExpose && revision.revision_id !== currentRevisionId && (
               <button onClick={() => onExpose(revision.revision_id)}>Expose URL</button>
             )}
+            {revision.revision_id !== currentRevisionId && (
+              <>
+                <button onClick={() => onCompare(revision.revision_id)}>Compare</button>
+                <button onClick={() => onCopy(revision)}>Copy to editor</button>
+                <button disabled={busy} onClick={() => onRestore(revision.revision_id)}>
+                  Restore
+                </button>
+              </>
+            )}
           </div>
-          {revision.revision_id !== currentRevisionId && (
-            <div className="revision-actions">
-              <button onClick={() => onCompare(revision.revision_id)}>Compare</button>
-              <button onClick={() => onCopy(revision)}>Copy to editor</button>
-              <button disabled={busy} onClick={() => onRestore(revision.revision_id)}>
-                Restore
-              </button>
-            </div>
-          )}
         </article>
       ))}
     </section>
@@ -317,18 +319,30 @@ function PublicationEditor({
   const publicationHref = publication?.url ?? `/p/${slug}`
   return (
     <section className="metadata-editor publication-editor">
-      <p className="eyebrow">Rendering & publication</p>
+      <header className="publication-section-header">
+        <div>
+          <p className="eyebrow">Publishing</p>
+          <strong>Rendering & access</strong>
+        </div>
+        <span className={`scope-badge ${publication?.active ? 'workspace' : ''}`}>
+          {publication?.active ? 'Live' : 'Draft'}
+        </span>
+      </header>
       {document.content_type === 'text/html' && (
         <div className="trust-control">
-          <strong>
-            {document.trust_level === 'trusted_interactive' ? 'Trusted interactive HTML' : 'Safe HTML'}
-          </strong>
-          <small>
-            {document.trust_level === 'trusted_interactive'
-              ? 'JavaScript runs only in the isolated preview origin.'
-              : 'Scripts are removed and the preview iframe cannot execute code.'}
-          </small>
+          <div>
+            <strong>
+              {document.trust_level === 'trusted_interactive' ? 'Trusted interactive HTML' : 'Safe HTML'}
+            </strong>
+            <small>
+              {document.trust_level === 'trusted_interactive'
+                ? 'JavaScript runs only in the isolated preview origin.'
+                : 'Scripts are removed and the preview cannot execute code.'}
+            </small>
+          </div>
           <button
+            type="button"
+            className="secondary-action"
             disabled={trust.isPending}
             onClick={() => {
               if (
@@ -360,20 +374,35 @@ function PublicationEditor({
           <option value="public">Public</option>
         </select>
       </label>
-      <button disabled={save.isPending || !slug} onClick={() => save.mutate()}>
-        {publication ? 'Update publication' : 'Publish document'}
+      <button
+        type="button"
+        className="panel-button publication-save"
+        disabled={save.isPending || !slug}
+        onClick={() => save.mutate()}
+      >
+        {save.isPending ? 'Saving…' : publication ? 'Update publication' : 'Publish document'}
       </button>
       {publication?.active && (
         <div className="publication-actions">
-          <a href={publicationHref} target="_blank" rel="noreferrer">
-            Open stable URL
+          <a className="secondary-action" href={publicationHref} target="_blank" rel="noreferrer">
+            Open publication
           </a>
           {publication.access_policy === 'unlisted' && (
-            <button disabled={rotate.isPending} onClick={() => rotate.mutate()}>
+            <button
+              type="button"
+              className="secondary-action"
+              disabled={rotate.isPending}
+              onClick={() => rotate.mutate()}
+            >
               Rotate access token
             </button>
           )}
-          <button disabled={remove.isPending} onClick={() => remove.mutate()}>
+          <button
+            type="button"
+            className="secondary-action danger"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
             Unpublish
           </button>
         </div>
@@ -383,6 +412,8 @@ function PublicationEditor({
           <strong>Copy this unlisted link now</strong>
           <code>{`${publicationHref}#token=${oneTimeToken}`}</code>
           <button
+            type="button"
+            className="secondary-action"
             onClick={() => void navigator.clipboard.writeText(`${publicationHref}#token=${oneTimeToken}`)}
           >
             Copy link
