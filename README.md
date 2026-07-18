@@ -31,13 +31,23 @@ be expired, revoked, or rotated from the browser.
 
 ## Screenshots
 
-### Focused document workspace
+### Pierre-powered document workspace
 
 Sangam starts with one editor and no permanent tab or status strip. Files,
 search, agent activity, maintenance tools, document properties, and save state
-remain available without forcing a split layout.
+remain available without forcing a split layout. The `@pierre/trees` explorer
+adds keyboard navigation, inline rename, context actions, and drag-and-drop
+organization while Sangam keeps document identity stable behind readable paths.
 
-![Current Sangam document workspace with the file explorer, Markdown editor, document inspector, and Agent activity navigation](./docs/assets/workbench-single.png)
+![Sangam document workspace with an expanded Pierre file tree, rendered Markdown preview, and document inspector](./docs/assets/pierre-workspace-tree.png)
+
+### Revision comparison
+
+The History inspector compares any two revisions with the lazy-loaded
+`@pierre/diffs` renderer. Additions and deletions remain readable alongside the
+document, revision metadata, and restore or copy actions.
+
+![Sangam revision history comparing the first and current Product roadmap revisions with Pierre Diffs](./docs/assets/pierre-revision-comparison.png)
 
 ### Scoped agent access
 
