@@ -31,13 +31,23 @@ be expired, revoked, or rotated from the browser.
 
 ## Screenshots
 
-### Focused document workspace
+### Pierre-powered document workspace
 
 Sangam starts with one editor and no permanent tab or status strip. Files,
 search, agent activity, maintenance tools, document properties, and save state
-remain available without forcing a split layout.
+remain available without forcing a split layout. The `@pierre/trees` explorer
+adds keyboard navigation, inline rename, context actions, and drag-and-drop
+organization while Sangam keeps document identity stable behind readable paths.
 
-![Current Sangam document workspace with the file explorer, Markdown editor, document inspector, and Agent activity navigation](./docs/assets/workbench-single.png)
+![Sangam document workspace with an expanded Pierre file tree, rendered Markdown preview, and document inspector](./docs/assets/pierre-workspace-tree.png)
+
+### Revision comparison
+
+The History inspector compares any two revisions with the lazy-loaded
+`@pierre/diffs` renderer. Additions and deletions remain readable alongside the
+document, revision metadata, and restore or copy actions.
+
+![Sangam revision history comparing the first and current Product roadmap revisions with Pierre Diffs](./docs/assets/pierre-revision-comparison.png)
 
 ### Scoped agent access
 
@@ -51,15 +61,16 @@ be rotated or revoked without erasing their historical attribution.
 
 The activity timeline keeps accepted, denied, conflicted, and failed agent
 operations reviewable without exposing credential secrets or document bodies.
-Events retain actor, token label, path, outcome, operation ID, and document links
-where applicable.
+The current empty state keeps actor and outcome filters ready before the first
+agent operation is recorded.
 
-![Current Sangam agent activity timeline showing one denied and one accepted document operation](./docs/assets/phase-3-activity.png)
+![Current Sangam agent activity empty state with actor and outcome filters](./docs/assets/phase-3-activity.png)
 
 ## Project documents
 
 - [Product vision and technical decisions](./docs/VISION.md)
 - [Brand identity and logo usage](./docs/BRAND.md)
+- [UI typography, dimensions, rails, and enforcement](./docs/UI_SYSTEM.md)
 - [Seven-phase vertical implementation](./docs/IMPLEMENTATION_PHASES.md)
 - [Phase 1 implementation and verification](./docs/PHASE_1.md)
 - [Phase 2 implementation and verification](./docs/PHASE_2.md)

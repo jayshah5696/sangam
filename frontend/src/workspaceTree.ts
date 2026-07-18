@@ -1,135 +1,78 @@
 import type { DocumentSummary, Folder as WorkspaceFolder } from './api'
 
-export type ExplorerFolder = {
-  type: 'folder'
-  id: string
-  name: string
-  path: string
-  documentCount: number
-  children: ExplorerNode[]
-  virtual?: boolean
+export type WorkspaceTreeAdapter = {
+  paths: string[]
+  documentByTreePath: Map<string, DocumentSummary>
+  folderByTreePath: Map<string, WorkspaceFolder>
+  treePathByDocumentId: Map<string, string>
+  draftsRootPath: string | null
 }
 
-export type ExplorerDocument = {
-  type: 'document'
-  id: string
-  name: string
-  path: string | null
-  document: DocumentSummary
-}
+/**
+ * Pierre Trees is intentionally path-first, while Sangam documents are ID-first.
+ * This adapter is the only place where the two models meet: the tree receives
+ * presentation paths, and every document action resolves back to a stable ID.
+ */
+export function buildWorkspaceTreeAdapter(
+  documents: DocumentSummary[],
+  folders: WorkspaceFolder[],
+): WorkspaceTreeAdapter {
+  const paths: string[] = []
+  const documentByTreePath = new Map<string, DocumentSummary>()
+  const folderByTreePath = new Map<string, WorkspaceFolder>()
+  const treePathByDocumentId = new Map<string, string>()
+  const occupiedRootNames = new Set<string>()
 
-export type ExplorerNode = ExplorerFolder | ExplorerDocument
+  for (const folder of folders) {
+    const path = normalizeWorkspacePath(folder.path)
+    if (!path) continue
+    occupiedRootNames.add(path.split('/')[0]!)
+    folderByTreePath.set(path, folder)
+    paths.push(`${path}/`)
+  }
 
-export function buildWorkspaceTree(documents: DocumentSummary[], folders: WorkspaceFolder[]): ExplorerNode[] {
-  const folderNodes = new Map<string, ExplorerFolder>()
-  for (const folder of [...folders].sort((a, b) => a.path.localeCompare(b.path))) {
-    folderNodes.set(folder.path, {
-      type: 'folder',
-      id: `folder:${folder.folder_id}`,
-      name: folder.name,
-      path: folder.path,
-      documentCount: folder.document_count,
-      children: [],
-    })
-  }
-  const roots: ExplorerNode[] = []
-  for (const folder of folderNodes.values()) {
-    const parentPath = parentWorkspacePath(folder.path)
-    const parent = folderNodes.get(parentPath)
-    if (parent) parent.children.push(folder)
-    else roots.push(folder)
-  }
-  const drafts: ExplorerDocument[] = []
+  const drafts = documents.filter((document) => !document.path)
   for (const document of documents) {
-    const node: ExplorerDocument = {
-      type: 'document',
-      id: `document:${document.document_id}`,
-      name: document.path ? workspaceBasename(document.path) : document.title,
-      path: document.path,
-      document,
-    }
-    if (!document.path) {
-      drafts.push(node)
-      continue
-    }
-    const parent = folderNodes.get(parentWorkspacePath(document.path))
-    if (parent) parent.children.push(node)
-    else roots.push(node)
+    if (!document.path) continue
+    const path = normalizeWorkspacePath(document.path)
+    occupiedRootNames.add(path.split('/')[0]!)
+    documentByTreePath.set(path, document)
+    treePathByDocumentId.set(document.document_id, path)
+    paths.push(path)
   }
-  if (drafts.length) {
-    roots.unshift({
-      type: 'folder',
-      id: 'folder:drafts',
-      name: 'Drafts',
-      path: '__drafts__',
-      documentCount: drafts.length,
-      children: drafts,
-      virtual: true,
-    })
-  }
-  sortNodes(roots)
-  return roots
-}
 
-export function flattenVisibleNodes(nodes: ExplorerNode[], expanded: Set<string>): ExplorerNode[] {
-  const result: ExplorerNode[] = []
-  for (const node of nodes) {
-    result.push(node)
-    if (node.type === 'folder' && expanded.has(node.path)) {
-      result.push(...flattenVisibleNodes(node.children, expanded))
+  const draftsRootPath = drafts.length ? availableDraftsRoot(occupiedRootNames) : null
+  if (draftsRootPath) {
+    const usedDraftPaths = new Set<string>()
+    for (const document of drafts) {
+      const path = uniqueDraftPath(draftsRootPath, document.title, usedDraftPaths)
+      usedDraftPaths.add(path)
+      documentByTreePath.set(path, document)
+      treePathByDocumentId.set(document.document_id, path)
+      paths.push(path)
     }
   }
-  return result
-}
 
-export function adjacentVisibleNodeId(
-  nodes: ExplorerNode[],
-  currentId: string | null,
-  direction: 1 | -1,
-): string | null {
-  if (nodes.length === 0) return null
-  const currentIndex = nodes.findIndex((node) => node.id === currentId)
-  const nextIndex =
-    currentIndex < 0
-      ? direction > 0
-        ? 0
-        : nodes.length - 1
-      : Math.max(0, Math.min(nodes.length - 1, currentIndex + direction))
-  return nodes[nextIndex]?.id ?? null
-}
-
-export function parentNodeId(nodes: ExplorerNode[], childId: string): string | null {
-  for (const node of nodes) {
-    if (node.type !== 'folder') continue
-    if (node.children.some((child) => child.id === childId)) return node.id
-    const nested = parentNodeId(node.children, childId)
-    if (nested) return nested
+  return {
+    paths: [...new Set(paths)],
+    documentByTreePath,
+    folderByTreePath,
+    treePathByDocumentId,
+    draftsRootPath,
   }
-  return null
-}
-
-export function typeaheadNodeId(
-  nodes: ExplorerNode[],
-  currentId: string | null,
-  query: string,
-): string | null {
-  if (!query) return null
-  const currentIndex = nodes.findIndex((node) => node.id === currentId)
-  const candidates = nodes.slice(currentIndex + 1).concat(nodes.slice(0, currentIndex + 1))
-  return candidates.find((node) => node.name.toLowerCase().startsWith(query.toLowerCase()))?.id ?? null
 }
 
 export function joinWorkspacePath(parent: string, child: string) {
-  return [parent.replace(/^\/+|\/+$/g, ''), child.replace(/^\/+|\/+$/g, '')].filter(Boolean).join('/')
+  return [normalizeWorkspacePath(parent), normalizeWorkspacePath(child)].filter(Boolean).join('/')
 }
 
 export function parentWorkspacePath(path: string) {
-  const normalized = path.replace(/^\/+|\/+$/g, '')
+  const normalized = normalizeWorkspacePath(path)
   return normalized.includes('/') ? normalized.slice(0, normalized.lastIndexOf('/')) : ''
 }
 
 export function workspaceBasename(path: string) {
-  const normalized = path.replace(/\/+$/g, '')
+  const normalized = normalizeWorkspacePath(path)
   return normalized.slice(normalized.lastIndexOf('/') + 1)
 }
 
@@ -138,7 +81,28 @@ export function ensureMarkdownExtension(name: string) {
   return normalized.toLowerCase().endsWith('.md') ? normalized : `${normalized}.md`
 }
 
-function sortNodes(nodes: ExplorerNode[]) {
-  nodes.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'folder' ? -1 : 1))
-  for (const node of nodes) if (node.type === 'folder') sortNodes(node.children)
+function normalizeWorkspacePath(path: string) {
+  return path.replace(/^\/+|\/+$/g, '')
+}
+
+function availableDraftsRoot(occupiedRootNames: Set<string>) {
+  const base = 'Drafts'
+  let candidate = base
+  let suffix = 2
+  while (occupiedRootNames.has(candidate)) {
+    candidate = `${base} (Sangam ${suffix})`
+    suffix += 1
+  }
+  return candidate
+}
+
+function uniqueDraftPath(root: string, title: string, usedPaths: Set<string>) {
+  const safeTitle = title.trim().replaceAll('/', '／') || 'Untitled document'
+  let candidate = joinWorkspacePath(root, safeTitle)
+  let suffix = 2
+  while (usedPaths.has(candidate)) {
+    candidate = joinWorkspacePath(root, `${safeTitle} (${suffix})`)
+    suffix += 1
+  }
+  return candidate
 }

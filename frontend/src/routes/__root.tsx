@@ -105,8 +105,8 @@ function PrimarySidebar({
   style: CSSProperties
 }) {
   return (
-    <aside className="primary-sidebar" style={style}>
-      <header className="sidebar-brandbar">
+    <aside className="primary-sidebar ui-rail ui-rail--inverse" style={style}>
+      <header className="sidebar-brandbar ui-rail-header">
         <Link to="/" className="sidebar-brand" aria-label="Sangam home">
           <img src="/sangam-mark.svg" alt="" />
           <span>
