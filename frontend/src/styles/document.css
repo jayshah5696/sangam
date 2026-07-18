@@ -78,7 +78,7 @@ button:disabled { cursor: default; opacity: .55; }
 .document-actions-form > label input, .editor-tools select { min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); padding: 7px; }
 .document-actions-form > button, .editor-tools button, .conflict-actions button, .backup-card button, .trash-card button { border: 1px solid var(--accent); color: var(--accent-text); background: var(--accent-soft); padding: 7px 10px; border-radius: var(--radius-control); }
 .document-actions-form > button { justify-self: start; }
-.document-actions-form .danger-button { border-color: #bd493c; color: #812e22; background: var(--danger-soft); }
+.document-actions-form .danger-button { border-color: var(--danger); color: #812e22; background: var(--danger-soft); }
 .materialize-bar { display: flex; gap: 8px; align-items: center; padding: 11px; background: var(--surface-soft); border-radius: var(--radius-panel) var(--radius-panel) 0 0; }
 .materialize-bar input, .metadata-editor input, .metadata-editor select, .folder-setting > input, .tag-creator input[type="text"] { flex: 1; min-width: 120px; border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 8px 10px; border-radius: var(--radius-control); }
 .materialize-bar button, .notice button, .revision button, .panel-button, .folder-setting > button, .tag-creator button { border: 1px solid var(--accent); color: var(--accent-text); background: var(--accent-soft); padding: 7px 10px; border-radius: var(--radius-control); }
@@ -109,7 +109,7 @@ button:disabled { cursor: default; opacity: .55; }
 .markdown-preview th, .markdown-preview td { border: 1px solid var(--line); padding: 7px 10px; }
 .markdown-preview img, .mermaid-diagram svg { max-width: 100%; height: auto; }
 .mermaid-diagram { margin: 24px auto; overflow-x: auto; text-align: center; }
-.mermaid-error { border: 2px solid #bd493c; }
+.mermaid-error { border: 2px solid var(--danger); }
 .history-panel { flex: none; min-height: 100vh; max-height: 100vh; border-left: 1px solid var(--line); padding: 25px 20px; background: var(--surface-soft); overflow-y: auto; }
 .right-panel-header { display: flex; justify-content: space-between; align-items: flex-start; }
 .right-rail { width: 42px; flex: none; border-left: 1px solid var(--line); background: var(--surface-soft); padding: 18px 5px; }
@@ -131,7 +131,7 @@ button:disabled { cursor: default; opacity: .55; }
 .revision button { font-size: var(--text-meta); }
 .revision-actions { flex-direction: row !important; flex-wrap: wrap; }
 .diff-summary span:first-child { color: #247a4b; }
-.diff-summary span:last-child { color: #bd493c; }
+.diff-summary span:last-child { color: var(--danger); }
 .document-inspector { padding-top: 14px; }
 .inspector-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 9px 0 12px; padding: 2px; border-radius: var(--radius-control); background: var(--surface); }
 .inspector-tabs button { border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); padding: 6px 4px; text-transform: capitalize; font-size: var(--text-meta); }
@@ -162,7 +162,7 @@ button:disabled { cursor: default; opacity: .55; }
 .conflict-notice { background: #f2d9ae; color: #633f08; }
 .error-notice { background: var(--danger-soft); color: #812e22; }
 .offline-notice { background: var(--surface-soft); color: var(--muted); border: 1px dashed var(--muted); }
-.error-text { color: #bd493c; font-size: var(--text-label); }
+.error-text { color: var(--danger); font-size: var(--text-label); }
 .success-text { color: var(--accent); font-size: var(--text-label); }
 .center-message { margin: 20vh auto; text-align: center; }
 .html-preview { display: block; width: 100%; min-height: 620px; border: 0; background: white; color-scheme: light; }
@@ -181,7 +181,7 @@ button:disabled { cursor: default; opacity: .55; }
 .publication-save { width: 100%; justify-self: stretch; }
 .publication-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
 .publication-actions .secondary-action { min-width: 0; text-decoration: none; }
-.publication-actions .danger { color: #bd493c; }
+.publication-actions .danger { color: var(--danger); }
 .one-time-token.compact { min-width: 0; display: grid; gap: var(--space-2); padding: var(--space-3); }
 .one-time-token.compact code { max-height: 4.5rem; overflow: auto; font-size: var(--text-meta); overflow-wrap: anywhere; }
 .revision-render-preview { overflow: hidden; margin: 8px -12px 14px; border-block: 1px solid var(--line); background: var(--surface); }

@@ -49,5 +49,6 @@ components remain synchronized with native Sangam controls.
 4. Add new tokens only when the role is genuinely absent, not to match a single mockup.
 5. Check every theme and both desktop and narrow layouts before merging.
 
-`npm --prefix frontend run lint` enforces the compact type, font-family, and
-radius rules so a new component cannot quietly introduce a parallel UI scale.
+`npm --prefix frontend run lint` enforces the compact type, font-family, radius,
+and defined-custom-property rules so a new component cannot quietly introduce
+a parallel UI scale or reference a missing design token.

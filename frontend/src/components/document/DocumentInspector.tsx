@@ -6,6 +6,7 @@ import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { HtmlPreview } from '../HtmlPreview'
 import { MarkdownPreview } from '../MarkdownPreview'
+import { OneTimeSecret } from '../OneTimeSecret'
 import { TrustedHtmlPreview } from '../TrustedHtmlPreview'
 
 export function DocumentInspector({
@@ -408,17 +409,15 @@ function PublicationEditor({
         </div>
       )}
       {oneTimeToken && (
-        <div className="one-time-token compact" role="status">
-          <strong>Copy this unlisted link now</strong>
-          <code>{`${publicationHref}#token=${oneTimeToken}`}</code>
-          <button
-            type="button"
-            className="secondary-action"
-            onClick={() => void navigator.clipboard.writeText(`${publicationHref}#token=${oneTimeToken}`)}
-          >
-            Copy link
-          </button>
-        </div>
+        <OneTimeSecret
+          compact
+          title="Copy this unlisted link now"
+          description="Sangam will not show this access token again."
+          value={`${publicationHref}#token=${oneTimeToken}`}
+          copyLabel="Copy link"
+          dismissLabel="I saved it"
+          onDismiss={() => setOneTimeToken(null)}
+        />
       )}
       {(save.isError || remove.isError || rotate.isError || trust.isError) && (
         <p className="error-text">The publication setting could not be saved.</p>
