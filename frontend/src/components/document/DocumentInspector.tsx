@@ -168,7 +168,9 @@ export function DocumentInspector({
             <section className="revision-render-preview">
               <header>
                 <strong>Rendered revision</strong>
-                <button onClick={() => setPreviewRevision(null)}>Close</button>
+                <button className="secondary-action" onClick={() => setPreviewRevision(null)}>
+                  Close
+                </button>
               </header>
               {document.content_type === 'text/markdown' ? (
                 <MarkdownPreview content={previewRevision.content} />

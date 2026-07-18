@@ -190,7 +190,7 @@ button:disabled { cursor: default; opacity: .55; }
 .revision-render-preview .html-preview { min-height: 320px; }
 .publication-page { width: min(960px, calc(100% - 36px)); min-height: 100vh; margin: 0 auto; padding: 48px 0 80px; }
 .publication-page > header { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
-.publication-page > header h1 { margin: 4px 0 8px; font-size: clamp(36px, 6vw, 64px); line-height: 1; }
+.publication-page > header h1 { margin: 4px 0 8px; font-family: var(--font-display); font-size: clamp(36px, 6vw, 64px); line-height: var(--leading-tight); }
 .publication-page > header small { color: var(--muted); }
 .publication-page > .markdown-preview { min-height: 0; border: 0; padding: 0; }
 .publication-page > .html-preview { min-height: 72vh; border: 1px solid var(--line); border-radius: var(--radius-panel); }

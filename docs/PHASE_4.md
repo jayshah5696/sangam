@@ -87,6 +87,9 @@ use `no-store` and `no-referrer`.
 
 The preview iframe has `allow-scripts` but not `allow-same-origin`, so its
 effective origin is opaque and it cannot read application credentials or DOM.
+Only the token-protected preview content and asset endpoints accept the
+resulting `Origin: null` CORS preflight; every other API route continues to
+reject opaque origins.
 Its CSP denies network access unless an operator explicitly configures allowed
 `connect-src` origins. Relative assets require the same live, scoped preview
 grant. Any trust transition invalidates an already-issued grant at the next
@@ -139,7 +142,7 @@ Automated backend coverage includes:
 - Agent `publish` capability path enforcement and human-only trust changes.
 - HMAC tampering, expiry, live trust revocation, exact asset scope, path
   traversal, trust-version replay prevention, no-store, referrer policy, and
-  CSP assertions.
+  CSP assertions, including endpoint-scoped opaque-origin CORS preflight.
 - Canonical idempotency-key reuse across document trust and publication
   mutations, including migration of Phase 4 preview-build records.
 - Cloudflare Access JWT signature, issuer, audience, and email validation.

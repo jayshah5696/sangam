@@ -409,20 +409,22 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
 
     rendered = client.get(
         "/api/v1/trusted-previews/content",
-        headers={"Authorization": f"Sangam-Preview {grant['token']}"},
+        headers={"Authorization": f"Sangam-Preview {grant['token']}", "Origin": "null"},
     )
     assert rendered.status_code == 200
     assert "window.previewRan = true" in rendered.text
     assert "default-src 'none'" in rendered.text
     assert "connect-src 'none'" in rendered.text
     assert rendered.headers["Cache-Control"] == "no-store, max-age=0"
+    assert rendered.headers["Access-Control-Allow-Origin"] == "null"
     preview_asset = client.get(
         "/api/v1/trusted-previews/asset",
         params={"path": "preview.png"},
-        headers={"Authorization": f"Sangam-Preview {grant['token']}"},
+        headers={"Authorization": f"Sangam-Preview {grant['token']}", "Origin": "null"},
     )
     assert preview_asset.status_code == 200
     assert preview_asset.content == b"trusted-preview-image"
+    assert preview_asset.headers["Access-Control-Allow-Origin"] == "null"
     assert (
         client.get(
             "/api/v1/trusted-previews/asset",
@@ -490,6 +492,54 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
         ("trusted_interactive", "untrusted"),
         ("untrusted", "trusted_interactive"),
     ]
+
+
+def test_trusted_preview_cors_is_limited_to_opaque_preview_requests(client: TestClient) -> None:
+    preflight = client.options(
+        "/api/v1/trusted-previews/content",
+        headers={
+            "Origin": "null",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert preflight.status_code == 204
+    assert preflight.headers["Access-Control-Allow-Origin"] == "null"
+    assert preflight.headers["Access-Control-Allow-Methods"] == "GET"
+    assert preflight.headers["Access-Control-Allow-Headers"] == "Authorization"
+
+    foreign_origin = client.options(
+        "/api/v1/trusted-previews/content",
+        headers={
+            "Origin": "https://attacker.example",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert foreign_origin.status_code == 400
+    assert foreign_origin.headers.get("Access-Control-Allow-Origin") is None
+
+    unsafe_method = client.options(
+        "/api/v1/trusted-previews/content",
+        headers={
+            "Origin": "null",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert unsafe_method.status_code == 400
+    assert unsafe_method.headers.get("Access-Control-Allow-Origin") is None
+
+    unrelated = client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "null",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert unrelated.status_code == 400
+    assert unrelated.headers.get("Access-Control-Allow-Origin") is None
 
 
 def test_private_publication_requires_trusted_proxy_identity(tmp_path: Path) -> None:

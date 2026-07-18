@@ -178,6 +178,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    trusted_preview_api_paths = {
+        "/api/v1/trusted-previews/content",
+        "/api/v1/trusted-previews/asset",
+    }
+
+    @app.middleware("http")
+    async def trusted_preview_opaque_origin_cors(request: Request, call_next):
+        is_preview_api = request.url.path in trusted_preview_api_paths
+        expected_host = resolved_settings.trusted_preview_host
+        is_preview_host = not expected_host or request.url.hostname == expected_host
+        is_opaque_origin = request.headers.get("origin") == "null"
+        if not (is_preview_api and is_preview_host and is_opaque_origin):
+            return await call_next(request)
+
+        if request.method == "OPTIONS":
+            requested_method = request.headers.get("access-control-request-method", "").upper()
+            requested_headers = {
+                header.strip().casefold()
+                for header in request.headers.get("access-control-request-headers", "").split(",")
+                if header.strip()
+            }
+            if requested_method != "GET" or not requested_headers.issubset({"authorization"}):
+                return Response(status_code=400)
+            return Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": "null",
+                    "Access-Control-Allow-Methods": "GET",
+                    "Access-Control-Allow-Headers": "Authorization",
+                    "Cache-Control": "no-store, max-age=0",
+                    "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+                },
+            )
+
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "null"
+        vary = {
+            value.strip() for value in response.headers.get("Vary", "").split(",") if value.strip()
+        }
+        vary.add("Origin")
+        response.headers["Vary"] = ", ".join(sorted(vary))
+        return response
+
     @app.exception_handler(SangamError)
     async def handle_sangam_error(_request: Request, error: SangamError) -> JSONResponse:
         status = 500
