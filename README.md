@@ -61,10 +61,10 @@ be rotated or revoked without erasing their historical attribution.
 
 The activity timeline keeps accepted, denied, conflicted, and failed agent
 operations reviewable without exposing credential secrets or document bodies.
-Events retain actor, token label, path, outcome, operation ID, and document links
-where applicable.
+The current empty state keeps actor and outcome filters ready before the first
+agent operation is recorded.
 
-![Current Sangam agent activity timeline showing one denied and one accepted document operation](./docs/assets/phase-3-activity.png)
+![Current Sangam agent activity empty state with actor and outcome filters](./docs/assets/phase-3-activity.png)
 
 ## Project documents
 
