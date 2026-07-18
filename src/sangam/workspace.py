@@ -9,11 +9,13 @@ from typing import Protocol
 from sangam.errors import InvalidPathError
 
 
-class WorkspaceFilesystem(Protocol):
+class WorkspacePathNormalizer(Protocol):
     def normalize_document_path(self, raw_path: str) -> str: ...
 
     def normalize_folder_path(self, raw_path: str) -> str: ...
 
+
+class WorkspaceFilesystem(WorkspacePathNormalizer, Protocol):
     def write_atomic(self, path: str, content: str) -> str: ...
 
     def delete_document(self, path: str) -> None: ...

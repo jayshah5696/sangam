@@ -56,6 +56,9 @@ authentication, bearer tokens, or a `Principal`. Moving authorization into that
 domain service would couple internal recovery and reconciliation to agent
 credentials. The access facade therefore keeps explicit, typed operations while
 shared execution helpers centralize policy outcomes and safe activity recording.
+Destination document paths cross a narrower normalization port at this boundary:
+Sangam validates and canonicalizes the path before evaluating its capability
+prefix, then passes that same canonical value into the document lifecycle.
 
 For list and search operations, the access policy reduces the principal's
 grants to an authorized union of path prefixes. When both `read` and `search`
