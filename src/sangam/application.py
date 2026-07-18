@@ -11,9 +11,10 @@ from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.idempotency import IdempotencyStore
 from sangam.organization import WorkspaceOrganizationService
+from sangam.publication import PreviewTokenService, PublicationService
 from sangam.reconciliation import ReconciliationPlanner, ReconciliationService
 from sangam.search import SearchIndex
-from sangam.security import AuthenticationService, IdentityService
+from sangam.security import AuthenticationService, CloudflareAccessVerifier, IdentityService
 from sangam.service import DocumentService
 from sangam.workspace import DiskWorkspaceFilesystem
 
@@ -31,6 +32,7 @@ class ApplicationServices:
     authentication: AuthenticationService
     activity: ActivityService
     authorization: AuthorizationPolicy
+    publications: PublicationService
 
 
 def build_application_services(settings: Settings) -> ApplicationServices:
@@ -74,20 +76,51 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         planner=ReconciliationPlanner(),
     )
     identity = IdentityService(database)
+    access_verifier = None
+    if settings.auth_mode == "cloudflare_access":
+        if not all(
+            (
+                settings.cloudflare_access_team_domain,
+                settings.cloudflare_access_audience,
+                settings.cloudflare_access_email,
+            )
+        ):
+            raise ValueError(
+                "Cloudflare Access mode requires team domain, audience, and allowed email"
+            )
+        access_verifier = CloudflareAccessVerifier(
+            team_domain=settings.cloudflare_access_team_domain or "",
+            audience=settings.cloudflare_access_audience or "",
+            allowed_email=settings.cloudflare_access_email or "",
+        )
     authentication = AuthenticationService(
         identity=identity,
         auth_mode=settings.auth_mode,
         trusted_identity_value=settings.trusted_identity_value,
         trusted_human_actor_id=settings.trusted_human_actor_id,
         trusted_human_display_name=settings.trusted_human_display_name,
+        access_identity_verifier=access_verifier,
     )
     activity = ActivityService(database)
     authorization = AuthorizationPolicy()
+    publications = PublicationService(
+        database=database,
+        documents=documents,
+        preview_tokens=PreviewTokenService(
+            secret=settings.preview_hmac_secret.get_secret_value(),
+            ttl_seconds=settings.preview_token_ttl_seconds,
+            base_url=settings.trusted_preview_base_url,
+        ),
+        workspace=workspace,
+        max_asset_bytes=settings.max_publication_asset_bytes,
+        publication_base_url=settings.publication_base_url,
+    )
     workspace_access = WorkspaceAccessService(
         documents=documents,
         organization=organization,
         policy=authorization,
         activity=activity,
+        publications=publications,
     )
     return ApplicationServices(
         documents=documents,
@@ -99,6 +132,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         authentication=authentication,
         activity=activity,
         authorization=authorization,
+        publications=publications,
     )
 
 

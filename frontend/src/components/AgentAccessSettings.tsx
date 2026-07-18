@@ -13,6 +13,7 @@ const capabilities: TokenScope['capability'][] = [
   'tag',
   'restore',
   'delete',
+  'publish',
 ]
 
 const defaultCapabilities = new Set<TokenScope['capability']>([

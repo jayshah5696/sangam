@@ -53,7 +53,7 @@ class DocumentService:
         size_bytes = len(content.encode("utf-8"))
         if size_bytes > self.max_document_bytes:
             raise ValidationError(
-                "Markdown content exceeds the configured size limit",
+                "Text content exceeds the configured size limit",
                 details={
                     "size_bytes": size_bytes,
                     "max_document_bytes": self.max_document_bytes,
@@ -68,6 +68,17 @@ class DocumentService:
 
     def _normalize_path(self, raw_path: str) -> str:
         return self.workspace.normalize_document_path(raw_path)
+
+    @staticmethod
+    def _validate_path_type(path: str | None, content_type: str) -> None:
+        if path is None:
+            return
+        suffix = path.lower().rsplit(".", 1)[-1]
+        expected = "text/html" if suffix in {"html", "htm"} else "text/markdown"
+        if content_type != expected:
+            raise ValidationError(
+                "The workspace path extension must match the document content type"
+            )
 
     def _document_query(self, *, include_content: bool = True, include_search: bool = False) -> str:
         content_projection = ", r.content" if include_content else ""
@@ -124,6 +135,8 @@ class DocumentService:
             revision_summary=row["revision_summary"],
             category=row["category"],
             metadata_version=row["metadata_version"],
+            trust_level=row["trust_level"],
+            trust_version=row["trust_version"],
             tags=[Tag.model_validate(tag) for tag in json.loads(row["tags_json"])],
             search_snippet=row["search_snippet"],
         )
@@ -264,12 +277,21 @@ class DocumentService:
         title: str,
         content: str,
         path: str | None,
+        content_type: str = "text/markdown",
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
         self._validate_content_size(content)
         normalized_path = self._normalize_path(path) if path is not None else None
-        payload = {"title": title, "content": content, "path": normalized_path}
+        if content_type not in {"text/markdown", "text/html"}:
+            raise ValidationError("Unsupported text document content type")
+        self._validate_path_type(normalized_path, content_type)
+        payload = {
+            "title": title,
+            "content": content,
+            "path": normalized_path,
+            "content_type": content_type,
+        }
         fingerprint = request_hash(payload)
         duplicate: tuple[str, str] | None = None
         try:
@@ -294,11 +316,12 @@ class DocumentService:
                             document_id, title, content_type, path, current_revision_id,
                             content_hash, size_bytes, materialization_state, file_hash,
                             deleted, created_by, created_at, updated_at
-                        ) VALUES (?, ?, 'text/markdown', ?, NULL, ?, ?, ?, NULL, 0, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, 0, ?, ?, ?)
                         """,
                         (
                             document_id,
                             title.strip(),
+                            content_type,
                             normalized_path,
                             content_hash,
                             size_bytes,
@@ -562,6 +585,7 @@ class DocumentService:
             title=title or f"{source.title} copy",
             content=source.content,
             path=path,
+            content_type=source.content_type,
             actor_id=actor_id,
             idempotency_key=idempotency_key,
         )
@@ -577,6 +601,8 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         normalized_path = self._normalize_path(path)
+        current = self.get_document(document_id)
+        self._validate_path_type(normalized_path, current.content_type)
         document, _ = self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
@@ -602,6 +628,7 @@ class DocumentService:
     ) -> Document:
         normalized_path = self._normalize_path(path)
         current = self.get_document(document_id)
+        self._validate_path_type(normalized_path, current.content_type)
         if not current.path:
             raise ValidationError("Unmaterialized documents must be materialized before moving")
         document, _ = self._append_revision(

@@ -1,0 +1,11 @@
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /etc/cloudflared/00000000-0000-0000-0000-000000000000.json
+
+ingress:
+  - hostname: sangam.example.com
+    service: http://127.0.0.1:8000
+  - hostname: docs.example.com
+    service: http://127.0.0.1:8000
+  - hostname: preview.example.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404

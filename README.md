@@ -5,9 +5,9 @@
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
-Phases 1 through 3 are implemented. The document core now supports a daily-use
-Markdown workspace through the browser, HTTP API, CLI, SQLite revision history,
-and ordinary workspace files.
+Phases 1 through 4 are implemented. The document core now supports a daily-use
+Markdown and HTML workspace through the browser, HTTP API, CLI, SQLite revision
+history, and ordinary workspace files.
 
 The workspace opens with one focused editor and reveals tabs only when a group
 contains more than one document. Users can add persistent horizontal,
@@ -28,6 +28,12 @@ receive deny-by-default capabilities and path scopes, work through the same
 optimistic document API as the human, and leave reviewable accepted, denied,
 and conflicted activity. Token secrets are stored only as secure hashes and can
 be expired, revoked, or rotated from the browser.
+
+Markdown and safe HTML can now be published at stable private, public, or
+unlisted URLs. Explicit historical revisions remain non-enumerable until
+exposed. Trusted interactive HTML runs only through a separate preview origin
+with a short-lived HMAC grant and an opaque sandbox; published HTML remains
+sanitized.
 
 ## Screenshots
 
@@ -64,9 +70,11 @@ where applicable.
 - [Phase 1 implementation and verification](./docs/PHASE_1.md)
 - [Phase 2 implementation and verification](./docs/PHASE_2.md)
 - [Phase 3 implementation and verification](./docs/PHASE_3.md)
+- [Phase 4 implementation and verification](./docs/PHASE_4.md)
 - [Phase 1 development, deployment, and recovery operations](./docs/operations/PHASE_1_OPERATIONS.md)
 - [Phase 2 development, backup, and restore operations](./docs/operations/PHASE_2_OPERATIONS.md)
 - [Phase 3 agent-token and incident-response operations](./docs/operations/PHASE_3_OPERATIONS.md)
+- [Phase 4 publication, preview, and Cloudflare operations](./docs/operations/PHASE_4_OPERATIONS.md)
 - [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
 
 ## Quick start

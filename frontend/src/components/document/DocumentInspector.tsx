@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { api, type Document, type Revision, type Tag } from '../../api'
+import { useQueryClient } from '@tanstack/react-query'
+import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { RevisionMergeView } from '../RevisionMergeView'
+import { HtmlPreview } from '../HtmlPreview'
+import { MarkdownPreview } from '../MarkdownPreview'
+import { TrustedHtmlPreview } from '../TrustedHtmlPreview'
 
 export function DocumentInspector({
   width,
@@ -22,8 +26,13 @@ export function DocumentInspector({
   const documentId = document.document_id
   const session = useDocumentSession(documentId)
   const sessions = useDocumentSessions()
+  const queryClient = useQueryClient()
   const historyQuery = useQuery({ queryKey: ['history', documentId], queryFn: () => api.history(documentId) })
   const tagsQuery = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
+  const publicationQuery = useQuery({
+    queryKey: ['publication', documentId],
+    queryFn: () => api.getDocumentPublication(documentId),
+  })
   const restore = useMutation({
     mutationFn: (revisionId: string) => api.restore(document, revisionId),
     onSuccess: (nextDocument) => {
@@ -35,6 +44,14 @@ export function DocumentInspector({
   const compareFrom = session.compareFrom
   const compareTo = session.compareTo ?? document.current_revision_id
   const [tab, setTab] = useState<'properties' | 'outline' | 'history'>('properties')
+  const [previewRevision, setPreviewRevision] = useState<Revision | null>(null)
+  const exposeRevision = useMutation({
+    mutationFn: (revisionId: string) => {
+      if (!publicationQuery.data) throw new Error('Publish the document first')
+      return api.exposePublicationRevision(publicationQuery.data.publication_id, revisionId)
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['publication', documentId] }),
+  })
   const headings = content
     .split('\n')
     .map((line, index) => {
@@ -69,12 +86,21 @@ export function DocumentInspector({
         ))}
       </div>
       {tab === 'properties' && (
-        <MetadataEditor
-          key={document.metadata_version}
-          document={document}
-          tags={tagsQuery.data ?? []}
-          onUpdated={onUpdated}
-        />
+        <>
+          <MetadataEditor
+            key={document.metadata_version}
+            document={document}
+            tags={tagsQuery.data ?? []}
+            onUpdated={onUpdated}
+          />
+          {!publicationQuery.isLoading && (
+            <PublicationEditor
+              document={document}
+              publication={publicationQuery.data ?? null}
+              onDocumentUpdated={onUpdated}
+            />
+          )}
+        </>
       )}
       {tab === 'outline' && (
         <section className="outline-panel">
@@ -137,11 +163,30 @@ export function DocumentInspector({
           {fromRevision && toRevision && fromRevision.revision_id !== toRevision.revision_id && (
             <RevisionMergeView original={fromRevision.content} modified={toRevision.content} />
           )}
+          {previewRevision && (
+            <section className="revision-render-preview">
+              <header>
+                <strong>Rendered revision</strong>
+                <button onClick={() => setPreviewRevision(null)}>Close</button>
+              </header>
+              {document.content_type === 'text/markdown' ? (
+                <MarkdownPreview content={previewRevision.content} />
+              ) : document.trust_level === 'trusted_interactive' ? (
+                <TrustedHtmlPreview document={document} revisionId={previewRevision.revision_id} />
+              ) : (
+                <HtmlPreview content={previewRevision.content} />
+              )}
+            </section>
+          )}
           <HistoryList
             history={history}
             currentRevisionId={document.current_revision_id}
             busy={restore.isPending || session.saveState !== 'saved'}
             onCompare={(revisionId) => setComparison(revisionId, document.current_revision_id)}
+            onPreview={(revision) => setPreviewRevision(revision)}
+            onExpose={
+              publicationQuery.data?.active ? (revisionId) => exposeRevision.mutate(revisionId) : undefined
+            }
             onCopy={(revision) => {
               sessions.updateSession(documentId, {
                 content: revision.content,
@@ -162,6 +207,8 @@ function HistoryList({
   currentRevisionId,
   busy,
   onCompare,
+  onPreview,
+  onExpose,
   onCopy,
   onRestore,
 }: {
@@ -169,6 +216,8 @@ function HistoryList({
   currentRevisionId: string
   busy: boolean
   onCompare: (revisionId: string) => void
+  onPreview: (revision: Revision) => void
+  onExpose?: (revisionId: string) => void
   onCopy: (revision: Revision) => void
   onRestore: (revisionId: string) => void
 }) {
@@ -189,6 +238,12 @@ function HistoryList({
             {revision.summary ? ` · ${revision.summary}` : ''}
           </p>
           {revision.operation_id && <small>Operation {revision.operation_id}</small>}
+          <div className="revision-actions">
+            <button onClick={() => onPreview(revision)}>Preview</button>
+            {onExpose && revision.revision_id !== currentRevisionId && (
+              <button onClick={() => onExpose(revision.revision_id)}>Expose URL</button>
+            )}
+          </div>
           {revision.revision_id !== currentRevisionId && (
             <div className="revision-actions">
               <button onClick={() => onCompare(revision.revision_id)}>Compare</button>
@@ -200,6 +255,143 @@ function HistoryList({
           )}
         </article>
       ))}
+    </section>
+  )
+}
+
+function slugify(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 64) || 'document'
+  )
+}
+
+function PublicationEditor({
+  document,
+  publication,
+  onDocumentUpdated,
+}: {
+  document: Document
+  publication: Publication | null
+  onDocumentUpdated: (document: Document) => void
+}) {
+  const queryClient = useQueryClient()
+  const [slug, setSlug] = useState(publication?.slug ?? slugify(document.title))
+  const [accessPolicy, setAccessPolicy] = useState<Publication['access_policy']>(
+    publication?.access_policy ?? 'private',
+  )
+  const [oneTimeToken, setOneTimeToken] = useState<string | null>(null)
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['publication', document.document_id] })
+  }
+  const save = useMutation({
+    mutationFn: () =>
+      publication
+        ? api.updatePublication(publication, slug, accessPolicy)
+        : api.createPublication(document.document_id, slug, accessPolicy),
+    onSuccess: async (result) => {
+      setOneTimeToken(result.token)
+      await refresh()
+    },
+  })
+  const remove = useMutation({ mutationFn: () => api.unpublish(publication!), onSuccess: refresh })
+  const rotate = useMutation({
+    mutationFn: () => api.rotatePublicationToken(publication!.publication_id),
+    onSuccess: async (result) => {
+      setOneTimeToken(result.token)
+      await refresh()
+    },
+  })
+  const trust = useMutation({
+    mutationFn: () =>
+      api.updateDocumentTrust(
+        document,
+        document.trust_level === 'trusted_interactive' ? 'untrusted' : 'trusted_interactive',
+      ),
+    onSuccess: onDocumentUpdated,
+  })
+  const publicationHref = publication?.url ?? `/p/${slug}`
+  return (
+    <section className="metadata-editor publication-editor">
+      <p className="eyebrow">Rendering & publication</p>
+      {document.content_type === 'text/html' && (
+        <div className="trust-control">
+          <strong>
+            {document.trust_level === 'trusted_interactive' ? 'Trusted interactive HTML' : 'Safe HTML'}
+          </strong>
+          <small>
+            {document.trust_level === 'trusted_interactive'
+              ? 'JavaScript runs only in the isolated preview origin.'
+              : 'Scripts are removed and the preview iframe cannot execute code.'}
+          </small>
+          <button
+            disabled={trust.isPending}
+            onClick={() => {
+              if (
+                document.trust_level === 'trusted_interactive' ||
+                window.confirm('Trust this HTML to run JavaScript in the isolated preview origin?')
+              ) {
+                trust.mutate()
+              }
+            }}
+          >
+            {document.trust_level === 'trusted_interactive'
+              ? 'Return to safe HTML'
+              : 'Trust interactive HTML'}
+          </button>
+        </div>
+      )}
+      <label>
+        <span>Stable slug</span>
+        <input value={slug} onChange={(event) => setSlug(event.target.value)} />
+      </label>
+      <label>
+        <span>Access</span>
+        <select
+          value={accessPolicy}
+          onChange={(event) => setAccessPolicy(event.target.value as Publication['access_policy'])}
+        >
+          <option value="private">Private</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="public">Public</option>
+        </select>
+      </label>
+      <button disabled={save.isPending || !slug} onClick={() => save.mutate()}>
+        {publication ? 'Update publication' : 'Publish document'}
+      </button>
+      {publication?.active && (
+        <div className="publication-actions">
+          <a href={publicationHref} target="_blank" rel="noreferrer">
+            Open stable URL
+          </a>
+          {publication.access_policy === 'unlisted' && (
+            <button disabled={rotate.isPending} onClick={() => rotate.mutate()}>
+              Rotate access token
+            </button>
+          )}
+          <button disabled={remove.isPending} onClick={() => remove.mutate()}>
+            Unpublish
+          </button>
+        </div>
+      )}
+      {oneTimeToken && (
+        <div className="one-time-token compact" role="status">
+          <strong>Copy this unlisted link now</strong>
+          <code>{`${publicationHref}#token=${oneTimeToken}`}</code>
+          <button
+            onClick={() => void navigator.clipboard.writeText(`${publicationHref}#token=${oneTimeToken}`)}
+          >
+            Copy link
+          </button>
+        </div>
+      )}
+      {(save.isError || remove.isError || rotate.isError || trust.isError) && (
+        <p className="error-text">The publication setting could not be saved.</p>
+      )}
     </section>
   )
 }

@@ -19,7 +19,7 @@ class DocumentSummary(BaseModel):
 
     document_id: str
     title: str
-    content_type: Literal["text/markdown"]
+    content_type: Literal["text/markdown", "text/html"]
     path: str | None
     current_revision_id: str
     content_hash: str
@@ -35,6 +35,8 @@ class DocumentSummary(BaseModel):
     revision_summary: str | None
     category: str | None
     metadata_version: int
+    trust_level: Literal["untrusted", "trusted_interactive"]
+    trust_version: int
     tags: list[Tag] = Field(default_factory=list)
     search_snippet: str | None = None
 
@@ -75,6 +77,7 @@ class CreateDocument(BaseModel):
     title: str = Field(min_length=1, max_length=240)
     content: str = ""
     path: str | None = None
+    content_type: Literal["text/markdown", "text/html"] = "text/markdown"
 
 
 class UpdateDocumentMetadata(BaseModel):
@@ -243,3 +246,70 @@ class OperationEvent(BaseModel):
     revision_id: str | None
     details: dict[str, object]
     created_at: str
+
+
+class UpdateDocumentTrust(BaseModel):
+    expected_trust_version: int = Field(ge=0)
+    trust_level: Literal["untrusted", "trusted_interactive"]
+
+
+class Publication(BaseModel):
+    publication_id: str
+    document_id: str
+    document_title: str
+    slug: str
+    access_policy: Literal["private", "public", "unlisted"]
+    version: int
+    active: bool
+    has_active_token: bool
+    created_by: str
+    updated_by: str
+    created_at: str
+    updated_at: str
+    url: str
+
+
+class IssuedPublication(Publication):
+    token: str | None = None
+
+
+class CreatePublication(BaseModel):
+    document_id: str
+    slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+    access_policy: Literal["private", "public", "unlisted"] = "private"
+
+
+class UpdatePublication(BaseModel):
+    expected_version: int = Field(ge=0)
+    slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+    access_policy: Literal["private", "public", "unlisted"]
+
+
+class PublicationRevision(BaseModel):
+    publication_id: str
+    revision_id: str
+    exposed_by: str
+    exposed_at: str
+
+
+class ExposePublicationRevision(BaseModel):
+    revision_id: str
+
+
+class PublicationContent(BaseModel):
+    publication_id: str
+    document_id: str
+    title: str
+    slug: str
+    revision_id: str
+    content_type: Literal["text/markdown", "text/html"]
+    content: str
+    trust_level: Literal["untrusted", "trusted_interactive"]
+    is_latest: bool
+    asset_base_url: str
+
+
+class TrustedPreviewGrant(BaseModel):
+    url: str
+    token: str
+    expires_at: str

@@ -24,6 +24,10 @@ const MarkdownPreview = lazy(() =>
 const MarkdownEditor = lazy(() =>
   import('../MarkdownEditor').then((module) => ({ default: module.MarkdownEditor })),
 )
+const HtmlPreview = lazy(() => import('../HtmlPreview').then((module) => ({ default: module.HtmlPreview })))
+const TrustedHtmlPreview = lazy(() =>
+  import('../TrustedHtmlPreview').then((module) => ({ default: module.TrustedHtmlPreview })),
+)
 
 export function DocumentWorkspace({
   initialDocument,
@@ -53,7 +57,9 @@ export function DocumentWorkspace({
   const mode = session.mode
   const selection = session.selection
   const documentsQuery = useQuery({ queryKey: ['documents', 'links'], queryFn: api.listDocuments })
-  const [materializePath, setMaterializePath] = useState('projects/first-document.md')
+  const [materializePath, setMaterializePath] = useState(
+    document.content_type === 'text/html' ? 'projects/interactive.html' : 'projects/first-document.md',
+  )
   const [linkTarget, setLinkTarget] = useState('')
 
   useEffect(() => {
@@ -115,6 +121,16 @@ export function DocumentWorkspace({
                 </span>
               ))}
               <span className="actor-badge">Edited by {document.updated_by_name}</span>
+              <span className="scope-badge">
+                {document.content_type === 'text/html' ? 'HTML' : 'Markdown'}
+              </span>
+              {document.content_type === 'text/html' && (
+                <span
+                  className={`scope-badge ${document.trust_level === 'trusted_interactive' ? 'workspace' : ''}`}
+                >
+                  {document.trust_level === 'trusted_interactive' ? 'Trusted interactive' : 'Safe HTML'}
+                </span>
+              )}
               <time>{new Date(document.updated_at).toLocaleString()}</time>
             </div>
           </div>
@@ -201,6 +217,7 @@ export function DocumentWorkspace({
               <MarkdownEditor
                 ref={editorRef}
                 value={content}
+                contentType={document.content_type}
                 onChange={handleEditorChange}
                 onSelectionChange={(nextSelection) =>
                   sessions.updateSession(documentId, { selection: nextSelection })
@@ -210,9 +227,18 @@ export function DocumentWorkspace({
               />
             </Suspense>
           )}
-          {mode !== 'edit' && (
+          {mode !== 'edit' && document.content_type === 'text/markdown' && (
             <Suspense fallback={<div className="markdown-preview muted">Preparing preview…</div>}>
               <MarkdownPreview content={content} />
+            </Suspense>
+          )}
+          {mode !== 'edit' && document.content_type === 'text/html' && (
+            <Suspense fallback={<div className="markdown-preview muted">Preparing HTML preview…</div>}>
+              {document.trust_level === 'trusted_interactive' && saveState === 'saved' ? (
+                <TrustedHtmlPreview document={document} revisionId={document.current_revision_id} />
+              ) : (
+                <HtmlPreview content={content} />
+              )}
             </Suspense>
           )}
         </div>

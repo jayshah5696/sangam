@@ -121,6 +121,7 @@ class ReconciliationDocumentPort(Protocol):
         title: str,
         content: str,
         path: str | None,
+        content_type: str = "text/markdown",
         actor_id: str,
         idempotency_key: str,
     ) -> Document: ...
@@ -188,7 +189,7 @@ class ReconciliationService:
             for document in documents
             if document.path is not None
         ]
-        disk_state = self.workspace.scan_markdown()
+        disk_state = self.workspace.scan_documents()
         self._remove_ignored_files(disk_state)
         plan = self.planner.plan(snapshots, disk_state)
         for document_id in plan.rematerialize_document_ids:
@@ -208,6 +209,9 @@ class ReconciliationService:
             title=self.workspace.title_from_path(normalized),
             content=content,
             path=normalized,
+            content_type=(
+                "text/html" if normalized.lower().endswith((".html", ".htm")) else "text/markdown"
+            ),
             actor_id="system:reconcile",
             idempotency_key=f"reindex:{normalized}:{fingerprint}",
         )

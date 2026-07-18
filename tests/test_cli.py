@@ -53,6 +53,11 @@ def test_cli_commands_map_to_http_api(monkeypatch: pytest.MonkeyPatch, tmp_path)
         ["history", "doc-1"],
         ["diff", "doc-1", "--from-revision", "r1", "--to-revision", "r2"],
         ["restore", "doc-1", "r1", "--expected-revision", "r2"],
+        ["publish", "doc-1", "cli-report", "--access", "unlisted"],
+        ["publications"],
+        ["expose-revision", "pub-1", "r1"],
+        ["rotate-publication-token", "pub-1"],
+        ["unpublish", "pub-1", "--expected-version", "2"],
     ]
     for arguments in invocations:
         result = runner.invoke(cli.app, arguments)
@@ -64,7 +69,12 @@ def test_cli_commands_map_to_http_api(monkeypatch: pytest.MonkeyPatch, tmp_path)
     assert (
         "POST",
         "/documents",
-        {"title": "CLI", "content": "from file", "path": None},
+        {
+            "title": "CLI",
+            "content": "from file",
+            "path": None,
+            "content_type": "text/markdown",
+        },
     ) in calls
     assert (
         "PATCH",
@@ -105,6 +115,19 @@ def test_cli_commands_map_to_http_api(monkeypatch: pytest.MonkeyPatch, tmp_path)
         "/documents/doc-1/restore",
         {"expected_revision_id": "r2", "revision_id": "r1"},
     ) in calls
+    assert (
+        "POST",
+        "/publications",
+        {"document_id": "doc-1", "slug": "cli-report", "access_policy": "unlisted"},
+    ) in calls
+    assert ("GET", "/publications", None) in calls
+    assert (
+        "POST",
+        "/publications/pub-1/revisions",
+        {"revision_id": "r1"},
+    ) in calls
+    assert ("POST", "/publications/pub-1/rotate-token", None) in calls
+    assert ("DELETE", "/publications/pub-1?expected_version=2", None) in calls
 
 
 def test_cli_uses_bearer_token_without_spoofable_actor_header(

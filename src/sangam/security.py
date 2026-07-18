@@ -10,7 +10,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Literal, Protocol
+
+import jwt
+from jwt import PyJWKClient
 
 from sangam.capabilities import Capability
 from sangam.db import Database, utc_now
@@ -23,6 +26,40 @@ from sangam.errors import (
 from sangam.schemas import Actor, AgentToken, IssuedAgentToken, TokenScope
 
 logger = logging.getLogger(__name__)
+
+
+class AccessIdentityVerifier(Protocol):
+    def verify(self, raw_token: str) -> str: ...
+
+
+class CloudflareAccessVerifier:
+    """Validate an Access application JWT before mapping the local human."""
+
+    def __init__(self, *, team_domain: str, audience: str, allowed_email: str) -> None:
+        self.issuer = team_domain.rstrip("/")
+        if not self.issuer.startswith("https://"):
+            raise ValueError("Cloudflare Access team domain must use https://")
+        self.audience = audience
+        self.allowed_email = allowed_email.strip().casefold()
+        self.jwks = PyJWKClient(f"{self.issuer}/cdn-cgi/access/certs", lifespan=3600)
+
+    def verify(self, raw_token: str) -> str:
+        try:
+            signing_key = self.jwks.get_signing_key_from_jwt(raw_token)
+            claims = jwt.decode(
+                raw_token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=self.audience,
+                issuer=self.issuer,
+                options={"require": ["exp", "iat", "iss", "aud", "email"]},
+            )
+            email = str(claims["email"]).strip().casefold()
+        except (jwt.PyJWTError, KeyError, TypeError, ValueError) as error:
+            raise AuthenticationError("The Cloudflare Access identity is invalid") from error
+        if not hmac.compare_digest(email, self.allowed_email):
+            raise AuthenticationError("The Cloudflare Access identity is not authorized")
+        return email
 
 
 @dataclass(frozen=True)
@@ -398,18 +435,22 @@ class AuthenticationService:
         self,
         *,
         identity: IdentityService,
-        auth_mode: Literal["single_user", "trusted_proxy"],
+        auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"],
         trusted_identity_value: str,
         trusted_human_actor_id: str,
         trusted_human_display_name: str,
+        access_identity_verifier: AccessIdentityVerifier | None = None,
     ) -> None:
-        if auth_mode not in {"single_user", "trusted_proxy"}:
+        if auth_mode not in {"single_user", "trusted_proxy", "cloudflare_access"}:
             raise ValueError(f"Unsupported authentication mode: {auth_mode}")
         self.identity = identity
         self.auth_mode = auth_mode
         self.trusted_identity_value = trusted_identity_value
         self.trusted_human_actor_id = trusted_human_actor_id
         self.trusted_human_display_name = trusted_human_display_name
+        self.access_identity_verifier = access_identity_verifier
+        if auth_mode == "cloudflare_access" and access_identity_verifier is None:
+            raise ValueError("Cloudflare Access authentication requires a configured verifier")
 
     def resolve(
         self,
@@ -417,6 +458,7 @@ class AuthenticationService:
         authorization_header: str | None,
         trusted_identity_assertion: str | None,
         operation_id: str,
+        access_jwt_assertion: str | None = None,
     ) -> Principal:
         if authorization_header:
             scheme, separator, credential = authorization_header.partition(" ")
@@ -424,6 +466,15 @@ class AuthenticationService:
             if not separator or scheme.casefold() != "bearer" or not credential:
                 raise AuthenticationError("Authorization must use a Bearer token")
             return self.identity.authenticate(credential, operation_id=operation_id)
+        if self.auth_mode == "cloudflare_access":
+            if not access_jwt_assertion or self.access_identity_verifier is None:
+                raise AuthenticationError("A Cloudflare Access identity assertion is required")
+            self.access_identity_verifier.verify(access_jwt_assertion)
+            return Principal.trusted_human(
+                actor_id=self.trusted_human_actor_id,
+                display_name=self.trusted_human_display_name,
+                operation_id=operation_id,
+            )
         if self.auth_mode == "trusted_proxy" and (
             trusted_identity_assertion != self.trusted_identity_value
         ):

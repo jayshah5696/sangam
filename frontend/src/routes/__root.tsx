@@ -35,6 +35,8 @@ function RootLayout() {
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('files')
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
 
+  if (location.pathname.startsWith('/p/')) return <Outlet />
+
   const chooseSidebarMode = async (next: SidebarMode) => {
     setSidebarMode(next)
     if (!isDocumentWorkspace) await navigate({ to: '/' })

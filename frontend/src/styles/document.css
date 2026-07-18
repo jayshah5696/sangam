@@ -156,6 +156,28 @@ button:disabled { cursor: default; opacity: .55; }
 .error-text { color: #bd493c; font-size: 11px; }
 .success-text { color: var(--accent); font-size: 11px; }
 .center-message { margin: 20vh auto; text-align: center; }
+.html-preview { width: 100%; min-height: 620px; border: 0; background: white; color-scheme: light; }
+.editing-surface .html-preview { min-height: 520px; }
+.mode-split .html-preview { border-left: 1px solid var(--line); }
+.publication-editor { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
+.publication-editor .trust-control { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-soft); }
+.publication-editor .trust-control small { color: var(--muted); line-height: 1.45; }
+.publication-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.publication-actions a { color: var(--accent); font-size: 10px; }
+.one-time-token.compact { min-width: 0; display: grid; gap: 6px; padding: 9px; }
+.one-time-token.compact code { max-height: 72px; overflow: auto; font-size: 8px; overflow-wrap: anywhere; }
+.revision-render-preview { overflow: hidden; margin: 8px -12px 14px; border-block: 1px solid var(--line); background: var(--surface); }
+.revision-render-preview > header { display: flex; align-items: center; justify-content: space-between; padding: 7px 9px; border-bottom: 1px solid var(--line); }
+.revision-render-preview .markdown-preview { min-height: 260px; padding: 14px; font-size: 10px; }
+.revision-render-preview .html-preview { min-height: 320px; }
+.publication-page { width: min(960px, calc(100% - 36px)); min-height: 100vh; margin: 0 auto; padding: 48px 0 80px; }
+.publication-page > header { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.publication-page > header h1 { margin: 4px 0 8px; font-size: clamp(36px, 6vw, 64px); line-height: 1; }
+.publication-page > header small { color: var(--muted); }
+.publication-page > .markdown-preview { min-height: 0; border: 0; padding: 0; }
+.publication-page > .html-preview { min-height: 72vh; border: 1px solid var(--line); border-radius: 8px; }
+.publication-missing { padding-top: 18vh; }
+.publication-missing p:last-child { color: var(--muted); }
 
 .settings-page { width: min(1080px, calc(100% - 64px)); margin: 0 auto; padding: 55px 0 90px; }
 .settings-header { padding-bottom: 38px; }

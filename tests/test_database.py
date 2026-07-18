@@ -31,11 +31,14 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "004",
         "005",
         "006",
+        "007",
     ]
     assert {
         "operation_events_revision_outcome_created_idx",
         "documents_deleted_updated_idx",
         "documents_category_idx",
+        "document_trust_events_document_created_idx",
+        "publication_events_publication_created_idx",
     } <= indexes
 
 
