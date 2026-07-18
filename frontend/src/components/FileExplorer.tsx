@@ -53,6 +53,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const [createMode, setCreateMode] = useState<CreateMode>(null)
   const [createName, setCreateName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const pendingFocusDocumentIdRef = useRef<string | null>(null)
 
   const refresh = async () => {
     await Promise.all([
@@ -103,7 +104,8 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       const title = workspaceBasename(destinationPath).trim() || 'Untitled document'
       return api.updateDocument(current, current.content, title)
     },
-    onSuccess: async () => {
+    onSuccess: async (document) => {
+      pendingFocusDocumentIdRef.current = document.document_id
       setError(null)
       await refresh()
     },
@@ -163,50 +165,51 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   }
 
   const adapterRef = useRef(adapter)
-  const callbacksRef = useRef<TreeCallbacks | null>(null)
   const suppressOpenRef = useRef(false)
+  const callbacks: TreeCallbacks = {
+    onSelectionChange: (paths) => {
+      const path = paths.at(-1) ?? null
+      setSelectedTreePath(path)
+      if (path && !suppressOpenRef.current) {
+        const document = adapterRef.current.documentByTreePath.get(path)
+        if (document) void openDocument(document)
+      }
+    },
+    canDrag: (paths) =>
+      paths.length === 1 && Boolean(adapterRef.current.documentByTreePath.get(paths[0]!)?.path),
+    canDrop: ({ draggedPaths, target }) =>
+      draggedPaths.length === 1 &&
+      target.directoryPath !== adapterRef.current.draftsRootPath &&
+      (target.directoryPath === null || adapterRef.current.folderByTreePath.has(target.directoryPath)),
+    onDropComplete: ({ draggedPaths, target }) => {
+      const document = adapterRef.current.documentByTreePath.get(draggedPaths[0]!)
+      if (document?.path) move.mutate({ document, folderPath: target.directoryPath ?? '' })
+    },
+    canRename: ({ isFolder, path }) => !isFolder && adapterRef.current.documentByTreePath.has(path),
+    onRename: ({ sourcePath, destinationPath }) => {
+      const document = adapterRef.current.documentByTreePath.get(sourcePath)
+      if (document) rename.mutate({ document, destinationPath })
+    },
+    renderRowDecoration: ({ item }) => {
+      const folder = adapterRef.current.folderByTreePath.get(item.path)
+      if (folder)
+        return {
+          text: String(folder.document_count),
+          title: `${folder.document_count} documents`,
+        }
+      if (item.path === adapterRef.current.draftsRootPath) {
+        const count = [...adapterRef.current.documentByTreePath.values()].filter(
+          (document) => !document.path,
+        ).length
+        return { text: String(count), title: `${count} drafts` }
+      }
+      return null
+    },
+  }
+  const callbacksRef = useRef(callbacks)
   useEffect(() => {
     adapterRef.current = adapter
-    callbacksRef.current = {
-      onSelectionChange: (paths) => {
-        const path = paths.at(-1) ?? null
-        setSelectedTreePath(path)
-        if (path && !suppressOpenRef.current) {
-          const document = adapterRef.current.documentByTreePath.get(path)
-          if (document) void openDocument(document)
-        }
-      },
-      canDrag: (paths) =>
-        paths.length === 1 && Boolean(adapterRef.current.documentByTreePath.get(paths[0]!)?.path),
-      canDrop: ({ draggedPaths, target }) =>
-        draggedPaths.length === 1 &&
-        target.directoryPath !== adapterRef.current.draftsRootPath &&
-        (target.directoryPath === null || adapterRef.current.folderByTreePath.has(target.directoryPath)),
-      onDropComplete: ({ draggedPaths, target }) => {
-        const document = adapterRef.current.documentByTreePath.get(draggedPaths[0]!)
-        if (document?.path) move.mutate({ document, folderPath: target.directoryPath ?? '' })
-      },
-      canRename: ({ isFolder, path }) => !isFolder && adapterRef.current.documentByTreePath.has(path),
-      onRename: ({ sourcePath, destinationPath }) => {
-        const document = adapterRef.current.documentByTreePath.get(sourcePath)
-        if (document) rename.mutate({ document, destinationPath })
-      },
-      renderRowDecoration: ({ item }) => {
-        const folder = adapterRef.current.folderByTreePath.get(item.path)
-        if (folder)
-          return {
-            text: String(folder.document_count),
-            title: `${folder.document_count} documents`,
-          }
-        if (item.path === adapterRef.current.draftsRootPath) {
-          const count = [...adapterRef.current.documentByTreePath.values()].filter(
-            (document) => !document.path,
-          ).length
-          return { text: String(count), title: `${count} drafts` }
-        }
-        return null
-      },
-    }
+    callbacksRef.current = callbacks
   })
 
   const { model } = useFileTree({
@@ -223,18 +226,18 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       contextMenu: { enabled: true, triggerMode: 'both', buttonVisibility: 'when-needed' },
     },
     dragAndDrop: {
-      canDrag: (paths) => callbacksRef.current?.canDrag(paths) ?? false,
-      canDrop: (event) => callbacksRef.current?.canDrop(event) ?? false,
-      onDropComplete: (event) => callbacksRef.current?.onDropComplete(event),
+      canDrag: (paths) => callbacksRef.current.canDrag(paths),
+      canDrop: (event) => callbacksRef.current.canDrop(event),
+      onDropComplete: (event) => callbacksRef.current.onDropComplete(event),
       onDropError: (message) => setError(message),
     },
     renaming: {
-      canRename: (item) => callbacksRef.current?.canRename(item) ?? false,
-      onRename: (event) => callbacksRef.current?.onRename(event),
+      canRename: (item) => callbacksRef.current.canRename(item),
+      onRename: (event) => callbacksRef.current.onRename(event),
       onError: (message) => setError(message),
     },
-    onSelectionChange: (paths) => callbacksRef.current?.onSelectionChange(paths),
-    renderRowDecoration: (context) => callbacksRef.current?.renderRowDecoration(context) ?? null,
+    onSelectionChange: (paths) => callbacksRef.current.onSelectionChange(paths),
+    renderRowDecoration: (context) => callbacksRef.current.renderRowDecoration(context),
   })
 
   useEffect(() => {
@@ -255,6 +258,23 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     model.scrollToPath(activePath, { focus: false, offset: 'nearest' })
     suppressOpenRef.current = false
   }, [activeDocumentId, adapter, model])
+
+  useEffect(() => {
+    const pendingDocumentId = pendingFocusDocumentIdRef.current
+    if (!pendingDocumentId) return
+    const path = adapter.treePathByDocumentId.get(pendingDocumentId)
+    const item = path ? model.getItem(path) : null
+    if (!path || !item) return
+    suppressOpenRef.current = true
+    for (const selectedPath of model.getSelectedPaths()) {
+      if (selectedPath !== path) model.getItem(selectedPath)?.deselect()
+    }
+    if (!item.isSelected()) item.select()
+    item.focus()
+    model.scrollToPath(path, { focus: false, offset: 'nearest' })
+    suppressOpenRef.current = false
+    pendingFocusDocumentIdRef.current = null
+  }, [adapter, model])
 
   useEffect(
     () =>
