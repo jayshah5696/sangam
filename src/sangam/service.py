@@ -164,6 +164,87 @@ class DocumentService:
                 connection, document_id, include_deleted=include_deleted
             )
 
+    def update_trust(
+        self,
+        *,
+        document_id: str,
+        expected_trust_version: int,
+        trust_level: str,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        """Apply an attributed HTML trust transition within the document boundary."""
+        if trust_level not in {"untrusted", "trusted_interactive"}:
+            raise ValidationError("Unsupported document trust level")
+        fingerprint = request_hash(
+            {
+                "document_id": document_id,
+                "expected_trust_version": expected_trust_version,
+                "trust_level": trust_level,
+            }
+        )
+        with self.database.transaction() as connection:
+            duplicate = self.idempotency.mutation_record(
+                connection,
+                actor_id=actor_id,
+                key=idempotency_key,
+                operation="document_trust",
+                request_hash=fingerprint,
+            )
+            if duplicate is None:
+                row = connection.execute(
+                    """
+                    SELECT content_type, trust_level, trust_version
+                    FROM documents WHERE document_id = ?
+                    """,
+                    (document_id,),
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError(f"Document not found: {document_id}")
+                if row["content_type"] != "text/html":
+                    raise ValidationError("Only HTML documents have an interactive trust policy")
+                if row["trust_version"] != expected_trust_version:
+                    raise ConflictError(
+                        "Document trust changed since it was read",
+                        details={"current_trust_version": row["trust_version"]},
+                    )
+                next_version = row["trust_version"] + 1
+                now = utc_now()
+                connection.execute(
+                    """
+                    UPDATE documents SET trust_level = ?, trust_version = ?, updated_at = ?
+                    WHERE document_id = ?
+                    """,
+                    (trust_level, next_version, now, document_id),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO document_trust_events(
+                        event_id, document_id, actor_id, previous_level,
+                        next_level, trust_version, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        document_id,
+                        actor_id,
+                        row["trust_level"],
+                        trust_level,
+                        next_version,
+                        now,
+                    ),
+                )
+                self.idempotency.record_mutation(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation="document_trust",
+                    request_hash=fingerprint,
+                    resource_type="document",
+                    resource_id=document_id,
+                )
+        return self.get_document(document_id)
+
     def list_documents(self, *, include_deleted: bool = False) -> list[Document]:
         with self.database.connection() as connection:
             rows = connection.execute(

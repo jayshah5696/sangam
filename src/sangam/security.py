@@ -69,6 +69,14 @@ class ScopeGrant:
 
 
 @dataclass(frozen=True)
+class PublicationAccess:
+    """Access context for a public, private, or tokenized publication read."""
+
+    unlisted_token: str | None = None
+    administrator: bool = False
+
+
+@dataclass(frozen=True)
 class Principal:
     actor_id: str
     display_name: str
@@ -484,3 +492,45 @@ class AuthenticationService:
             display_name=self.trusted_human_display_name,
             operation_id=operation_id,
         )
+
+    def resolve_publication_access(
+        self,
+        *,
+        authorization_header: str | None,
+        trusted_identity_assertion: str | None,
+        access_jwt_assertion: str | None,
+        operation_id: str,
+    ) -> PublicationAccess:
+        """Resolve optional publication credentials without requiring login for public reads."""
+        if authorization_header:
+            scheme, separator, credential = authorization_header.partition(" ")
+            credential = credential.strip()
+            if scheme.casefold() == "sangam-publication":
+                if not separator or not credential:
+                    raise AuthenticationError("Publication authorization is malformed")
+                return PublicationAccess(unlisted_token=credential)
+            principal = self.resolve(
+                authorization_header=authorization_header,
+                trusted_identity_assertion=trusted_identity_assertion,
+                operation_id=operation_id,
+                access_jwt_assertion=access_jwt_assertion,
+            )
+            return PublicationAccess(administrator=principal.administrator)
+
+        if self.auth_mode == "cloudflare_access":
+            if access_jwt_assertion:
+                principal = self.resolve(
+                    authorization_header=None,
+                    trusted_identity_assertion=None,
+                    operation_id=operation_id,
+                    access_jwt_assertion=access_jwt_assertion,
+                )
+                return PublicationAccess(administrator=principal.administrator)
+            return PublicationAccess()
+
+        if self.auth_mode == "trusted_proxy":
+            return PublicationAccess(
+                administrator=trusted_identity_assertion == self.trusted_identity_value
+            )
+
+        return PublicationAccess(administrator=True)

@@ -106,6 +106,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
     publications = PublicationService(
         database=database,
         documents=documents,
+        idempotency=idempotency,
         preview_tokens=PreviewTokenService(
             secret=settings.preview_hmac_secret.get_secret_value(),
             ttl_seconds=settings.preview_token_ttl_seconds,

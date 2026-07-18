@@ -37,6 +37,23 @@ sanitized.
 
 ## Screenshots
 
+### HTML preview and publication controls
+
+HTML documents use the normal Sangam editor and revision history. Safe preview
+keeps embedded presentation CSS while removing scripts and active content. The
+inspector makes trust state, stable slug, access policy, publication updates,
+and unpublishing explicit.
+
+![Phase 4 HTML publishing workspace showing a styled safe preview and the stable public publication controls](./docs/assets/phase-4-publishing-workspace.png)
+
+### Stable public publication
+
+The stable publication route renders the current revision without exposing the
+workspace UI. Published HTML always uses the sanitized, script-disabled
+renderer, including documents separately trusted for interactive preview.
+
+![Phase 4 public publication rendering the current HTML revision at its stable route](./docs/assets/phase-4-publication.png)
+
 ### Focused document workspace
 
 Sangam starts with one editor and no permanent tab or status strip. Files,

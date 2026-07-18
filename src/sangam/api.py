@@ -61,7 +61,7 @@ from sangam.schemas import (
     UpdateFolderMetadata,
     UpdatePublication,
 )
-from sangam.security import Principal
+from sangam.security import Principal, PublicationAccess
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +401,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = admin_dependency,
     ) -> Document:
-        return publications.update_trust(
+        return documents.update_trust(
             document_id=document_id,
             expected_trust_version=body.expected_trust_version,
             trust_level=body.trust_level,
@@ -514,12 +514,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         revision: str | None = Query(default=None),
         authorization_header: str | None = Header(default=None, alias="Authorization"),
     ) -> JSONResponse:
-        unlisted_token, administrator = resolve_publication_access(request, authorization_header)
+        access = resolve_publication_access(request, authorization_header)
         content = publications.get_content(
             slug=slug,
             revision_id=revision,
-            raw_unlisted_token=unlisted_token,
-            administrator=administrator,
+            raw_unlisted_token=access.unlisted_token,
+            administrator=access.administrator,
         )
         return JSONResponse(
             content=content.model_dump(),
@@ -528,35 +528,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def resolve_publication_access(
         request: Request, authorization_header: str | None
-    ) -> tuple[str | None, bool]:
-        if authorization_header:
-            scheme, _, credential = authorization_header.partition(" ")
-            if scheme.casefold() == "sangam-publication":
-                return credential.strip(), False
-            principal = authentication.resolve(
-                authorization_header=authorization_header,
-                trusted_identity_assertion=request.headers.get(
-                    resolved_settings.trusted_identity_header
-                ),
-                operation_id=request.state.operation_id,
-                access_jwt_assertion=request.headers.get("Cf-Access-Jwt-Assertion"),
-            )
-            return None, principal.administrator
-        if resolved_settings.auth_mode == "cloudflare_access" and request.headers.get(
-            "Cf-Access-Jwt-Assertion"
-        ):
-            principal = authentication.resolve(
-                authorization_header=None,
-                trusted_identity_assertion=None,
-                operation_id=request.state.operation_id,
-                access_jwt_assertion=request.headers.get("Cf-Access-Jwt-Assertion"),
-            )
-            return None, principal.administrator
-        trusted_proxy_identity = (
-            request.headers.get(resolved_settings.trusted_identity_header)
-            == resolved_settings.trusted_identity_value
+    ) -> PublicationAccess:
+        return authentication.resolve_publication_access(
+            authorization_header=authorization_header,
+            trusted_identity_assertion=request.headers.get(
+                resolved_settings.trusted_identity_header
+            ),
+            access_jwt_assertion=request.headers.get("Cf-Access-Jwt-Assertion"),
+            operation_id=request.state.operation_id,
         )
-        return None, resolved_settings.auth_mode == "single_user" or trusted_proxy_identity
 
     @app.get("/api/v1/publications/{slug}/asset", include_in_schema=False)
     def publication_asset(
@@ -566,13 +546,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: str = Query(min_length=1, max_length=1000),
         authorization_header: str | None = Header(default=None, alias="Authorization"),
     ) -> Response:
-        unlisted_token, administrator = resolve_publication_access(request, authorization_header)
+        access = resolve_publication_access(request, authorization_header)
         asset = publications.get_asset(
             slug=slug,
             revision_id=revision,
             asset_reference=path,
-            raw_unlisted_token=unlisted_token,
-            administrator=administrator,
+            raw_unlisted_token=access.unlisted_token,
+            administrator=access.administrator,
         )
         return Response(
             content=asset.content,

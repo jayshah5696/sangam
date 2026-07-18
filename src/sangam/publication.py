@@ -16,7 +16,7 @@ from urllib.parse import unquote, urlsplit
 
 from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, IdempotencyError, NotFoundError, ValidationError
-from sangam.idempotency import request_hash
+from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.schemas import (
     Document,
     IssuedPublication,
@@ -41,6 +41,7 @@ def _decode(value: str) -> bytes:
 class VerifiedPreview:
     document_id: str
     revision_id: str
+    trust_version: int
     assets: tuple[str, ...]
     expires_at: int
 
@@ -60,12 +61,18 @@ class PreviewTokenService:
         self.base_url = base_url.rstrip("/")
 
     def issue(
-        self, *, document_id: str, revision_id: str, assets: tuple[str, ...]
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        trust_version: int,
+        assets: tuple[str, ...],
     ) -> TrustedPreviewGrant:
         expires = int(time.time()) + self.ttl_seconds
         payload = {
             "document_id": document_id,
             "revision_id": revision_id,
+            "trust_version": trust_version,
             "assets": list(assets),
             "exp": expires,
             "nonce": secrets.token_urlsafe(12),
@@ -87,6 +94,7 @@ class PreviewTokenService:
             payload = json.loads(_decode(encoded))
             document_id = str(payload["document_id"])
             revision_id = str(payload["revision_id"])
+            trust_version = int(payload["trust_version"])
             assets = tuple(str(asset) for asset in payload["assets"])
             expires = int(payload["exp"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
@@ -96,6 +104,7 @@ class PreviewTokenService:
         return VerifiedPreview(
             document_id=document_id,
             revision_id=revision_id,
+            trust_version=trust_version,
             assets=assets,
             expires_at=expires,
         )
@@ -109,6 +118,7 @@ class PublicationService:
         *,
         database: Database,
         documents: DocumentService,
+        idempotency: IdempotencyStore,
         preview_tokens: PreviewTokenService,
         workspace: WorkspaceFilesystem,
         max_asset_bytes: int,
@@ -116,6 +126,7 @@ class PublicationService:
     ) -> None:
         self.database = database
         self.documents = documents
+        self.idempotency = idempotency
         self.preview_tokens = preview_tokens
         self.workspace = workspace
         self.max_asset_bytes = max_asset_bytes
@@ -465,84 +476,6 @@ class PublicationService:
         result = self.get_publication(publication_id)
         return IssuedPublication(**result.model_dump(), token=raw_token)
 
-    def update_trust(
-        self,
-        *,
-        document_id: str,
-        expected_trust_version: int,
-        trust_level: str,
-        actor_id: str,
-        idempotency_key: str,
-    ) -> Document:
-        if trust_level not in {"untrusted", "trusted_interactive"}:
-            raise ValidationError("Unsupported document trust level")
-        fingerprint = request_hash(
-            {
-                "document_id": document_id,
-                "expected_trust_version": expected_trust_version,
-                "trust_level": trust_level,
-            }
-        )
-        with self.database.transaction() as connection:
-            duplicate = self._idempotent_resource(
-                connection,
-                actor_id=actor_id,
-                key=idempotency_key,
-                operation="document_trust",
-                fingerprint=fingerprint,
-            )
-            if duplicate is None:
-                row = connection.execute(
-                    """
-                    SELECT content_type, trust_level, trust_version
-                    FROM documents WHERE document_id = ?
-                    """,
-                    (document_id,),
-                ).fetchone()
-                if row is None:
-                    raise NotFoundError(f"Document not found: {document_id}")
-                if row["content_type"] != "text/html":
-                    raise ValidationError("Only HTML documents have an interactive trust policy")
-                if row["trust_version"] != expected_trust_version:
-                    raise ConflictError(
-                        "Document trust changed since it was read",
-                        details={"current_trust_version": row["trust_version"]},
-                    )
-                next_version = row["trust_version"] + 1
-                connection.execute(
-                    """
-                    UPDATE documents SET trust_level = ?, trust_version = ?, updated_at = ?
-                    WHERE document_id = ?
-                    """,
-                    (trust_level, next_version, utc_now(), document_id),
-                )
-                connection.execute(
-                    """
-                    INSERT INTO document_trust_events(
-                        event_id, document_id, actor_id, previous_level,
-                        next_level, trust_version, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(uuid.uuid4()),
-                        document_id,
-                        actor_id,
-                        row["trust_level"],
-                        trust_level,
-                        next_version,
-                        utc_now(),
-                    ),
-                )
-                self._record_idempotency(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation="document_trust",
-                    fingerprint=fingerprint,
-                    resource_id=document_id,
-                )
-        return self.documents.get_document(document_id)
-
     def issue_trusted_preview(self, *, document_id: str, revision_id: str) -> TrustedPreviewGrant:
         document = self.documents.get_document(document_id)
         if document.content_type != "text/html" or document.trust_level != "trusted_interactive":
@@ -550,14 +483,15 @@ class PublicationService:
         revision = self._revision_content(document_id=document_id, revision_id=revision_id)
         assets = tuple(sorted(self._relative_asset_references(revision["content"])))
         return self.preview_tokens.issue(
-            document_id=document_id, revision_id=revision_id, assets=assets
+            document_id=document_id,
+            revision_id=revision_id,
+            trust_version=document.trust_version,
+            assets=assets,
         )
 
     def trusted_preview_content(self, raw_token: str) -> str:
         verified = self.preview_tokens.verify(raw_token)
-        document = self.documents.get_document(verified.document_id)
-        if document.content_type != "text/html" or document.trust_level != "trusted_interactive":
-            raise NotFoundError("Trusted preview grant was not found")
+        self._trusted_preview_document(verified)
         return self._revision_content(
             document_id=verified.document_id, revision_id=verified.revision_id
         )["content"]
@@ -566,10 +500,18 @@ class PublicationService:
         verified = self.preview_tokens.verify(raw_token)
         if asset_reference not in verified.assets:
             raise NotFoundError("Trusted preview asset was not found")
-        document = self.documents.get_document(verified.document_id)
-        if document.content_type != "text/html" or document.trust_level != "trusted_interactive":
-            raise NotFoundError("Trusted preview asset was not found")
+        document = self._trusted_preview_document(verified)
         return self._read_document_asset(document=document, asset_reference=asset_reference)
+
+    def _trusted_preview_document(self, verified: VerifiedPreview) -> Document:
+        document = self.documents.get_document(verified.document_id)
+        if (
+            document.content_type != "text/html"
+            or document.trust_level != "trusted_interactive"
+            or document.trust_version != verified.trust_version
+        ):
+            raise NotFoundError("Trusted preview grant was not found")
+        return document
 
     def get_content(
         self,
@@ -828,8 +770,8 @@ class PublicationService:
             ),
         )
 
-    @staticmethod
     def _idempotent_resource(
+        self,
         connection: sqlite3.Connection,
         *,
         actor_id: str,
@@ -837,31 +779,17 @@ class PublicationService:
         operation: str,
         fingerprint: str,
     ) -> str | None:
-        for table in ("idempotency_keys", "mutation_idempotency_keys"):
-            if connection.execute(
-                f"SELECT 1 FROM {table} WHERE actor_id = ? AND idempotency_key = ?",
-                (actor_id, key),
-            ).fetchone():
-                raise IdempotencyError(
-                    "Idempotency key was already used for a different mutation",
-                    details={"idempotency_key": key},
-                )
-        row = connection.execute(
-            """
-            SELECT operation, request_hash, resource_id FROM phase_four_idempotency_keys
-            WHERE actor_id = ? AND idempotency_key = ?
-            """,
-            (actor_id, key),
-        ).fetchone()
-        if row and (row["operation"] != operation or row["request_hash"] != fingerprint):
-            raise IdempotencyError(
-                "Idempotency key was already used for a different mutation",
-                details={"idempotency_key": key},
-            )
-        return row["resource_id"] if row else None
+        record = self.idempotency.mutation_record(
+            connection,
+            actor_id=actor_id,
+            key=key,
+            operation=operation,
+            request_hash=fingerprint,
+        )
+        return record.resource_id if record else None
 
-    @staticmethod
     def _record_idempotency(
+        self,
         connection: sqlite3.Connection,
         *,
         actor_id: str,
@@ -870,11 +798,19 @@ class PublicationService:
         fingerprint: str,
         resource_id: str,
     ) -> None:
-        connection.execute(
-            """
-            INSERT INTO phase_four_idempotency_keys(
-                actor_id, idempotency_key, operation, request_hash, resource_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (actor_id, key, operation, fingerprint, resource_id, utc_now()),
+        resource_type = (
+            "document"
+            if operation == "document_trust"
+            else "publication_revision"
+            if operation == "expose_revision"
+            else "publication"
+        )
+        self.idempotency.record_mutation(
+            connection,
+            actor_id=actor_id,
+            key=key,
+            operation=operation,
+            request_hash=fingerprint,
+            resource_type=resource_type,
+            resource_id=resource_id,
         )

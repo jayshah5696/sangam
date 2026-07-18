@@ -21,10 +21,23 @@ const csp = [
 function safeDocument(content: string) {
   const sanitized = DOMPurify.sanitize(content, {
     USE_PROFILES: { html: true },
+    WHOLE_DOCUMENT: true,
+    ADD_TAGS: ['style'],
     FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'base'],
     FORBID_ATTR: ['srcdoc'],
   })
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer"></head><body>${sanitized}</body></html>`
+  const parsed = new DOMParser().parseFromString(sanitized, 'text/html')
+  parsed.querySelectorAll('meta[http-equiv], meta[name="referrer"]').forEach((element) => element.remove())
+  const charset = parsed.createElement('meta')
+  charset.setAttribute('charset', 'utf-8')
+  const policy = parsed.createElement('meta')
+  policy.setAttribute('http-equiv', 'Content-Security-Policy')
+  policy.setAttribute('content', csp)
+  const referrer = parsed.createElement('meta')
+  referrer.setAttribute('name', 'referrer')
+  referrer.setAttribute('content', 'no-referrer')
+  parsed.head.prepend(charset, policy, referrer)
+  return `<!doctype html>${parsed.documentElement.outerHTML}`
 }
 
 export function HtmlPreview({ content, resolveAsset }: HtmlPreviewProps) {

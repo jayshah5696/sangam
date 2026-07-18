@@ -47,10 +47,11 @@ revision, optimistic-concurrency, idempotency, materialization, recovery, and
 reconciliation protocol as Markdown.
 
 `PublicationService` owns slugs, policy, active state, one-time unlisted
-credentials, explicit revision exposure, document trust events, and preview
-grants. A Publication stores no copied content. The stable URL resolves the
-document's current revision at request time; a versioned URL resolves only an
-explicitly exposed revision.
+credentials, explicit revision exposure, and preview grants. `DocumentService`
+owns trust state and its immutable actor-attributed events. Both services use
+the canonical `IdempotencyStore`; a publication stores no copied content. The
+stable URL resolves the document's current revision at request time; a
+versioned URL resolves only an explicitly exposed revision.
 
 ## Rendering zones
 
@@ -63,11 +64,13 @@ URLs in the browser.
 
 ### Safe HTML
 
-HTML is untrusted by default. DOMPurify removes scripts, event handlers,
-iframes, objects, embeds, and base elements. The result is placed in an iframe
-with an empty `sandbox` attribute and a CSP that sets `default-src 'none'` and
-`script-src 'none'`. Published HTML always uses this safe renderer, even when
-the source document is trusted for interactive preview.
+HTML is untrusted by default. DOMPurify preserves embedded presentation CSS
+while removing scripts, event handlers, iframes, objects, embeds, and base
+elements. The result is placed in an iframe with an empty `sandbox` attribute
+and a CSP that sets `default-src 'none'`, `script-src 'none'`, and denies
+external style, image, font, object, and connection sources. Published HTML
+always uses this safe renderer, even when the source document is trusted for
+interactive preview.
 
 ### Trusted interactive HTML
 
@@ -76,18 +79,19 @@ immutable actor-attributed event history. It is deliberately not inferred from
 path, author, import source, or publication state.
 
 The application issues an HMAC-signed grant containing the document ID,
-revision ID, exact relative asset references, random nonce, and expiry. The
-credential is delivered in the URL fragment. Fragments are not sent in HTTP
-requests; the preview bootstrap removes it from browser history and uses it in
-an authorization header. Preview requests and responses use `no-store` and
-`no-referrer`.
+revision ID, current trust version, exact relative asset references, random
+nonce, and expiry. The credential is delivered in the URL fragment. Fragments
+are not sent in HTTP requests; the preview bootstrap removes it from browser
+history and uses it in an authorization header. Preview requests and responses
+use `no-store` and `no-referrer`.
 
 The preview iframe has `allow-scripts` but not `allow-same-origin`, so its
 effective origin is opaque and it cannot read application credentials or DOM.
 Its CSP denies network access unless an operator explicitly configures allowed
 `connect-src` origins. Relative assets require the same live, scoped preview
-grant. Removing document trust invalidates an already-issued grant at the next
-request.
+grant. Any trust transition invalidates an already-issued grant at the next
+request, so untrusting and later re-trusting a document cannot revive an old
+credential.
 
 ## Publication policy
 
@@ -134,12 +138,16 @@ Automated backend coverage includes:
 - One-time hashed unlisted tokens, rotation, revocation, and unpublish.
 - Agent `publish` capability path enforcement and human-only trust changes.
 - HMAC tampering, expiry, live trust revocation, exact asset scope, path
-  traversal, no-store, referrer policy, and CSP assertions.
+  traversal, trust-version replay prevention, no-store, referrer policy, and
+  CSP assertions.
+- Canonical idempotency-key reuse across document trust and publication
+  mutations, including migration of Phase 4 preview-build records.
 - Cloudflare Access JWT signature, issuer, audience, and email validation.
 
-Frontend coverage and build checks include safe HTML sanitization, iframe
-sandbox attributes, existing Markdown sanitization, runtime API schemas,
-TypeScript production build, lint, formatting, and all browser unit tests.
+Frontend coverage and build checks include safe HTML sanitization, embedded CSS
+preservation, iframe sandbox attributes, existing Markdown sanitization,
+runtime API schemas, TypeScript production build, lint, formatting, and all
+browser unit tests.
 
 Run the complete local verification:
 

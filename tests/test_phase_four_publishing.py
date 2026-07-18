@@ -83,6 +83,67 @@ def test_html_document_uses_the_normal_revision_materialization_and_reindex_spin
     assert imported["content_type"] == "text/html"
 
 
+def test_publication_and_trust_share_the_canonical_idempotency_namespace(
+    client: TestClient,
+) -> None:
+    document = create_document(
+        client,
+        title="Canonical mutations",
+        content="<h1>Canonical</h1>",
+        content_type="text/html",
+        key="canonical-source",
+    )
+    trusted = client.patch(
+        f"/api/v1/documents/{document['document_id']}/trust",
+        headers=mutation_headers("shared-phase-four-key"),
+        json={"expected_trust_version": 0, "trust_level": "trusted_interactive"},
+    )
+    assert trusted.status_code == 200
+
+    collision = client.post(
+        "/api/v1/publications",
+        headers=mutation_headers("shared-phase-four-key"),
+        json={
+            "document_id": document["document_id"],
+            "slug": "canonical-collision",
+            "access_policy": "public",
+        },
+    )
+    assert collision.status_code == 409
+    assert collision.json()["error"]["code"] == "idempotency_conflict"
+
+    published = client.post(
+        "/api/v1/publications",
+        headers=mutation_headers("canonical-publication"),
+        json={
+            "document_id": document["document_id"],
+            "slug": "canonical",
+            "access_policy": "public",
+        },
+    )
+    assert published.status_code == 201
+
+    with client.app.state.services.documents.database.connection() as connection:
+        phase_four_table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'phase_four_idempotency_keys'
+            """
+        ).fetchone()
+        rows = connection.execute(
+            """
+            SELECT operation, resource_type FROM mutation_idempotency_keys
+            WHERE idempotency_key IN ('shared-phase-four-key', 'canonical-publication')
+            ORDER BY operation
+            """
+        ).fetchall()
+    assert phase_four_table is None
+    assert [tuple(row) for row in rows] == [
+        ("document_trust", "document"),
+        ("publish", "publication"),
+    ]
+
+
 def test_publication_latest_revision_and_explicit_exposure_are_non_enumerable(
     client: TestClient,
 ) -> None:
@@ -394,6 +455,32 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
         == 404
     )
 
+    retrusted = client.patch(
+        f"/api/v1/documents/{document['document_id']}/trust",
+        headers=mutation_headers("retrust-html"),
+        json={"expected_trust_version": 2, "trust_level": "trusted_interactive"},
+    )
+    assert retrusted.status_code == 200
+    assert retrusted.json()["trust_version"] == 3
+    assert (
+        client.get(
+            "/api/v1/trusted-previews/content",
+            headers={"Authorization": f"Sangam-Preview {grant['token']}"},
+        ).status_code
+        == 404
+    )
+    replacement_grant = client.post(
+        f"/api/v1/documents/{document['document_id']}/trusted-preview",
+        params={"revision_id": document["current_revision_id"]},
+    ).json()
+    assert (
+        client.get(
+            "/api/v1/trusted-previews/content",
+            headers={"Authorization": f"Sangam-Preview {replacement_grant['token']}"},
+        ).status_code
+        == 200
+    )
+
     with client.app.state.services.documents.database.connection() as connection:
         trust_events = connection.execute(
             "SELECT previous_level, next_level FROM document_trust_events ORDER BY created_at"
@@ -401,6 +488,7 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
     assert [tuple(event) for event in trust_events] == [
         ("untrusted", "trusted_interactive"),
         ("trusted_interactive", "untrusted"),
+        ("untrusted", "trusted_interactive"),
     ]
 
 
