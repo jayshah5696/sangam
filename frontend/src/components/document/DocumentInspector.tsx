@@ -48,8 +48,8 @@ export function DocumentInspector({
     sessions.updateSession(documentId, { compareFrom: from, compareTo: to })
   }
   return (
-    <aside className="history-panel document-inspector" style={{ width }}>
-      <div className="right-panel-header">
+    <aside className="history-panel document-inspector ui-rail ui-rail--surface" style={{ width }}>
+      <div className="right-panel-header ui-rail-header">
         <p className="eyebrow">Inspector</p>
         <button className="icon-button" aria-label="Collapse document inspector" onClick={onCollapse}>
           ›
@@ -188,7 +188,9 @@ function HistoryList({
             </span>
             {revision.summary ? ` · ${revision.summary}` : ''}
           </p>
-          {revision.operation_id && <small>Operation {revision.operation_id}</small>}
+          {revision.operation_id && (
+            <small className="revision-operation-id">Operation {revision.operation_id}</small>
+          )}
           {revision.revision_id !== currentRevisionId && (
             <div className="revision-actions">
               <button onClick={() => onCompare(revision.revision_id)}>Compare</button>

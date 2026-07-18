@@ -70,6 +70,7 @@ where applicable.
 
 - [Product vision and technical decisions](./docs/VISION.md)
 - [Brand identity and logo usage](./docs/BRAND.md)
+- [UI typography, dimensions, rails, and enforcement](./docs/UI_SYSTEM.md)
 - [Seven-phase vertical implementation](./docs/IMPLEMENTATION_PHASES.md)
 - [Phase 1 implementation and verification](./docs/PHASE_1.md)
 - [Phase 2 implementation and verification](./docs/PHASE_2.md)

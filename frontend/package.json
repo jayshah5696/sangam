@@ -8,7 +8,7 @@
     "build": "vite build && tsc -b",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/check-ui-system.mjs",
     "test": "vitest run"
   },
   "dependencies": {

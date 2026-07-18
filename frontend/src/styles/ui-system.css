@@ -1,0 +1,267 @@
+/*
+ * Sangam application UI system
+ *
+ * Inter is the only application-chrome font. Georgia is reserved for document
+ * and display headings; the mono stack is reserved for editable/code-like data.
+ * Component styles should consume the tokens here instead of adding local type,
+ * radius, spacing, or control-height values.
+ */
+
+:where(body, button, input, select, textarea) {
+  font-family: var(--font-ui);
+}
+
+:where(button, input, select, textarea) {
+  font-size: var(--text-control);
+  line-height: var(--leading-ui);
+}
+
+:where(code, kbd, samp) {
+  font-family: var(--font-mono);
+}
+
+button {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-control);
+  line-height: var(--leading-ui);
+}
+
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea) {
+  min-height: var(--control-height);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-control);
+  line-height: var(--leading-ui);
+}
+
+/* Shared panel anatomy: the color treatment can differ, the grammar cannot. */
+.ui-rail {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  line-height: var(--leading-ui);
+}
+
+.ui-rail--inverse {
+  background: var(--sidebar);
+  color: var(--sidebar-text);
+}
+
+.ui-rail--surface {
+  background: color-mix(in srgb, var(--surface-soft) 78%, var(--app-bg));
+  color: var(--text);
+}
+
+.ui-rail-header,
+.sidebar-brandbar,
+.right-panel-header {
+  min-height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.ui-rail--inverse .ui-rail-header,
+.ui-rail--inverse .sidebar-brandbar {
+  border-color: color-mix(in srgb, var(--sidebar-text) 11%, transparent);
+}
+
+/* One control language across rails, toolbars, settings, and menus. */
+:where(
+  .sidebar-mode-switch button,
+  .sidebar-actions button,
+  .sidebar-inline-form button,
+  .sidebar-search-trigger,
+  .sidebar-footer-nav a,
+  .inspector-tabs button,
+  .outline-panel button,
+  .revision button,
+  .panel-button,
+  .secondary-action,
+  .mode-switch button,
+  .document-actions-trigger,
+  .document-actions-form > button,
+  .editor-tools button,
+  .conflict-actions button,
+  .backup-card button,
+  .trash-card button,
+  .folder-setting > button,
+  .tag-creator button,
+  .tree-context-menu > button,
+  .action-menu-popover > button,
+  .action-menu-popover .document-layout-actions > button
+) {
+  min-height: var(--control-height);
+  border-radius: var(--radius-control);
+  font-size: var(--text-control);
+  line-height: var(--leading-ui);
+}
+
+:where(
+  .sidebar-inline-form input,
+  .sidebar-search-input,
+  .sidebar-sort select,
+  .compare-controls select,
+  .metadata-editor input,
+  .materialize-bar input,
+  .folder-setting > input,
+  .tag-creator input[type="text"],
+  .document-actions-form > label input,
+  .editor-tools select,
+  .agent-token-form input,
+  .activity-filters input,
+  .activity-filters select
+) {
+  min-height: var(--control-height);
+  border-radius: var(--radius-control);
+  font-size: var(--text-control);
+  line-height: var(--leading-ui);
+}
+
+/* Reusable text roles. Nothing interactive should fall below 12px. */
+:where(
+  .sidebar-mode-switch button,
+  .sidebar-actions button,
+  .sidebar-inline-form input,
+  .sidebar-search-trigger,
+  .sidebar-search-input input,
+  .sidebar-sort select,
+  .sidebar-footer-nav a,
+  .primary-sidebar .file-link,
+  .tree-context-menu > button,
+  .action-menu-popover > button,
+  .action-menu-popover .document-layout-actions > button,
+  .editor-tab > button[role="tab"],
+  .inspector-tabs button,
+  .outline-panel button,
+  .compare-controls select,
+  .compare-controls > button,
+  .revision button,
+  .panel-button,
+  .secondary-action,
+  .settings-nav a
+) {
+  font-size: var(--text-control);
+}
+
+:where(
+  .eyebrow,
+  .sidebar-section-title,
+  .compare-controls label,
+  .document-actions-form > label,
+  .settings-panel > header p,
+  .settings-subtitle > span,
+  .agent-token-form > label,
+  .activity-filters label
+) {
+  font-size: var(--text-label);
+  line-height: var(--leading-ui);
+}
+
+:where(
+  .sidebar-brand small,
+  .sidebar-section-title small,
+  .sidebar-message,
+  .search-snippet,
+  .explorer-create,
+  .explorer-error,
+  .command-palette [role="option"] small,
+  .command-palette footer,
+  .outline-panel button small,
+  .revision time,
+  .revision p,
+  .settings-nav-title span,
+  .setting-row small,
+  .setting-value,
+  .compact-switch,
+  .operation-card p,
+  .maintenance-row small,
+  .shortcut-list span,
+  .one-time-token small,
+  .token-row small,
+  .activity-page header p:last-child,
+  .activity-event small
+) {
+  font-size: var(--text-meta);
+  line-height: var(--leading-ui);
+}
+
+:where(
+  .settings-nav-title strong,
+  .settings-panel h2,
+  .setting-row strong,
+  .settings-subtitle strong,
+  .operation-card strong,
+  .maintenance-row strong,
+  .revision strong
+) {
+  font-size: var(--text-body);
+  line-height: var(--leading-tight);
+}
+
+:where(
+  .scope-badge,
+  .category-badge,
+  .tag-badge,
+  .actor-badge,
+  .conflict-kind,
+  .verification,
+  .token-row i
+) {
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
+  line-height: var(--leading-ui);
+}
+
+:where(
+  .settings-panel,
+  .operation-card,
+  .maintenance-row,
+  .agent-token-form,
+  .one-time-token,
+  .token-row,
+  .activity-event,
+  .theme-card,
+  .tree-context-menu,
+  .action-menu-popover
+) {
+  border-radius: var(--radius-panel);
+}
+
+.sangam-file-tree {
+  --trees-font-family-override: var(--font-ui);
+  --trees-font-size-override: var(--text-control);
+  --trees-border-radius-override: var(--radius-control);
+}
+
+.revision-merge-view {
+  --diffs-font-family: var(--font-mono);
+  --diffs-font-size: var(--text-label);
+  --diffs-line-height: 1.0625rem;
+}
+
+.revision-operation-id {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font: var(--text-meta)/var(--leading-ui) var(--font-mono);
+}
+
+/* Explicit, limited exceptions to the UI font. */
+:where(.sidebar-brand strong, .welcome h1, .settings-header h1, .document-header h1, .settings-title h2, .markdown-preview h1, .markdown-preview h2, .markdown-preview h3) {
+  font-family: var(--font-display);
+}
+
+:where(.editor .cm-scroller, .markdown-preview code, .one-time-token code, .activity-event code, .trash-card code) {
+  font-family: var(--font-mono);
+}
