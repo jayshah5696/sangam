@@ -1,6 +1,6 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--app-bg); color: var(--text); font-family: var(--font-ui); font-synthesis: none; text-rendering: optimizeLegibility; }
-button, input, select { font: inherit; }
+button, input, select { font-family: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: .55; }
 

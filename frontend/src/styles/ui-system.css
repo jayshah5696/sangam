@@ -20,6 +20,11 @@
   font-family: var(--font-mono);
 }
 
+small {
+  font-size: var(--text-meta);
+  line-height: var(--leading-ui);
+}
+
 button {
   min-height: var(--control-height);
   padding: 0 var(--space-3);
