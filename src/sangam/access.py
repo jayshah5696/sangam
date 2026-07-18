@@ -11,7 +11,7 @@ from sangam.organization import WorkspaceOrganizationService
 from sangam.schemas import Document, DocumentSummary, Folder, Revision, RevisionDiff, Tag
 from sangam.security import Principal
 from sangam.service import DocumentService
-from sangam.workspace import WorkspacePathNormalizer
+from sangam.workspace import canonicalize_document_path
 
 T = TypeVar("T")
 
@@ -26,13 +26,11 @@ class WorkspaceAccessService:
         organization: WorkspaceOrganizationService,
         policy: AuthorizationPolicy,
         activity: ActivityService,
-        path_normalizer: WorkspacePathNormalizer,
     ) -> None:
         self.documents = documents
         self.organization = organization
         self.policy = policy
         self.activity = activity
-        self.path_normalizer = path_normalizer
 
     def list_documents(
         self,
@@ -461,9 +459,7 @@ class WorkspaceAccessService:
         capability: Capability,
         path: str | None,
     ) -> str | None:
-        normalized_path = (
-            self.path_normalizer.normalize_document_path(path) if path is not None else None
-        )
+        normalized_path = canonicalize_document_path(path) if path is not None else None
         self.policy.require(principal, capability, normalized_path)
         return normalized_path
 

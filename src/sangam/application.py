@@ -88,7 +88,6 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         organization=organization,
         policy=authorization,
         activity=activity,
-        path_normalizer=workspace,
     )
     return ApplicationServices(
         documents=documents,

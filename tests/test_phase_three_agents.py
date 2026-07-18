@@ -374,6 +374,55 @@ def test_destination_paths_are_validated_before_scoped_authorization(client: Tes
     }
 
 
+def test_destination_authorization_precedes_filesystem_containment(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    for prefix in ("agents", "projects"):
+        parent = settings.workspace_root / prefix
+        parent.mkdir(parents=True, exist_ok=True)
+        (parent / "linked").symlink_to(outside, target_is_directory=True)
+
+    issued = issue_token(client)
+    token = issued["token"]
+    denied = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "out-of-scope-symlink"),
+        json={
+            "title": "Denied probe",
+            "content": "no",
+            "path": "projects/linked/probe.md",
+        },
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "forbidden"
+
+    invalid = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "in-scope-symlink"),
+        json={
+            "title": "Invalid destination",
+            "content": "no",
+            "path": "agents/linked/escape.md",
+        },
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "invalid_path"
+    assert not (outside / "escape.md").exists()
+
+    operation_ids = {
+        denied.headers["X-Operation-ID"],
+        invalid.headers["X-Operation-ID"],
+    }
+    activity = client.get("/api/v1/activity", params={"actor_id": "agent:researcher"}).json()
+    events = [event for event in activity if event["operation_id"] in operation_ids]
+    assert {(event["outcome"], event["error_code"]) for event in events} == {
+        ("denied", "forbidden"),
+        ("failed", "invalid_path"),
+    }
+
+
 def test_path_scoped_reads_filter_lists_search_and_unmaterialized_documents(
     client: TestClient,
 ) -> None:
