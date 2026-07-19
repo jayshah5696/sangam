@@ -6,6 +6,7 @@ import { api, type Document, type Publication, type Revision, type Tag } from '.
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { HtmlPreview } from '../HtmlPreview'
+import { ChatPanel } from '../ChatPanel'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { TrustedHtmlPreview } from '../TrustedHtmlPreview'
@@ -14,6 +15,7 @@ export function DocumentInspector({
   width,
   document,
   content,
+  selectedText,
   onCollapse,
   onUpdated,
   onFocusEditor,
@@ -21,6 +23,7 @@ export function DocumentInspector({
   width: number
   document: Document
   content: string
+  selectedText: string
   onCollapse: () => void
   onUpdated: (document: Document, replaceContent?: boolean) => void
   onFocusEditor: () => void
@@ -45,7 +48,7 @@ export function DocumentInspector({
   const history = historyQuery.data ?? []
   const compareFrom = session.compareFrom
   const compareTo = session.compareTo ?? document.current_revision_id
-  const [tab, setTab] = useState<'properties' | 'outline' | 'history'>('properties')
+  const [tab, setTab] = useState<'properties' | 'outline' | 'history' | 'chat'>('properties')
   const [previewRevision, setPreviewRevision] = useState<Revision | null>(null)
   const exposeRevision = useMutation({
     mutationFn: (revisionId: string) => {
@@ -80,7 +83,7 @@ export function DocumentInspector({
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
-        {(['properties', 'outline', 'history'] as const).map((candidate) => (
+        {(['properties', 'outline', 'history', 'chat'] as const).map((candidate) => (
           <button
             role="tab"
             aria-selected={tab === candidate}
@@ -222,6 +225,9 @@ export function DocumentInspector({
             onRestore={(revisionId) => restore.mutate(revisionId)}
           />
         </>
+      )}
+      {tab === 'chat' && (
+        <ChatPanel document={document} selectedText={selectedText} onDocumentUpdated={onUpdated} />
       )}
     </aside>
   )

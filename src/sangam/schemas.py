@@ -463,3 +463,34 @@ class AnnotationEvent(BaseModel):
     version: int
     snapshot: AnnotationSnapshot
     created_at: str
+
+
+class ChatRuntimeConfig(BaseModel):
+    configured: bool
+    provider: Literal["openrouter_openai_agents"]
+    transport: Literal["chatkit"] = "chatkit"
+    domain_key: str
+    default_model: str
+    available_models: list[str]
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"]
+
+
+class ChatProposal(BaseModel):
+    proposal_id: str
+    thread_id: str
+    document_id: str
+    expected_revision_id: str
+    content: str
+    summary: str | None
+    status: Literal["pending", "applied", "stale", "dismissed"]
+    applied_revision_id: str | None
+    created_at: str
+    applied_at: str | None
+
+
+class ApplyChatProposal(BaseModel):
+    expected_revision_id: str
+
+
+class DismissChatProposal(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)

@@ -59,6 +59,13 @@ export function DocumentWorkspace({
   const saveState = session.saveState
   const mode = session.mode
   const selection = session.selection
+  const selectedText =
+    session.viewState && selection.selectedCharacters
+      ? content.slice(
+          Math.min(session.viewState.anchor, session.viewState.head),
+          Math.max(session.viewState.anchor, session.viewState.head),
+        )
+      : ''
   const documentsQuery = useQuery({ queryKey: ['documents', 'links'], queryFn: api.listDocuments })
   const [materializePath, setMaterializePath] = useState(
     document.content_type === 'text/html' ? 'projects/interactive.html' : 'projects/first-document.md',
@@ -281,6 +288,7 @@ export function DocumentWorkspace({
               width={preferences.rightWidth}
               document={document}
               content={content}
+              selectedText={selectedText}
               onCollapse={() => updatePreferences({ rightVisible: false })}
               onUpdated={updateCachedDocument}
               onFocusEditor={() => editorRef.current?.focus()}

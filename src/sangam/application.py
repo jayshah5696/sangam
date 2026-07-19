@@ -8,6 +8,7 @@ from sangam.actors import ActorService
 from sangam.authorization import AuthorizationPolicy
 from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
+from sangam.chat import SangamChatServer
 from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.idempotency import IdempotencyStore
@@ -41,6 +42,7 @@ class ApplicationServices:
     publications: PublicationService
     pdf_research: PdfResearchService
     karakeep: KarakeepService
+    chat: SangamChatServer
 
 
 def build_application_services(settings: Settings) -> ApplicationServices:
@@ -160,6 +162,24 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         publications=publications,
         pdf_research=pdf_research,
     )
+    chat = SangamChatServer(
+        database=database,
+        workspace=workspace_access,
+        api_key=(
+            settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else None
+        ),
+        base_url=settings.openrouter_base_url,
+        http_referer=settings.openrouter_http_referer,
+        app_title=settings.openrouter_app_title,
+        domain_key=settings.chatkit_domain_key,
+        available_models=settings.chat_available_models,
+        default_model=settings.chat_default_model,
+        reasoning_effort=settings.chat_reasoning_effort,
+        max_turns=settings.chat_max_tool_rounds,
+        max_tool_result_bytes=settings.chat_max_tool_result_bytes,
+        max_context_messages=settings.chat_max_context_messages,
+        timeout_seconds=settings.chat_timeout_seconds,
+    )
     return ApplicationServices(
         documents=documents,
         organization=organization,
@@ -173,6 +193,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         publications=publications,
         pdf_research=pdf_research,
         karakeep=karakeep,
+        chat=chat,
     )
 
 

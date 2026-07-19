@@ -335,6 +335,33 @@ export const annotationEventSchema = z.object({
 
 export type AnnotationEvent = z.infer<typeof annotationEventSchema>
 
+export const chatRuntimeConfigSchema = z.object({
+  configured: z.boolean(),
+  provider: z.literal('openrouter_openai_agents'),
+  transport: z.literal('chatkit'),
+  domain_key: z.string(),
+  default_model: z.string(),
+  available_models: z.array(z.string()),
+  reasoning_effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']),
+})
+
+export type ChatRuntimeConfig = z.infer<typeof chatRuntimeConfigSchema>
+
+export const chatProposalSchema = z.object({
+  proposal_id: z.string(),
+  thread_id: z.string(),
+  document_id: z.string(),
+  expected_revision_id: z.string(),
+  content: z.string(),
+  summary: z.string().nullable(),
+  status: z.enum(['pending', 'applied', 'stale', 'dismissed']),
+  applied_revision_id: z.string().nullable(),
+  created_at: z.string(),
+  applied_at: z.string().nullable(),
+})
+
+export type ChatProposal = z.infer<typeof chatProposalSchema>
+
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
   valid: z.boolean(),
@@ -404,6 +431,30 @@ export async function collectPages<T>(
 }
 
 export const api = {
+  async chatConfig(): Promise<ChatRuntimeConfig> {
+    return chatRuntimeConfigSchema.parse(await request('/chat/config'))
+  },
+  async listChatProposals(documentId: string, threadId?: string): Promise<ChatProposal[]> {
+    const params = new URLSearchParams({ document_id: documentId })
+    if (threadId) params.set('thread_id', threadId)
+    return z.array(chatProposalSchema).parse(await request(`/chat/proposals?${params.toString()}`))
+  },
+  async applyChatProposal(proposal: ChatProposal): Promise<ChatProposal> {
+    return chatProposalSchema.parse(
+      await request(`/chat/proposals/${proposal.proposal_id}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ expected_revision_id: proposal.expected_revision_id }),
+      }),
+    )
+  },
+  async dismissChatProposal(proposalId: string): Promise<ChatProposal> {
+    return chatProposalSchema.parse(
+      await request(`/chat/proposals/${proposalId}/dismiss`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'Dismissed in the chat panel' }),
+      }),
+    )
+  },
   async karakeepHealth(): Promise<z.infer<typeof karakeepConnectionSchema>> {
     return karakeepConnectionSchema.parse(await request('/karakeep/health'))
   },

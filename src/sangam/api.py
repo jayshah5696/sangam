@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
 from sangam.application import build_application_services
@@ -83,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     publications = services.publications
     pdf_research = services.pdf_research
     karakeep = services.karakeep
+    chat = services.chat
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -133,9 +135,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         preview_origin = f"{preview_url.scheme}://{preview_url.netloc}"
         response.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; script-src 'self' https://cdn.platform.openai.com; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; "
-            f"frame-src 'self' {preview_origin}; object-src 'none'; base-uri 'none'; "
+            f"frame-src 'self' {preview_origin} https://*.openai.com; "
+            "object-src 'none'; base-uri 'none'; "
             "frame-ancestors 'none'; form-action 'self'",
         )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -458,6 +462,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             require_administrator=require_administrator,
         )
     )
+    app.include_router(create_chat_router(chat=chat, resolve_principal=resolve_principal))
     app.include_router(
         create_karakeep_router(
             karakeep=karakeep,
