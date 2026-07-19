@@ -49,7 +49,46 @@ initial revision to `integration:karakeep`, and prevents duplicate Documents by
 bookmark ID. Refreshes preserve the corrected working copy and wait in a
 side-by-side review state until a human applies a normal attributed revision.
 
+## Configure Karakeep
+
+For a Docker Compose deployment, copy the example environment file and set a
+read-capable Karakeep API key:
+
+```bash
+cp .env.example .env
+```
+
+Uncomment and edit these values in `.env`:
+
+```dotenv
+SANGAM_KARAKEEP_BASE_URL=http://karakeep:3000/api/v1
+SANGAM_KARAKEEP_API_KEY=replace-with-karakeep-api-key
+SANGAM_KARAKEEP_TIMEOUT_SECONDS=20
+SANGAM_MAX_KARAKEEP_SOURCE_BYTES=5000000
+```
+
+The base URL must be reachable from the Sangam process or container and must
+include `/api/v1`. Generate the key from Karakeep's API-key settings and keep it
+server-side; Sangam never sends it to the browser. Apply the configuration with:
+
+```bash
+docker compose up -d --build
+```
+
+Open **Karakeep imports** and confirm that the connection card reports
+**Connected** before searching. See
+[Phase 6 operations](./docs/operations/PHASE_6_OPERATIONS.md) for native-process
+configuration, credential rotation, source limits, retry behavior, and recovery.
+
 ## Screenshots
+
+### Karakeep import and source review
+
+Search remains in Karakeep until a bookmark is selected. Imported sources show
+their stable Karakeep identity, original link, tags, attachment descriptors,
+archived extraction, and corrected Sangam working copy side by side.
+
+![Phase 6 Karakeep integration showing a connected archive, selective import, provenance, and the archived extraction beside the corrected working copy](./docs/assets/phase-6-karakeep-import.jpg)
 
 ### PDF research workspace
 

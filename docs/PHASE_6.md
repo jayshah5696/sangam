@@ -33,19 +33,22 @@ state, or recorded in operation details.
 flowchart LR
     Browser["Karakeep import and review page"] --> API["Human-admin import API"]
     API --> Importer["KarakeepService"]
-    Importer --> Client["Karakeep HTTP adapter"]
+    Importer --> Client["Typed Karakeep gateway"]
     Client --> Archive["Karakeep API"]
-    Importer --> Provenance["Import identity and source snapshots"]
+    Importer --> Extractor["Pure source extractor"]
+    Importer --> Repository["Import lifecycle repository"]
+    Repository --> Provenance["Import identity and source snapshots"]
     Importer --> Documents["DocumentService"]
     Documents --> Revisions["Attributed immutable revisions"]
     Documents --> Search["Shared FTS5 index"]
     Importer --> Tags["WorkspaceOrganizationService"]
 ```
 
-`KarakeepService` owns only the integration boundary: connection checks,
-bookmark selection, source normalization, source snapshots, provenance,
-failure state, and refresh review. `DocumentService` remains the only creator
-and updater of text Documents. Initial content is attributed to
+`KarakeepService` coordinates the use case without interpreting HTTP payloads
+or embedding SQL. The gateway validates remote JSON and returns typed source
+bookmarks, the pure extractor owns HTML-to-Markdown and provenance rules, and
+the repository owns the durable import state machine. `DocumentService`
+remains the only creator and updater of text Documents. Initial content is attributed to
 `integration:karakeep`; a reviewed refresh is attributed to the human who
 applies it.
 
@@ -76,9 +79,11 @@ conversion.
 
 `karakeep_imports.bookmark_id` is unique. A successful repeat import returns
 the existing import and Document even when the HTTP request uses a new
-idempotency key. The initial Document mutation also uses a stable internal
-idempotency key, so a process failure between Document creation and provenance
-linking can retry without duplicating the revision.
+idempotency key. Initial import stores the source snapshot before creating the
+Document, then links the Document immediately. The Document mutation uses a
+stable internal idempotency key; if the process stops after creation but before
+linkage, retry recovers the exact Document ID from that idempotency record and
+finishes the existing import instead of creating another Document or revision.
 
 Each source snapshot records:
 
@@ -132,6 +137,9 @@ Automated backend coverage includes:
   silent overwrite, expected-revision application, and human attribution.
 - Durable failure recording, explicit retry, migration idempotency, and all
   earlier phase tests.
+- Invalid remote payload rejection at the gateway, pure extraction rules, and
+  an injected post-creation linkage failure proving retry reconnects exactly
+  one Document.
 
 Frontend verification includes formatting, TypeScript production build,
 schema validation, UI-system lint, browser unit tests, and desktop and narrow

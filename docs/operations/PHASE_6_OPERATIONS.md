@@ -11,9 +11,19 @@ SANGAM_KARAKEEP_API_KEY=replace-with-karakeep-api-key
 SANGAM_KARAKEEP_TIMEOUT_SECONDS=20
 ```
 
-For Docker Compose, place the values in the untracked `.env` file and recreate
-the Sangam container. Do not put the API key in a browser configuration file,
-URL, screenshot, issue, or committed Compose override.
+For Docker Compose, create the untracked environment file, uncomment the three
+Karakeep variables, and recreate Sangam:
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+For a native process, export the same variables in the service environment
+before starting Sangam. The base URL must be reachable from that process; the
+Compose example uses the `karakeep` service name on their shared container
+network. Do not put the API key in a browser configuration file, URL,
+screenshot, issue, or committed Compose override.
 
 Open **Karakeep imports** from the workspace navigation. The connection card
 must report that bookmark-read permission was verified before search is
@@ -75,7 +85,9 @@ Failed imports and refreshes retain a bounded `last_error`. Check:
 Retry an initial failure by importing the same bookmark again. Retry a failed
 refresh with **Check for refresh**. Sangam also converts any `importing` record
 left by a process restart to `failed`; it never assumes the interrupted remote
-read completed.
+read completed. If interruption occurred after Document creation but before
+import linkage, retry uses the stable internal idempotency record to reconnect
+that Document and finish the original import.
 
 ## Credential rotation
 

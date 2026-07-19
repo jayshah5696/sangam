@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from sangam.errors import IntegrationError
+from sangam.karakeep_gateway import KarakeepSourceBookmark, KarakeepSourcePage
+from sangam.schemas import KarakeepAsset
 
 
 class FakeKarakeep:
@@ -16,11 +19,11 @@ class FakeKarakeep:
         if not self.available:
             raise IntegrationError("Karakeep is offline")
 
-    def search(self, *, query: str, limit: int, cursor: str | None) -> dict[str, Any]:
+    def search(self, *, query: str, limit: int, cursor: str | None) -> KarakeepSourcePage:
         del query, limit, cursor
-        return {"bookmarks": [self.bookmark("bookmark-1")], "nextCursor": None}
+        return KarakeepSourcePage(bookmarks=(self.bookmark("bookmark-1"),), next_cursor=None)
 
-    def bookmark(self, bookmark_id: str) -> dict[str, Any]:
+    def bookmark(self, bookmark_id: str) -> KarakeepSourceBookmark:
         if not self.available:
             raise IntegrationError("Karakeep is offline")
         body = (
@@ -28,7 +31,7 @@ class FakeKarakeep:
             if self.version == 1
             else "<article><h2>Archived article</h2><p>Refreshed research evidence.</p></article>"
         )
-        return {
+        raw = {
             "id": bookmark_id,
             "createdAt": "2026-07-01T10:00:00Z",
             "modifiedAt": f"2026-07-0{self.version}T10:00:00Z",
@@ -59,6 +62,27 @@ class FakeKarakeep:
                 {"id": "asset-1", "assetType": "fullPageArchive", "fileName": "archive.html"}
             ],
         }
+        return KarakeepSourceBookmark(
+            bookmark_id=bookmark_id,
+            title="A useful archive",
+            content_type="link",
+            source_url="https://example.com/research",
+            author="Example Author",
+            created_at="2026-07-01T10:00:00Z",
+            modified_at=f"2026-07-0{self.version}T10:00:00Z",
+            tags=("Research", "Evidence"),
+            assets=(
+                KarakeepAsset(
+                    asset_id="asset-1",
+                    asset_type="fullPageArchive",
+                    file_name="archive.html",
+                ),
+            ),
+            source_html=body,
+            source_text="",
+            fallback_text="Research source",
+            source_payload_json=json.dumps(raw, sort_keys=True, separators=(",", ":")),
+        )
 
 
 def configure_fake(client: TestClient) -> FakeKarakeep:
@@ -191,7 +215,7 @@ def test_failure_state_is_durable_and_retryable(client: TestClient) -> None:
     assert retried.json()["status"] == "current"
 
     service = client.app.state.services.karakeep
-    with service.database.transaction() as connection:
+    with service.repository.database.transaction() as connection:
         connection.execute(
             "UPDATE karakeep_imports SET status = 'importing' WHERE import_id = ?",
             (retried.json()["import_id"],),
@@ -207,3 +231,47 @@ def test_failure_state_is_durable_and_retryable(client: TestClient) -> None:
     )
     assert resumed.status_code == 200
     assert resumed.json()["status"] == "current"
+
+
+def test_late_link_failure_reconnects_exactly_one_document(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure_fake(client)
+    service = client.app.state.services.karakeep
+    original_link = service.repository.link_initial_document
+    failed_once = False
+
+    def interrupt_link(import_id: str, document_id: str, snapshot_id: str) -> None:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise RuntimeError("simulated interruption before import linkage")
+        original_link(import_id, document_id, snapshot_id)
+
+    monkeypatch.setattr(service.repository, "link_initial_document", interrupt_link)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        service.import_bookmark("bookmark-1")
+
+    with service.repository.database.connection() as connection:
+        failed = connection.execute(
+            "SELECT import_id, document_id, status FROM karakeep_imports"
+        ).fetchone()
+        created = connection.execute(
+            """
+            SELECT document_id FROM idempotency_keys
+            WHERE actor_id = 'integration:karakeep'
+                AND idempotency_key = 'karakeep:bookmark-1:create'
+            """
+        ).fetchone()
+        document_count = connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    assert failed["document_id"] is None
+    assert failed["status"] == "failed"
+    assert created is not None
+    assert document_count == 1
+
+    recovered = service.import_bookmark("bookmark-1")
+
+    assert recovered.document_id == created["document_id"]
+    assert recovered.status == "current"
+    with service.repository.database.connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
