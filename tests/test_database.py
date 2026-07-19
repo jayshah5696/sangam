@@ -34,6 +34,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "006",
         "007",
         "008",
+        "009",
     ]
     assert {
         "operation_events_revision_outcome_created_idx",
@@ -134,3 +135,85 @@ def test_publication_idempotency_migration_preserves_existing_keys(
         created_at,
     )
     assert duplicate_table is None
+
+
+def test_pdf_migration_preserves_phase_four_documents_and_publications(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migration_source = resources.files("sangam.migrations")
+
+    def staged(destination: Path, through: str) -> Path:
+        destination.mkdir()
+        for migration in migration_source.iterdir():
+            version = migration.name.split("_", 1)[0]
+            if migration.name.endswith(".sql") and version <= through:
+                (destination / migration.name).write_text(
+                    migration.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+        return destination
+
+    phase_four = staged(tmp_path / "phase-four", "008")
+    monkeypatch.setattr("sangam.db.resources.files", lambda _package: phase_four)
+    database = Database(tmp_path / "upgrade.sqlite3")
+    database.initialize()
+    now = "2026-07-18T12:00:00+00:00"
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO actors(actor_id, display_name, actor_type, identity_kind, created_at)
+            VALUES ('human:test', 'Test Human', 'human', 'human', ?)
+            """,
+            (now,),
+        )
+        connection.execute(
+            """
+            INSERT INTO documents(
+                document_id, title, content_type, path, current_revision_id,
+                content_hash, size_bytes, materialization_state, file_hash,
+                deleted, created_by, created_at, updated_at
+            ) VALUES ('doc-1', 'Existing HTML', 'text/html', 'existing.html', NULL,
+                'hash', 4, 'clean', 'hash', 0, 'human:test', ?, ?)
+            """,
+            (now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO revisions(
+                revision_id, document_id, parent_revision_id, content, content_hash,
+                size_bytes, actor_id, operation, summary, created_at
+            ) VALUES ('rev-1', 'doc-1', NULL, 'test', 'hash', 4,
+                'human:test', 'create', NULL, ?)
+            """,
+            (now,),
+        )
+        connection.execute(
+            "UPDATE documents SET current_revision_id = 'rev-1' WHERE document_id = 'doc-1'"
+        )
+        connection.execute(
+            """
+            INSERT INTO publications(
+                publication_id, document_id, slug, access_policy, version, active,
+                created_by, updated_by, created_at, updated_at
+            ) VALUES ('pub-1', 'doc-1', 'existing', 'public', 0, 1,
+                'human:test', 'human:test', ?, ?)
+            """,
+            (now, now),
+        )
+
+    current = staged(tmp_path / "current", "009")
+    monkeypatch.setattr("sangam.db.resources.files", lambda _package: current)
+    database.initialize()
+
+    with database.connection() as connection:
+        document = connection.execute(
+            "SELECT content_type, current_revision_id FROM documents WHERE document_id = 'doc-1'"
+        ).fetchone()
+        publication = connection.execute(
+            "SELECT document_id FROM publications WHERE publication_id = 'pub-1'"
+        ).fetchone()
+        pdf_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pdf_documents'"
+        ).fetchone()
+    assert tuple(document) == ("text/html", "rev-1")
+    assert publication["document_id"] == "doc-1"
+    assert pdf_table is not None

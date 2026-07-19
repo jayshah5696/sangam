@@ -18,4 +18,12 @@ describe('stable document links', () => {
       }),
     ).toBe('[projects/a-note.md](sangam://document/stable-id)')
   })
+
+  it('preserves validated PDF page and annotation targets', () => {
+    expect(
+      internalDocumentHref(
+        'sangam://document/0d10bbdc-e3c8-4c2b-afdd-06e263ada380?page=4&annotation=abc-123',
+      ),
+    ).toBe('/documents/0d10bbdc-e3c8-4c2b-afdd-06e263ada380?page=4&annotation=abc-123')
+  })
 })

@@ -1,7 +1,7 @@
 services:
   sangam:
     build: .
-    image: sangam:phase4
+    image: sangam:phase5
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
@@ -13,6 +13,7 @@ services:
       SANGAM_DATABASE_PATH: /data/database/sangam.sqlite3
       SANGAM_WORKSPACE_ROOT: /data/workspace
       SANGAM_BACKUP_ROOT: /data/backups
+      SANGAM_MAX_PDF_BYTES: ${SANGAM_MAX_PDF_BYTES:-100000000}
       SANGAM_AUTH_MODE: ${SANGAM_AUTH_MODE:-single_user}
       SANGAM_PREVIEW_HMAC_SECRET: ${SANGAM_PREVIEW_HMAC_SECRET:-development-only-preview-secret-change-me}
       SANGAM_PUBLICATION_BASE_URL: ${SANGAM_PUBLICATION_BASE_URL:-http://127.0.0.1:8000/p}

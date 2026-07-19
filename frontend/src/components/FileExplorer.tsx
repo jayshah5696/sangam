@@ -176,7 +176,9 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       }
     },
     canDrag: (paths) =>
-      paths.length === 1 && Boolean(adapterRef.current.documentByTreePath.get(paths[0]!)?.path),
+      paths.length === 1 &&
+      Boolean(adapterRef.current.documentByTreePath.get(paths[0]!)?.path) &&
+      adapterRef.current.documentByTreePath.get(paths[0]!)?.content_type !== 'application/pdf',
     canDrop: ({ draggedPaths, target }) =>
       draggedPaths.length === 1 &&
       target.directoryPath !== adapterRef.current.draftsRootPath &&
@@ -185,7 +187,8 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       const document = adapterRef.current.documentByTreePath.get(draggedPaths[0]!)
       if (document?.path) move.mutate({ document, folderPath: target.directoryPath ?? '' })
     },
-    canRename: ({ isFolder, path }) => !isFolder && adapterRef.current.documentByTreePath.has(path),
+    canRename: ({ isFolder, path }) =>
+      !isFolder && adapterRef.current.documentByTreePath.get(path)?.content_type !== 'application/pdf',
     onRename: ({ sourcePath, destinationPath }) => {
       const document = adapterRef.current.documentByTreePath.get(sourcePath)
       if (document) rename.mutate({ document, destinationPath })
@@ -437,15 +440,24 @@ function ExplorerContextMenu({
       <button type="button" role="menuitem" onClick={() => run(() => onOpenToSide(document))}>
         <PanelRightOpen size={12} /> Open in split
       </button>
-      <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
-        <Pencil size={12} /> Rename
-      </button>
-      <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(document))}>
-        <Copy size={12} /> Duplicate
-      </button>
-      <button className="danger" type="button" role="menuitem" onClick={() => run(() => onTrash(document))}>
-        <Trash2 size={12} /> Move to trash
-      </button>
+      {document.content_type !== 'application/pdf' && (
+        <>
+          <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
+            <Pencil size={12} /> Rename
+          </button>
+          <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(document))}>
+            <Copy size={12} /> Duplicate
+          </button>
+          <button
+            className="danger"
+            type="button"
+            role="menuitem"
+            onClick={() => run(() => onTrash(document))}
+          >
+            <Trash2 size={12} /> Move to trash
+          </button>
+        </>
+      )}
     </div>
   )
 }

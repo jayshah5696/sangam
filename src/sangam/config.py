@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     backups_enabled: bool = True
     frontend_dist: Path = Field(default=Path("frontend/dist"))
     max_document_bytes: int = Field(default=2_000_000, ge=1_024, le=50_000_000)
+    max_pdf_bytes: int = Field(default=100_000_000, ge=1_024, le=1_000_000_000)
     max_publication_asset_bytes: int = Field(default=10_000_000, ge=1_024, le=100_000_000)
     auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"

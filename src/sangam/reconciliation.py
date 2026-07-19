@@ -19,6 +19,7 @@ class MaterializedDocumentSnapshot:
     document_id: str
     path: str
     content_hash: str
+    recoverable_from_database: bool = True
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,17 @@ class ReconciliationPlanner:
         for document in missing:
             matches = unknown_paths_by_hash.get(document.content_hash, [])
             if not matches:
-                rematerialize.append(document.document_id)
+                if document.recoverable_from_database:
+                    rematerialize.append(document.document_id)
+                else:
+                    conflicts.append(
+                        PlannedConflict(
+                            conflict_type="unexpected_hash",
+                            document_id=document.document_id,
+                            path=document.path,
+                            expected_hash=document.content_hash,
+                        )
+                    )
                 continue
             move_candidate_paths.update(matches)
             unambiguous = (
@@ -185,6 +196,7 @@ class ReconciliationService:
                 document_id=document.document_id,
                 path=document.path,
                 content_hash=document.content_hash,
+                recoverable_from_database=document.content_type != "application/pdf",
             )
             for document in documents
             if document.path is not None
@@ -203,6 +215,8 @@ class ReconciliationService:
         normalized = self.workspace.normalize_document_path(path)
         if not self.workspace.is_document_file(normalized):
             raise NotFoundError(f"Workspace file not found: {normalized}")
+        if normalized.lower().endswith(".pdf"):
+            raise ValidationError("Use the PDF import endpoint for unknown PDF files")
         content = self.workspace.read_document(normalized)
         fingerprint = _content_hash(content)
         document = self.documents.create_document(
@@ -231,6 +245,10 @@ class ReconciliationService:
         if not conflict["document_id"]:
             raise NotFoundError("Open unexpected-hash conflict not found")
         document = self.documents.get_document(conflict["document_id"])
+        if document.content_type == "application/pdf":
+            raise ValidationError(
+                "Changed PDF bytes must be imported as a replacement, never accepted in place"
+            )
         content = self.workspace.read_document(conflict["path"])
         fingerprint = _content_hash(content)
         if document.content_hash == fingerprint:
@@ -296,6 +314,8 @@ class ReconciliationService:
         repaired: list[str] = []
         for document in self.documents.list_documents():
             if document.path and document.materialization_state == "pending":
+                if document.content_type == "application/pdf":
+                    continue
                 self.documents.rematerialize_document(document.document_id)
                 repaired.append(document.document_id)
         return repaired

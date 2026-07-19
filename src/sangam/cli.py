@@ -22,17 +22,27 @@ def _token() -> str | None:
     return token.strip() if token and token.strip() else None
 
 
-def _request(method: str, path: str, *, body: dict[str, Any] | None = None) -> Any:
+def _request(
+    method: str,
+    path: str,
+    *,
+    body: dict[str, Any] | None = None,
+    content: bytes | None = None,
+    content_type: str | None = None,
+) -> Any:
     headers: dict[str, str] = {}
     if token := _token():
         headers["Authorization"] = f"Bearer {token}"
     if method != "GET":
         headers["Idempotency-Key"] = str(uuid.uuid4())
+    if content_type:
+        headers["Content-Type"] = content_type
     try:
         response = httpx.request(
             method,
             f"{_base_url()}/api/v1{path}",
             json=body,
+            content=content,
             headers=headers,
             timeout=15,
         )
@@ -114,6 +124,55 @@ def create(
             },
         )
     )
+
+
+@app.command("pdf-import")
+def pdf_import(
+    file: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    title: Annotated[str, typer.Option("--title", "-t")],
+    path: Annotated[str, typer.Option("--path", help="Workspace-relative .pdf path.")],
+    supersedes: Annotated[str | None, typer.Option("--supersedes")] = None,
+) -> None:
+    """Import immutable PDF bytes and start background text extraction."""
+    parameters = {"title": title, "path": path}
+    if supersedes:
+        parameters["supersedes_document_id"] = supersedes
+    _print_json(
+        _request(
+            "POST",
+            f"/pdfs?{urlencode(parameters)}",
+            content=file.read_bytes(),
+            content_type="application/pdf",
+        )
+    )
+
+
+@app.command("pdf-pages")
+def pdf_pages(
+    document_id: str,
+    query: Annotated[str | None, typer.Option("--query", "-q")] = None,
+) -> None:
+    """Read extracted PDF pages or search them with page-aware snippets."""
+    path = f"/pdfs/{document_id}/pages"
+    if query:
+        path = f"/pdfs/{document_id}/search?{urlencode({'q': query})}"
+    _print_json(_request("GET", path))
+
+
+@app.command("annotations")
+def annotations(
+    document_id: str,
+    query: Annotated[str | None, typer.Option("--query", "-q")] = None,
+    include_deleted: Annotated[bool, typer.Option("--include-deleted")] = False,
+) -> None:
+    """List and search versioned PDF annotations."""
+    parameters: dict[str, str] = {}
+    if query:
+        parameters["q"] = query
+    if include_deleted:
+        parameters["include_deleted"] = "true"
+    suffix = f"?{urlencode(parameters)}" if parameters else ""
+    _print_json(_request("GET", f"/pdfs/{document_id}/annotations{suffix}"))
 
 
 @app.command()

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { Command, FilePlus2, Search } from 'lucide-react'
+import { Command, FilePlus2, FileUp, Search } from 'lucide-react'
 import { api } from '../api'
 import { useWorkbench } from '../workbench'
 
@@ -19,6 +19,19 @@ function Welcome() {
         contentType === 'text/html' ? 'Untitled HTML document' : 'Untitled document',
         undefined,
         contentType,
+      ),
+    onSuccess: async (document) => {
+      await queryClient.invalidateQueries({ queryKey: ['documents'] })
+      workbench.ensureDocumentOpen(document.document_id, document.title)
+      await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
+    },
+  })
+  const importPdf = useMutation({
+    mutationFn: (file: File) =>
+      api.importPdf(
+        file,
+        file.name.replace(/\.pdf$/i, '') || 'Imported PDF',
+        `research/${file.name.toLowerCase().endsWith('.pdf') ? file.name : `${file.name}.pdf`}`,
       ),
     onSuccess: async (document) => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -56,6 +69,19 @@ function Welcome() {
             ? 'Creating…'
             : `Create ${contentType === 'text/html' ? 'HTML' : 'Markdown'}`}
         </button>
+        <label className="pdf-import-control">
+          <FileUp size={16} />
+          <span>{importPdf.isPending ? 'Importing PDF…' : 'Import PDF'}</span>
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            disabled={importPdf.isPending}
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null
+              if (file) importPdf.mutate(file)
+            }}
+          />
+        </label>
         <span>
           <Command size={14} /> <kbd>⌘ K</kbd> commands
         </span>
@@ -78,7 +104,9 @@ function Welcome() {
           ))}
         </div>
       )}
-      {createDocument.isError && <p className="error-text">The document could not be created.</p>}
+      {(createDocument.isError || importPdf.isError) && (
+        <p className="error-text">The document could not be created or imported.</p>
+      )}
     </section>
   )
 }
