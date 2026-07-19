@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Enforce Conventional Commits locally. Install with:
+#
+#   git config core.hooksPath scripts/git-hooks
+#
+# Skipped for merge commits and revert commits (git generates their messages).
+
+set -Eeuo pipefail
+
+MESSAGE_FILE=$1
+FIRST_LINE=$(head -n1 "$MESSAGE_FILE")
+
+case "$FIRST_LINE" in
+  "Merge "*|"Revert "*|"fixup!"*|"squash!"*|"amend!"*)
+    exit 0
+    ;;
+esac
+
+PATTERN='^(feat|fix|perf|refactor|docs|test|chore|ci|build|revert)(\([a-z0-9._-]+\))?!?: .+'
+if ! printf '%s' "$FIRST_LINE" | grep -Eq "$PATTERN"; then
+  cat >&2 <<EOF
+error: commit message must follow Conventional Commits.
+       Expected: <type>[optional scope][!]: <subject>
+       Types:    feat, fix, perf, refactor, docs, test, chore, ci, build, revert
+       Got:      $FIRST_LINE
+
+See CONTRIBUTING.md for details.
+EOF
+  exit 1
+fi

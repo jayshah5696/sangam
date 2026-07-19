@@ -1,0 +1,52 @@
+# Production compose file for pulling the published Sangam image from GHCR.
+#
+# Pin a specific tag for production; ":latest" tracks the newest release and
+# will surface breaking changes as they land.
+#
+#   docker compose -f deploy/compose.prod.yaml pull
+#   docker compose -f deploy/compose.prod.yaml up -d
+
+services:
+  sangam:
+    image: ghcr.io/jayshah5696/sangam:${SANGAM_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - sangam-database:/data/database
+      - sangam-workspace:/data/workspace
+      - sangam-backups:/data/backups
+    environment:
+      SANGAM_DATABASE_PATH: /data/database/sangam.sqlite3
+      SANGAM_WORKSPACE_ROOT: /data/workspace
+      SANGAM_BACKUP_ROOT: /data/backups
+      SANGAM_MAX_PDF_BYTES: ${SANGAM_MAX_PDF_BYTES:-100000000}
+      SANGAM_MAX_KARAKEEP_SOURCE_BYTES: ${SANGAM_MAX_KARAKEEP_SOURCE_BYTES:-5000000}
+      SANGAM_KARAKEEP_BASE_URL: ${SANGAM_KARAKEEP_BASE_URL:-}
+      SANGAM_KARAKEEP_API_KEY: ${SANGAM_KARAKEEP_API_KEY:-}
+      SANGAM_KARAKEEP_TIMEOUT_SECONDS: ${SANGAM_KARAKEEP_TIMEOUT_SECONDS:-20}
+      SANGAM_AUTH_MODE: ${SANGAM_AUTH_MODE:-single_user}
+      SANGAM_PREVIEW_HMAC_SECRET: ${SANGAM_PREVIEW_HMAC_SECRET:?set to a long random string}
+      SANGAM_PUBLICATION_BASE_URL: ${SANGAM_PUBLICATION_BASE_URL:-http://127.0.0.1:8000/p}
+      SANGAM_TRUSTED_PREVIEW_BASE_URL: ${SANGAM_TRUSTED_PREVIEW_BASE_URL:-http://127.0.0.1:8000/trusted-preview}
+      SANGAM_TRUSTED_PREVIEW_HOST: ${SANGAM_TRUSTED_PREVIEW_HOST:-}
+      SANGAM_TRUSTED_PREVIEW_PARENT_ORIGINS: ${SANGAM_TRUSTED_PREVIEW_PARENT_ORIGINS:-["http://127.0.0.1:8000"]}
+      SANGAM_TRUSTED_PREVIEW_CONNECT_SRC: ${SANGAM_TRUSTED_PREVIEW_CONNECT_SRC:-[]}
+      SANGAM_CLOUDFLARE_ACCESS_TEAM_DOMAIN: ${SANGAM_CLOUDFLARE_ACCESS_TEAM_DOMAIN:-}
+      SANGAM_CLOUDFLARE_ACCESS_AUDIENCE: ${SANGAM_CLOUDFLARE_ACCESS_AUDIENCE:-}
+      SANGAM_CLOUDFLARE_ACCESS_EMAIL: ${SANGAM_CLOUDFLARE_ACCESS_EMAIL:-}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  sangam-database:
+  sangam-workspace:
+  sangam-backups:

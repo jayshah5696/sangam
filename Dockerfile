@@ -9,6 +9,11 @@ RUN npm run build
 FROM python:3.14-slim AS runtime
 COPY --from=ghcr.io/astral-sh/uv:0.11.16 /uv /uvx /bin/
 
+LABEL org.opencontainers.image.title="Sangam" \
+      org.opencontainers.image.description="A small, self-hosted document server for humans and agents" \
+      org.opencontainers.image.source="https://github.com/jayshah5696/sangam" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     SANGAM_DATABASE_PATH=/data/database/sangam.sqlite3 \
