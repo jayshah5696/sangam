@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 STATE=$(mktemp -d "$ROOT/.sangam-smoke.XXXXXX")
-NAME="sangam-phase3-smoke-$$"
+NAME="sangam-phase4-smoke-$$"
 PORT=18080
 
 cleanup() {
@@ -13,14 +13,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$STATE/database" "$STATE/workspace" "$STATE/backups"
-docker build -t sangam:phase3 "$ROOT"
+docker build -t sangam:phase4 "$ROOT"
 docker run -d \
   --name "$NAME" \
   -p "127.0.0.1:$PORT:8000" \
   -v "$STATE/database:/data/database" \
   -v "$STATE/workspace:/data/workspace" \
   -v "$STATE/backups:/data/backups" \
-  sangam:phase3 >/dev/null
+  sangam:phase4 >/dev/null
 
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
@@ -49,6 +49,40 @@ SEARCHED_ID=$(curl --fail --silent \
   "http://127.0.0.1:$PORT/api/v1/search?q=container" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["document_id"])')
 test "$SEARCHED_ID" = "$DOCUMENT_ID"
+
+HTML_CREATED=$(curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-html' \
+  --data '{"title":"Interactive smoke","content":"<script>window.smoke=true</script><h1>Interactive</h1>","content_type":"text/html","path":"published/interactive.html"}' \
+  "http://127.0.0.1:$PORT/api/v1/documents")
+HTML_DOCUMENT_ID=$(printf '%s' "$HTML_CREATED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["document_id"])')
+HTML_REVISION_ID=$(printf '%s' "$HTML_CREATED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["current_revision_id"])')
+test -f "$STATE/workspace/published/interactive.html"
+
+PUBLICATION=$(curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-publish' \
+  --data "{\"document_id\":\"$HTML_DOCUMENT_ID\",\"slug\":\"docker-interactive\",\"access_policy\":\"public\"}" \
+  "http://127.0.0.1:$PORT/api/v1/publications")
+PUBLICATION_ID=$(printf '%s' "$PUBLICATION" | python3 -c 'import json,sys; print(json.load(sys.stdin)["publication_id"])')
+curl --fail --silent \
+  "http://127.0.0.1:$PORT/api/v1/publications/docker-interactive/content" \
+  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["content_type"] == "text/html" and data["is_latest"]'
+
+TRUSTED=$(curl --fail --silent -X PATCH \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-trust' \
+  --data '{"expected_trust_version":0,"trust_level":"trusted_interactive"}' \
+  "http://127.0.0.1:$PORT/api/v1/documents/$HTML_DOCUMENT_ID/trust")
+printf '%s' "$TRUSTED" | python3 -c 'import json,sys; assert json.load(sys.stdin)["trust_level"] == "trusted_interactive"'
+PREVIEW_GRANT=$(curl --fail --silent -X POST \
+  "http://127.0.0.1:$PORT/api/v1/documents/$HTML_DOCUMENT_ID/trusted-preview?revision_id=$HTML_REVISION_ID")
+PREVIEW_TOKEN=$(printf '%s' "$PREVIEW_GRANT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+curl --fail --silent \
+  -H "Authorization: Sangam-Preview $PREVIEW_TOKEN" \
+  "http://127.0.0.1:$PORT/api/v1/trusted-previews/content" \
+  | grep -q 'window.smoke=true'
+echo "Verified HTML materialization, stable publication, and isolated trusted preview."
 
 ISSUED_TOKEN=$(curl --fail --silent \
   -H 'Content-Type: application/json' \

@@ -8,7 +8,18 @@ from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
 from sangam.errors import AuthorizationError, ConflictError, SangamError
 from sangam.organization import WorkspaceOrganizationService
-from sangam.schemas import Document, DocumentSummary, Folder, Revision, RevisionDiff, Tag
+from sangam.publication import PublicationService
+from sangam.schemas import (
+    Document,
+    DocumentSummary,
+    Folder,
+    IssuedPublication,
+    Publication,
+    PublicationRevision,
+    Revision,
+    RevisionDiff,
+    Tag,
+)
 from sangam.security import Principal
 from sangam.service import DocumentService
 from sangam.workspace import canonicalize_document_path
@@ -26,11 +37,13 @@ class WorkspaceAccessService:
         organization: WorkspaceOrganizationService,
         policy: AuthorizationPolicy,
         activity: ActivityService,
+        publications: PublicationService,
     ) -> None:
         self.documents = documents
         self.organization = organization
         self.policy = policy
         self.activity = activity
+        self.publications = publications
 
     def list_documents(
         self,
@@ -97,6 +110,7 @@ class WorkspaceAccessService:
         title: str,
         content: str,
         path: str | None,
+        content_type: str = "text/markdown",
         idempotency_key: str,
     ) -> Document:
         def operation() -> Document:
@@ -107,11 +121,160 @@ class WorkspaceAccessService:
                 title=title,
                 content=content,
                 path=authorized_path,
+                content_type=content_type,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             )
 
         return self._run(principal, "create", "document", operation, path=path)
+
+    def create_publication(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        slug: str,
+        access_policy: str,
+        idempotency_key: str,
+    ) -> IssuedPublication:
+        current = self.documents.get_document(document_id)
+
+        def operation() -> IssuedPublication:
+            self.policy.require(principal, Capability.PUBLISH, current.path)
+            return self.publications.create(
+                document_id=document_id,
+                slug=slug,
+                access_policy=access_policy,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+        return self._run(
+            principal,
+            "publish",
+            "publication",
+            operation,
+            resource_id=document_id,
+            path=current.path,
+        )
+
+    def update_publication(
+        self,
+        principal: Principal,
+        *,
+        publication_id: str,
+        expected_version: int,
+        slug: str,
+        access_policy: str,
+        idempotency_key: str,
+    ) -> IssuedPublication:
+        publication = self.publications.get_publication(publication_id)
+        current = self.documents.get_document(publication.document_id)
+
+        def operation() -> IssuedPublication:
+            self.policy.require(principal, Capability.PUBLISH, current.path)
+            return self.publications.update(
+                publication_id=publication_id,
+                expected_version=expected_version,
+                slug=slug,
+                access_policy=access_policy,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+        return self._run(
+            principal,
+            "publish",
+            "publication",
+            operation,
+            resource_id=publication_id,
+            path=current.path,
+        )
+
+    def unpublish(
+        self,
+        principal: Principal,
+        *,
+        publication_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> Publication:
+        publication = self.publications.get_publication(publication_id)
+        current = self.documents.get_document(publication.document_id)
+
+        def operation() -> Publication:
+            self.policy.require(principal, Capability.PUBLISH, current.path)
+            return self.publications.unpublish(
+                publication_id=publication_id,
+                expected_version=expected_version,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+        return self._run(
+            principal,
+            "unpublish",
+            "publication",
+            operation,
+            resource_id=publication_id,
+            path=current.path,
+        )
+
+    def expose_publication_revision(
+        self,
+        principal: Principal,
+        *,
+        publication_id: str,
+        revision_id: str,
+        idempotency_key: str,
+    ) -> PublicationRevision:
+        publication = self.publications.get_publication(publication_id)
+        current = self.documents.get_document(publication.document_id)
+
+        def operation() -> PublicationRevision:
+            self.policy.require(principal, Capability.PUBLISH, current.path)
+            return self.publications.expose_revision(
+                publication_id=publication_id,
+                revision_id=revision_id,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+        return self._run(
+            principal,
+            "expose_revision",
+            "publication",
+            operation,
+            resource_id=publication_id,
+            path=current.path,
+        )
+
+    def rotate_publication_token(
+        self,
+        principal: Principal,
+        *,
+        publication_id: str,
+        idempotency_key: str,
+    ) -> IssuedPublication:
+        publication = self.publications.get_publication(publication_id)
+        current = self.documents.get_document(publication.document_id)
+
+        def operation() -> IssuedPublication:
+            self.policy.require(principal, Capability.PUBLISH, current.path)
+            return self.publications.rotate_token(
+                publication_id=publication_id,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+        return self._run(
+            principal,
+            "rotate_token",
+            "publication",
+            operation,
+            resource_id=publication_id,
+            path=current.path,
+        )
 
     def update_document(
         self,

@@ -1,5 +1,6 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
+import { html } from '@codemirror/lang-html'
 import { EditorState } from '@codemirror/state'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
@@ -28,10 +29,11 @@ type MarkdownEditorProps = {
   onSelectionChange?: (selection: EditorSelection) => void
   initialViewState?: EditorViewState
   onViewStateChange?: (viewState: EditorViewState) => void
+  contentType?: 'text/markdown' | 'text/html'
 }
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, onSelectionChange, initialViewState, onViewStateChange },
+  { value, onChange, onSelectionChange, initialViewState, onViewStateChange, contentType = 'text/markdown' },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -82,7 +84,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         extensions: [
           lineNumbers(),
           history(),
-          markdown(),
+          contentType === 'text/html' ? html() : markdown(),
           highlightSelectionMatches(),
           keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           EditorView.lineWrapping,
@@ -127,7 +129,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       view.destroy()
       viewRef.current = null
     }
-  }, [])
+  }, [contentType])
 
   useEffect(() => {
     const view = viewRef.current

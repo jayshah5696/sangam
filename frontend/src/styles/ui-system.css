@@ -117,6 +117,7 @@ button {
   .sidebar-sort select,
   .compare-controls select,
   .metadata-editor input,
+  .metadata-editor select,
   .materialize-bar input,
   .folder-setting > input,
   .tag-creator input[type="text"],

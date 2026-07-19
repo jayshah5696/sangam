@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import mimetypes
 import os
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -12,8 +13,8 @@ from sangam.errors import InvalidPathError
 def canonicalize_document_path(raw_path: str) -> str:
     """Validate document-path syntax without consulting the filesystem."""
     normalized = _canonicalize_relative_path(raw_path, kind="Document")
-    if PurePosixPath(normalized).suffix.lower() != ".md":
-        raise InvalidPathError("Sangam supports only .md document paths")
+    if PurePosixPath(normalized).suffix.lower() not in {".md", ".html", ".htm"}:
+        raise InvalidPathError("Sangam document paths must end in .md, .html, or .htm")
     return normalized
 
 
@@ -55,7 +56,7 @@ class WorkspaceFilesystem(Protocol):
 
     def delete_document(self, path: str) -> None: ...
 
-    def scan_markdown(self) -> dict[str, str]: ...
+    def scan_documents(self) -> dict[str, str]: ...
 
     def is_document_file(self, path: str) -> bool: ...
 
@@ -64,6 +65,8 @@ class WorkspaceFilesystem(Protocol):
     def title_from_path(self, path: str) -> str: ...
 
     def create_folder(self, path: str) -> None: ...
+
+    def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]: ...
 
 
 class DiskWorkspaceFilesystem:
@@ -123,14 +126,20 @@ class DiskWorkspaceFilesystem:
             document.unlink()
             self._fsync_directory(document.parent)
 
-    def scan_markdown(self) -> dict[str, str]:
+    def scan_documents(self) -> dict[str, str]:
         files: dict[str, str] = {}
         root = self.root.resolve()
-        for file_path in root.rglob("*.md"):
+        for file_path in root.rglob("*"):
+            if file_path.suffix.lower() not in {".md", ".html", ".htm"}:
+                continue
             if file_path.is_file() and ".sangam-" not in file_path.name:
                 relative = file_path.relative_to(root).as_posix()
                 files[relative] = hashlib.sha256(file_path.read_bytes()).hexdigest()
         return files
+
+    def scan_markdown(self) -> dict[str, str]:
+        """Compatibility alias for older clients; Phase 4 scans every text document."""
+        return self.scan_documents()
 
     def is_document_file(self, path: str) -> bool:
         return self._document_path(path).is_file()
@@ -144,6 +153,18 @@ class DiskWorkspaceFilesystem:
 
     def create_folder(self, path: str) -> None:
         self._folder_path(path).mkdir(parents=True, exist_ok=True)
+
+    def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]:
+        normalized = _canonicalize_relative_path(path, kind="Asset")
+        self._require_inside_workspace(normalized, noun="Asset path")
+        candidate = self.root.resolve() / normalized
+        if not candidate.is_file():
+            raise InvalidPathError("Publication asset was not found")
+        size = candidate.stat().st_size
+        if size > max_bytes:
+            raise InvalidPathError("Publication asset exceeds the configured size limit")
+        media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        return candidate.read_bytes(), media_type
 
     @staticmethod
     def _fsync_directory(directory: Path) -> None:

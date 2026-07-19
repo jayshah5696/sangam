@@ -26,6 +26,8 @@ const materializedDocument: DocumentSummary = {
   revision_summary: null,
   category: null,
   metadata_version: 1,
+  trust_level: 'untrusted',
+  trust_version: 0,
   tags: [],
 }
 

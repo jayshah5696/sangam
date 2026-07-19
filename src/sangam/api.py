@@ -5,10 +5,11 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from sangam.application import build_application_services
@@ -32,26 +33,35 @@ from sangam.schemas import (
     CreateAgentToken,
     CreateDocument,
     CreateFolder,
+    CreatePublication,
     CreateTag,
     DeleteDocument,
     Document,
     DocumentSummary,
     DuplicateDocument,
+    ExposePublicationRevision,
     Folder,
     IssuedAgentToken,
+    IssuedPublication,
     OperationEvent,
     PathMutation,
+    Publication,
+    PublicationContent,
+    PublicationRevision,
     ReconciliationReport,
     ReindexPath,
     RestoreDocument,
     Revision,
     RevisionDiff,
     Tag,
+    TrustedPreviewGrant,
     UpdateDocument,
     UpdateDocumentMetadata,
+    UpdateDocumentTrust,
     UpdateFolderMetadata,
+    UpdatePublication,
 )
-from sangam.security import Principal
+from sangam.security import Principal, PublicationAccess
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     authentication = services.authentication
     activity = services.activity
     authorization = services.authorization
+    publications = services.publications
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -107,11 +118,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.state.operation_id = str(uuid.uuid4())
         response = await call_next(request)
         response.headers["X-Operation-ID"] = request.state.operation_id
+        preview_url = urlsplit(resolved_settings.trusted_preview_base_url)
+        preview_origin = f"{preview_url.scheme}://{preview_url.netloc}"
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; "
+            f"frame-src 'self' {preview_origin}; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'; form-action 'self'",
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+        )
+        if request.url.path.startswith(("/api/v1/publications/", "/p/", "/trusted-preview")):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     def resolve_principal(
         request: Request,
         authorization_header: str | None = Header(default=None, alias="Authorization"),
+        access_jwt_assertion: str | None = Header(default=None, alias="Cf-Access-Jwt-Assertion"),
     ) -> Principal:
         return authentication.resolve(
             authorization_header=authorization_header,
@@ -119,6 +147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 resolved_settings.trusted_identity_header
             ),
             operation_id=request.state.operation_id,
+            access_jwt_assertion=access_jwt_assertion,
         )
 
     principal_dependency = Depends(resolve_principal)
@@ -148,6 +177,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    trusted_preview_api_paths = {
+        "/api/v1/trusted-previews/content",
+        "/api/v1/trusted-previews/asset",
+    }
+
+    @app.middleware("http")
+    async def trusted_preview_opaque_origin_cors(request: Request, call_next):
+        is_preview_api = request.url.path in trusted_preview_api_paths
+        expected_host = resolved_settings.trusted_preview_host
+        is_preview_host = not expected_host or request.url.hostname == expected_host
+        is_opaque_origin = request.headers.get("origin") == "null"
+        if not (is_preview_api and is_preview_host and is_opaque_origin):
+            return await call_next(request)
+
+        if request.method == "OPTIONS":
+            requested_method = request.headers.get("access-control-request-method", "").upper()
+            requested_headers = {
+                header.strip().casefold()
+                for header in request.headers.get("access-control-request-headers", "").split(",")
+                if header.strip()
+            }
+            if requested_method != "GET" or not requested_headers.issubset({"authorization"}):
+                return Response(status_code=400)
+            return Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": "null",
+                    "Access-Control-Allow-Methods": "GET",
+                    "Access-Control-Allow-Headers": "Authorization",
+                    "Cache-Control": "no-store, max-age=0",
+                    "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+                },
+            )
+
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "null"
+        vary = {
+            value.strip() for value in response.headers.get("Vary", "").split(",") if value.strip()
+        }
+        vary.add("Origin")
+        response.headers["Vary"] = ", ".join(sorted(vary))
+        return response
 
     @app.exception_handler(SangamError)
     async def handle_sangam_error(_request: Request, error: SangamError) -> JSONResponse:
@@ -361,7 +433,271 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             title=body.title,
             content=body.content,
             path=body.path,
+            content_type=body.content_type,
             idempotency_key=idempotency_key,
+        )
+
+    @app.patch("/api/v1/documents/{document_id}/trust", response_model=Document)
+    def update_document_trust(
+        document_id: str,
+        body: UpdateDocumentTrust,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = admin_dependency,
+    ) -> Document:
+        return documents.update_trust(
+            document_id=document_id,
+            expected_trust_version=body.expected_trust_version,
+            trust_level=body.trust_level,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post(
+        "/api/v1/documents/{document_id}/trusted-preview",
+        response_model=TrustedPreviewGrant,
+    )
+    def issue_trusted_preview(
+        document_id: str,
+        revision_id: str = Query(),
+        principal: Principal = admin_dependency,
+    ) -> TrustedPreviewGrant:
+        del principal
+        return publications.issue_trusted_preview(document_id=document_id, revision_id=revision_id)
+
+    @app.get("/api/v1/publications", response_model=list[Publication])
+    def list_publications(_principal: Principal = admin_dependency) -> list[Publication]:
+        return publications.list_publications()
+
+    @app.get("/api/v1/publications/by-document/{document_id}", response_model=Publication | None)
+    def get_document_publication(
+        document_id: str, _principal: Principal = admin_dependency
+    ) -> Publication | None:
+        return publications.get_document_publication(document_id)
+
+    @app.post("/api/v1/publications", response_model=IssuedPublication, status_code=201)
+    def create_publication(
+        body: CreatePublication,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> IssuedPublication:
+        return workspace.create_publication(
+            principal,
+            document_id=body.document_id,
+            slug=body.slug,
+            access_policy=body.access_policy,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.patch("/api/v1/publications/{publication_id}", response_model=IssuedPublication)
+    def update_publication(
+        publication_id: str,
+        body: UpdatePublication,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> IssuedPublication:
+        return workspace.update_publication(
+            principal,
+            publication_id=publication_id,
+            expected_version=body.expected_version,
+            slug=body.slug,
+            access_policy=body.access_policy,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.delete("/api/v1/publications/{publication_id}", response_model=Publication)
+    def unpublish(
+        publication_id: str,
+        expected_version: int = Query(ge=0),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> Publication:
+        return workspace.unpublish(
+            principal,
+            publication_id=publication_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post(
+        "/api/v1/publications/{publication_id}/revisions",
+        response_model=PublicationRevision,
+    )
+    def expose_publication_revision(
+        publication_id: str,
+        body: ExposePublicationRevision,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> PublicationRevision:
+        return workspace.expose_publication_revision(
+            principal,
+            publication_id=publication_id,
+            revision_id=body.revision_id,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post(
+        "/api/v1/publications/{publication_id}/rotate-token",
+        response_model=IssuedPublication,
+    )
+    def rotate_publication_token(
+        publication_id: str,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> IssuedPublication:
+        return workspace.rotate_publication_token(
+            principal,
+            publication_id=publication_id,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get("/api/v1/publications/{slug}/content", response_model=PublicationContent)
+    def publication_content(
+        slug: str,
+        request: Request,
+        revision: str | None = Query(default=None),
+        authorization_header: str | None = Header(default=None, alias="Authorization"),
+    ) -> JSONResponse:
+        access = resolve_publication_access(request, authorization_header)
+        content = publications.get_content(
+            slug=slug,
+            revision_id=revision,
+            raw_unlisted_token=access.unlisted_token,
+            administrator=access.administrator,
+        )
+        return JSONResponse(
+            content=content.model_dump(),
+            headers={"Cache-Control": "no-store, max-age=0", "Vary": "Authorization"},
+        )
+
+    def resolve_publication_access(
+        request: Request, authorization_header: str | None
+    ) -> PublicationAccess:
+        return authentication.resolve_publication_access(
+            authorization_header=authorization_header,
+            trusted_identity_assertion=request.headers.get(
+                resolved_settings.trusted_identity_header
+            ),
+            access_jwt_assertion=request.headers.get("Cf-Access-Jwt-Assertion"),
+            operation_id=request.state.operation_id,
+        )
+
+    @app.get("/api/v1/publications/{slug}/asset", include_in_schema=False)
+    def publication_asset(
+        slug: str,
+        request: Request,
+        revision: str = Query(),
+        path: str = Query(min_length=1, max_length=1000),
+        authorization_header: str | None = Header(default=None, alias="Authorization"),
+    ) -> Response:
+        access = resolve_publication_access(request, authorization_header)
+        asset = publications.get_asset(
+            slug=slug,
+            revision_id=revision,
+            asset_reference=path,
+            raw_unlisted_token=access.unlisted_token,
+            administrator=access.administrator,
+        )
+        return Response(
+            content=asset.content,
+            media_type=asset.media_type,
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "Content-Security-Policy": "default-src 'none'",
+                "Vary": "Authorization",
+            },
+        )
+
+    def require_preview_host(request: Request) -> None:
+        expected = resolved_settings.trusted_preview_host
+        if expected and request.url.hostname != expected:
+            raise NotFoundError("Trusted preview endpoint was not found")
+
+    @app.get("/trusted-preview/", response_class=HTMLResponse, include_in_schema=False)
+    def trusted_preview_shell(request: Request) -> HTMLResponse:
+        require_preview_host(request)
+        parents = " ".join(resolved_settings.trusted_preview_parent_origins) or "'none'"
+        csp = (
+            "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; "
+            f"style-src 'unsafe-inline'; frame-ancestors {parents}; "
+            "base-uri 'none'; form-action 'none'"
+        )
+        shell = """<!doctype html><meta charset=\"utf-8\"><title>Trusted Sangam preview</title>
+<p id=\"status\">Opening trusted preview…</p><script>
+const token = new URLSearchParams(location.hash.slice(1)).get('token');
+history.replaceState(null, '', location.pathname);
+if (!token) document.getElementById('status').textContent = 'Preview token is missing.';
+else fetch('/api/v1/trusted-previews/content', {
+  headers: {Authorization: `Sangam-Preview ${token}`}
+})
+  .then(response => { if (!response.ok) throw new Error(); return response.text(); })
+  .then(async html => {
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    const assets = Array.from(parsed.querySelectorAll('[src]')).filter(element => {
+      const source = element.getAttribute('src') || '';
+      return source && !source.startsWith('/') && !source.startsWith('data:') &&
+        !source.startsWith('blob:') && !source.includes('://');
+    });
+    await Promise.all(assets.map(async element => {
+      const source = element.getAttribute('src');
+      const response = await fetch(
+        `/api/v1/trusted-previews/asset?path=${encodeURIComponent(source)}`,
+        {headers: {Authorization: `Sangam-Preview ${token}`}}
+      );
+      if (!response.ok) throw new Error();
+      element.setAttribute('src', URL.createObjectURL(await response.blob()));
+    }));
+    document.open();
+    document.write('<!doctype html>' + parsed.documentElement.outerHTML);
+    document.close();
+  })
+  .catch(() => {
+    document.getElementById('status').textContent = 'Preview expired or was revoked.';
+  });
+</script>"""
+        return HTMLResponse(
+            shell,
+            headers={"Content-Security-Policy": csp, "Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/v1/trusted-previews/content", include_in_schema=False)
+    def trusted_preview_content(
+        request: Request,
+        authorization_header: str | None = Header(default=None, alias="Authorization"),
+    ) -> HTMLResponse:
+        require_preview_host(request)
+        scheme, separator, token = (authorization_header or "").partition(" ")
+        if not separator or scheme.casefold() != "sangam-preview" or not token.strip():
+            raise NotFoundError("Trusted preview grant was not found")
+        content = publications.trusted_preview_content(token.strip())
+        connect_sources = " ".join(resolved_settings.trusted_preview_connect_src) or "'none'"
+        csp = (
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            f"connect-src {connect_sources}; img-src data: blob:; media-src 'none'; "
+            "font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+        )
+        wrapped = (
+            '<!doctype html><html><head><meta charset="utf-8">'
+            f'<meta http-equiv="Content-Security-Policy" content="{csp}">'
+            '<meta name="referrer" content="no-referrer"></head><body>'
+            f"{content}</body></html>"
+        )
+        return HTMLResponse(wrapped, headers={"Cache-Control": "no-store, max-age=0"})
+
+    @app.get("/api/v1/trusted-previews/asset", include_in_schema=False)
+    def trusted_preview_asset(
+        request: Request,
+        path: str = Query(min_length=1, max_length=1000),
+        authorization_header: str | None = Header(default=None, alias="Authorization"),
+    ) -> Response:
+        require_preview_host(request)
+        scheme, separator, token = (authorization_header or "").partition(" ")
+        if not separator or scheme.casefold() != "sangam-preview" or not token.strip():
+            raise NotFoundError("Trusted preview asset was not found")
+        asset = publications.trusted_preview_asset(raw_token=token.strip(), asset_reference=path)
+        return Response(
+            content=asset.content,
+            media_type=asset.media_type,
+            headers={"Cache-Control": "no-store, max-age=0"},
         )
 
     @app.get("/api/v1/documents/{document_id}", response_model=Document)

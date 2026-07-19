@@ -31,9 +31,10 @@ markdown.validateLink = (url) => internalDocumentHref(url) !== null || defaultVa
 
 type MarkdownPreviewProps = {
   content: string
+  resolveAsset?: (reference: string) => Promise<string>
 }
 
-export function MarkdownPreview({ content }: MarkdownPreviewProps) {
+export function MarkdownPreview({ content, resolveAsset }: MarkdownPreviewProps) {
   const previewRef = useRef<HTMLDivElement>(null)
   const safeHtml = useMemo(
     () =>
@@ -43,6 +44,27 @@ export function MarkdownPreview({ content }: MarkdownPreviewProps) {
       }),
     [content],
   )
+
+  useEffect(() => {
+    const host = previewRef.current
+    if (!host || !resolveAsset) return
+    let cancelled = false
+    const objectUrls: string[] = []
+    const images = Array.from(host.querySelectorAll<HTMLImageElement>('img[src]'))
+    void Promise.all(
+      images.map(async (element) => {
+        const reference = element.getAttribute('src') ?? ''
+        if (!reference || /^(?:[a-z]+:|\/|#)/i.test(reference)) return
+        const objectUrl = await resolveAsset(reference)
+        objectUrls.push(objectUrl)
+        if (!cancelled) element.src = objectUrl
+      }),
+    ).catch(() => undefined)
+    return () => {
+      cancelled = true
+      objectUrls.forEach(URL.revokeObjectURL)
+    }
+  }, [resolveAsset, safeHtml])
 
   useEffect(() => {
     const host = previewRef.current

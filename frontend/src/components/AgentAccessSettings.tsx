@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Bot, Check, Copy, KeyRound, RefreshCw, ShieldOff } from 'lucide-react'
+import { Bot, KeyRound, RefreshCw, ShieldOff } from 'lucide-react'
 import { api, type IssuedAgentToken, type TokenScope } from '../api'
+import { OneTimeSecret } from './OneTimeSecret'
 
 const capabilities: TokenScope['capability'][] = [
   'read',
@@ -13,6 +14,7 @@ const capabilities: TokenScope['capability'][] = [
   'tag',
   'restore',
   'delete',
+  'publish',
 ]
 
 const defaultCapabilities = new Set<TokenScope['capability']>([
@@ -85,27 +87,15 @@ export function AgentAccessSettings() {
       </header>
       <div className="settings-panel-body agent-access-settings">
         {issued && (
-          <div className="one-time-token" role="status">
-            <div>
-              <KeyRound size={18} />
-              <span>
-                <strong>Copy this token now</strong>
-                <small>Sangam stores only its hash. This value will not be shown again.</small>
-              </span>
-            </div>
-            <code>{issued.token}</code>
-            <div className="token-actions">
-              <button
-                className="secondary-action"
-                onClick={() => void navigator.clipboard.writeText(issued.token)}
-              >
-                <Copy size={14} /> Copy token
-              </button>
-              <button className="secondary-action" onClick={() => setIssued(null)}>
-                <Check size={14} /> I saved it
-              </button>
-            </div>
-          </div>
+          <OneTimeSecret
+            title="Copy this token now"
+            description="Sangam stores only its hash. This value will not be shown again."
+            value={issued.token}
+            copyLabel="Copy token"
+            icon={<KeyRound size={18} />}
+            dismissLabel="I saved it"
+            onDismiss={() => setIssued(null)}
+          />
         )}
 
         <form

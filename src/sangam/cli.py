@@ -92,13 +92,27 @@ def create(
     title: Annotated[str, typer.Option("--title", "-t")],
     content: Annotated[str, typer.Option("--content", "-c")] = "",
     file: Annotated[Path | None, typer.Option("--file", "-f")] = None,
-    path: Annotated[str | None, typer.Option("--path", help="Workspace-relative .md path.")] = None,
+    path: Annotated[
+        str | None, typer.Option("--path", help="Workspace-relative .md or .html path.")
+    ] = None,
+    content_type: Annotated[
+        str, typer.Option("--content-type", help="text/markdown or text/html")
+    ] = "text/markdown",
 ) -> None:
-    """Create a Markdown document, materialized only when --path is provided."""
+    """Create a text document, materialized only when --path is provided."""
     if file:
         content = file.read_text(encoding="utf-8")
     _print_json(
-        _request("POST", "/documents", body={"title": title, "content": content, "path": path})
+        _request(
+            "POST",
+            "/documents",
+            body={
+                "title": title,
+                "content": content,
+                "path": path,
+                "content_type": content_type,
+            },
+        )
     )
 
 
@@ -220,6 +234,62 @@ def restore(
             },
         )
     )
+
+
+@app.command()
+def publish(
+    document_id: str,
+    slug: str,
+    access: Annotated[
+        str, typer.Option("--access", help="private, public, or unlisted")
+    ] = "private",
+) -> None:
+    """Publish a document at a stable slug."""
+    _print_json(
+        _request(
+            "POST",
+            "/publications",
+            body={"document_id": document_id, "slug": slug, "access_policy": access},
+        )
+    )
+
+
+@app.command("publications")
+def list_publications() -> None:
+    """List document publications and their current policy."""
+    _print_json(_request("GET", "/publications"))
+
+
+@app.command()
+def unpublish(
+    publication_id: str,
+    expected_version: Annotated[int, typer.Option("--expected-version", min=0)],
+) -> None:
+    """Disable a publication and revoke its unlisted credentials."""
+    _print_json(
+        _request(
+            "DELETE",
+            f"/publications/{publication_id}?{urlencode({'expected_version': expected_version})}",
+        )
+    )
+
+
+@app.command("expose-revision")
+def expose_revision(publication_id: str, revision_id: str) -> None:
+    """Expose one historical revision through its non-enumerable ID."""
+    _print_json(
+        _request(
+            "POST",
+            f"/publications/{publication_id}/revisions",
+            body={"revision_id": revision_id},
+        )
+    )
+
+
+@app.command("rotate-publication-token")
+def rotate_publication_token(publication_id: str) -> None:
+    """Rotate and disclose a replacement unlisted-publication token once."""
+    _print_json(_request("POST", f"/publications/{publication_id}/rotate-token"))
 
 
 if __name__ == "__main__":

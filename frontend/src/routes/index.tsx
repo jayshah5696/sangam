@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { Command, FilePlus2, Search } from 'lucide-react'
@@ -10,9 +11,15 @@ function Welcome() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
   const documents = useQuery({ queryKey: ['documents', 'welcome'], queryFn: api.listDocuments })
   const createDocument = useMutation({
-    mutationFn: () => api.createDocument('Untitled document'),
+    mutationFn: () =>
+      api.createDocument(
+        contentType === 'text/html' ? 'Untitled HTML document' : 'Untitled document',
+        undefined,
+        contentType,
+      ),
     onSuccess: async (document) => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
       workbench.ensureDocumentOpen(document.document_id, document.title)
@@ -29,13 +36,25 @@ function Welcome() {
         them again through full-text search.
       </p>
       <div className="welcome-actions">
+        <label>
+          Format
+          <select
+            value={contentType}
+            onChange={(event) => setContentType(event.target.value as typeof contentType)}
+          >
+            <option value="text/markdown">Markdown</option>
+            <option value="text/html">HTML</option>
+          </select>
+        </label>
         <button
           className="primary-button"
           disabled={createDocument.isPending}
           onClick={() => createDocument.mutate()}
         >
           <FilePlus2 size={16} />
-          {createDocument.isPending ? 'Creating…' : 'Create a document'}
+          {createDocument.isPending
+            ? 'Creating…'
+            : `Create ${contentType === 'text/html' ? 'HTML' : 'Markdown'}`}
         </button>
         <span>
           <Command size={14} /> <kbd>⌘ K</kbd> commands

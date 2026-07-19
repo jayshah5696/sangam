@@ -1,6 +1,6 @@
 # Sangam: Vertical Implementation Phases
 
-> Status: Phases 1–3 implemented and verified; Phases 4–7 remain proposed
+> Status: Phases 1–4 implemented and verified locally; Phases 5–7 remain proposed
 >
 > Related: [Product vision and technical decisions](./VISION.md)
 
@@ -251,6 +251,8 @@ Built-in AI chat and general agent orchestration. Sangam provides document capab
 ---
 
 ## Phase 4 — HTML rendering and publishing
+
+> Implementation: [Phase 4 implementation and verification](./PHASE_4.md)
 
 ### Outcome
 

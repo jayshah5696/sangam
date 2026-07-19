@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const documentSchema = z.object({
   document_id: z.string(),
   title: z.string(),
-  content_type: z.literal('text/markdown'),
+  content_type: z.enum(['text/markdown', 'text/html']),
   path: z.string().nullable(),
   current_revision_id: z.string(),
   content: z.string(),
@@ -20,6 +20,8 @@ export const documentSchema = z.object({
   revision_summary: z.string().nullable(),
   category: z.string().nullable(),
   metadata_version: z.number(),
+  trust_level: z.enum(['untrusted', 'trusted_interactive']),
+  trust_version: z.number(),
   tags: z.array(z.lazy(() => tagSchema)),
   search_snippet: z.string().nullable().optional(),
 })
@@ -114,7 +116,7 @@ export const backupSetSchema = z.object({
 export type BackupSet = z.infer<typeof backupSetSchema>
 
 export const tokenScopeSchema = z.object({
-  capability: z.enum(['read', 'search', 'create', 'update', 'move', 'tag', 'restore', 'delete']),
+  capability: z.enum(['read', 'search', 'create', 'update', 'move', 'tag', 'restore', 'delete', 'publish']),
   path_prefix: z.string().nullable(),
 })
 
@@ -158,6 +160,50 @@ export const operationEventSchema = z.object({
 })
 
 export type OperationEvent = z.infer<typeof operationEventSchema>
+
+export const publicationSchema = z.object({
+  publication_id: z.string(),
+  document_id: z.string(),
+  document_title: z.string(),
+  slug: z.string(),
+  access_policy: z.enum(['private', 'public', 'unlisted']),
+  version: z.number(),
+  active: z.boolean(),
+  has_active_token: z.boolean(),
+  created_by: z.string(),
+  updated_by: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  url: z.string(),
+})
+
+export type Publication = z.infer<typeof publicationSchema>
+
+export const issuedPublicationSchema = publicationSchema.extend({ token: z.string().nullable() })
+export type IssuedPublication = z.infer<typeof issuedPublicationSchema>
+
+export const publicationContentSchema = z.object({
+  publication_id: z.string(),
+  document_id: z.string(),
+  title: z.string(),
+  slug: z.string(),
+  revision_id: z.string(),
+  content_type: z.enum(['text/markdown', 'text/html']),
+  content: z.string(),
+  trust_level: z.enum(['untrusted', 'trusted_interactive']),
+  is_latest: z.boolean(),
+  asset_base_url: z.string(),
+})
+
+export type PublicationContent = z.infer<typeof publicationContentSchema>
+
+export const trustedPreviewGrantSchema = z.object({
+  url: z.string(),
+  token: z.string(),
+  expires_at: z.string(),
+})
+
+export type TrustedPreviewGrant = z.infer<typeof trustedPreviewGrantSchema>
 
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
@@ -310,13 +356,106 @@ export const api = {
   async getDocument(documentId: string): Promise<Document> {
     return documentSchema.parse(await request(`/documents/${documentId}`))
   },
-  async createDocument(title: string, path?: string): Promise<Document> {
+  async createDocument(
+    title: string,
+    path?: string,
+    contentType: Document['content_type'] = 'text/markdown',
+  ): Promise<Document> {
+    const content =
+      contentType === 'text/html'
+        ? `<!doctype html>\n<html>\n  <head><title>${title}</title></head>\n  <body>\n    <h1>${title}</h1>\n  </body>\n</html>\n`
+        : `# ${title}\n\n`
     return documentSchema.parse(
       await request('/documents', {
         method: 'POST',
-        body: JSON.stringify({ title, content: `# ${title}\n\n`, path }),
+        body: JSON.stringify({ title, content, path, content_type: contentType }),
       }),
     )
+  },
+  async updateDocumentTrust(document: Document, trustLevel: Document['trust_level']): Promise<Document> {
+    return documentSchema.parse(
+      await request(`/documents/${document.document_id}/trust`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          expected_trust_version: document.trust_version,
+          trust_level: trustLevel,
+        }),
+      }),
+    )
+  },
+  async issueTrustedPreview(document: Document, revisionId: string): Promise<TrustedPreviewGrant> {
+    const params = new URLSearchParams({ revision_id: revisionId })
+    return trustedPreviewGrantSchema.parse(
+      await request(`/documents/${document.document_id}/trusted-preview?${params.toString()}`, {
+        method: 'POST',
+      }),
+    )
+  },
+  async getDocumentPublication(documentId: string): Promise<Publication | null> {
+    return publicationSchema.nullable().parse(await request(`/publications/by-document/${documentId}`))
+  },
+  async createPublication(
+    documentId: string,
+    slug: string,
+    accessPolicy: Publication['access_policy'],
+  ): Promise<IssuedPublication> {
+    return issuedPublicationSchema.parse(
+      await request('/publications', {
+        method: 'POST',
+        body: JSON.stringify({ document_id: documentId, slug, access_policy: accessPolicy }),
+      }),
+    )
+  },
+  async updatePublication(
+    publication: Publication,
+    slug: string,
+    accessPolicy: Publication['access_policy'],
+  ): Promise<IssuedPublication> {
+    return issuedPublicationSchema.parse(
+      await request(`/publications/${publication.publication_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          expected_version: publication.version,
+          slug,
+          access_policy: accessPolicy,
+        }),
+      }),
+    )
+  },
+  async unpublish(publication: Publication): Promise<Publication> {
+    return publicationSchema.parse(
+      await request(`/publications/${publication.publication_id}?expected_version=${publication.version}`, {
+        method: 'DELETE',
+      }),
+    )
+  },
+  async exposePublicationRevision(publicationId: string, revisionId: string): Promise<void> {
+    await request(`/publications/${publicationId}/revisions`, {
+      method: 'POST',
+      body: JSON.stringify({ revision_id: revisionId }),
+    })
+  },
+  async rotatePublicationToken(publicationId: string): Promise<IssuedPublication> {
+    return issuedPublicationSchema.parse(
+      await request(`/publications/${publicationId}/rotate-token`, { method: 'POST' }),
+    )
+  },
+  async getPublicationContent(slug: string, revision?: string, token?: string): Promise<PublicationContent> {
+    const params = new URLSearchParams()
+    if (revision) params.set('revision', revision)
+    const query = params.size ? `?${params.toString()}` : ''
+    return publicationContentSchema.parse(
+      await request(`/publications/${encodeURIComponent(slug)}/content${query}`, {
+        headers: token ? { Authorization: `Sangam-Publication ${token}` } : undefined,
+      }),
+    )
+  },
+  async publicationAsset(url: string, reference: string, token?: string): Promise<string> {
+    const response = await fetch(`${url}${encodeURIComponent(reference)}`, {
+      headers: token ? { Authorization: `Sangam-Publication ${token}` } : undefined,
+    })
+    if (!response.ok) throw new Error('Publication asset could not be loaded')
+    return URL.createObjectURL(await response.blob())
   },
   async updateDocument(document: Document, content: string, title?: string): Promise<Document> {
     return documentSchema.parse(

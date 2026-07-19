@@ -14,3 +14,4 @@ class Capability(StrEnum):
     TAG = "tag"
     RESTORE = "restore"
     DELETE = "delete"
+    PUBLISH = "publish"
