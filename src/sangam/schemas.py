@@ -350,18 +350,24 @@ class PdfSearchResult(PdfPage):
     snippet: str
 
 
-class Annotation(BaseModel):
+class AnnotationFields(BaseModel):
+    selected_text: str | None = Field(default=None, max_length=20_000)
+    note: str | None = Field(default=None, max_length=20_000)
+    geometry: list[PdfRect] = Field(default_factory=list, max_length=100)
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    color: str = Field(default="#f0c75e", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class AnnotationSnapshot(AnnotationFields):
     annotation_id: str
     document_id: str
     page_number: int
     annotation_type: AnnotationType
-    selected_text: str | None
-    note: str | None
-    geometry: list[PdfRect]
-    tags: list[str]
-    color: str
     version: int
     deleted: bool
+
+
+class Annotation(AnnotationSnapshot):
     created_by: str
     created_by_name: str
     updated_by: str
@@ -370,23 +376,13 @@ class Annotation(BaseModel):
     updated_at: str
 
 
-class CreateAnnotation(BaseModel):
+class CreateAnnotation(AnnotationFields):
     page_number: int = Field(ge=1)
     annotation_type: AnnotationType
-    selected_text: str | None = Field(default=None, max_length=20_000)
-    note: str | None = Field(default=None, max_length=20_000)
-    geometry: list[PdfRect] = Field(default_factory=list, max_length=100)
-    tags: list[str] = Field(default_factory=list, max_length=50)
-    color: str = Field(default="#f0c75e", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
-class UpdateAnnotation(BaseModel):
+class UpdateAnnotation(AnnotationFields):
     expected_version: int = Field(ge=1)
-    selected_text: str | None = Field(default=None, max_length=20_000)
-    note: str | None = Field(default=None, max_length=20_000)
-    geometry: list[PdfRect] = Field(default_factory=list, max_length=100)
-    tags: list[str] = Field(default_factory=list, max_length=50)
-    color: str = Field(default="#f0c75e", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
 class AnnotationEvent(BaseModel):
@@ -398,5 +394,5 @@ class AnnotationEvent(BaseModel):
     actor_kind: str
     operation: Literal["create", "update", "delete"]
     version: int
-    snapshot: dict[str, object]
+    snapshot: AnnotationSnapshot
     created_at: str

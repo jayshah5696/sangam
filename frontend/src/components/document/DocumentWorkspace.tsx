@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MoreHorizontal, PanelRightClose, Rows2 } from 'lucide-react'
+import { Columns2, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
 import { api, type Document } from '../../api'
 import {
   useDocumentSession,
@@ -291,9 +291,10 @@ export function DocumentWorkspace({
             <button
               className="icon-button"
               aria-label="Open document sidebar"
+              title="Open document inspector"
               onClick={() => updatePreferences({ rightVisible: true })}
             >
-              ‹
+              <PanelRightOpen size={16} />
             </button>
           </aside>
         ))}

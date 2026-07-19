@@ -6,6 +6,7 @@ import json
 import sqlite3
 import uuid
 
+from sangam.actors import ActorService
 from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
@@ -38,6 +39,7 @@ class DocumentService:
         database: Database,
         workspace: WorkspaceFilesystem,
         idempotency: IdempotencyStore,
+        actors: ActorService,
         organization: WorkspaceOrganizationService,
         search_index: SearchIndex,
         max_document_bytes: int,
@@ -45,6 +47,7 @@ class DocumentService:
         self.database = database
         self.workspace = workspace
         self.idempotency = idempotency
+        self.actors = actors
         self.organization = organization
         self.search_index = search_index
         self.max_document_bytes = max_document_bytes
@@ -59,12 +62,6 @@ class DocumentService:
                     "max_document_bytes": self.max_document_bytes,
                 },
             )
-
-    def _ensure_actor(self, connection: sqlite3.Connection, actor_id: str) -> None:
-        if not connection.execute(
-            "SELECT 1 FROM actors WHERE actor_id = ?", (actor_id,)
-        ).fetchone():
-            raise ValidationError(f"Unknown actor: {actor_id}")
 
     def _normalize_path(self, raw_path: str) -> str:
         return self.workspace.normalize_document_path(raw_path)
@@ -387,7 +384,7 @@ class DocumentService:
         duplicate: tuple[str, str] | None = None
         try:
             with self.database.transaction() as connection:
-                self._ensure_actor(connection, actor_id)
+                self.actors.require_known(connection, actor_id)
                 duplicate = self._idempotent_result(
                     connection,
                     actor_id=actor_id,
@@ -495,7 +492,7 @@ class DocumentService:
         result: tuple[str, str] | None = None
         try:
             with self.database.transaction() as connection:
-                self._ensure_actor(connection, actor_id)
+                self.actors.require_known(connection, actor_id)
                 result = self._idempotent_result(
                     connection,
                     actor_id=actor_id,
@@ -926,7 +923,7 @@ class DocumentService:
         }
         fingerprint = request_hash(payload)
         with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
+            self.actors.require_known(connection, actor_id)
             duplicate = self._idempotent_result(
                 connection,
                 actor_id=actor_id,

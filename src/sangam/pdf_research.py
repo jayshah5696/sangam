@@ -9,12 +9,15 @@ import uuid
 
 from pypdf import PdfReader
 
+from sangam.actors import ActorService
 from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, NotFoundError, ValidationError
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.schemas import (
     Annotation,
     AnnotationEvent,
+    AnnotationFields,
+    AnnotationSnapshot,
     AnnotationType,
     Document,
     PdfPage,
@@ -36,6 +39,7 @@ class PdfResearchService:
         workspace: WorkspaceFilesystem,
         documents: DocumentService,
         idempotency: IdempotencyStore,
+        actors: ActorService,
         search_index: SearchIndex,
         max_pdf_bytes: int,
     ) -> None:
@@ -43,6 +47,7 @@ class PdfResearchService:
         self.workspace = workspace
         self.documents = documents
         self.idempotency = idempotency
+        self.actors = actors
         self.search_index = search_index
         self.max_pdf_bytes = max_pdf_bytes
 
@@ -103,7 +108,7 @@ class PdfResearchService:
         revision_id = str(uuid.uuid4())
         try:
             with self.database.transaction() as connection:
-                self.documents._ensure_actor(connection, actor_id)
+                self.actors.require_known(connection, actor_id)
                 if supersedes_document_id:
                     previous = connection.execute(
                         "SELECT content_type FROM documents WHERE document_id = ? AND deleted = 0",
@@ -365,7 +370,11 @@ class PdfResearchService:
             color=color,
         )
         fingerprint = request_hash(
-            {"document_id": document_id, "page_number": page_number, **normalized}
+            {
+                "document_id": document_id,
+                "page_number": page_number,
+                **normalized.model_dump(),
+            }
         )
         with self.database.transaction() as connection:
             duplicate = self.idempotency.mutation_record(
@@ -378,7 +387,7 @@ class PdfResearchService:
             if duplicate is not None:
                 annotation_id = duplicate.resource_id
             else:
-                self.documents._ensure_actor(connection, actor_id)
+                self.actors.require_known(connection, actor_id)
                 annotation_id = str(uuid.uuid4())
                 now = utc_now()
                 connection.execute(
@@ -394,25 +403,25 @@ class PdfResearchService:
                         document_id,
                         page_number,
                         annotation_type,
-                        normalized["selected_text"],
-                        normalized["note"],
-                        json.dumps(normalized["geometry"]),
-                        json.dumps(normalized["tags"]),
-                        color,
+                        normalized.selected_text,
+                        normalized.note,
+                        json.dumps([rect.model_dump() for rect in normalized.geometry]),
+                        json.dumps(normalized.tags),
+                        normalized.color,
                         actor_id,
                         actor_id,
                         now,
                         now,
                     ),
                 )
-                snapshot = self._snapshot(
+                snapshot = AnnotationSnapshot(
                     annotation_id=annotation_id,
                     document_id=document_id,
                     page_number=page_number,
                     annotation_type=annotation_type,
                     version=1,
                     deleted=False,
-                    **normalized,
+                    **normalized.model_dump(),
                 )
                 self._insert_event(
                     connection,
@@ -476,13 +485,13 @@ class PdfResearchService:
         idempotency_key: str,
     ) -> Annotation:
         current = self.get_annotation(annotation_id)
-        normalized = {
-            "selected_text": current.selected_text,
-            "note": current.note,
-            "geometry": [rect.model_dump() for rect in current.geometry],
-            "tags": current.tags,
-            "color": current.color,
-        }
+        normalized = AnnotationFields(
+            selected_text=current.selected_text,
+            note=current.note,
+            geometry=current.geometry,
+            tags=current.tags,
+            color=current.color,
+        )
         return self._change_annotation(
             current=current,
             expected_version=expected_version,
@@ -510,7 +519,7 @@ class PdfResearchService:
         events: list[AnnotationEvent] = []
         for row in rows:
             values = dict(row)
-            snapshot = json.loads(values.pop("snapshot_json"))
+            snapshot = AnnotationSnapshot.model_validate(json.loads(values.pop("snapshot_json")))
             events.append(AnnotationEvent(**values, snapshot=snapshot))
         return events
 
@@ -519,7 +528,7 @@ class PdfResearchService:
         *,
         current: Annotation,
         expected_version: int,
-        normalized: dict[str, object],
+        normalized: AnnotationFields,
         deleted: bool,
         operation: str,
         actor_id: str,
@@ -530,7 +539,7 @@ class PdfResearchService:
                 "annotation_id": current.annotation_id,
                 "expected_version": expected_version,
                 "deleted": deleted,
-                **normalized,
+                **normalized.model_dump(),
             }
         )
         with self.database.transaction() as connection:
@@ -542,7 +551,7 @@ class PdfResearchService:
                 request_hash=fingerprint,
             )
             if duplicate is None:
-                self.documents._ensure_actor(connection, actor_id)
+                self.actors.require_known(connection, actor_id)
                 row = connection.execute(
                     "SELECT version, deleted FROM annotations WHERE annotation_id = ?",
                     (current.annotation_id,),
@@ -567,11 +576,11 @@ class PdfResearchService:
                         updated_by = ?, updated_at = ? WHERE annotation_id = ?
                     """,
                     (
-                        normalized["selected_text"],
-                        normalized["note"],
-                        json.dumps(normalized["geometry"]),
-                        json.dumps(normalized["tags"]),
-                        normalized["color"],
+                        normalized.selected_text,
+                        normalized.note,
+                        json.dumps([rect.model_dump() for rect in normalized.geometry]),
+                        json.dumps(normalized.tags),
+                        normalized.color,
                         next_version,
                         int(deleted),
                         actor_id,
@@ -579,14 +588,14 @@ class PdfResearchService:
                         current.annotation_id,
                     ),
                 )
-                snapshot = self._snapshot(
+                snapshot = AnnotationSnapshot(
                     annotation_id=current.annotation_id,
                     document_id=current.document_id,
                     page_number=current.page_number,
                     annotation_type=current.annotation_type,
                     version=next_version,
                     deleted=deleted,
-                    **normalized,
+                    **normalized.model_dump(),
                 )
                 self._insert_event(
                     connection,
@@ -629,28 +638,24 @@ class PdfResearchService:
         geometry: list[PdfRect],
         tags: list[str],
         color: str,
-    ) -> dict[str, object]:
+    ) -> AnnotationFields:
         selected_text = selected_text.strip() if selected_text and selected_text.strip() else None
         note = note.strip() if note and note.strip() else None
         normalized_tags = sorted({tag.strip() for tag in tags if tag.strip()}, key=str.casefold)
-        normalized_geometry = [rect.model_dump() for rect in geometry]
+        normalized_geometry = geometry
         if annotation_type == "text_highlight" and not selected_text:
             raise ValidationError("Text highlights require selected text")
         if annotation_type in {"text_highlight", "area_highlight"} and not normalized_geometry:
             raise ValidationError("Highlights require page coordinates")
         if annotation_type in {"comment", "page_note"} and not note:
             raise ValidationError("Notes and comments require text")
-        return {
-            "selected_text": selected_text,
-            "note": note,
-            "geometry": normalized_geometry,
-            "tags": normalized_tags,
-            "color": color.lower(),
-        }
-
-    @staticmethod
-    def _snapshot(**values: object) -> dict[str, object]:
-        return values
+        return AnnotationFields(
+            selected_text=selected_text,
+            note=note,
+            geometry=normalized_geometry,
+            tags=normalized_tags,
+            color=color.lower(),
+        )
 
     @staticmethod
     def _insert_event(
@@ -661,7 +666,7 @@ class PdfResearchService:
         actor_id: str,
         operation: str,
         version: int,
-        snapshot: dict[str, object],
+        snapshot: AnnotationSnapshot,
     ) -> None:
         connection.execute(
             """
@@ -677,7 +682,7 @@ class PdfResearchService:
                 actor_id,
                 operation,
                 version,
-                json.dumps(snapshot, sort_keys=True),
+                json.dumps(snapshot.model_dump(mode="json"), sort_keys=True),
                 utc_now(),
             ),
         )

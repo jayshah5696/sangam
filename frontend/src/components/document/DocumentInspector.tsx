@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
+import { PanelRightClose } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { RevisionMergeView } from '../RevisionMergeView'
@@ -69,8 +70,13 @@ export function DocumentInspector({
     <aside className="history-panel document-inspector ui-rail ui-rail--surface" style={{ width }}>
       <div className="right-panel-header ui-rail-header">
         <p className="eyebrow">Inspector</p>
-        <button className="icon-button" aria-label="Collapse document inspector" onClick={onCollapse}>
-          ›
+        <button
+          className="icon-button"
+          aria-label="Collapse document inspector"
+          title="Collapse document inspector"
+          onClick={onCollapse}
+        >
+          <PanelRightClose size={16} />
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">

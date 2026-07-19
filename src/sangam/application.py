@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from sangam.access import WorkspaceAccessService
 from sangam.activity import ActivityService
+from sangam.actors import ActorService
 from sangam.authorization import AuthorizationPolicy
 from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
@@ -45,16 +46,19 @@ def build_application_services(settings: Settings) -> ApplicationServices:
     _bootstrap_actors(database, settings)
     workspace = DiskWorkspaceFilesystem(settings.workspace_root)
     idempotency = IdempotencyStore(database)
+    actors = ActorService()
     organization = WorkspaceOrganizationService(
         database=database,
         workspace=workspace,
         idempotency=idempotency,
+        actors=actors,
     )
     search_index = SearchIndex(database)
     documents = DocumentService(
         database=database,
         workspace=workspace,
         idempotency=idempotency,
+        actors=actors,
         organization=organization,
         search_index=search_index,
         max_document_bytes=settings.max_document_bytes,
@@ -70,6 +74,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         database=database,
         idempotency=idempotency,
         manager=backup_manager,
+        actors=actors,
     )
     reconciliation = ReconciliationService(
         database=database,
@@ -123,6 +128,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         workspace=workspace,
         documents=documents,
         idempotency=idempotency,
+        actors=actors,
         search_index=search_index,
         max_pdf_bytes=settings.max_pdf_bytes,
     )

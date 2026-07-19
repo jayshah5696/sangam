@@ -44,6 +44,21 @@ reference the exact original bytes.
 
 ## Screenshots
 
+### PDF research workspace
+
+Immutable PDFs open in a dedicated PDF.js reader beside the research rail.
+Page-aware text search, annotation filters, replacement imports, stable page
+links, and actor-attributed notes remain available without changing the source
+bytes.
+
+![Phase 5 PDF research workspace showing the PDF reader, page-text search result, and an actor-attributed page note](./docs/assets/phase-5-pdf-research.png)
+
+At narrow widths, the reader and research rail stack into one continuous
+workspace. The toolbar wraps while the PDF viewport and research rail retain
+their own overflow behavior.
+
+![Phase 5 PDF research workspace at a narrow viewport with the fitted PDF reader above the page search and annotation controls](./docs/assets/phase-5-pdf-research-narrow.png)
+
 ### HTML preview and publication controls
 
 HTML documents use the normal Sangam editor and revision history. Safe preview

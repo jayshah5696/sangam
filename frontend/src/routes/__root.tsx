@@ -43,7 +43,7 @@ function RootLayout() {
   }
 
   return (
-    <div className="workbench-shell">
+    <div className={`workbench-shell ${preferences.leftVisible ? '' : 'sidebar-collapsed'}`}>
       {preferences.leftVisible ? (
         <>
           <PrimarySidebar
@@ -62,7 +62,7 @@ function RootLayout() {
         </>
       ) : (
         <button
-          className="sidebar-reveal"
+          className="sidebar-reveal icon-button"
           aria-label="Show workspace sidebar"
           title="Show workspace sidebar"
           onClick={() => updatePreferences({ leftVisible: true })}

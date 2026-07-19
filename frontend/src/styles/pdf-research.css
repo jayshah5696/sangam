@@ -17,6 +17,8 @@
 }
 
 .pdf-toolbar,
+.pdf-toolbar-group,
+.pdf-toolbar-actions,
 .pdf-page-controls,
 .pdf-zoom-controls,
 .pdf-annotation-actions,
@@ -27,12 +29,22 @@
 }
 
 .pdf-toolbar {
-  min-height: var(--control-height);
+  min-height: calc(var(--control-height) + var(--space-4));
   padding: var(--space-2) var(--space-3);
-  flex-wrap: wrap;
   justify-content: space-between;
+  gap: var(--space-3);
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+
+.pdf-toolbar-group,
+.pdf-toolbar-actions {
+  min-width: 0;
+}
+
+.pdf-toolbar-group {
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .pdf-toolbar button,
@@ -42,6 +54,27 @@
   border-radius: var(--radius-control);
   font: inherit;
   font-size: var(--text-control);
+}
+
+.pdf-toolbar button {
+  height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding-inline: var(--space-3);
+  white-space: nowrap;
+}
+
+.pdf-toolbar .icon-button {
+  width: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0;
+}
+
+.pdf-toolbar button > svg,
+.pdf-replacement-button > svg {
+  flex: none;
 }
 
 .pdf-page-controls label {
@@ -151,7 +184,6 @@
 
 .pdf-search,
 .annotation-filter,
-.pdf-replacement-control,
 .annotation-composer,
 .annotation-detail,
 .pdf-search-results,
@@ -264,7 +296,6 @@
 }
 
 .annotation-filter,
-.pdf-replacement-control,
 .annotation-composer label,
 .annotation-detail label {
   display: grid;
@@ -274,7 +305,69 @@
 }
 
 .pdf-replacement-control {
+  min-height: calc(var(--control-height) * 2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border-bottom: 1px solid var(--line);
+}
+
+.pdf-replacement-copy {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.pdf-replacement-copy strong {
+  font-size: var(--text-body);
+  line-height: var(--leading-tight);
+}
+
+.pdf-replacement-copy small {
+  color: var(--muted);
+}
+
+.pdf-replacement-button {
+  position: relative;
+  min-height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex: none;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-control);
+  line-height: var(--leading-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pdf-replacement-button:hover {
+  border-color: var(--accent);
+}
+
+.pdf-replacement-button:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pdf-replacement-button[aria-disabled="true"] {
+  opacity: .55;
+  cursor: default;
+}
+
+.pdf-replacement-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
 .annotation-filter input,
@@ -323,7 +416,18 @@
   }
 
   .pdf-toolbar {
+    align-items: stretch;
     flex-wrap: wrap;
+  }
+
+  .pdf-toolbar-group,
+  .pdf-toolbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .pdf-toolbar-actions > button {
+    flex: 1;
   }
 
   .pdf-page-scroll {
