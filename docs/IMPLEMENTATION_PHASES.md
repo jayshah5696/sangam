@@ -1,6 +1,6 @@
 # Sangam: Vertical Implementation Phases
 
-> Status: Phases 1–5 implemented and verified locally; Phases 6–7 remain proposed
+> Status: Phases 1–6 implemented and verified locally; Phase 7 remains proposed
 >
 > Related: [Product vision and technical decisions](./VISION.md)
 
@@ -380,6 +380,8 @@ OCR, collaborative live cursors, annotation export, annotated-PDF generation, an
 
 ## Phase 6 — Karakeep confluence
 
+> Implementation: [Phase 6 implementation and verification](./PHASE_6.md)
+
 ### Outcome
 
 Selected archived web content flows from Karakeep into Sangam as editable, attributable documents without displacing Karakeep as the archive of record.
@@ -498,4 +500,4 @@ General-purpose agent orchestration, autonomous background agents, multi-agent w
 
 After Phase 7, Sangam satisfies the product capabilities in the vision: ordinary-file documents, stable identity, versioned human and agent collaboration, workspace search, safe and trusted rendering, PDF research, Karakeep import, publishing, and grounded chat through one document API.
 
-This document defines direction and phase boundaries. Phases 1–5 now have concrete implementation documents linked from their sections. Phases 6–7 remain directional until evidence from the running system makes their detailed planning timely.
+This document defines direction and phase boundaries. Phases 1–6 now have concrete implementation documents linked from their sections. Phase 7 remains directional until evidence from the running system makes its detailed planning timely.

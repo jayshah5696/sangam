@@ -7,6 +7,7 @@ import {
   Activity,
   ArchiveRestore,
   FileText,
+  Import,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -155,6 +156,7 @@ function SidebarLinks() {
     { to: '/activity' as const, label: 'Agent activity', icon: Activity },
     { to: '/reconciliation' as const, label: 'Workspace integrity', icon: ShieldCheck },
     { to: '/backups' as const, label: 'Backups', icon: ArchiveRestore },
+    { to: '/karakeep' as const, label: 'Karakeep imports', icon: Import },
     { to: '/trash' as const, label: 'Trash', icon: Trash2 },
     { to: '/settings' as const, label: 'Settings', icon: Settings },
   ]

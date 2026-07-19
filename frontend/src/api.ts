@@ -36,6 +36,70 @@ export const documentSummarySchema = documentSchema.omit({ content: true })
 
 export type DocumentSummary = z.infer<typeof documentSummarySchema>
 
+export const karakeepAssetSchema = z.object({
+  asset_id: z.string(),
+  asset_type: z.string(),
+  file_name: z.string().nullable(),
+})
+
+export const karakeepBookmarkSchema = z.object({
+  bookmark_id: z.string(),
+  title: z.string(),
+  content_type: z.enum(['link', 'text', 'asset', 'unknown']),
+  source_url: z.string().nullable(),
+  author: z.string().nullable(),
+  created_at: z.string(),
+  modified_at: z.string().nullable(),
+  tags: z.array(z.string()),
+  assets: z.array(karakeepAssetSchema),
+  imported_document_id: z.string().nullable(),
+  import_status: z.string().nullable(),
+})
+
+export type KarakeepBookmark = z.infer<typeof karakeepBookmarkSchema>
+
+export const karakeepBookmarkPageSchema = z.object({
+  bookmarks: z.array(karakeepBookmarkSchema),
+  next_cursor: z.string().nullable(),
+})
+
+export const karakeepConnectionSchema = z.object({
+  configured: z.boolean(),
+  connected: z.boolean(),
+  message: z.string(),
+})
+
+export const karakeepImportSchema = z.object({
+  import_id: z.string(),
+  bookmark_id: z.string(),
+  document_id: z.string().nullable(),
+  status: z.enum(['importing', 'current', 'review_required', 'failed']),
+  last_error: z.string().nullable(),
+  last_attempt_at: z.string(),
+  last_success_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  source_url: z.string().nullable(),
+  title: z.string().nullable(),
+  author: z.string().nullable(),
+  source_created_at: z.string().nullable(),
+  source_modified_at: z.string().nullable(),
+  tags: z.array(z.string()),
+  assets: z.array(karakeepAssetSchema),
+})
+
+export type KarakeepImport = z.infer<typeof karakeepImportSchema>
+
+export const karakeepImportDetailSchema = karakeepImportSchema.extend({
+  document_title: z.string().nullable(),
+  current_revision_id: z.string().nullable(),
+  working_copy: z.string().nullable(),
+  accepted_markdown: z.string().nullable(),
+  pending_markdown: z.string().nullable(),
+})
+
+export type KarakeepImportDetail = z.infer<typeof karakeepImportDetailSchema>
+
 export const tagSchema = z.object({
   tag_id: z.string(),
   name: z.string(),
@@ -340,6 +404,42 @@ export async function collectPages<T>(
 }
 
 export const api = {
+  async karakeepHealth(): Promise<z.infer<typeof karakeepConnectionSchema>> {
+    return karakeepConnectionSchema.parse(await request('/karakeep/health'))
+  },
+  async searchKarakeep(query: string, cursor?: string): Promise<z.infer<typeof karakeepBookmarkPageSchema>> {
+    const params = new URLSearchParams({ q: query, limit: '30' })
+    if (cursor) params.set('cursor', cursor)
+    return karakeepBookmarkPageSchema.parse(await request(`/karakeep/bookmarks?${params.toString()}`))
+  },
+  async listKarakeepImports(): Promise<KarakeepImport[]> {
+    return z.array(karakeepImportSchema).parse(await request('/karakeep/imports'))
+  },
+  async getKarakeepImport(importId: string): Promise<KarakeepImportDetail> {
+    return karakeepImportDetailSchema.parse(await request(`/karakeep/imports/${importId}`))
+  },
+  async importKarakeepBookmark(bookmarkId: string): Promise<KarakeepImportDetail> {
+    return karakeepImportDetailSchema.parse(
+      await request('/karakeep/imports', {
+        method: 'POST',
+        body: JSON.stringify({ bookmark_id: bookmarkId }),
+      }),
+    )
+  },
+  async refreshKarakeepImport(importId: string): Promise<KarakeepImportDetail> {
+    return karakeepImportDetailSchema.parse(
+      await request(`/karakeep/imports/${importId}/refresh`, { method: 'POST' }),
+    )
+  },
+  async applyKarakeepRefresh(detail: KarakeepImportDetail, content: string): Promise<KarakeepImportDetail> {
+    if (!detail.current_revision_id) throw new Error('The imported document has no current revision')
+    return karakeepImportDetailSchema.parse(
+      await request(`/karakeep/imports/${detail.import_id}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ expected_revision_id: detail.current_revision_id, content }),
+      }),
+    )
+  },
   async listAgentTokens(): Promise<AgentToken[]> {
     return z.array(agentTokenSchema).parse(await request('/agent-tokens'))
   },

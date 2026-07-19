@@ -3,24 +3,37 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 STATE=$(mktemp -d "$ROOT/.sangam-smoke.XXXXXX")
-NAME="sangam-phase5-smoke-$$"
+NAME="sangam-phase6-smoke-$$"
+KARAKEEP_NAME="sangam-karakeep-smoke-$$"
+NETWORK="sangam-phase6-smoke-$$"
 PORT=18080
 
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
+  docker rm -f "$KARAKEEP_NAME" >/dev/null 2>&1 || true
+  docker network rm "$NETWORK" >/dev/null 2>&1 || true
   rm -rf "$STATE"
 }
 trap cleanup EXIT INT TERM
 
 mkdir -p "$STATE/database" "$STATE/workspace" "$STATE/backups"
-docker build -t sangam:phase5 "$ROOT"
+docker build -t sangam:phase6 "$ROOT"
+docker network create "$NETWORK" >/dev/null
+docker run -d \
+  --name "$KARAKEEP_NAME" \
+  --network "$NETWORK" \
+  -v "$ROOT/scripts/fake-karakeep.py:/fake-karakeep.py:ro" \
+  sangam:phase6 uv run --no-sync python /fake-karakeep.py >/dev/null
 docker run -d \
   --name "$NAME" \
+  --network "$NETWORK" \
   -p "127.0.0.1:$PORT:8000" \
   -v "$STATE/database:/data/database" \
   -v "$STATE/workspace:/data/workspace" \
   -v "$STATE/backups:/data/backups" \
-  sangam:phase5 >/dev/null
+  -e "SANGAM_KARAKEEP_BASE_URL=http://$KARAKEEP_NAME:8901/api/v1" \
+  -e SANGAM_KARAKEEP_API_KEY=docker-smoke-key \
+  sangam:phase6 >/dev/null
 
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
@@ -49,6 +62,32 @@ SEARCHED_ID=$(curl --fail --silent \
   "http://127.0.0.1:$PORT/api/v1/search?q=container" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["document_id"])')
 test "$SEARCHED_ID" = "$DOCUMENT_ID"
+
+curl --fail --silent \
+  "http://127.0.0.1:$PORT/api/v1/karakeep/health" \
+  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["connected"]'
+KARAKEEP_SEARCH=$(curl --fail --silent \
+  "http://127.0.0.1:$PORT/api/v1/karakeep/bookmarks?q=container")
+KARAKEEP_BOOKMARK_ID=$(printf '%s' "$KARAKEEP_SEARCH" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["bookmarks"][0]["bookmark_id"])')
+KARAKEEP_IMPORT=$(curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-karakeep-import' \
+  --data "{\"bookmark_id\":\"$KARAKEEP_BOOKMARK_ID\"}" \
+  "http://127.0.0.1:$PORT/api/v1/karakeep/imports")
+KARAKEEP_DOCUMENT_ID=$(printf '%s' "$KARAKEEP_IMPORT" \
+  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"] == "current" and len(data["assets"]) == 1; print(data["document_id"])')
+curl --fail --silent \
+  "http://127.0.0.1:$PORT/api/v1/documents/$KARAKEEP_DOCUMENT_ID/history" \
+  | python3 -c 'import json,sys; assert json.load(sys.stdin)[0]["actor_id"] == "integration:karakeep"'
+KARAKEEP_REPEATED_ID=$(curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-karakeep-repeat' \
+  --data "{\"bookmark_id\":\"$KARAKEEP_BOOKMARK_ID\"}" \
+  "http://127.0.0.1:$PORT/api/v1/karakeep/imports" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["document_id"])')
+test "$KARAKEEP_REPEATED_ID" = "$KARAKEEP_DOCUMENT_ID"
+echo "Verified Karakeep connection, selective import, attribution, attachment metadata, and repeat identity."
 
 HTML_CREATED=$(curl --fail --silent \
   -H 'Content-Type: application/json' \
@@ -253,4 +292,4 @@ CONFLICT_TYPE=$(curl --fail --silent "http://127.0.0.1:$PORT/api/v1/reconciliati
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["conflicts"][0]["conflict_type"])')
 test "$CONFLICT_TYPE" = "unexpected_hash"
 
-echo "Docker smoke passed: text, HTML, PDF research, scoped agents, search, backup, restart, and reconciliation."
+echo "Docker smoke passed: text, HTML, PDF research, Karakeep import, scoped agents, search, backup, restart, and reconciliation."
