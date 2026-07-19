@@ -106,6 +106,25 @@ domain registration, Cloudflare streaming checks, model changes, and key rotatio
 
 ## Screenshots
 
+### Workspace-grounded agent chat
+
+The document inspector embeds ChatKit's streaming conversation UI, enabled
+OpenRouter model picker, durable history, and retry controls beside the active
+document. The OpenAI Agents SDK can read authorized workspace context and use
+Sangam tools while existing-document changes remain outside the editor until
+the human reviews them.
+
+![Phase 7 workspace-grounded chat showing the active launch brief, ChatKit composer with an OpenRouter model, and a pending agent edit proposal](./docs/assets/phase-7-chat-workspace.jpg)
+
+### Human-reviewed chat proposal
+
+An agent-proposed document update is pinned to the revision it reviewed. Sangam
+shows the exact addition with Pierre Diffs and keeps apply or dismiss under
+human control; applying the change uses the normal attributed, idempotent
+document update path.
+
+![Phase 7 chat proposal showing the unchanged source document beside the revision-pinned recovery addition and human apply or dismiss controls](./docs/assets/phase-7-chat-proposal.jpg)
+
 ### Karakeep import and source review
 
 Search remains in Karakeep until a bookmark is selected. Imported sources show
