@@ -11,7 +11,10 @@ from sangam.backup_service import BackupService
 from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.idempotency import IdempotencyStore
-from sangam.karakeep import KarakeepClient, KarakeepService
+from sangam.karakeep import KarakeepService
+from sangam.karakeep_extraction import KarakeepExtractor
+from sangam.karakeep_gateway import KarakeepClient
+from sangam.karakeep_repository import KarakeepRepository
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
 from sangam.publication import PreviewTokenService, PublicationService
@@ -142,11 +145,11 @@ def build_application_services(settings: Settings) -> ApplicationServices:
             timeout_seconds=settings.karakeep_timeout_seconds,
         )
     karakeep = KarakeepService(
-        database=database,
         documents=documents,
         organization=organization,
         client=karakeep_client,
-        max_source_bytes=settings.max_karakeep_source_bytes,
+        extractor=KarakeepExtractor(max_source_bytes=settings.max_karakeep_source_bytes),
+        repository=KarakeepRepository(database),
     )
     karakeep.recover_interrupted_imports()
     workspace_access = WorkspaceAccessService(
