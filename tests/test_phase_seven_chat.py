@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from types import SimpleNamespace
+from typing import Any, cast
 
+import pytest
+from agents.tool_context import ToolContext as AgentsToolContext
+from chatkit.agents import AgentContext
+from chatkit.types import CustomTask
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
-from sangam.chat import ChatRequestContext
+from sangam.chat_context import ChatRequestContext
+from sangam.errors import ValidationError
 from sangam.security import Principal
 
 
@@ -107,8 +115,8 @@ def test_reviewed_chat_proposal_uses_the_normal_document_update_path(
     principal = Principal.trusted_human(
         actor_id="human:jay", display_name="Jay", operation_id="proposal-test"
     )
-    proposal = client.app.state.services.chat.create_proposal(
-        ChatRequestContext(principal=principal, document_id=document["document_id"]),
+    proposal = client.app.state.services.chat.proposals.create(
+        principal,
         thread_id=thread_id,
         document_id=document["document_id"],
         expected_revision_id=document["current_revision_id"],
@@ -148,8 +156,8 @@ def test_chat_proposal_detects_a_concurrent_edit(client: TestClient) -> None:
     principal = Principal.trusted_human(
         actor_id="human:jay", display_name="Jay", operation_id="proposal-conflict"
     )
-    proposal = client.app.state.services.chat.create_proposal(
-        ChatRequestContext(principal=principal, document_id=document["document_id"]),
+    proposal = client.app.state.services.chat.proposals.create(
+        principal,
         thread_id=thread_id,
         document_id=document["document_id"],
         expected_revision_id=document["current_revision_id"],
@@ -175,3 +183,138 @@ def test_chat_proposal_detects_a_concurrent_edit(client: TestClient) -> None:
     assert listed[0]["status"] == "stale"
     current = client.get(f"/api/v1/documents/{document['document_id']}").json()
     assert current["content"] == "human version"
+
+
+def test_chat_proposal_apply_recovers_after_status_write_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Recoverable", "content": "before"},
+        headers=headers("phase-seven-recovery-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-recovery"
+    )
+    proposals = client.app.state.services.chat.proposals
+    proposal = proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="after",
+        summary="Recover interrupted apply",
+    )
+    original_mark_applied = proposals.repository.mark_applied
+    calls = 0
+
+    def fail_once(apply_principal: Principal, proposal_id: str, applied_revision_id: str):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("simulated interruption after document commit")
+        return original_mark_applied(apply_principal, proposal_id, applied_revision_id)
+
+    monkeypatch.setattr(proposals.repository, "mark_applied", fail_once)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        proposals.apply(
+            principal,
+            proposal_id=proposal.proposal_id,
+            expected_revision_id=proposal.expected_revision_id,
+            idempotency_key="first-apply-key",
+        )
+
+    pending = proposals.repository.get_owned(principal, proposal.proposal_id)
+    assert pending.status == "pending"
+    retry_principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-recovery-retry"
+    )
+    recovered = proposals.apply(
+        retry_principal,
+        proposal_id=proposal.proposal_id,
+        expected_revision_id=proposal.expected_revision_id,
+        idempotency_key="different-retry-key",
+    )
+
+    assert recovered.status == "applied"
+    assert recovered.applied_revision_id is not None
+    history = client.get(f"/api/v1/documents/{document['document_id']}/history").json()
+    assert [revision["content"] for revision in history] == ["after", "before"]
+
+
+def test_chat_tool_wrapper_tracks_task_identity_and_serializes_failures(client: TestClient) -> None:
+    toolset = client.app.state.services.chat.toolset
+
+    class FakeAgentContext:
+        def __init__(self) -> None:
+            existing = CustomTask(title="Earlier task", content="done", status_indicator="complete")
+            workflow = SimpleNamespace(tasks=[existing])
+            self.workflow_item = SimpleNamespace(workflow=workflow)
+            self.updated_index: int | None = None
+
+        async def add_workflow_task(self, task: CustomTask) -> None:
+            self.workflow_item.workflow.tasks.append(task)
+
+        async def update_workflow_task(self, task: CustomTask, task_index: int) -> None:
+            self.updated_index = task_index
+            self.workflow_item.workflow.tasks[task_index] = task
+
+    agent_context = FakeAgentContext()
+    ctx = cast(Any, SimpleNamespace(context=agent_context))
+
+    result = asyncio.run(
+        toolset._run_tool(
+            ctx,
+            "Read document",
+            "missing",
+            lambda: (_ for _ in ()).throw(ValidationError("cannot read document")),
+        )
+    )
+
+    assert agent_context.updated_index == 1
+    assert json.loads(result)["error"]["code"] == "validation_error"
+    assert agent_context.workflow_item.workflow.tasks[1].content == "Failed: cannot read document"
+
+
+def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
+    client: TestClient,
+) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Tool invocation", "content": "orchid-compass-93"},
+        headers=headers("phase-seven-tool-invocation"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="tool-invocation"
+    )
+    request_context = ChatRequestContext(principal=principal, document_id=document["document_id"])
+    chat = client.app.state.services.chat
+    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    agent_context = AgentContext(
+        thread=thread,
+        store=chat.store_adapter,
+        request_context=request_context,
+    )
+    read_tool = next(tool for tool in chat.tools if tool.name == "read_document")
+    arguments = json.dumps({"document_id": document["document_id"]})
+    run_context = AgentsToolContext(
+        context=agent_context,
+        tool_name=read_tool.name,
+        tool_call_id="call-read-document",
+        tool_arguments=arguments,
+    )
+
+    result = asyncio.run(
+        read_tool.on_invoke_tool(
+            run_context,
+            arguments,
+        )
+    )
+
+    payload = json.loads(result)
+    assert payload["content"] == "orchid-compass-93"
+    assert payload["source"]["revision_id"] == document["current_revision_id"]
+    assert agent_context.workflow_item is not None
+    assert agent_context.workflow_item.workflow.tasks[0].status_indicator == "complete"

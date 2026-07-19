@@ -6,7 +6,7 @@ from typing import TypeVar
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
-from sangam.errors import AuthorizationError, ConflictError, SangamError
+from sangam.errors import AuthorizationError, ConflictError, SangamError, ValidationError
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
 from sangam.publication import PublicationService
@@ -53,6 +53,27 @@ class WorkspaceAccessService:
         self.activity = activity
         self.publications = publications
         self.pdf_research = pdf_research
+
+    def validate_proposed_update(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        content: str,
+    ) -> Document:
+        """Authorize and validate a reviewable update without mutating the document."""
+        current = self.documents.get_document(document_id)
+        self.policy.require(principal, Capability.UPDATE, current.path)
+        if current.content_type == "application/pdf":
+            raise ValidationError("PDF source bytes cannot be updated through chat")
+        if current.current_revision_id != expected_revision_id:
+            raise ConflictError(
+                "The document changed before the proposal was created",
+                details={"current_revision_id": current.current_revision_id},
+            )
+        self.documents.validate_proposed_content(content)
+        return current
 
     def import_pdf(
         self,

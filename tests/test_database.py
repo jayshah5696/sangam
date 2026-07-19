@@ -37,6 +37,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "009",
         "010",
         "011",
+        "012",
     ]
     assert {
         "operation_events_revision_outcome_created_idx",
@@ -44,6 +45,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "documents_category_idx",
         "document_trust_events_document_created_idx",
         "publication_events_publication_created_idx",
+        "chat_proposals_apply_key_idx",
     } <= indexes
 
 

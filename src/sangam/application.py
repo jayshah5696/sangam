@@ -165,20 +165,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
     chat = SangamChatServer(
         database=database,
         workspace=workspace_access,
-        api_key=(
-            settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else None
-        ),
-        base_url=settings.openrouter_base_url,
-        http_referer=settings.openrouter_http_referer,
-        app_title=settings.openrouter_app_title,
-        domain_key=settings.chatkit_domain_key,
-        available_models=settings.chat_available_models,
-        default_model=settings.chat_default_model,
-        reasoning_effort=settings.chat_reasoning_effort,
-        max_turns=settings.chat_max_tool_rounds,
-        max_tool_result_bytes=settings.chat_max_tool_result_bytes,
-        max_context_messages=settings.chat_max_context_messages,
-        timeout_seconds=settings.chat_timeout_seconds,
+        config=settings.chat_server_config(),
     )
     return ApplicationServices(
         documents=documents,

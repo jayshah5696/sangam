@@ -81,6 +81,9 @@ second WebSocket transport as a workaround.
 - A provider or network failure produces a ChatKit error item with retry enabled.
 - Completed thread items are durable in SQLite and included in normal backups.
 - A pending edit proposal remains unapplied across restart.
+- If a Document revision commits before its proposal status is updated, retry
+  the same proposal. Sangam reuses the proposal's reserved idempotency key and
+  completes the status transition without creating a second revision.
 - A proposal whose expected revision is no longer current becomes stale when
   application receives the normal Document conflict.
 

@@ -227,7 +227,12 @@ export function DocumentInspector({
         </>
       )}
       {tab === 'chat' && (
-        <ChatPanel document={document} selectedText={selectedText} onDocumentUpdated={onUpdated} />
+        <ChatPanel
+          key={document.document_id}
+          document={document}
+          selectedText={selectedText}
+          onDocumentUpdated={onUpdated}
+        />
       )}
     </aside>
   )

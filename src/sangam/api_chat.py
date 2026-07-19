@@ -57,7 +57,7 @@ def create_chat_router(
         document_id: str | None = Query(default=None),
         principal: Principal = principal_dependency,
     ) -> list[ChatProposal]:
-        return chat.list_proposals(principal, thread_id=thread_id, document_id=document_id)
+        return chat.proposals.list(principal, thread_id=thread_id, document_id=document_id)
 
     @router.post("/chat/proposals/{proposal_id}/apply", response_model=ChatProposal)
     def apply_proposal(
@@ -66,7 +66,7 @@ def create_chat_router(
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = principal_dependency,
     ) -> ChatProposal:
-        return chat.apply_proposal(
+        return chat.proposals.apply(
             principal,
             proposal_id=proposal_id,
             expected_revision_id=body.expected_revision_id,
@@ -79,6 +79,6 @@ def create_chat_router(
         body: DismissChatProposal,
         principal: Principal = principal_dependency,
     ) -> ChatProposal:
-        return chat.dismiss_proposal(principal, proposal_id, body.reason)
+        return chat.proposals.dismiss(principal, proposal_id, body.reason)
 
     return router

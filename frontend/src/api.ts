@@ -394,7 +394,9 @@ export class ApiError extends Error {
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const headers = new Headers(init?.headers)
   if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  if (init?.method && init.method !== 'GET') headers.set('Idempotency-Key', crypto.randomUUID())
+  if (init?.method && init.method !== 'GET' && !headers.has('Idempotency-Key')) {
+    headers.set('Idempotency-Key', crypto.randomUUID())
+  }
   const response = await fetch(`/api/v1${path}`, { ...init, headers })
   const payload: unknown = await response.json()
   if (!response.ok) {
@@ -443,6 +445,7 @@ export const api = {
     return chatProposalSchema.parse(
       await request(`/chat/proposals/${proposal.proposal_id}/apply`, {
         method: 'POST',
+        headers: { 'Idempotency-Key': `chat-proposal:${proposal.proposal_id}` },
         body: JSON.stringify({ expected_revision_id: proposal.expected_revision_id }),
       }),
     )

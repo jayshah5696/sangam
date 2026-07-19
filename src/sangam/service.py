@@ -63,6 +63,10 @@ class DocumentService:
                 },
             )
 
+    def validate_proposed_content(self, content: str) -> None:
+        """Validate text content before a caller persists a reviewable proposal."""
+        self._validate_content_size(content)
+
     def _normalize_path(self, raw_path: str) -> str:
         return self.workspace.normalize_document_path(raw_path)
 

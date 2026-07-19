@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 from chatkit.store import Store
 from chatkit.types import Attachment, Page, ThreadItem, ThreadMetadata
@@ -8,8 +8,18 @@ from pydantic import TypeAdapter
 
 from sangam.db import Database, utc_now
 from sangam.errors import NotFoundError
+from sangam.security import Principal
 
-TContext = TypeVar("TContext")
+
+class OwnerContext(Protocol):
+    @property
+    def principal(self) -> Principal: ...
+
+    @property
+    def document_id(self) -> str | None: ...
+
+
+TContext = TypeVar("TContext", bound=OwnerContext)
 
 _THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
 _ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
@@ -23,11 +33,11 @@ class SQLiteChatKitStore(Store[TContext]):
 
     @staticmethod
     def _actor_id(context: TContext) -> str:
-        return context.principal.actor_id  # type: ignore[attr-defined]
+        return context.principal.actor_id
 
     @staticmethod
     def _document_id(context: TContext) -> str | None:
-        return context.document_id  # type: ignore[attr-defined]
+        return context.document_id
 
     def _require_thread_owner(self, thread_id: str, context: TContext) -> None:
         with self.database.connection() as connection:

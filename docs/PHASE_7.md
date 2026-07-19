@@ -29,11 +29,13 @@ flowchart LR
     ChatKitPy --> Store["Owner-scoped SQLite Store"]
     ChatKitPy --> Runner["OpenAI Agents SDK Runner"]
     Runner --> Router["OpenRouter Responses API"]
-    Runner --> Tools["Authorized function tools"]
+    Runner --> Tools["ChatToolset"]
     Tools --> Access["WorkspaceAccessService"]
     Access --> Documents["Canonical DocumentService"]
-    Tools --> Proposals["Reviewable proposals"]
-    Proposals --> Access
+    Tools --> ProposalService["ChatProposalService"]
+    ProposalService --> ProposalRepository["ChatProposalRepository"]
+    ProposalRepository --> Store
+    ProposalService --> Access
 ```
 
 `SangamChatServer` subclasses ChatKit's server abstraction. ChatKit creates and
@@ -41,6 +43,12 @@ serializes threads, persists completed items, streams native events, marks
 cancelled responses, and implements retry semantics. `stream_agent_response`
 adapts the Agents SDK event stream into those native events. Sangam does not
 parse provider SSE in the browser or implement a parallel tool-call loop.
+
+`ChatToolset` contains the importable tool implementations and owns bounded
+workflow-task reporting. `ChatProposalService` coordinates authorization and
+canonical document updates while `ChatProposalRepository` concentrates all
+owner-scoped proposal SQL. The chat server therefore does not reach into Store
+internals or issue proposal queries directly.
 
 The Agents SDK uses `OpenAIProvider` with an `AsyncOpenAI` client whose base URL
 is OpenRouter. `use_responses=True` keeps the integration on the Responses API,
@@ -96,6 +104,15 @@ the human Principal. The resulting immutable revision therefore has normal
 human attribution, materialization behavior, search indexing, activity, and
 conflict semantics.
 
+Before the document mutation begins, the proposal repository durably reserves
+the first apply idempotency key. If the process stops after the document
+revision commits but before the proposal status changes, a later apply resumes
+with that same key, receives the existing revision from `DocumentService`, and
+marks the proposal applied. A reserved proposal cannot be dismissed while its
+apply is recoverable. This closes the cross-transaction failure window without
+adding a second document writer or passing database connections through the
+workspace access boundary.
+
 Create and publish tools are reserved for explicit user requests and call the
 same service boundary with deterministic idempotency keys. A proposed update
 never claims to be applied, and a concurrent change marks it stale after the
@@ -119,6 +136,10 @@ Automated coverage verifies:
 - Durable thread replay and actor ownership isolation.
 - Model allowlisting and the exact exposed Agents SDK function-tool set.
 - Proposal review, normal human-attributed application, and stale conflicts.
+- Proposal-apply recovery after interruption and identity-safe workflow-task
+  failure reporting.
+- Stable per-Document ChatKit remounting so navigation cannot reuse another
+  Document's thread ID.
 - Frontend schema validation, formatting, production build, UI-system lint, and
   browser unit tests.
 
