@@ -5,6 +5,7 @@ import sqlite3
 import uuid
 from pathlib import PurePosixPath
 
+from sangam.actors import ActorService
 from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, NotFoundError, ValidationError
 from sangam.idempotency import IdempotencyStore, request_hash
@@ -21,10 +22,12 @@ class WorkspaceOrganizationService:
         database: Database,
         workspace: WorkspaceFilesystem,
         idempotency: IdempotencyStore,
+        actors: ActorService,
     ) -> None:
         self.database = database
         self.workspace = workspace
         self.idempotency = idempotency
+        self.actors = actors
 
     def normalize_folder_path(self, raw_path: str) -> str:
         return self.workspace.normalize_folder_path(raw_path)
@@ -79,7 +82,7 @@ class WorkspaceOrganizationService:
         normalized_color = color.lower()
         fingerprint = request_hash({"name": normalized_name, "color": normalized_color})
         with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
+            self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
                 actor_id=actor_id,
@@ -157,7 +160,7 @@ class WorkspaceOrganizationService:
             }
         )
         with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
+            self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
                 actor_id=actor_id,
@@ -239,7 +242,7 @@ class WorkspaceOrganizationService:
             }
         )
         with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
+            self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
                 actor_id=actor_id,
@@ -286,13 +289,6 @@ class WorkspaceOrganizationService:
             if updated is None:
                 raise RuntimeError("Updated folder could not be reloaded")
             return self._folder_from_row(connection, updated)
-
-    @staticmethod
-    def _ensure_actor(connection: sqlite3.Connection, actor_id: str) -> None:
-        if not connection.execute(
-            "SELECT 1 FROM actors WHERE actor_id = ?", (actor_id,)
-        ).fetchone():
-            raise ValidationError(f"Unknown actor: {actor_id}")
 
     @staticmethod
     def _folder_from_row(connection: sqlite3.Connection, row: sqlite3.Row) -> Folder:

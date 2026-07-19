@@ -116,6 +116,10 @@ const document: DocumentSummary = {
   trust_level: 'untrusted',
   trust_version: 0,
   tags: [],
+  pdf_page_count: null,
+  pdf_extraction_status: null,
+  pdf_extraction_error: null,
+  supersedes_document_id: null,
 }
 
 const folder: Folder = {

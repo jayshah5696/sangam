@@ -48,6 +48,18 @@ class SearchIndex:
             """,
             (document.document_id,),
         ).fetchone()
+        pdf_search = connection.execute(
+            """
+            SELECT
+                (SELECT group_concat('Page ' || page_number || ' ' || text, ' ')
+                    FROM pdf_pages WHERE document_id = ?) AS pages,
+                (SELECT group_concat(
+                    COALESCE(selected_text, '') || ' ' || COALESCE(note, '') || ' ' || tags_json,
+                    ' '
+                ) FROM annotations WHERE document_id = ? AND deleted = 0) AS annotations
+            """,
+            (document.document_id, document.document_id),
+        ).fetchone()
         connection.execute(
             """
             INSERT INTO document_search(
@@ -58,7 +70,15 @@ class SearchIndex:
                 document.document_id,
                 document.title,
                 document.path or "",
-                document.content,
+                " ".join(
+                    value
+                    for value in (
+                        document.content,
+                        pdf_search["pages"],
+                        pdf_search["annotations"],
+                    )
+                    if value
+                ),
                 " ".join(tag.name for tag in document.tags),
                 document.category or "",
                 revision_search["authors"] or "",

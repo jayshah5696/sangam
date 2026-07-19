@@ -8,12 +8,19 @@ from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
 from sangam.errors import AuthorizationError, ConflictError, SangamError
 from sangam.organization import WorkspaceOrganizationService
+from sangam.pdf_research import PdfResearchService
 from sangam.publication import PublicationService
 from sangam.schemas import (
+    Annotation,
+    AnnotationEvent,
+    AnnotationType,
     Document,
     DocumentSummary,
     Folder,
     IssuedPublication,
+    PdfPage,
+    PdfRect,
+    PdfSearchResult,
     Publication,
     PublicationRevision,
     Revision,
@@ -38,12 +45,207 @@ class WorkspaceAccessService:
         policy: AuthorizationPolicy,
         activity: ActivityService,
         publications: PublicationService,
+        pdf_research: PdfResearchService,
     ) -> None:
         self.documents = documents
         self.organization = organization
         self.policy = policy
         self.activity = activity
         self.publications = publications
+        self.pdf_research = pdf_research
+
+    def import_pdf(
+        self,
+        principal: Principal,
+        *,
+        title: str,
+        path: str,
+        content: bytes,
+        supersedes_document_id: str | None,
+        idempotency_key: str,
+    ) -> Document:
+        def operation() -> Document:
+            authorized_path = self._authorize_destination_path(
+                principal, capability=Capability.CREATE, path=path
+            )
+            if authorized_path is None:
+                raise AuthorizationError("PDF imports require a materialized workspace path")
+            if supersedes_document_id:
+                previous = self.documents.get_document(supersedes_document_id)
+                self.policy.require(principal, Capability.READ, previous.path)
+            return self.pdf_research.import_pdf(
+                title=title,
+                path=authorized_path,
+                content=content,
+                supersedes_document_id=supersedes_document_id,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+        return self._run(principal, "import", "pdf_document", operation, path=path)
+
+    def pdf_bytes(self, principal: Principal, document_id: str) -> tuple[Document, bytes]:
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="read_pdf",
+            current=current,
+            operation=lambda: self.pdf_research.pdf_bytes(document_id),
+        )
+
+    def pdf_pages(self, principal: Principal, document_id: str) -> list[PdfPage]:
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="read_pdf_text",
+            current=current,
+            operation=lambda: self.pdf_research.pages(document_id),
+        )
+
+    def search_pdf_pages(
+        self, principal: Principal, document_id: str, query: str
+    ) -> list[PdfSearchResult]:
+        current = self.documents.get_document(document_id)
+
+        def operation() -> list[PdfSearchResult]:
+            self.policy.require(principal, Capability.READ, current.path)
+            self.policy.require(principal, Capability.SEARCH, current.path)
+            return self.pdf_research.search_pages(document_id, query)
+
+        return self._run(
+            principal,
+            "search_pdf",
+            "pdf_document",
+            operation,
+            resource_id=document_id,
+            path=current.path,
+        )
+
+    def list_annotations(
+        self,
+        principal: Principal,
+        document_id: str,
+        *,
+        page_number: int | None,
+        query: str,
+        include_deleted: bool,
+    ) -> list[Annotation]:
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="list_annotations",
+            current=current,
+            operation=lambda: self.pdf_research.list_annotations(
+                document_id,
+                page_number=page_number,
+                query=query,
+                include_deleted=include_deleted,
+            ),
+        )
+
+    def create_annotation(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        page_number: int,
+        annotation_type: AnnotationType,
+        selected_text: str | None,
+        note: str | None,
+        geometry: list[PdfRect],
+        tags: list[str],
+        color: str,
+        idempotency_key: str,
+    ) -> Annotation:
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.UPDATE,
+            action="annotate",
+            current=current,
+            operation=lambda: self.pdf_research.create_annotation(
+                document_id=document_id,
+                page_number=page_number,
+                annotation_type=annotation_type,
+                selected_text=selected_text,
+                note=note,
+                geometry=geometry,
+                tags=tags,
+                color=color,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            ),
+        )
+
+    def update_annotation(
+        self,
+        principal: Principal,
+        *,
+        annotation_id: str,
+        expected_version: int,
+        selected_text: str | None,
+        note: str | None,
+        geometry: list[PdfRect],
+        tags: list[str],
+        color: str,
+        idempotency_key: str,
+    ) -> Annotation:
+        annotation = self.pdf_research.get_annotation(annotation_id)
+        current = self.documents.get_document(annotation.document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.UPDATE,
+            action="annotate",
+            current=current,
+            operation=lambda: self.pdf_research.update_annotation(
+                annotation_id=annotation_id,
+                expected_version=expected_version,
+                selected_text=selected_text,
+                note=note,
+                geometry=geometry,
+                tags=tags,
+                color=color,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            ),
+        )
+
+    def delete_annotation(
+        self,
+        principal: Principal,
+        *,
+        annotation_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> Annotation:
+        annotation = self.pdf_research.get_annotation(annotation_id)
+        current = self.documents.get_document(annotation.document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.UPDATE,
+            action="annotate",
+            current=current,
+            operation=lambda: self.pdf_research.delete_annotation(
+                annotation_id=annotation_id,
+                expected_version=expected_version,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            ),
+        )
+
+    def annotation_history(self, principal: Principal, annotation_id: str) -> list[AnnotationEvent]:
+        annotation = self.pdf_research.get_annotation(annotation_id, include_deleted=True)
+        current = self.documents.get_document(annotation.document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="annotation_history",
+            current=current,
+            operation=lambda: self.pdf_research.annotation_history(annotation_id),
+        )
 
     def list_documents(
         self,

@@ -167,6 +167,8 @@ class PublicationService:
         normalized_slug = self._normalize_slug(slug)
         self._validate_policy(access_policy)
         document = self.documents.get_document(document_id)
+        if document.content_type == "application/pdf":
+            raise ValidationError("PDF publications are deferred; use the private research view")
         fingerprint = request_hash(
             {"document_id": document_id, "slug": normalized_slug, "access_policy": access_policy}
         )

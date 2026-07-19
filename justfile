@@ -1,6 +1,6 @@
 set dotenv-load
 
-image := "sangam:phase4"
+image := "sangam:phase5"
 container := "sangam"
 port := "8000"
 

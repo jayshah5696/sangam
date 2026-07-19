@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
+import { PanelRightClose } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { RevisionMergeView } from '../RevisionMergeView'
@@ -69,8 +70,13 @@ export function DocumentInspector({
     <aside className="history-panel document-inspector ui-rail ui-rail--surface" style={{ width }}>
       <div className="right-panel-header ui-rail-header">
         <p className="eyebrow">Inspector</p>
-        <button className="icon-button" aria-label="Collapse document inspector" onClick={onCollapse}>
-          ›
+        <button
+          className="icon-button"
+          aria-label="Collapse document inspector"
+          title="Collapse document inspector"
+          onClick={onCollapse}
+        >
+          <PanelRightClose size={16} />
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
@@ -94,7 +100,7 @@ export function DocumentInspector({
             tags={tagsQuery.data ?? []}
             onUpdated={onUpdated}
           />
-          {!publicationQuery.isLoading && (
+          {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
             <PublicationEditor
               document={document}
               publication={publicationQuery.data ?? null}
@@ -105,66 +111,81 @@ export function DocumentInspector({
       )}
       {tab === 'outline' && (
         <section className="outline-panel">
-          {headings.map((heading) => (
-            <button
-              key={`${heading.line}:${heading.text}`}
-              style={{ paddingLeft: 8 + (heading.level - 1) * 10 }}
-            >
-              <span>{heading.text}</span>
-              <small>Ln {heading.line}</small>
-            </button>
-          ))}
-          {headings.length === 0 && <p className="small-muted">No Markdown headings in this document.</p>}
+          {document.content_type === 'application/pdf' && (
+            <div className="pdf-inspector-summary">
+              <strong>{document.pdf_page_count ?? '…'} pages</strong>
+              <small>Extraction: {document.pdf_extraction_status ?? 'pending'}</small>
+              <small>SHA-256 {document.content_hash}</small>
+            </div>
+          )}
+          {document.content_type !== 'application/pdf' &&
+            headings.map((heading) => (
+              <button
+                key={`${heading.line}:${heading.text}`}
+                style={{ paddingLeft: 8 + (heading.level - 1) * 10 }}
+              >
+                <span>{heading.text}</span>
+                <small>Ln {heading.line}</small>
+              </button>
+            ))}
+          {document.content_type !== 'application/pdf' && headings.length === 0 && (
+            <p className="small-muted">No Markdown headings in this document.</p>
+          )}
         </section>
       )}
       {tab === 'history' && (
         <>
-          <section className="compare-controls">
-            <label>
-              From
-              <select
-                value={compareFrom ?? ''}
-                onChange={(event) => {
-                  if (event.target.value) setComparison(event.target.value, compareTo)
-                }}
-              >
-                <option value="">Choose a revision…</option>
-                {history.map((revision) => (
-                  <option key={revision.revision_id} value={revision.revision_id}>
-                    {revision.operation} · {new Date(revision.created_at).toLocaleString()}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              To
-              <select
-                value={compareTo}
-                onChange={(event) => {
-                  if (compareFrom) setComparison(compareFrom, event.target.value)
-                }}
-              >
-                {history.map((revision) => (
-                  <option key={revision.revision_id} value={revision.revision_id}>
-                    {revision.operation} · {new Date(revision.created_at).toLocaleString()}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {fromRevision && toRevision && fromRevision.revision_id !== toRevision.revision_id && (
-              <button
-                onClick={() =>
-                  sessions.updateSession(documentId, { compareFrom: undefined, compareTo: undefined })
-                }
-              >
-                Close comparison
-              </button>
-            )}
-          </section>
-          {fromRevision && toRevision && fromRevision.revision_id !== toRevision.revision_id && (
-            <RevisionMergeView original={fromRevision.content} modified={toRevision.content} />
+          {document.content_type !== 'application/pdf' && (
+            <section className="compare-controls">
+              <label>
+                From
+                <select
+                  value={compareFrom ?? ''}
+                  onChange={(event) => {
+                    if (event.target.value) setComparison(event.target.value, compareTo)
+                  }}
+                >
+                  <option value="">Choose a revision…</option>
+                  {history.map((revision) => (
+                    <option key={revision.revision_id} value={revision.revision_id}>
+                      {revision.operation} · {new Date(revision.created_at).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                To
+                <select
+                  value={compareTo}
+                  onChange={(event) => {
+                    if (compareFrom) setComparison(compareFrom, event.target.value)
+                  }}
+                >
+                  {history.map((revision) => (
+                    <option key={revision.revision_id} value={revision.revision_id}>
+                      {revision.operation} · {new Date(revision.created_at).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {fromRevision && toRevision && fromRevision.revision_id !== toRevision.revision_id && (
+                <button
+                  onClick={() =>
+                    sessions.updateSession(documentId, { compareFrom: undefined, compareTo: undefined })
+                  }
+                >
+                  Close comparison
+                </button>
+              )}
+            </section>
           )}
-          {previewRevision && (
+          {document.content_type !== 'application/pdf' &&
+            fromRevision &&
+            toRevision &&
+            fromRevision.revision_id !== toRevision.revision_id && (
+              <RevisionMergeView original={fromRevision.content} modified={toRevision.content} />
+            )}
+          {document.content_type !== 'application/pdf' && previewRevision && (
             <section className="revision-render-preview">
               <header>
                 <strong>Rendered revision</strong>
@@ -182,6 +203,7 @@ export function DocumentInspector({
             </section>
           )}
           <HistoryList
+            binary={document.content_type === 'application/pdf'}
             history={history}
             currentRevisionId={document.current_revision_id}
             busy={restore.isPending || session.saveState !== 'saved'}
@@ -206,6 +228,7 @@ export function DocumentInspector({
 }
 
 function HistoryList({
+  binary,
   history,
   currentRevisionId,
   busy,
@@ -215,6 +238,7 @@ function HistoryList({
   onCopy,
   onRestore,
 }: {
+  binary?: boolean
   history: Revision[]
   currentRevisionId: string
   busy: boolean
@@ -243,21 +267,23 @@ function HistoryList({
           {revision.operation_id && (
             <small className="revision-operation-id">Operation {revision.operation_id}</small>
           )}
-          <div className="revision-actions">
-            <button onClick={() => onPreview(revision)}>Preview</button>
-            {onExpose && revision.revision_id !== currentRevisionId && (
-              <button onClick={() => onExpose(revision.revision_id)}>Expose URL</button>
-            )}
-            {revision.revision_id !== currentRevisionId && (
-              <>
-                <button onClick={() => onCompare(revision.revision_id)}>Compare</button>
-                <button onClick={() => onCopy(revision)}>Copy to editor</button>
-                <button disabled={busy} onClick={() => onRestore(revision.revision_id)}>
-                  Restore
-                </button>
-              </>
-            )}
-          </div>
+          {!binary && (
+            <div className="revision-actions">
+              <button onClick={() => onPreview(revision)}>Preview</button>
+              {onExpose && revision.revision_id !== currentRevisionId && (
+                <button onClick={() => onExpose(revision.revision_id)}>Expose URL</button>
+              )}
+              {revision.revision_id !== currentRevisionId && (
+                <>
+                  <button onClick={() => onCompare(revision.revision_id)}>Compare</button>
+                  <button onClick={() => onCopy(revision)}>Copy to editor</button>
+                  <button disabled={busy} onClick={() => onRestore(revision.revision_id)}>
+                    Restore
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </article>
       ))}
     </section>

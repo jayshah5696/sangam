@@ -29,6 +29,10 @@ function documentAt(revision: string, content: string): Document {
     trust_version: 0,
     tags: [],
     search_snippet: null,
+    pdf_page_count: null,
+    pdf_extraction_status: null,
+    pdf_extraction_error: null,
+    supersedes_document_id: null,
   }
 }
 

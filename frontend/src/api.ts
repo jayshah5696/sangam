@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const documentSchema = z.object({
   document_id: z.string(),
   title: z.string(),
-  content_type: z.enum(['text/markdown', 'text/html']),
+  content_type: z.enum(['text/markdown', 'text/html', 'application/pdf']),
   path: z.string().nullable(),
   current_revision_id: z.string(),
   content: z.string(),
@@ -24,6 +24,10 @@ export const documentSchema = z.object({
   trust_version: z.number(),
   tags: z.array(z.lazy(() => tagSchema)),
   search_snippet: z.string().nullable().optional(),
+  pdf_page_count: z.number().nullable(),
+  pdf_extraction_status: z.enum(['pending', 'processing', 'ready', 'failed']).nullable(),
+  pdf_extraction_error: z.string().nullable(),
+  supersedes_document_id: z.string().nullable(),
 })
 
 export type Document = z.infer<typeof documentSchema>
@@ -205,6 +209,68 @@ export const trustedPreviewGrantSchema = z.object({
 
 export type TrustedPreviewGrant = z.infer<typeof trustedPreviewGrantSchema>
 
+export const pdfRectSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+})
+
+export type PdfRect = z.infer<typeof pdfRectSchema>
+
+export const pdfPageSchema = z.object({
+  document_id: z.string(),
+  page_number: z.number(),
+  text: z.string(),
+})
+
+export const pdfSearchResultSchema = pdfPageSchema.extend({ snippet: z.string() })
+export type PdfSearchResult = z.infer<typeof pdfSearchResultSchema>
+
+export const annotationSchema = z.object({
+  annotation_id: z.string(),
+  document_id: z.string(),
+  page_number: z.number(),
+  annotation_type: z.enum([
+    'text_highlight',
+    'area_highlight',
+    'comment',
+    'page_note',
+    'bookmark',
+    'citation_marker',
+  ]),
+  selected_text: z.string().nullable(),
+  note: z.string().nullable(),
+  geometry: z.array(pdfRectSchema),
+  tags: z.array(z.string()),
+  color: z.string(),
+  version: z.number(),
+  deleted: z.boolean(),
+  created_by: z.string(),
+  created_by_name: z.string(),
+  updated_by: z.string(),
+  updated_by_name: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+
+export type Annotation = z.infer<typeof annotationSchema>
+
+export const annotationEventSchema = z.object({
+  event_id: z.string(),
+  annotation_id: z.string(),
+  document_id: z.string(),
+  actor_id: z.string(),
+  actor_display_name: z.string(),
+  actor_kind: z.string(),
+  operation: z.enum(['create', 'update', 'delete']),
+  version: z.number(),
+  snapshot: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+})
+
+export type AnnotationEvent = z.infer<typeof annotationEventSchema>
+
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
   valid: z.boolean(),
@@ -236,7 +302,7 @@ export class ApiError extends Error {
 
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const headers = new Headers(init?.headers)
-  if (init?.body) headers.set('Content-Type', 'application/json')
+  if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (init?.method && init.method !== 'GET') headers.set('Idempotency-Key', crypto.randomUUID())
   const response = await fetch(`/api/v1${path}`, { ...init, headers })
   const payload: unknown = await response.json()
@@ -371,6 +437,78 @@ export const api = {
         body: JSON.stringify({ title, content, path, content_type: contentType }),
       }),
     )
+  },
+  async importPdf(file: File, title: string, path: string, supersedesDocumentId?: string): Promise<Document> {
+    const params = new URLSearchParams({ title, path })
+    if (supersedesDocumentId) params.set('supersedes_document_id', supersedesDocumentId)
+    return documentSchema.parse(
+      await request(`/pdfs?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/pdf' },
+        body: file,
+      }),
+    )
+  },
+  pdfContentUrl(documentId: string): string {
+    return `/api/v1/pdfs/${encodeURIComponent(documentId)}/content`
+  },
+  async pdfPages(documentId: string): Promise<z.infer<typeof pdfPageSchema>[]> {
+    return z.array(pdfPageSchema).parse(await request(`/pdfs/${documentId}/pages`))
+  },
+  async searchPdf(documentId: string, query: string): Promise<PdfSearchResult[]> {
+    return z
+      .array(pdfSearchResultSchema)
+      .parse(await request(`/pdfs/${documentId}/search?${new URLSearchParams({ q: query })}`))
+  },
+  async retryPdfExtraction(documentId: string): Promise<Document> {
+    return documentSchema.parse(await request(`/pdfs/${documentId}/extract`, { method: 'POST' }))
+  },
+  async listAnnotations(documentId: string, query = '', includeDeleted = false): Promise<Annotation[]> {
+    const params = new URLSearchParams()
+    if (query) params.set('q', query)
+    if (includeDeleted) params.set('include_deleted', 'true')
+    const suffix = params.size ? `?${params.toString()}` : ''
+    return z.array(annotationSchema).parse(await request(`/pdfs/${documentId}/annotations${suffix}`))
+  },
+  async createAnnotation(
+    documentId: string,
+    input: {
+      page_number: number
+      annotation_type: Annotation['annotation_type']
+      selected_text?: string | null
+      note?: string | null
+      geometry?: PdfRect[]
+      tags?: string[]
+      color?: string
+    },
+  ): Promise<Annotation> {
+    return annotationSchema.parse(
+      await request(`/pdfs/${documentId}/annotations`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async updateAnnotation(
+    annotation: Annotation,
+    input: Pick<Annotation, 'selected_text' | 'note' | 'geometry' | 'tags' | 'color'>,
+  ): Promise<Annotation> {
+    return annotationSchema.parse(
+      await request(`/annotations/${annotation.annotation_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ expected_version: annotation.version, ...input }),
+      }),
+    )
+  },
+  async deleteAnnotation(annotation: Annotation): Promise<Annotation> {
+    return annotationSchema.parse(
+      await request(`/annotations/${annotation.annotation_id}?expected_version=${annotation.version}`, {
+        method: 'DELETE',
+      }),
+    )
+  },
+  async annotationHistory(annotationId: string): Promise<AnnotationEvent[]> {
+    return z.array(annotationEventSchema).parse(await request(`/annotations/${annotationId}/history`))
   },
   async updateDocumentTrust(document: Document, trustLevel: Document['trust_level']): Promise<Document> {
     return documentSchema.parse(

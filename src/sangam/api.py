@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from sangam.api_pdf import create_pdf_router
 from sangam.application import build_application_services
 from sangam.config import Settings
 from sangam.errors import (
@@ -78,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     activity = services.activity
     authorization = services.authorization
     publications = services.publications
+    pdf_research = services.pdf_research
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -98,11 +100,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         backup_task: asyncio.Task[None] | None = None
         if resolved_settings.backups_enabled:
             backup_task = asyncio.create_task(maintain_backups())
+        extraction_tasks = {
+            asyncio.create_task(asyncio.to_thread(pdf_research.extract_text, document_id))
+            for document_id in pdf_research.pending_extractions()
+        }
         yield
         if backup_task:
             backup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await backup_task
+        if extraction_tasks:
+            await asyncio.gather(*extraction_tasks, return_exceptions=True)
 
     app = FastAPI(
         title="Sangam API",
@@ -436,6 +444,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content_type=body.content_type,
             idempotency_key=idempotency_key,
         )
+
+    app.include_router(
+        create_pdf_router(
+            workspace=workspace,
+            pdf_research=pdf_research,
+            resolve_principal=resolve_principal,
+            require_administrator=require_administrator,
+        )
+    )
 
     @app.patch("/api/v1/documents/{document_id}/trust", response_model=Document)
     def update_document_trust(

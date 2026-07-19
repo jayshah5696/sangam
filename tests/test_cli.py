@@ -146,3 +146,33 @@ def test_cli_uses_bearer_token_without_spoofable_actor_header(
     request_headers = captured["headers"]
     assert isinstance(request_headers, dict)
     assert request_headers == {"Authorization": "Bearer sgm_agt_example.secret"}
+
+
+def test_cli_pdf_import_pages_and_annotations(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_request(method: str, path: str, **kwargs: object) -> Any:
+        calls.append({"method": method, "path": path, **kwargs})
+        return [] if method == "GET" else {"document_id": "pdf-1"}
+
+    monkeypatch.setattr(cli, "_request", fake_request)
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-test")
+    runner = CliRunner()
+
+    for arguments in (
+        ["pdf-import", str(pdf), "--title", "Paper", "--path", "research/paper.pdf"],
+        ["pdf-pages", "pdf-1", "--query", "evidence"],
+        ["annotations", "pdf-1", "--query", "important", "--include-deleted"],
+    ):
+        result = runner.invoke(cli.app, arguments)
+        assert result.exit_code == 0, result.output
+
+    assert calls[0] == {
+        "method": "POST",
+        "path": "/pdfs?title=Paper&path=research%2Fpaper.pdf",
+        "content": b"%PDF-test",
+        "content_type": "application/pdf",
+    }
+    assert calls[1]["path"] == "/pdfs/pdf-1/search?q=evidence"
+    assert calls[2]["path"] == "/pdfs/pdf-1/annotations?q=important&include_deleted=true"

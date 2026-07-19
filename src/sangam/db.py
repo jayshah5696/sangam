@@ -67,16 +67,27 @@ class Database:
                 ).fetchone()
                 if applied:
                     continue
+                migration_sql = migration.read_text(encoding="utf-8")
+                rebuilds_referenced_tables = migration_sql.startswith("-- sangam:foreign-keys-off")
                 try:
-                    connection.executescript(
-                        "BEGIN IMMEDIATE;\n" + migration.read_text(encoding="utf-8")
-                    )
+                    if rebuilds_referenced_tables:
+                        connection.execute("PRAGMA foreign_keys = OFF")
+                    connection.executescript("BEGIN IMMEDIATE;\n" + migration_sql)
                     connection.execute(
                         "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                         (version, utc_now()),
                     )
+                    if rebuilds_referenced_tables:
+                        violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+                        if violations:
+                            raise sqlite3.IntegrityError(
+                                f"Migration {version} left foreign key violations"
+                            )
                     connection.commit()
                 except Exception:
                     if connection.in_transaction:
                         connection.rollback()
                     raise
+                finally:
+                    if rebuilds_referenced_tables:
+                        connection.execute("PRAGMA foreign_keys = ON")

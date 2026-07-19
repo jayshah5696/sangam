@@ -1,6 +1,6 @@
 # Sangam: Vertical Implementation Phases
 
-> Status: Phases 1–4 implemented and verified locally; Phases 5–7 remain proposed
+> Status: Phases 1–5 implemented and verified locally; Phases 6–7 remain proposed
 >
 > Related: [Product vision and technical decisions](./VISION.md)
 
@@ -323,6 +323,8 @@ Static-site generation, themes as a product system, arbitrary routing, server-si
 
 ## Phase 5 — PDF research workspace
 
+> Implementation: [Phase 5 implementation and verification](./PHASE_5.md)
+
 ### Outcome
 
 Sangam supports reading and researching immutable PDFs alongside Markdown and HTML documents.
@@ -496,4 +498,4 @@ General-purpose agent orchestration, autonomous background agents, multi-agent w
 
 After Phase 7, Sangam satisfies the product capabilities in the vision: ordinary-file documents, stable identity, versioned human and agent collaboration, workspace search, safe and trusted rendering, PDF research, Karakeep import, publishing, and grounded chat through one document API.
 
-This document defines direction and phase boundaries. Phases 1 and 2 now have concrete implementation documents linked from their sections. Phases 3–7 remain directional until evidence from the running system makes their detailed planning timely.
+This document defines direction and phase boundaries. Phases 1–5 now have concrete implementation documents linked from their sections. Phases 6–7 remain directional until evidence from the running system makes their detailed planning timely.

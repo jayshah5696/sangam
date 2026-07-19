@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 STATE=$(mktemp -d "$ROOT/.sangam-smoke.XXXXXX")
-NAME="sangam-phase4-smoke-$$"
+NAME="sangam-phase5-smoke-$$"
 PORT=18080
 
 cleanup() {
@@ -13,14 +13,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$STATE/database" "$STATE/workspace" "$STATE/backups"
-docker build -t sangam:phase4 "$ROOT"
+docker build -t sangam:phase5 "$ROOT"
 docker run -d \
   --name "$NAME" \
   -p "127.0.0.1:$PORT:8000" \
   -v "$STATE/database:/data/database" \
   -v "$STATE/workspace:/data/workspace" \
   -v "$STATE/backups:/data/backups" \
-  sangam:phase4 >/dev/null
+  sangam:phase5 >/dev/null
 
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
@@ -83,6 +83,88 @@ curl --fail --silent \
   "http://127.0.0.1:$PORT/api/v1/trusted-previews/content" \
   | grep -q 'window.smoke=true'
 echo "Verified HTML materialization, stable publication, and isolated trusted preview."
+
+docker exec -i "$NAME" uv run --no-sync python - <<'PY'
+from pathlib import Path
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+def write_pdf(path: str, text: str) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    reference = writer._add_object(font)
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): reference})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("ascii"))
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    with Path(path).open("wb") as output:
+        writer.write(output)
+
+write_pdf("/tmp/research.pdf", "Container PDF evidence phrase")
+write_pdf("/tmp/research-replacement.pdf", "Replacement PDF evidence")
+PY
+docker cp "$NAME:/tmp/research.pdf" "$STATE/research.pdf"
+docker cp "$NAME:/tmp/research-replacement.pdf" "$STATE/research-replacement.pdf"
+
+PDF_CREATED=$(curl --fail --silent \
+  -H 'Content-Type: application/pdf' \
+  -H 'Idempotency-Key: docker-smoke-pdf' \
+  --data-binary "@$STATE/research.pdf" \
+  "http://127.0.0.1:$PORT/api/v1/pdfs?title=Research%20PDF&path=research%2Fresearch.pdf")
+PDF_DOCUMENT_ID=$(printf '%s' "$PDF_CREATED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["document_id"])')
+PDF_HASH=$(printf '%s' "$PDF_CREATED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["content_hash"])')
+
+attempt=0
+while :; do
+  PDF_STATUS=$(curl --fail --silent \
+    "http://127.0.0.1:$PORT/api/v1/documents/$PDF_DOCUMENT_ID" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["pdf_extraction_status"])')
+  test "$PDF_STATUS" = "ready" && break
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    echo "PDF extraction did not become ready." >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+curl --fail --silent \
+  "http://127.0.0.1:$PORT/api/v1/pdfs/$PDF_DOCUMENT_ID/search?q=evidence%20phrase" \
+  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data[0]["page_number"] == 1'
+RANGE_STATUS=$(curl --silent \
+  -H 'Range: bytes=0-7' \
+  -o "$STATE/pdf-range.bin" \
+  -w '%{http_code}' \
+  "http://127.0.0.1:$PORT/api/v1/pdfs/$PDF_DOCUMENT_ID/content")
+test "$RANGE_STATUS" = "206"
+python3 -c 'import sys; source=open(sys.argv[1], "rb").read(); partial=open(sys.argv[2], "rb").read(); assert partial == source[:8]' \
+  "$STATE/research.pdf" "$STATE/pdf-range.bin"
+
+ANNOTATION=$(curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: docker-smoke-annotation' \
+  --data '{"page_number":1,"annotation_type":"area_highlight","note":"Container note","geometry":[{"x":0.1,"y":0.1,"width":0.2,"height":0.05}],"tags":["smoke"],"color":"#f0c75e"}' \
+  "http://127.0.0.1:$PORT/api/v1/pdfs/$PDF_DOCUMENT_ID/annotations")
+ANNOTATION_ID=$(printf '%s' "$ANNOTATION" | python3 -c 'import json,sys; print(json.load(sys.stdin)["annotation_id"])')
+curl --fail --silent \
+  "http://127.0.0.1:$PORT/api/v1/annotations/$ANNOTATION_ID/history" \
+  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data[0]["operation"] == "create"'
+
+PDF_REPLACEMENT=$(curl --fail --silent \
+  -H 'Content-Type: application/pdf' \
+  -H 'Idempotency-Key: docker-smoke-pdf-replacement' \
+  --data-binary "@$STATE/research-replacement.pdf" \
+  "http://127.0.0.1:$PORT/api/v1/pdfs?title=Replacement%20PDF&path=research%2Fresearch-replacement.pdf&supersedes_document_id=$PDF_DOCUMENT_ID")
+printf '%s' "$PDF_REPLACEMENT" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["supersedes_document_id"] == sys.argv[1] and data["document_id"] != sys.argv[1]' "$PDF_DOCUMENT_ID"
+test "$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$STATE/workspace/research/research.pdf")" = "$PDF_HASH"
+echo "Verified immutable PDF import, extraction, range serving, annotation history, and replacement relationship."
 
 ISSUED_TOKEN=$(curl --fail --silent \
   -H 'Content-Type: application/json' \
@@ -171,4 +253,4 @@ CONFLICT_TYPE=$(curl --fail --silent "http://127.0.0.1:$PORT/api/v1/reconciliati
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["conflicts"][0]["conflict_type"])')
 test "$CONFLICT_TYPE" = "unexpected_hash"
 
-echo "Docker smoke passed: API, scoped agent auth, activity, revocation, CLI, search, verified backup, host file, restart, and reconciliation."
+echo "Docker smoke passed: text, HTML, PDF research, scoped agents, search, backup, restart, and reconciliation."

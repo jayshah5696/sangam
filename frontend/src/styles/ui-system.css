@@ -36,6 +36,13 @@ button {
   line-height: var(--leading-ui);
 }
 
+.icon-button,
+.quiet-icon,
+.tab-close,
+.tab-actions-trigger {
+  padding: 0;
+}
+
 :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea) {
   min-height: var(--control-height);
   border: 1px solid var(--line);

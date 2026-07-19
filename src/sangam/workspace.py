@@ -13,8 +13,8 @@ from sangam.errors import InvalidPathError
 def canonicalize_document_path(raw_path: str) -> str:
     """Validate document-path syntax without consulting the filesystem."""
     normalized = _canonicalize_relative_path(raw_path, kind="Document")
-    if PurePosixPath(normalized).suffix.lower() not in {".md", ".html", ".htm"}:
-        raise InvalidPathError("Sangam document paths must end in .md, .html, or .htm")
+    if PurePosixPath(normalized).suffix.lower() not in {".md", ".html", ".htm", ".pdf"}:
+        raise InvalidPathError("Sangam document paths must end in .md, .html, .htm, or .pdf")
     return normalized
 
 
@@ -54,6 +54,8 @@ class WorkspaceFilesystem(Protocol):
 
     def write_atomic(self, path: str, content: str) -> str: ...
 
+    def write_atomic_bytes(self, path: str, content: bytes, *, overwrite: bool = False) -> str: ...
+
     def delete_document(self, path: str) -> None: ...
 
     def scan_documents(self) -> dict[str, str]: ...
@@ -61,6 +63,8 @@ class WorkspaceFilesystem(Protocol):
     def is_document_file(self, path: str) -> bool: ...
 
     def read_document(self, path: str) -> str: ...
+
+    def read_binary(self, path: str) -> bytes: ...
 
     def title_from_path(self, path: str) -> str: ...
 
@@ -99,7 +103,12 @@ class DiskWorkspaceFilesystem:
         return self.root.resolve() / normalized
 
     def write_atomic(self, path: str, content: str) -> str:
+        return self.write_atomic_bytes(path, content.encode("utf-8"), overwrite=True)
+
+    def write_atomic_bytes(self, path: str, content: bytes, *, overwrite: bool = False) -> str:
         destination = self._document_path(path)
+        if destination.exists() and not overwrite:
+            raise InvalidPathError("A workspace file already exists at that path")
         destination.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{destination.name}.sangam-", dir=destination.parent
@@ -107,7 +116,7 @@ class DiskWorkspaceFilesystem:
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as output:
-                output.write(content.encode("utf-8"))
+                output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, destination)
@@ -115,7 +124,7 @@ class DiskWorkspaceFilesystem:
         finally:
             temporary.unlink(missing_ok=True)
         actual_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        expected_hash = hashlib.sha256(content).hexdigest()
         if actual_hash != expected_hash:
             raise OSError("Materialized file hash does not match the committed revision")
         return actual_hash
@@ -130,7 +139,7 @@ class DiskWorkspaceFilesystem:
         files: dict[str, str] = {}
         root = self.root.resolve()
         for file_path in root.rglob("*"):
-            if file_path.suffix.lower() not in {".md", ".html", ".htm"}:
+            if file_path.suffix.lower() not in {".md", ".html", ".htm", ".pdf"}:
                 continue
             if file_path.is_file() and ".sangam-" not in file_path.name:
                 relative = file_path.relative_to(root).as_posix()
@@ -146,6 +155,9 @@ class DiskWorkspaceFilesystem:
 
     def read_document(self, path: str) -> str:
         return self._document_path(path).read_text(encoding="utf-8")
+
+    def read_binary(self, path: str) -> bytes:
+        return self._document_path(path).read_bytes()
 
     def title_from_path(self, path: str) -> str:
         document = self._document_path(path)

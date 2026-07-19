@@ -36,8 +36,8 @@
 .sidebar-mode-switch button:hover { color: var(--sidebar-text); }
 .sidebar-mode-switch button.active { background: var(--sidebar-raised); color: var(--sidebar-text); box-shadow: 0 2px 9px rgba(0,0,0,.13); }
 .quiet-icon {
-  width: 28px;
-  height: 28px;
+  width: var(--control-compact);
+  height: var(--control-compact);
   display: grid;
   place-items: center;
   flex: none;
@@ -49,13 +49,10 @@
 .quiet-icon:hover { color: var(--sidebar-text); background: var(--sidebar-raised); }
 .sidebar-reveal {
   z-index: 7;
-  width: 28px;
-  height: 34px;
-  margin: 8px 0 0 7px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  width: var(--control-height);
+  height: var(--control-height);
+  margin: var(--space-2) 0 0 var(--space-2);
+  flex: none;
   background: var(--surface);
   color: var(--muted);
 }
@@ -252,7 +249,8 @@
 @media (max-width: 1100px) {
   .workbench-shell { position: relative; }
   .primary-sidebar { position: absolute; z-index: 11; inset: 0 auto 0 0; width: min(330px, calc(100vw - 40px)) !important; box-shadow: 18px 0 45px rgba(0,0,0,.28); }
-  .sidebar-reveal { position: absolute; z-index: 12; top: 0; left: 0; margin-left: 7px; }
+  .sidebar-reveal { position: absolute; z-index: 12; top: 0; left: 0; }
+  .sidebar-collapsed .document-header { padding-left: calc(var(--control-height) + var(--space-2)); }
   .workbench-shell > .resize-handle { display: none; }
   .workbench-main { min-width: 100vw; }
   .split-workbench .document-workspace { padding: 18px 22px 22px; }

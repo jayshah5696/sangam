@@ -19,7 +19,7 @@ class DocumentSummary(BaseModel):
 
     document_id: str
     title: str
-    content_type: Literal["text/markdown", "text/html"]
+    content_type: Literal["text/markdown", "text/html", "application/pdf"]
     path: str | None
     current_revision_id: str
     content_hash: str
@@ -39,6 +39,10 @@ class DocumentSummary(BaseModel):
     trust_version: int
     tags: list[Tag] = Field(default_factory=list)
     search_snippet: str | None = None
+    pdf_page_count: int | None = None
+    pdf_extraction_status: Literal["pending", "processing", "ready", "failed"] | None = None
+    pdf_extraction_error: str | None = None
+    supersedes_document_id: str | None = None
 
 
 class Document(DocumentSummary):
@@ -313,3 +317,82 @@ class TrustedPreviewGrant(BaseModel):
     url: str
     token: str
     expires_at: str
+
+
+class PdfRect(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+
+AnnotationType = Literal[
+    "text_highlight",
+    "area_highlight",
+    "comment",
+    "page_note",
+    "bookmark",
+    "citation_marker",
+]
+
+
+class PdfImportResult(BaseModel):
+    document: Document
+
+
+class PdfPage(BaseModel):
+    document_id: str
+    page_number: int
+    text: str
+
+
+class PdfSearchResult(PdfPage):
+    snippet: str
+
+
+class AnnotationFields(BaseModel):
+    selected_text: str | None = Field(default=None, max_length=20_000)
+    note: str | None = Field(default=None, max_length=20_000)
+    geometry: list[PdfRect] = Field(default_factory=list, max_length=100)
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    color: str = Field(default="#f0c75e", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class AnnotationSnapshot(AnnotationFields):
+    annotation_id: str
+    document_id: str
+    page_number: int
+    annotation_type: AnnotationType
+    version: int
+    deleted: bool
+
+
+class Annotation(AnnotationSnapshot):
+    created_by: str
+    created_by_name: str
+    updated_by: str
+    updated_by_name: str
+    created_at: str
+    updated_at: str
+
+
+class CreateAnnotation(AnnotationFields):
+    page_number: int = Field(ge=1)
+    annotation_type: AnnotationType
+
+
+class UpdateAnnotation(AnnotationFields):
+    expected_version: int = Field(ge=1)
+
+
+class AnnotationEvent(BaseModel):
+    event_id: str
+    annotation_id: str
+    document_id: str
+    actor_id: str
+    actor_display_name: str
+    actor_kind: str
+    operation: Literal["create", "update", "delete"]
+    version: int
+    snapshot: AnnotationSnapshot
+    created_at: str

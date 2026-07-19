@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from sangam.access import WorkspaceAccessService
 from sangam.activity import ActivityService
+from sangam.actors import ActorService
 from sangam.authorization import AuthorizationPolicy
 from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
@@ -11,6 +12,7 @@ from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.idempotency import IdempotencyStore
 from sangam.organization import WorkspaceOrganizationService
+from sangam.pdf_research import PdfResearchService
 from sangam.publication import PreviewTokenService, PublicationService
 from sangam.reconciliation import ReconciliationPlanner, ReconciliationService
 from sangam.search import SearchIndex
@@ -33,6 +35,7 @@ class ApplicationServices:
     activity: ActivityService
     authorization: AuthorizationPolicy
     publications: PublicationService
+    pdf_research: PdfResearchService
 
 
 def build_application_services(settings: Settings) -> ApplicationServices:
@@ -43,16 +46,19 @@ def build_application_services(settings: Settings) -> ApplicationServices:
     _bootstrap_actors(database, settings)
     workspace = DiskWorkspaceFilesystem(settings.workspace_root)
     idempotency = IdempotencyStore(database)
+    actors = ActorService()
     organization = WorkspaceOrganizationService(
         database=database,
         workspace=workspace,
         idempotency=idempotency,
+        actors=actors,
     )
     search_index = SearchIndex(database)
     documents = DocumentService(
         database=database,
         workspace=workspace,
         idempotency=idempotency,
+        actors=actors,
         organization=organization,
         search_index=search_index,
         max_document_bytes=settings.max_document_bytes,
@@ -68,6 +74,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         database=database,
         idempotency=idempotency,
         manager=backup_manager,
+        actors=actors,
     )
     reconciliation = ReconciliationService(
         database=database,
@@ -116,12 +123,22 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         max_asset_bytes=settings.max_publication_asset_bytes,
         publication_base_url=settings.publication_base_url,
     )
+    pdf_research = PdfResearchService(
+        database=database,
+        workspace=workspace,
+        documents=documents,
+        idempotency=idempotency,
+        actors=actors,
+        search_index=search_index,
+        max_pdf_bytes=settings.max_pdf_bytes,
+    )
     workspace_access = WorkspaceAccessService(
         documents=documents,
         organization=organization,
         policy=authorization,
         activity=activity,
         publications=publications,
+        pdf_research=pdf_research,
     )
     return ApplicationServices(
         documents=documents,
@@ -134,6 +151,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         activity=activity,
         authorization=authorization,
         publications=publications,
+        pdf_research=pdf_research,
     )
 
 

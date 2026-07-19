@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MoreHorizontal, PanelRightClose, Rows2 } from 'lucide-react'
+import { Columns2, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
 import { api, type Document } from '../../api'
 import {
   useDocumentSession,
@@ -27,6 +27,9 @@ const MarkdownEditor = lazy(() =>
 const HtmlPreview = lazy(() => import('../HtmlPreview').then((module) => ({ default: module.HtmlPreview })))
 const TrustedHtmlPreview = lazy(() =>
   import('../TrustedHtmlPreview').then((module) => ({ default: module.TrustedHtmlPreview })),
+)
+const PdfResearchWorkspace = lazy(() =>
+  import('../PdfResearchWorkspace').then((module) => ({ default: module.PdfResearchWorkspace })),
 )
 
 export function DocumentWorkspace({
@@ -106,11 +109,15 @@ export function DocumentWorkspace({
   }
 
   return (
-    <div className="document-layout tab-document-layout">
+    <div
+      className={`document-layout tab-document-layout ${
+        document.content_type === 'application/pdf' ? 'pdf-document-layout' : ''
+      }`}
+    >
       <section
         className={`document-workspace ${
           document.content_type === 'text/html' && mode !== 'edit' ? 'html-preview-workspace' : ''
-        }`}
+        } ${document.content_type === 'application/pdf' ? 'pdf-document-workspace' : ''}`}
       >
         <header className="document-header">
           <div>
@@ -126,7 +133,11 @@ export function DocumentWorkspace({
               ))}
               <span className="actor-badge">Edited by {document.updated_by_name}</span>
               <span className="scope-badge">
-                {document.content_type === 'text/html' ? 'HTML' : 'Markdown'}
+                {document.content_type === 'application/pdf'
+                  ? 'PDF'
+                  : document.content_type === 'text/html'
+                    ? 'HTML'
+                    : 'Markdown'}
               </span>
               {document.content_type === 'text/html' && (
                 <span
@@ -138,40 +149,44 @@ export function DocumentWorkspace({
               <time>{new Date(document.updated_at).toLocaleString()}</time>
             </div>
           </div>
-          <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>
+          <span className={`save-state ${saveState}`}>
+            {document.content_type === 'application/pdf' ? 'Immutable source' : saveLabel(saveState)}
+          </span>
         </header>
-        <DocumentToolbar
-          document={document}
-          content={content}
-          saveState={saveState}
-          mode={mode}
-          onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
-          canCloseGroup={canCloseGroup}
-          onSplit={onSplit}
-          onCloseGroup={onCloseGroup}
-          onUpdated={(updated) => updateCachedDocument(updated)}
-          onDeleted={async () => {
-            await queryClient.invalidateQueries({ queryKey: ['documents'] })
-            onDeleted()
-          }}
-        />
-        {saveState === 'conflict' && (
+        {document.content_type !== 'application/pdf' && (
+          <DocumentToolbar
+            document={document}
+            content={content}
+            saveState={saveState}
+            mode={mode}
+            onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
+            canCloseGroup={canCloseGroup}
+            onSplit={onSplit}
+            onCloseGroup={onCloseGroup}
+            onUpdated={(updated) => updateCachedDocument(updated)}
+            onDeleted={async () => {
+              await queryClient.invalidateQueries({ queryKey: ['documents'] })
+              onDeleted()
+            }}
+          />
+        )}
+        {document.content_type !== 'application/pdf' && saveState === 'conflict' && (
           <div className="notice conflict-notice">
             This document changed elsewhere. Your text is still here.
             <button onClick={() => void reloadAfterConflict()}>Reload current revision</button>
           </div>
         )}
-        {saveState === 'failed' && (
+        {document.content_type !== 'application/pdf' && saveState === 'failed' && (
           <div className="notice error-notice">
             Save failed. Your text remains in this editor; edit again to retry.
           </div>
         )}
-        {saveState === 'offline' && (
+        {document.content_type !== 'application/pdf' && saveState === 'offline' && (
           <div className="notice offline-notice">
             You are offline. Changes remain in this browser and will save after reconnecting.
           </div>
         )}
-        {!document.path && (
+        {document.content_type !== 'application/pdf' && !document.path && (
           <form
             className="materialize-bar"
             onSubmit={(event) => {
@@ -189,7 +204,7 @@ export function DocumentWorkspace({
             </button>
           </form>
         )}
-        {mode !== 'preview' && (
+        {document.content_type !== 'application/pdf' && mode !== 'preview' && (
           <div className="editor-tools">
             <label>
               Internal link
@@ -216,7 +231,12 @@ export function DocumentWorkspace({
           </div>
         )}
         <div className={`editing-surface mode-${mode}`}>
-          {mode !== 'preview' && (
+          {document.content_type === 'application/pdf' && (
+            <Suspense fallback={<div className="center-message">Preparing PDF reader…</div>}>
+              <PdfResearchWorkspace document={document} />
+            </Suspense>
+          )}
+          {document.content_type !== 'application/pdf' && mode !== 'preview' && (
             <Suspense fallback={<div className="editor muted">Preparing editor…</div>}>
               <MarkdownEditor
                 ref={editorRef}
@@ -271,9 +291,10 @@ export function DocumentWorkspace({
             <button
               className="icon-button"
               aria-label="Open document sidebar"
+              title="Open document inspector"
               onClick={() => updatePreferences({ rightVisible: true })}
             >
-              ‹
+              <PanelRightOpen size={16} />
             </button>
           </aside>
         ))}

@@ -5,9 +5,9 @@
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
-Phases 1 through 4 are implemented. The document core now supports a daily-use
-Markdown and HTML workspace through the browser, HTTP API, CLI, SQLite revision
-history, and ordinary workspace files.
+Phases 1 through 5 are implemented. The document core now supports a daily-use
+Markdown, HTML, and immutable PDF research workspace through the browser, HTTP
+API, CLI, SQLite revision and annotation history, and ordinary workspace files.
 
 The workspace opens with one focused editor and reveals tabs only when a group
 contains more than one document. Users can add persistent horizontal,
@@ -35,7 +35,29 @@ exposed. Trusted interactive HTML runs only through a separate preview origin
 with a short-lived HMAC grant and an opaque sandbox; published HTML remains
 sanitized.
 
+PDFs can now be imported as immutable binary Documents, rendered with PDF.js,
+searched by extracted page text, and researched with text or area highlights,
+notes, comments, bookmarks, citation markers, colors, tags, stable deep links,
+and actor-attributed annotation history. Replacement PDFs receive new stable
+IDs and explicit `supersedes` relationships, so prior citations continue to
+reference the exact original bytes.
+
 ## Screenshots
+
+### PDF research workspace
+
+Immutable PDFs open in a dedicated PDF.js reader beside the research rail.
+Page-aware text search, annotation filters, replacement imports, stable page
+links, and actor-attributed notes remain available without changing the source
+bytes.
+
+![Phase 5 PDF research workspace showing the PDF reader, page-text search result, and an actor-attributed page note](./docs/assets/phase-5-pdf-research.png)
+
+At narrow widths, the reader and research rail stack into one continuous
+workspace. The toolbar wraps while the PDF viewport and research rail retain
+their own overflow behavior.
+
+![Phase 5 PDF research workspace at a narrow viewport with the fitted PDF reader above the page search and annotation controls](./docs/assets/phase-5-pdf-research-narrow.png)
 
 ### HTML preview and publication controls
 
@@ -102,10 +124,12 @@ agent operation is recorded.
 - [Phase 2 implementation and verification](./docs/PHASE_2.md)
 - [Phase 3 implementation and verification](./docs/PHASE_3.md)
 - [Phase 4 implementation and verification](./docs/PHASE_4.md)
+- [Phase 5 implementation and verification](./docs/PHASE_5.md)
 - [Phase 1 development, deployment, and recovery operations](./docs/operations/PHASE_1_OPERATIONS.md)
 - [Phase 2 development, backup, and restore operations](./docs/operations/PHASE_2_OPERATIONS.md)
 - [Phase 3 agent-token and incident-response operations](./docs/operations/PHASE_3_OPERATIONS.md)
 - [Phase 4 publication, preview, and Cloudflare operations](./docs/operations/PHASE_4_OPERATIONS.md)
+- [Phase 5 PDF import, extraction, annotation, and recovery operations](./docs/operations/PHASE_5_OPERATIONS.md)
 - [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
 
 ## Quick start

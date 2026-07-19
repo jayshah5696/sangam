@@ -6,6 +6,7 @@ import json
 import sqlite3
 import uuid
 
+from sangam.actors import ActorService
 from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
@@ -38,6 +39,7 @@ class DocumentService:
         database: Database,
         workspace: WorkspaceFilesystem,
         idempotency: IdempotencyStore,
+        actors: ActorService,
         organization: WorkspaceOrganizationService,
         search_index: SearchIndex,
         max_document_bytes: int,
@@ -45,6 +47,7 @@ class DocumentService:
         self.database = database
         self.workspace = workspace
         self.idempotency = idempotency
+        self.actors = actors
         self.organization = organization
         self.search_index = search_index
         self.max_document_bytes = max_document_bytes
@@ -60,12 +63,6 @@ class DocumentService:
                 },
             )
 
-    def _ensure_actor(self, connection: sqlite3.Connection, actor_id: str) -> None:
-        if not connection.execute(
-            "SELECT 1 FROM actors WHERE actor_id = ?", (actor_id,)
-        ).fetchone():
-            raise ValidationError(f"Unknown actor: {actor_id}")
-
     def _normalize_path(self, raw_path: str) -> str:
         return self.workspace.normalize_document_path(raw_path)
 
@@ -74,7 +71,10 @@ class DocumentService:
         if path is None:
             return
         suffix = path.lower().rsplit(".", 1)[-1]
-        expected = "text/html" if suffix in {"html", "htm"} else "text/markdown"
+        if suffix == "pdf":
+            expected = "application/pdf"
+        else:
+            expected = "text/html" if suffix in {"html", "htm"} else "text/markdown"
         if content_type != expected:
             raise ValidationError(
                 "The workspace path extension must match the document content type"
@@ -95,6 +95,8 @@ class DocumentService:
         return f"""
             SELECT d.*{content_projection}, r.actor_id AS updated_by,
                 r.summary AS revision_summary, a.display_name AS updated_by_name,
+                pdf.page_count, pdf.extraction_status, pdf.extraction_error,
+                pdf.supersedes_document_id,
                 COALESCE((
                     SELECT json_group_array(json_object(
                         'tag_id', ordered_tags.tag_id,
@@ -112,6 +114,7 @@ class DocumentService:
             FROM documents d
             JOIN revisions r ON r.revision_id = d.current_revision_id
             JOIN actors a ON a.actor_id = r.actor_id
+            LEFT JOIN pdf_documents pdf ON pdf.document_id = d.document_id
             {search_join}
         """
 
@@ -139,6 +142,10 @@ class DocumentService:
             trust_version=row["trust_version"],
             tags=[Tag.model_validate(tag) for tag in json.loads(row["tags_json"])],
             search_snippet=row["search_snippet"],
+            pdf_page_count=row["page_count"],
+            pdf_extraction_status=row["extraction_status"],
+            pdf_extraction_error=row["extraction_error"],
+            supersedes_document_id=row["supersedes_document_id"],
         )
 
     def _document_from_row(self, row: sqlite3.Row) -> Document:
@@ -377,7 +384,7 @@ class DocumentService:
         duplicate: tuple[str, str] | None = None
         try:
             with self.database.transaction() as connection:
-                self._ensure_actor(connection, actor_id)
+                self.actors.require_known(connection, actor_id)
                 duplicate = self._idempotent_result(
                     connection,
                     actor_id=actor_id,
@@ -485,7 +492,7 @@ class DocumentService:
         result: tuple[str, str] | None = None
         try:
             with self.database.transaction() as connection:
-                self._ensure_actor(connection, actor_id)
+                self.actors.require_known(connection, actor_id)
                 result = self._idempotent_result(
                     connection,
                     actor_id=actor_id,
@@ -606,6 +613,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        self._require_text_document(document_id, "PDF source bytes cannot be edited in place")
         document, _ = self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
@@ -629,6 +637,9 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         """Record accepted workspace content through the normal revision protocol."""
+        self._require_text_document(
+            document_id, "Changed PDF bytes must be imported as a replacement document"
+        )
         document, _ = self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
@@ -653,6 +664,8 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         source = self.get_document(document_id)
+        if source.content_type == "application/pdf":
+            raise ValidationError("PDF copies must be imported as new immutable documents")
         if source.current_revision_id != expected_revision_id:
             raise ConflictError(
                 "The source document changed since it was read",
@@ -683,6 +696,8 @@ class DocumentService:
     ) -> Document:
         normalized_path = self._normalize_path(path)
         current = self.get_document(document_id)
+        if current.content_type == "application/pdf":
+            raise ValidationError("PDFs are materialized when they are imported")
         self._validate_path_type(normalized_path, current.content_type)
         document, _ = self._append_revision(
             document_id=document_id,
@@ -709,6 +724,8 @@ class DocumentService:
     ) -> Document:
         normalized_path = self._normalize_path(path)
         current = self.get_document(document_id)
+        if current.content_type == "application/pdf":
+            raise ValidationError("PDF path changes are deferred; import a replacement if needed")
         self._validate_path_type(normalized_path, current.content_type)
         if not current.path:
             raise ValidationError("Unmaterialized documents must be materialized before moving")
@@ -734,6 +751,9 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        self._require_text_document(
+            document_id, "PDF deletion is deferred so immutable research sources remain available"
+        )
         document, _ = self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
@@ -773,6 +793,8 @@ class DocumentService:
         self, *, document_id: str, from_revision_id: str, to_revision_id: str | None
     ) -> RevisionDiff:
         document = self.get_document(document_id, include_deleted=True)
+        if document.content_type == "application/pdf":
+            raise ValidationError("Binary PDF revisions do not have a line-oriented diff")
         resolved_to = to_revision_id or document.current_revision_id
         with self.database.connection() as connection:
             rows = connection.execute(
@@ -818,6 +840,9 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        self._require_text_document(
+            document_id, "Immutable PDF source bytes cannot be restored as text revisions"
+        )
         with self.database.connection() as connection:
             target = connection.execute(
                 "SELECT content FROM revisions WHERE revision_id = ? AND document_id = ?",
@@ -866,8 +891,18 @@ class DocumentService:
     def rematerialize_document(self, document_id: str) -> Document:
         """Rewrite a materialized document from the canonical database head."""
         document = self.get_document(document_id)
+        if document.content_type == "application/pdf":
+            raise ValidationError(
+                "Missing PDF bytes must be restored from backup; they are not stored in SQLite"
+            )
         self._finish_materialization(document)
         return self.get_document(document_id)
+
+    def _require_text_document(self, document_id: str, message: str) -> Document:
+        document = self.get_document(document_id, include_deleted=True)
+        if document.content_type == "application/pdf":
+            raise ValidationError(message)
+        return document
 
     def update_document_metadata(
         self,
@@ -888,7 +923,7 @@ class DocumentService:
         }
         fingerprint = request_hash(payload)
         with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
+            self.actors.require_known(connection, actor_id)
             duplicate = self._idempotent_result(
                 connection,
                 actor_id=actor_id,

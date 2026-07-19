@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
-
+from sangam.actors import ActorService
 from sangam.backup import BackupManager
 from sangam.db import Database
-from sangam.errors import NotFoundError, ValidationError
+from sangam.errors import NotFoundError
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.schemas import BackupSet, BackupVerification
 
@@ -18,10 +17,12 @@ class BackupService:
         database: Database,
         idempotency: IdempotencyStore,
         manager: BackupManager,
+        actors: ActorService,
     ) -> None:
         self.database = database
         self.idempotency = idempotency
         self.manager = manager
+        self.actors = actors
 
     def list(self) -> list[BackupSet]:
         return self.manager.list()
@@ -29,7 +30,7 @@ class BackupService:
     def create(self, *, actor_id: str, idempotency_key: str) -> BackupSet:
         fingerprint = request_hash({"operation": "create_backup"})
         with self.database.transaction() as connection:
-            self._ensure_actor(connection, actor_id)
+            self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
                 actor_id=actor_id,
@@ -73,10 +74,3 @@ class BackupService:
 
     def create_if_due(self) -> BackupSet | None:
         return self.manager.create_if_due()
-
-    @staticmethod
-    def _ensure_actor(connection: sqlite3.Connection, actor_id: str) -> None:
-        if not connection.execute(
-            "SELECT 1 FROM actors WHERE actor_id = ?", (actor_id,)
-        ).fetchone():
-            raise ValidationError(f"Unknown actor: {actor_id}")
