@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
 from sangam.application import build_application_services
 from sangam.config import Settings
@@ -20,6 +21,7 @@ from sangam.errors import (
     AuthorizationError,
     ConflictError,
     IdempotencyError,
+    IntegrationError,
     InvalidPathError,
     MaterializationError,
     NotFoundError,
@@ -80,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     authorization = services.authorization
     publications = services.publications
     pdf_research = services.pdf_research
+    karakeep = services.karakeep
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -244,6 +247,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status = 422
         elif isinstance(error, MaterializationError):
             status = 503
+        elif isinstance(error, IntegrationError):
+            status = 502
         return JSONResponse(
             status_code=status,
             content={
@@ -450,6 +455,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             workspace=workspace,
             pdf_research=pdf_research,
             resolve_principal=resolve_principal,
+            require_administrator=require_administrator,
+        )
+    )
+    app.include_router(
+        create_karakeep_router(
+            karakeep=karakeep,
             require_administrator=require_administrator,
         )
     )

@@ -49,6 +49,73 @@ class Document(DocumentSummary):
     content: str
 
 
+class KarakeepAsset(BaseModel):
+    asset_id: str
+    asset_type: str
+    file_name: str | None = None
+
+
+class KarakeepBookmark(BaseModel):
+    bookmark_id: str
+    title: str
+    content_type: Literal["link", "text", "asset", "unknown"]
+    source_url: str | None = None
+    author: str | None = None
+    created_at: str
+    modified_at: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    assets: list[KarakeepAsset] = Field(default_factory=list)
+    imported_document_id: str | None = None
+    import_status: str | None = None
+
+
+class KarakeepBookmarkPage(BaseModel):
+    bookmarks: list[KarakeepBookmark]
+    next_cursor: str | None = None
+
+
+class KarakeepConnection(BaseModel):
+    configured: bool
+    connected: bool
+    message: str
+
+
+class KarakeepImport(BaseModel):
+    import_id: str
+    bookmark_id: str
+    document_id: str | None
+    status: Literal["importing", "current", "review_required", "failed"]
+    last_error: str | None
+    last_attempt_at: str
+    last_success_at: str | None
+    created_at: str
+    updated_at: str
+    source_url: str | None = None
+    title: str | None = None
+    author: str | None = None
+    source_created_at: str | None = None
+    source_modified_at: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    assets: list[KarakeepAsset] = Field(default_factory=list)
+
+
+class KarakeepImportDetail(KarakeepImport):
+    document_title: str | None = None
+    current_revision_id: str | None = None
+    working_copy: str | None = None
+    accepted_markdown: str | None = None
+    pending_markdown: str | None = None
+
+
+class ImportKarakeepBookmark(BaseModel):
+    bookmark_id: str = Field(min_length=1, max_length=240)
+
+
+class ApplyKarakeepRefresh(BaseModel):
+    expected_revision_id: str
+    content: str | None = None
+
+
 class Folder(BaseModel):
     folder_id: str
     path: str

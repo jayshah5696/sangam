@@ -5,7 +5,7 @@
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
-Phases 1 through 5 are implemented. The document core now supports a daily-use
+Phases 1 through 6 are implemented. The document core now supports a daily-use
 Markdown, HTML, and immutable PDF research workspace through the browser, HTTP
 API, CLI, SQLite revision and annotation history, and ordinary workspace files.
 
@@ -41,6 +41,13 @@ notes, comments, bookmarks, citation markers, colors, tags, stable deep links,
 and actor-attributed annotation history. Replacement PDFs receive new stable
 IDs and explicit `supersedes` relationships, so prior citations continue to
 reference the exact original bytes.
+
+Selected Karakeep bookmarks can now be searched and imported as editable
+Markdown without turning Sangam into a second archive. Sangam keeps stable
+Karakeep provenance, source tags and attachment descriptors, attributes the
+initial revision to `integration:karakeep`, and prevents duplicate Documents by
+bookmark ID. Refreshes preserve the corrected working copy and wait in a
+side-by-side review state until a human applies a normal attributed revision.
 
 ## Screenshots
 
@@ -125,11 +132,13 @@ agent operation is recorded.
 - [Phase 3 implementation and verification](./docs/PHASE_3.md)
 - [Phase 4 implementation and verification](./docs/PHASE_4.md)
 - [Phase 5 implementation and verification](./docs/PHASE_5.md)
+- [Phase 6 implementation and verification](./docs/PHASE_6.md)
 - [Phase 1 development, deployment, and recovery operations](./docs/operations/PHASE_1_OPERATIONS.md)
 - [Phase 2 development, backup, and restore operations](./docs/operations/PHASE_2_OPERATIONS.md)
 - [Phase 3 agent-token and incident-response operations](./docs/operations/PHASE_3_OPERATIONS.md)
 - [Phase 4 publication, preview, and Cloudflare operations](./docs/operations/PHASE_4_OPERATIONS.md)
 - [Phase 5 PDF import, extraction, annotation, and recovery operations](./docs/operations/PHASE_5_OPERATIONS.md)
+- [Phase 6 Karakeep connection, import, refresh, and recovery operations](./docs/operations/PHASE_6_OPERATIONS.md)
 - [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
 
 ## Quick start

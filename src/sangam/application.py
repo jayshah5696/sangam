@@ -11,6 +11,7 @@ from sangam.backup_service import BackupService
 from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.idempotency import IdempotencyStore
+from sangam.karakeep import KarakeepClient, KarakeepService
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
 from sangam.publication import PreviewTokenService, PublicationService
@@ -36,6 +37,7 @@ class ApplicationServices:
     authorization: AuthorizationPolicy
     publications: PublicationService
     pdf_research: PdfResearchService
+    karakeep: KarakeepService
 
 
 def build_application_services(settings: Settings) -> ApplicationServices:
@@ -132,6 +134,21 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         search_index=search_index,
         max_pdf_bytes=settings.max_pdf_bytes,
     )
+    karakeep_client = None
+    if settings.karakeep_base_url and settings.karakeep_api_key:
+        karakeep_client = KarakeepClient(
+            base_url=settings.karakeep_base_url,
+            api_key=settings.karakeep_api_key.get_secret_value(),
+            timeout_seconds=settings.karakeep_timeout_seconds,
+        )
+    karakeep = KarakeepService(
+        database=database,
+        documents=documents,
+        organization=organization,
+        client=karakeep_client,
+        max_source_bytes=settings.max_karakeep_source_bytes,
+    )
+    karakeep.recover_interrupted_imports()
     workspace_access = WorkspaceAccessService(
         documents=documents,
         organization=organization,
@@ -152,6 +169,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         authorization=authorization,
         publications=publications,
         pdf_research=pdf_research,
+        karakeep=karakeep,
     )
 
 
@@ -166,6 +184,7 @@ def _bootstrap_actors(database: Database, settings: Settings) -> None:
         ("client:cli", "Sangam CLI", "client", "client"),
         ("system", "Sangam system", "system", "system"),
         ("system:reconcile", "Filesystem reconciliation", "system", "system"),
+        ("integration:karakeep", "Karakeep importer", "client", "integration"),
     )
     with database.transaction() as connection:
         for actor_id, display_name, actor_type, identity_kind in actors:

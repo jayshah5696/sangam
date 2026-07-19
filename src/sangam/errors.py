@@ -34,6 +34,10 @@ class MaterializationError(SangamError):
     code = "materialization_failed"
 
 
+class IntegrationError(SangamError):
+    code = "integration_unavailable"
+
+
 class ValidationError(SangamError):
     code = "validation_error"
 

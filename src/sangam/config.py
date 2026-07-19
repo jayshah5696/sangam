@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     max_document_bytes: int = Field(default=2_000_000, ge=1_024, le=50_000_000)
     max_pdf_bytes: int = Field(default=100_000_000, ge=1_024, le=1_000_000_000)
     max_publication_asset_bytes: int = Field(default=10_000_000, ge=1_024, le=100_000_000)
+    max_karakeep_source_bytes: int = Field(default=5_000_000, ge=1_024, le=50_000_000)
+    karakeep_base_url: str | None = None
+    karakeep_api_key: SecretStr | None = None
+    karakeep_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
     auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"
     trusted_identity_value: str = "human:jay"
