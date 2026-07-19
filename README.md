@@ -171,3 +171,50 @@ just docker-smoke
 `http://127.0.0.1:8000`, and mounts the three persistent `data/` directories.
 Override its defaults when needed, for example:
 `just port=8080 image=sangam:dev docker-serve`.
+
+## Run a published image
+
+Every push to `main` and every `v*.*.*` tag publishes a signed multi-arch image
+to GitHub Container Registry at `ghcr.io/jayshah5696/sangam`.
+
+Tag scheme:
+
+- `latest` — the newest tagged release. Convenient, but pins nothing; avoid in
+  production.
+- `X.Y.Z` — a specific release (e.g. `0.2.0`). Recommended for production.
+- `X.Y` — the newest patch inside a minor line. Good balance for self-hosters.
+- `main`, `sha-<short>` — the latest `main` commit and each individual commit
+  build; useful for staging and reproducing bug reports.
+
+Pull and run with the packaged compose file:
+
+```bash
+export SANGAM_IMAGE_TAG=0.1.0
+export SANGAM_PREVIEW_HMAC_SECRET="$(openssl rand -hex 32)"
+docker compose -f deploy/compose.prod.yaml pull
+docker compose -f deploy/compose.prod.yaml up -d
+```
+
+Verify the image signature (keyless via Sigstore) before rolling out:
+
+```bash
+cosign verify ghcr.io/jayshah5696/sangam:0.1.0 \
+  --certificate-identity-regexp 'https://github.com/jayshah5696/sangam/.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+## Cutting a release
+
+Releases are cut from `main`. `scripts/release.sh` bumps the version, refreshes
+`CHANGELOG.md` via [git-cliff](https://git-cliff.org), commits, tags, and pushes.
+The `v*.*.*` tag push triggers `.github/workflows/docker-publish.yml`, which
+builds the multi-arch image, signs it with cosign, generates an SBOM, and
+publishes to GHCR.
+
+```bash
+scripts/release.sh 0.2.0 --dry-run   # preview the version bump and changelog
+scripts/release.sh 0.2.0             # commit, tag v0.2.0, push, publish
+```
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+so `git-cliff` can categorise them (`feat:`, `fix:`, `docs:`, `chore:`, …).

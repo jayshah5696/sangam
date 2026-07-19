@@ -71,3 +71,42 @@ docker-serve: docker-build
 # Build and exercise the production image with persistent state and restart recovery.
 docker-smoke:
     ./scripts/docker-smoke.sh
+
+# Run every pre-push check that CI runs (backend + frontend + docs).
+check: test test-docs
+
+# Run every pre-push check, then rebuild the production image.
+check-docker: check docker-build
+
+# Preview the next release: bump pyproject.toml + regenerate CHANGELOG.md, no commit.
+release-dry version:
+    ./scripts/release.sh {{ version }} --dry-run
+
+# Cut a release: bump, tag v<version>, push. Triggers the GHCR publish workflow.
+release version:
+    ./scripts/release.sh {{ version }}
+
+# Preview the CHANGELOG.md that git-cliff would produce for the next tag.
+changelog version:
+    uvx --from git-cliff@2.4.0 git-cliff --tag "v{{ version }}" --unreleased
+
+# Show the last few container publish workflow runs.
+release-status:
+    gh run list --workflow docker-publish.yml --limit 10
+
+# Verify a published container image signature via cosign (keyless, Sigstore).
+verify-image version:
+    cosign verify "ghcr.io/jayshah5696/sangam:{{ version }}" \
+      --certificate-identity-regexp 'https://github.com/jayshah5696/sangam/.+' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Reject commit messages that do not follow Conventional Commits. Meant for git hooks.
+lint-commit message:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    pattern='^(feat|fix|perf|refactor|docs|test|chore|ci|build|revert)(\([a-z0-9._-]+\))?!?: .+'
+    if ! printf '%s' "{{ message }}" | grep -Eq "$pattern"; then
+      echo "error: commit message must follow Conventional Commits (see CONTRIBUTING.md)." >&2
+      echo "       got: {{ message }}" >&2
+      exit 1
+    fi
