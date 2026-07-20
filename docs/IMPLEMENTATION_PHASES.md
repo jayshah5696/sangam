@@ -1,6 +1,6 @@
 # Sangam: Vertical Implementation Phases
 
-> Status: Phases 1–6 implemented and verified locally; Phase 7 remains proposed
+> Status: Phases 1–7 implemented and verified locally; Phase 7's production Cloudflare exercise remains a manual release gate
 >
 > Related: [Product vision and technical decisions](./VISION.md)
 
@@ -433,6 +433,8 @@ Replacing Karakeep, continuously mirroring every bookmark, generic website crawl
 
 ## Phase 7 — Workspace-grounded AI chat
 
+> Implementation: [Phase 7 implementation and verification](./PHASE_7.md)
+
 ### Outcome
 
 Sangam provides a workspace-grounded chat client that uses the mature document API while leaving model execution and agent orchestration to external infrastructure.
@@ -445,8 +447,9 @@ A human asks a question about the current document and related workspace materia
 
 #### Runtime boundary
 
-- Minimal `AgentRuntime` streaming interface.
-- One external runtime integration only.
+- OpenAI Agents SDK for the model/tool loop and function-tool contracts.
+- OpenRouter's OpenAI-compatible Responses endpoint as the only model provider.
+- ChatKit React and ChatKit Python for the chat protocol, streaming, cancellation, retry, and history.
 - Provider/model configuration outside the document service.
 - No general workflow builder or agent scheduler.
 
@@ -500,4 +503,4 @@ General-purpose agent orchestration, autonomous background agents, multi-agent w
 
 After Phase 7, Sangam satisfies the product capabilities in the vision: ordinary-file documents, stable identity, versioned human and agent collaboration, workspace search, safe and trusted rendering, PDF research, Karakeep import, publishing, and grounded chat through one document API.
 
-This document defines direction and phase boundaries. Phases 1–6 now have concrete implementation documents linked from their sections. Phase 7 remains directional until evidence from the running system makes its detailed planning timely.
+This document defines direction and phase boundaries. Every phase now has a concrete implementation document linked from its section. Production Cloudflare, DNS, and Access evidence remains an operational release gate rather than something local automation can claim.

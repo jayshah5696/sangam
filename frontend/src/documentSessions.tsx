@@ -55,10 +55,22 @@ export class DocumentSessionStore {
   private readonly sessions = new Map<string, DocumentSession>()
   private readonly runtimes = new Map<string, SessionRuntime>()
   private readonly listeners = new Map<string, Set<() => void>>()
+  private readonly editorFocusers = new Map<string, () => void>()
   private online = true
 
   constructor(private readonly options: StoreOptions) {
     this.online = options.isOnline?.() ?? true
+  }
+
+  registerEditor = (documentId: string, focus: () => void) => {
+    this.editorFocusers.set(documentId, focus)
+    return () => {
+      if (this.editorFocusers.get(documentId) === focus) this.editorFocusers.delete(documentId)
+    }
+  }
+
+  focusEditor = (documentId: string) => {
+    this.editorFocusers.get(documentId)?.()
   }
 
   getSession = (documentId: string): DocumentSession => {

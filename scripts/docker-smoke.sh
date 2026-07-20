@@ -3,9 +3,9 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 STATE=$(mktemp -d "$ROOT/.sangam-smoke.XXXXXX")
-NAME="sangam-phase6-smoke-$$"
+NAME="sangam-phase7-smoke-$$"
 KARAKEEP_NAME="sangam-karakeep-smoke-$$"
-NETWORK="sangam-phase6-smoke-$$"
+NETWORK="sangam-phase7-smoke-$$"
 PORT=18080
 
 cleanup() {
@@ -17,13 +17,13 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$STATE/database" "$STATE/workspace" "$STATE/backups"
-docker build -t sangam:phase6 "$ROOT"
+docker build -t sangam:phase7 "$ROOT"
 docker network create "$NETWORK" >/dev/null
 docker run -d \
   --name "$KARAKEEP_NAME" \
   --network "$NETWORK" \
   -v "$ROOT/scripts/fake-karakeep.py:/fake-karakeep.py:ro" \
-  sangam:phase6 uv run --no-sync python /fake-karakeep.py >/dev/null
+  sangam:phase7 uv run --no-sync python /fake-karakeep.py >/dev/null
 docker run -d \
   --name "$NAME" \
   --network "$NETWORK" \
@@ -33,7 +33,7 @@ docker run -d \
   -v "$STATE/backups:/data/backups" \
   -e "SANGAM_KARAKEEP_BASE_URL=http://$KARAKEEP_NAME:8901/api/v1" \
   -e SANGAM_KARAKEEP_API_KEY=docker-smoke-key \
-  sangam:phase6 >/dev/null
+  sangam:phase7 >/dev/null
 
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
@@ -44,6 +44,18 @@ until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
   fi
   sleep 1
 done
+
+curl --fail --silent "http://127.0.0.1:$PORT/api/v1/chat/config" \
+  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["provider"] == "openrouter_openai_agents" and data["transport"] == "chatkit" and not data["configured"]'
+curl --fail --silent "http://127.0.0.1:$PORT/" \
+  | grep -q 'https://cdn.platform.openai.com/deployments/chatkit/chatkit.js'
+CHATKIT_STREAM=$(curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  --data '{"type":"threads.create","params":{"input":{"content":[{"type":"input_text","text":"Docker ChatKit smoke"}],"attachments":[],"inference_options":{"model":"openai/gpt-5.4-nano"}}}}' \
+  "http://127.0.0.1:$PORT/api/v1/chatkit")
+CHATKIT_THREAD_ID=$(printf '%s' "$CHATKIT_STREAM" \
+  | python3 -c 'import json,sys; events=[json.loads(line[6:]) for line in sys.stdin if line.startswith("data: ")]; assert [item["type"] for item in events] == ["thread.created", "thread.item.done", "stream_options", "error"]; assert events[-1]["code"] == "custom"; print(events[0]["thread"]["id"])')
+echo "Verified ChatKit protocol, durable thread creation, and safe unconfigured runtime."
 
 CREATED=$(curl --fail --silent \
   -H 'Content-Type: application/json' \
@@ -275,6 +287,13 @@ until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/documents/$DOCUMENT_ID
   fi
   sleep 1
 done
+
+curl --fail --silent \
+  -H 'Content-Type: application/json' \
+  --data "{\"type\":\"threads.get_by_id\",\"params\":{\"thread_id\":\"$CHATKIT_THREAD_ID\"}}" \
+  "http://127.0.0.1:$PORT/api/v1/chatkit" \
+  | python3 -c 'import json,sys; thread=json.load(sys.stdin); assert thread["items"]["data"][0]["content"][0]["text"] == "Docker ChatKit smoke"'
+echo "Verified ChatKit thread recovery after container restart."
 
 docker stop "$NAME" >/dev/null
 printf '%s\n' '# Changed outside Sangam' > "$STATE/workspace/projects/docker-smoke.md"

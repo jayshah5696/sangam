@@ -5,7 +5,7 @@
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
-Phases 1 through 6 are implemented. The document core now supports a daily-use
+All seven vertical phases are implemented locally. The document core now supports a daily-use
 Markdown, HTML, and immutable PDF research workspace through the browser, HTTP
 API, CLI, SQLite revision and annotation history, and ordinary workspace files.
 
@@ -49,6 +49,12 @@ initial revision to `integration:karakeep`, and prevents duplicate Documents by
 bookmark ID. Refreshes preserve the corrected working copy and wait in a
 side-by-side review state until a human applies a normal attributed revision.
 
+Workspace chat uses ChatKit React and ChatKit Python for the UI, durable thread
+protocol, streaming, stop, retry, and history. The OpenAI Agents SDK owns the
+tool loop, while OpenRouter supplies configurable OpenAI-compatible Responses
+models. Sangam's code remains limited to authorized workspace tools,
+revision-pinned citations, and human-reviewed edit proposals.
+
 ## Configure Karakeep
 
 For a Docker Compose deployment, copy the example environment file and set a
@@ -80,7 +86,44 @@ Open **Karakeep imports** and confirm that the connection card reports
 [Phase 6 operations](./docs/operations/PHASE_6_OPERATIONS.md) for native-process
 configuration, credential rotation, source limits, retry behavior, and recovery.
 
+## Configure workspace chat
+
+Add an OpenRouter key and an explicit model allowlist to `.env`:
+
+```dotenv
+SANGAM_OPENROUTER_API_KEY=replace-with-openrouter-api-key
+SANGAM_CHAT_DEFAULT_MODEL=openai/gpt-5.4-mini
+SANGAM_CHAT_AVAILABLE_MODELS=["openai/gpt-5.4-mini","openai/gpt-5.4-nano","openai/gpt-5.6-terra"]
+SANGAM_CHATKIT_DOMAIN_KEY=local-dev
+SANGAM_OPENROUTER_APP_TITLE=Sangam
+```
+
+Open a document, select **Chat** in its inspector, and choose an enabled model
+from ChatKit's composer. Existing-document edits remain proposals until the
+human reviews and applies the diff. See
+[Phase 7 operations](./docs/operations/PHASE_7_OPERATIONS.md) for production
+domain registration, Cloudflare streaming checks, model changes, and key rotation.
+
 ## Screenshots
+
+### Workspace-grounded agent chat
+
+The document inspector embeds ChatKit's streaming conversation UI, enabled
+OpenRouter model picker, durable history, and retry controls beside the active
+document. The OpenAI Agents SDK can read authorized workspace context and use
+Sangam tools while existing-document changes remain outside the editor until
+the human reviews them.
+
+![Phase 7 workspace-grounded chat showing the active launch brief, ChatKit composer with an OpenRouter model, and a pending agent edit proposal](./docs/assets/phase-7-chat-workspace.jpg)
+
+### Human-reviewed chat proposal
+
+An agent-proposed document update is pinned to the revision it reviewed. Sangam
+shows the exact addition with Pierre Diffs and keeps apply or dismiss under
+human control; applying the change uses the normal attributed, idempotent
+document update path.
+
+![Phase 7 chat proposal showing the unchanged source document beside the revision-pinned recovery addition and human apply or dismiss controls](./docs/assets/phase-7-chat-proposal.jpg)
 
 ### Karakeep import and source review
 
@@ -172,12 +215,14 @@ agent operation is recorded.
 - [Phase 4 implementation and verification](./docs/PHASE_4.md)
 - [Phase 5 implementation and verification](./docs/PHASE_5.md)
 - [Phase 6 implementation and verification](./docs/PHASE_6.md)
+- [Phase 7 implementation and verification](./docs/PHASE_7.md)
 - [Phase 1 development, deployment, and recovery operations](./docs/operations/PHASE_1_OPERATIONS.md)
 - [Phase 2 development, backup, and restore operations](./docs/operations/PHASE_2_OPERATIONS.md)
 - [Phase 3 agent-token and incident-response operations](./docs/operations/PHASE_3_OPERATIONS.md)
 - [Phase 4 publication, preview, and Cloudflare operations](./docs/operations/PHASE_4_OPERATIONS.md)
 - [Phase 5 PDF import, extraction, annotation, and recovery operations](./docs/operations/PHASE_5_OPERATIONS.md)
 - [Phase 6 Karakeep connection, import, refresh, and recovery operations](./docs/operations/PHASE_6_OPERATIONS.md)
+- [Phase 7 OpenRouter, ChatKit, and Cloudflare streaming operations](./docs/operations/PHASE_7_OPERATIONS.md)
 - [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
 
 ## Quick start

@@ -4,8 +4,10 @@ import { useQueryClient } from '@tanstack/react-query'
 import { PanelRightClose } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
+import { useTheme, type InspectorTab } from '../../theme'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { HtmlPreview } from '../HtmlPreview'
+import { ChatPanel } from '../ChatPanel'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { TrustedHtmlPreview } from '../TrustedHtmlPreview'
@@ -14,6 +16,7 @@ export function DocumentInspector({
   width,
   document,
   content,
+  selectedText,
   onCollapse,
   onUpdated,
   onFocusEditor,
@@ -21,6 +24,7 @@ export function DocumentInspector({
   width: number
   document: Document
   content: string
+  selectedText: string
   onCollapse: () => void
   onUpdated: (document: Document, replaceContent?: boolean) => void
   onFocusEditor: () => void
@@ -45,7 +49,9 @@ export function DocumentInspector({
   const history = historyQuery.data ?? []
   const compareFrom = session.compareFrom
   const compareTo = session.compareTo ?? document.current_revision_id
-  const [tab, setTab] = useState<'properties' | 'outline' | 'history'>('properties')
+  const { preferences, updatePreferences } = useTheme()
+  const tab = preferences.rightTab
+  const setTab = (next: InspectorTab) => updatePreferences({ rightTab: next })
   const [previewRevision, setPreviewRevision] = useState<Revision | null>(null)
   const exposeRevision = useMutation({
     mutationFn: (revisionId: string) => {
@@ -67,7 +73,10 @@ export function DocumentInspector({
     sessions.updateSession(documentId, { compareFrom: from, compareTo: to })
   }
   return (
-    <aside className="history-panel document-inspector ui-rail ui-rail--surface" style={{ width }}>
+    <aside
+      className={`history-panel document-inspector ui-rail ui-rail--surface ${tab === 'chat' ? 'mode-chat' : ''}`}
+      style={{ width }}
+    >
       <div className="right-panel-header ui-rail-header">
         <p className="eyebrow">Inspector</p>
         <button
@@ -80,7 +89,7 @@ export function DocumentInspector({
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
-        {(['properties', 'outline', 'history'] as const).map((candidate) => (
+        {(['properties', 'outline', 'history', 'chat'] as const).map((candidate) => (
           <button
             role="tab"
             aria-selected={tab === candidate}
@@ -223,6 +232,12 @@ export function DocumentInspector({
           />
         </>
       )}
+      {/* ChatKit keeps its own composer draft and streaming state internally, so
+          the panel stays mounted across inspector-tab switches and is only hidden
+          with CSS. Unmounting it would reload the ChatKit iframe and lose context. */}
+      <div className="chat-panel-host" hidden={tab !== 'chat'}>
+        <ChatPanel document={document} selectedText={selectedText} onDocumentUpdated={onUpdated} />
+      </div>
     </aside>
   )
 }

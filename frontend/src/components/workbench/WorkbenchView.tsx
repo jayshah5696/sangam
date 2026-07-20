@@ -1,10 +1,21 @@
 import { useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MoreHorizontal, PanelRightClose, Pin, PinOff, RotateCcw, Rows2, X } from 'lucide-react'
+import {
+  Columns2,
+  MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
+  Pin,
+  PinOff,
+  RotateCcw,
+  Rows2,
+  X,
+} from 'lucide-react'
 import { Group as PanelGroup, Panel, Separator } from 'react-resizable-panels'
-import { api } from '../../api'
-import { useDocumentSession } from '../../documentSessions'
+import { api, type Document } from '../../api'
+import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
+import { useTheme } from '../../theme'
 import {
   collectGroups,
   useWorkbench,
@@ -21,6 +32,8 @@ import {
 import { useMediaQuery } from '../../useMediaQuery'
 import { ActionMenu, ActionMenuItem } from '../ActionMenu'
 import { DocumentWorkspace } from '../document/DocumentWorkspace'
+import { DocumentInspector } from '../document/DocumentInspector'
+import { ResizeHandle } from '../ResizeHandle'
 import { EditorGroupErrorBoundary } from './EditorGroupErrorBoundary'
 
 export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) {
@@ -41,32 +54,10 @@ export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) 
 }
 
 function LayoutRenderer({ node }: { node: LayoutNode }) {
-  const navigate = useNavigate()
   const workbench = useWorkbench()
   const stackNarrowHorizontalSplit = useMediaQuery('(max-width: 859px)')
   if (node.kind === 'group') {
-    const resetKey = `${node.id}:${node.activeTabId ?? 'empty'}`
-    const recover = async () => {
-      const groups = collectGroups(workbench.root)
-      const fallback = groups.find((group) => group.id !== node.id)?.activeTabId
-      if (groups.length > 1) workbench.closeGroup(node.id)
-      else workbench.resetLayout()
-      if (fallback) {
-        await navigate({ to: '/documents/$documentId', params: { documentId: fallback }, replace: true })
-      } else {
-        await navigate({ to: '/', replace: true })
-      }
-    }
-    return (
-      <EditorGroupErrorBoundary
-        key={resetKey}
-        groupId={node.id}
-        resetKey={resetKey}
-        onRecover={() => void recover()}
-      >
-        <EditorGroupView group={node} />
-      </EditorGroupErrorBoundary>
-    )
+    return <EditorGroupView key={node.id} group={node} />
   }
   const renderedDirection =
     node.direction === 'horizontal' && stackNarrowHorizontalSplit ? 'vertical' : node.direction
@@ -112,6 +103,13 @@ function EditorGroupView({ group }: { group: GroupNode }) {
   const groups = collectGroups(workbench.root)
   const showTabStrip = group.tabs.length > 1
   const activeDocumentId = group.activeTabId
+  const showInspector = group.id === workbench.activeGroupId && groups.length === 1
+  const activeDocumentQuery = useQuery({
+    queryKey: ['document', activeDocumentId],
+    queryFn: () => api.getDocument(activeDocumentId as string),
+    enabled: Boolean(activeDocumentId),
+  })
+  const isPdf = activeDocumentQuery.data?.content_type === 'application/pdf'
   const activate = async (documentId: string) => {
     workbench.activateTab(group.id, documentId)
     await navigate({ to: '/documents/$documentId', params: { documentId } })
@@ -141,6 +139,17 @@ function EditorGroupView({ group }: { group: GroupNode }) {
     const documentId = workbench.reopenClosedTab()
     if (documentId) await navigate({ to: '/documents/$documentId', params: { documentId } })
   }
+  const resetKey = `${group.id}:${activeDocumentId ?? 'empty'}`
+  const recover = async () => {
+    const fallback = groups.find((candidate) => candidate.id !== group.id)?.activeTabId
+    if (groups.length > 1) workbench.closeGroup(group.id)
+    else workbench.resetLayout()
+    if (fallback) {
+      await navigate({ to: '/documents/$documentId', params: { documentId: fallback }, replace: true })
+    } else {
+      await navigate({ to: '/', replace: true })
+    }
+  }
   return (
     <section
       className={group.id === workbench.activeGroupId ? 'editor-group active' : 'editor-group'}
@@ -165,27 +174,105 @@ function EditorGroupView({ group }: { group: GroupNode }) {
           onCloseGroup={() => void closeGroup()}
         />
       )}
-      {activeDocumentId ? (
-        <DocumentLoader
-          key={`${group.id}:${activeDocumentId}`}
-          documentId={activeDocumentId}
-          showInspector={group.id === workbench.activeGroupId && groups.length === 1}
-          canCloseGroup={groups.length > 1}
-          onSplit={(direction) => {
-            if (canSplitActiveGroup(direction)) {
-              workbench.splitGroup(group.id, direction, activeDocumentId)
-            }
-          }}
-          onCloseGroup={() => void closeGroup()}
-          onDeleted={() => void close(activeDocumentId)}
-        />
-      ) : (
-        <div className="empty-editor-group">
-          <strong>Empty group</strong>
-          <p>Open a file from the explorer or close this group.</p>
-        </div>
-      )}
+      {/* The editor remounts per document (keyed), but the inspector is a sibling
+          that persists across tab switches so chat context and drafts survive. */}
+      <div className={`document-layout tab-document-layout ${isPdf ? 'pdf-document-layout' : ''}`}>
+        <EditorGroupErrorBoundary
+          key={resetKey}
+          groupId={group.id}
+          resetKey={resetKey}
+          onRecover={() => void recover()}
+        >
+          {activeDocumentId ? (
+            <DocumentLoader
+              key={`${group.id}:${activeDocumentId}`}
+              documentId={activeDocumentId}
+              canCloseGroup={groups.length > 1}
+              onSplit={(direction) => {
+                if (canSplitActiveGroup(direction)) {
+                  workbench.splitGroup(group.id, direction, activeDocumentId)
+                }
+              }}
+              onCloseGroup={() => void closeGroup()}
+              onDeleted={() => void close(activeDocumentId)}
+            />
+          ) : (
+            <div className="empty-editor-group">
+              <strong>Empty group</strong>
+              <p>Open a file from the explorer or close this group.</p>
+            </div>
+          )}
+        </EditorGroupErrorBoundary>
+        {showInspector && activeDocumentId && <GroupInspector documentId={activeDocumentId} />}
+      </div>
     </section>
+  )
+}
+
+function GroupInspector({ documentId }: { documentId: string }) {
+  const queryClient = useQueryClient()
+  const { preferences, updatePreferences } = useTheme()
+  const { updateDocumentTitle } = useWorkbenchActions()
+  const sessions = useDocumentSessions()
+  const session = useDocumentSession(documentId)
+  const documentQuery = useQuery({
+    queryKey: ['document', documentId],
+    queryFn: () => api.getDocument(documentId),
+    // Keep the previously loaded document visible while switching tabs so the
+    // inspector (and its persistent ChatKit instance) never unmounts on a cache miss.
+    placeholderData: keepPreviousData,
+  })
+  const document = documentQuery.data
+  if (!document) return null
+  const content = session.content ?? document.content
+  const selectedText =
+    session.viewState && session.selection.selectedCharacters
+      ? content.slice(
+          Math.min(session.viewState.anchor, session.viewState.head),
+          Math.max(session.viewState.anchor, session.viewState.head),
+        )
+      : ''
+  const updateCachedDocument = (nextDocument: Document, replaceContent = false) => {
+    queryClient.setQueryData(['document', documentId], nextDocument)
+    sessions.acceptServerDocument(nextDocument, replaceContent)
+    updateDocumentTitle(documentId, nextDocument.title)
+    void queryClient.invalidateQueries({ queryKey: ['documents'] })
+    void queryClient.invalidateQueries({ queryKey: ['history', documentId] })
+    void queryClient.invalidateQueries({ queryKey: ['folders'] })
+  }
+  if (!preferences.rightVisible) {
+    return (
+      <aside className="right-rail">
+        <button
+          className="icon-button"
+          aria-label="Open document sidebar"
+          title="Open document inspector"
+          onClick={() => updatePreferences({ rightVisible: true })}
+        >
+          <PanelRightOpen size={16} />
+        </button>
+      </aside>
+    )
+  }
+  return (
+    <>
+      <ResizeHandle
+        side="right"
+        value={preferences.rightWidth}
+        min={290}
+        max={720}
+        onChange={(rightWidth) => updatePreferences({ rightWidth })}
+      />
+      <DocumentInspector
+        width={preferences.rightWidth}
+        document={document}
+        content={content}
+        selectedText={selectedText}
+        onCollapse={() => updatePreferences({ rightVisible: false })}
+        onUpdated={updateCachedDocument}
+        onFocusEditor={() => sessions.focusEditor(documentId)}
+      />
+    </>
   )
 }
 
@@ -335,14 +422,12 @@ function DocumentTab({
 
 function DocumentLoader({
   documentId,
-  showInspector,
   canCloseGroup,
   onSplit,
   onCloseGroup,
   onDeleted,
 }: {
   documentId: string
-  showInspector: boolean
   canCloseGroup: boolean
   onSplit: (direction: 'horizontal' | 'vertical') => void
   onCloseGroup: () => void
@@ -359,7 +444,6 @@ function DocumentLoader({
   return (
     <DocumentWorkspace
       initialDocument={documentQuery.data}
-      showInspector={showInspector}
       canCloseGroup={canCloseGroup}
       onSplit={onSplit}
       onCloseGroup={onCloseGroup}

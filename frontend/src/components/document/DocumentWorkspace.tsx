@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
+import { Columns2, MoreHorizontal, PanelRightClose, Rows2 } from 'lucide-react'
 import { api, type Document } from '../../api'
 import {
   useDocumentSession,
@@ -10,13 +10,10 @@ import {
   type SaveState,
 } from '../../documentSessions'
 import { internalDocumentMarkdown } from '../../internalLinks'
-import { useTheme } from '../../theme'
 import { useWorkbenchActions } from '../../workbench'
 import { canSplitActiveGroup } from '../../splitPolicy'
 import { ActionMenu, ActionMenuItem } from '../ActionMenu'
 import type { MarkdownEditorHandle } from '../MarkdownEditor'
-import { ResizeHandle } from '../ResizeHandle'
-import { DocumentInspector } from './DocumentInspector'
 
 const MarkdownPreview = lazy(() =>
   import('../MarkdownPreview').then((module) => ({ default: module.MarkdownPreview })),
@@ -34,14 +31,12 @@ const PdfResearchWorkspace = lazy(() =>
 
 export function DocumentWorkspace({
   initialDocument,
-  showInspector,
   canCloseGroup,
   onSplit,
   onCloseGroup,
   onDeleted,
 }: {
   initialDocument: Document
-  showInspector: boolean
   canCloseGroup: boolean
   onSplit: (direction: 'horizontal' | 'vertical') => void
   onCloseGroup: () => void
@@ -49,7 +44,6 @@ export function DocumentWorkspace({
 }) {
   const documentId = initialDocument.document_id
   const queryClient = useQueryClient()
-  const { preferences, updatePreferences } = useTheme()
   const { updateDocumentTitle } = useWorkbenchActions()
   const sessions = useDocumentSessions()
   const session = useDocumentSession(documentId)
@@ -71,6 +65,10 @@ export function DocumentWorkspace({
   useEffect(
     () => updateDocumentTitle(documentId, document.title),
     [document.title, documentId, updateDocumentTitle],
+  )
+  useEffect(
+    () => sessions.registerEditor(documentId, () => editorRef.current?.focus()),
+    [documentId, sessions],
   )
 
   const updateCachedDocument = (nextDocument: Document, replaceContent = false) => {
@@ -109,196 +107,159 @@ export function DocumentWorkspace({
   }
 
   return (
-    <div
-      className={`document-layout tab-document-layout ${
-        document.content_type === 'application/pdf' ? 'pdf-document-layout' : ''
-      }`}
+    <section
+      className={`document-workspace ${
+        document.content_type === 'text/html' && mode !== 'edit' ? 'html-preview-workspace' : ''
+      } ${document.content_type === 'application/pdf' ? 'pdf-document-workspace' : ''}`}
     >
-      <section
-        className={`document-workspace ${
-          document.content_type === 'text/html' && mode !== 'edit' ? 'html-preview-workspace' : ''
-        } ${document.content_type === 'application/pdf' ? 'pdf-document-workspace' : ''}`}
-      >
-        <header className="document-header">
-          <div>
-            <p className="eyebrow">{document.path ?? 'Unmaterialized draft'}</p>
-            <h1>{document.title}</h1>
-            <div className="document-badges">
-              {document.category && <span className="category-badge">{document.category}</span>}
-              {document.tags.map((tag) => (
-                <span className="tag-badge" key={tag.tag_id}>
-                  <i style={{ background: tag.color }} />
-                  {tag.name}
-                </span>
-              ))}
-              <span className="actor-badge">Edited by {document.updated_by_name}</span>
-              <span className="scope-badge">
-                {document.content_type === 'application/pdf'
-                  ? 'PDF'
-                  : document.content_type === 'text/html'
-                    ? 'HTML'
-                    : 'Markdown'}
+      <header className="document-header">
+        <div>
+          <p className="eyebrow">{document.path ?? 'Unmaterialized draft'}</p>
+          <h1>{document.title}</h1>
+          <div className="document-badges">
+            {document.category && <span className="category-badge">{document.category}</span>}
+            {document.tags.map((tag) => (
+              <span className="tag-badge" key={tag.tag_id}>
+                <i style={{ background: tag.color }} />
+                {tag.name}
               </span>
-              {document.content_type === 'text/html' && (
-                <span
-                  className={`scope-badge ${document.trust_level === 'trusted_interactive' ? 'workspace' : ''}`}
-                >
-                  {document.trust_level === 'trusted_interactive' ? 'Trusted interactive' : 'Safe HTML'}
-                </span>
-              )}
-              <time>{new Date(document.updated_at).toLocaleString()}</time>
-            </div>
+            ))}
+            <span className="actor-badge">Edited by {document.updated_by_name}</span>
+            <span className="scope-badge">
+              {document.content_type === 'application/pdf'
+                ? 'PDF'
+                : document.content_type === 'text/html'
+                  ? 'HTML'
+                  : 'Markdown'}
+            </span>
+            {document.content_type === 'text/html' && (
+              <span
+                className={`scope-badge ${document.trust_level === 'trusted_interactive' ? 'workspace' : ''}`}
+              >
+                {document.trust_level === 'trusted_interactive' ? 'Trusted interactive' : 'Safe HTML'}
+              </span>
+            )}
+            <time>{new Date(document.updated_at).toLocaleString()}</time>
           </div>
-          <span className={`save-state ${saveState}`}>
-            {document.content_type === 'application/pdf' ? 'Immutable source' : saveLabel(saveState)}
-          </span>
-        </header>
-        {document.content_type !== 'application/pdf' && (
-          <DocumentToolbar
-            document={document}
-            content={content}
-            saveState={saveState}
-            mode={mode}
-            onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
-            canCloseGroup={canCloseGroup}
-            onSplit={onSplit}
-            onCloseGroup={onCloseGroup}
-            onUpdated={(updated) => updateCachedDocument(updated)}
-            onDeleted={async () => {
-              await queryClient.invalidateQueries({ queryKey: ['documents'] })
-              onDeleted()
-            }}
+        </div>
+        <span className={`save-state ${saveState}`}>
+          {document.content_type === 'application/pdf' ? 'Immutable source' : saveLabel(saveState)}
+        </span>
+      </header>
+      {document.content_type !== 'application/pdf' && (
+        <DocumentToolbar
+          document={document}
+          content={content}
+          saveState={saveState}
+          mode={mode}
+          onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
+          canCloseGroup={canCloseGroup}
+          onSplit={onSplit}
+          onCloseGroup={onCloseGroup}
+          onUpdated={(updated) => updateCachedDocument(updated)}
+          onDeleted={async () => {
+            await queryClient.invalidateQueries({ queryKey: ['documents'] })
+            onDeleted()
+          }}
+        />
+      )}
+      {document.content_type !== 'application/pdf' && saveState === 'conflict' && (
+        <div className="notice conflict-notice">
+          This document changed elsewhere. Your text is still here.
+          <button onClick={() => void reloadAfterConflict()}>Reload current revision</button>
+        </div>
+      )}
+      {document.content_type !== 'application/pdf' && saveState === 'failed' && (
+        <div className="notice error-notice">
+          Save failed. Your text remains in this editor; edit again to retry.
+        </div>
+      )}
+      {document.content_type !== 'application/pdf' && saveState === 'offline' && (
+        <div className="notice offline-notice">
+          You are offline. Changes remain in this browser and will save after reconnecting.
+        </div>
+      )}
+      {document.content_type !== 'application/pdf' && !document.path && (
+        <form
+          className="materialize-bar"
+          onSubmit={(event) => {
+            event.preventDefault()
+            materialize.mutate({ base: document, path: materializePath })
+          }}
+        >
+          <input
+            aria-label="Workspace path"
+            value={materializePath}
+            onChange={(event) => setMaterializePath(event.target.value)}
           />
-        )}
-        {document.content_type !== 'application/pdf' && saveState === 'conflict' && (
-          <div className="notice conflict-notice">
-            This document changed elsewhere. Your text is still here.
-            <button onClick={() => void reloadAfterConflict()}>Reload current revision</button>
-          </div>
-        )}
-        {document.content_type !== 'application/pdf' && saveState === 'failed' && (
-          <div className="notice error-notice">
-            Save failed. Your text remains in this editor; edit again to retry.
-          </div>
-        )}
-        {document.content_type !== 'application/pdf' && saveState === 'offline' && (
-          <div className="notice offline-notice">
-            You are offline. Changes remain in this browser and will save after reconnecting.
-          </div>
-        )}
-        {document.content_type !== 'application/pdf' && !document.path && (
-          <form
-            className="materialize-bar"
-            onSubmit={(event) => {
-              event.preventDefault()
-              materialize.mutate({ base: document, path: materializePath })
-            }}
-          >
-            <input
-              aria-label="Workspace path"
-              value={materializePath}
-              onChange={(event) => setMaterializePath(event.target.value)}
-            />
-            <button disabled={materialize.isPending || saveState !== 'saved'}>
-              {materialize.isPending ? 'Saving file…' : 'Save to workspace'}
-            </button>
-          </form>
+          <button disabled={materialize.isPending || saveState !== 'saved'}>
+            {materialize.isPending ? 'Saving file…' : 'Save to workspace'}
+          </button>
+        </form>
+      )}
+      {document.content_type !== 'application/pdf' && mode !== 'preview' && (
+        <div className="editor-tools">
+          <label>
+            Internal link
+            <select value={linkTarget} onChange={(event) => setLinkTarget(event.target.value)}>
+              <option value="">Choose a document…</option>
+              {documentsQuery.data
+                ?.filter((candidate) => candidate.document_id !== documentId)
+                .map((candidate) => (
+                  <option key={candidate.document_id} value={candidate.document_id}>
+                    {candidate.path ?? candidate.title}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <button type="button" disabled={!linkTarget} onClick={insertLink}>
+            Insert link
+          </button>
+          <span>
+            Ln {selection.line}, Col {selection.column}
+            {selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}
+          </span>
+          <kbd>⌘F</kbd>
+          <small>find/replace</small>
+        </div>
+      )}
+      <div className={`editing-surface mode-${mode}`}>
+        {document.content_type === 'application/pdf' && (
+          <Suspense fallback={<div className="center-message">Preparing PDF reader…</div>}>
+            <PdfResearchWorkspace document={document} />
+          </Suspense>
         )}
         {document.content_type !== 'application/pdf' && mode !== 'preview' && (
-          <div className="editor-tools">
-            <label>
-              Internal link
-              <select value={linkTarget} onChange={(event) => setLinkTarget(event.target.value)}>
-                <option value="">Choose a document…</option>
-                {documentsQuery.data
-                  ?.filter((candidate) => candidate.document_id !== documentId)
-                  .map((candidate) => (
-                    <option key={candidate.document_id} value={candidate.document_id}>
-                      {candidate.path ?? candidate.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <button type="button" disabled={!linkTarget} onClick={insertLink}>
-              Insert link
-            </button>
-            <span>
-              Ln {selection.line}, Col {selection.column}
-              {selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}
-            </span>
-            <kbd>⌘F</kbd>
-            <small>find/replace</small>
-          </div>
+          <Suspense fallback={<div className="editor muted">Preparing editor…</div>}>
+            <MarkdownEditor
+              ref={editorRef}
+              value={content}
+              contentType={document.content_type}
+              onChange={handleEditorChange}
+              onSelectionChange={(nextSelection) =>
+                sessions.updateSession(documentId, { selection: nextSelection })
+              }
+              initialViewState={session.viewState}
+              onViewStateChange={(viewState) => sessions.updateSession(documentId, { viewState })}
+            />
+          </Suspense>
         )}
-        <div className={`editing-surface mode-${mode}`}>
-          {document.content_type === 'application/pdf' && (
-            <Suspense fallback={<div className="center-message">Preparing PDF reader…</div>}>
-              <PdfResearchWorkspace document={document} />
-            </Suspense>
-          )}
-          {document.content_type !== 'application/pdf' && mode !== 'preview' && (
-            <Suspense fallback={<div className="editor muted">Preparing editor…</div>}>
-              <MarkdownEditor
-                ref={editorRef}
-                value={content}
-                contentType={document.content_type}
-                onChange={handleEditorChange}
-                onSelectionChange={(nextSelection) =>
-                  sessions.updateSession(documentId, { selection: nextSelection })
-                }
-                initialViewState={session.viewState}
-                onViewStateChange={(viewState) => sessions.updateSession(documentId, { viewState })}
-              />
-            </Suspense>
-          )}
-          {mode !== 'edit' && document.content_type === 'text/markdown' && (
-            <Suspense fallback={<div className="markdown-preview muted">Preparing preview…</div>}>
-              <MarkdownPreview content={content} />
-            </Suspense>
-          )}
-          {mode !== 'edit' && document.content_type === 'text/html' && (
-            <Suspense fallback={<div className="markdown-preview muted">Preparing HTML preview…</div>}>
-              {document.trust_level === 'trusted_interactive' && saveState === 'saved' ? (
-                <TrustedHtmlPreview document={document} revisionId={document.current_revision_id} />
-              ) : (
-                <HtmlPreview content={content} />
-              )}
-            </Suspense>
-          )}
-        </div>
-      </section>
-      {showInspector &&
-        (preferences.rightVisible ? (
-          <>
-            <ResizeHandle
-              side="right"
-              value={preferences.rightWidth}
-              min={290}
-              max={720}
-              onChange={(rightWidth) => updatePreferences({ rightWidth })}
-            />
-            <DocumentInspector
-              width={preferences.rightWidth}
-              document={document}
-              content={content}
-              onCollapse={() => updatePreferences({ rightVisible: false })}
-              onUpdated={updateCachedDocument}
-              onFocusEditor={() => editorRef.current?.focus()}
-            />
-          </>
-        ) : (
-          <aside className="right-rail">
-            <button
-              className="icon-button"
-              aria-label="Open document sidebar"
-              title="Open document inspector"
-              onClick={() => updatePreferences({ rightVisible: true })}
-            >
-              <PanelRightOpen size={16} />
-            </button>
-          </aside>
-        ))}
-    </div>
+        {mode !== 'edit' && document.content_type === 'text/markdown' && (
+          <Suspense fallback={<div className="markdown-preview muted">Preparing preview…</div>}>
+            <MarkdownPreview content={content} />
+          </Suspense>
+        )}
+        {mode !== 'edit' && document.content_type === 'text/html' && (
+          <Suspense fallback={<div className="markdown-preview muted">Preparing HTML preview…</div>}>
+            {document.trust_level === 'trusted_interactive' && saveState === 'saved' ? (
+              <TrustedHtmlPreview document={document} revisionId={document.current_revision_id} />
+            ) : (
+              <HtmlPreview content={content} />
+            )}
+          </Suspense>
+        )}
+      </div>
+    </section>
   )
 }
 

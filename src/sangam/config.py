@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ChatReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+
+
+@dataclass(frozen=True)
+class ChatServerConfig:
+    api_key: str | None
+    base_url: str
+    http_referer: str | None
+    app_title: str
+    domain_key: str
+    available_models: tuple[str, ...]
+    default_model: str
+    reasoning_effort: ChatReasoningEffort
+    max_turns: int
+    max_tool_result_bytes: int
+    max_context_messages: int
+    timeout_seconds: float
 
 
 class Settings(BaseSettings):
@@ -24,6 +43,22 @@ class Settings(BaseSettings):
     karakeep_base_url: str | None = None
     karakeep_api_key: SecretStr | None = None
     karakeep_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
+    openrouter_api_key: SecretStr | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_http_referer: str | None = None
+    openrouter_app_title: str = "Sangam"
+    chatkit_domain_key: str = "local-dev"
+    chat_default_model: str = Field(default="openai/gpt-5.4-mini", min_length=1, max_length=160)
+    chat_available_models: tuple[str, ...] = (
+        "openai/gpt-5.4-mini",
+        "openai/gpt-5.4-nano",
+        "openai/gpt-5.6-terra",
+    )
+    chat_reasoning_effort: ChatReasoningEffort = "low"
+    chat_timeout_seconds: float = Field(default=120.0, ge=5.0, le=600.0)
+    chat_max_tool_rounds: int = Field(default=8, ge=1, le=20)
+    chat_max_tool_result_bytes: int = Field(default=40_000, ge=1_024, le=500_000)
+    chat_max_context_messages: int = Field(default=20, ge=2, le=100)
     auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"
     trusted_identity_value: str = "human:jay"
@@ -49,6 +84,30 @@ class Settings(BaseSettings):
     )
 
     def prepare(self) -> None:
+        if self.chat_default_model not in self.chat_available_models:
+            raise ValueError(
+                "SANGAM_CHAT_DEFAULT_MODEL must be listed in SANGAM_CHAT_AVAILABLE_MODELS"
+            )
+        if len(set(self.chat_available_models)) != len(self.chat_available_models):
+            raise ValueError("SANGAM_CHAT_AVAILABLE_MODELS must not contain duplicates")
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self.backup_root.mkdir(parents=True, exist_ok=True)
+
+    def chat_server_config(self) -> ChatServerConfig:
+        return ChatServerConfig(
+            api_key=(
+                self.openrouter_api_key.get_secret_value() if self.openrouter_api_key else None
+            ),
+            base_url=self.openrouter_base_url,
+            http_referer=self.openrouter_http_referer,
+            app_title=self.openrouter_app_title,
+            domain_key=self.chatkit_domain_key,
+            available_models=self.chat_available_models,
+            default_model=self.chat_default_model,
+            reasoning_effort=self.chat_reasoning_effort,
+            max_turns=self.chat_max_tool_rounds,
+            max_tool_result_bytes=self.chat_max_tool_result_bytes,
+            max_context_messages=self.chat_max_context_messages,
+            timeout_seconds=self.chat_timeout_seconds,
+        )

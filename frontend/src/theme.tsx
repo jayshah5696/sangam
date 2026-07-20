@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 
 export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
 
+export type InspectorTab = 'properties' | 'outline' | 'history' | 'chat'
+
 export const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
   {
     id: 'river',
@@ -35,6 +37,7 @@ type WorkspacePreferences = {
   rightWidth: number
   leftVisible: boolean
   rightVisible: boolean
+  rightTab: InspectorTab
 }
 
 type ThemeContextValue = {
@@ -48,6 +51,7 @@ const defaults: WorkspacePreferences = {
   rightWidth: 320,
   leftVisible: true,
   rightVisible: true,
+  rightTab: 'properties',
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
