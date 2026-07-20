@@ -5,20 +5,68 @@ from dataclasses import replace
 
 from agents import Agent, ModelSettings, RunConfig, Runner
 from agents.models.openai_provider import OpenAIProvider
-from chatkit.agents import AgentContext, simple_to_agent_input, stream_agent_response
+from chatkit.agents import AgentContext, ThreadItemConverter, stream_agent_response
 from chatkit.errors import CustomStreamError
 from chatkit.server import ChatKitServer
-from chatkit.types import ThreadMetadata, ThreadStreamEvent, UserMessageItem
+from chatkit.types import (
+    AssistantMessageItem,
+    ThreadMetadata,
+    ThreadStreamEvent,
+    UserMessageItem,
+)
 from openai import AsyncOpenAI
+from openai.types.responses import EasyInputMessageParam, ResponseInputTextParam
 
 from sangam.access import WorkspaceAccessService
 from sangam.chat_context import AgentRunContext, ChatRequestContext
+from sangam.chat_models import ChatModelCatalog
 from sangam.chat_proposals import ChatProposalRepository, ChatProposalService
 from sangam.chat_store import SQLiteChatKitStore
 from sangam.chat_tools import ChatToolset
 from sangam.config import ChatServerConfig
 from sangam.db import Database
 from sangam.schemas import ChatRuntimeConfig
+
+_MAX_TITLE_LENGTH = 48
+
+
+class SangamThreadItemConverter(ThreadItemConverter):
+    """Converts thread items to agent input with provider-safe assistant history.
+
+    ChatKit's default converter replays prior assistant turns by dumping
+    ``ResponseOutputText`` items, which fabricates output-only fields such as
+    ``logprobs: null``. OpenRouter's stateless Responses API rejects those
+    fabricated fields with a 400 on the second turn (see openai-python#3008), so
+    every follow-on request in a thread fails. We flatten replayed assistant
+    messages into a plain-text assistant message, which is valid input for both
+    OpenAI and OpenRouter and preserves the conversation for context.
+    """
+
+    async def assistant_message_to_input(self, item: AssistantMessageItem) -> EasyInputMessageParam:
+        text = "".join(part.text for part in item.content)
+        return EasyInputMessageParam(
+            type="message",
+            role="assistant",
+            content=[ResponseInputTextParam(type="input_text", text=text)],
+        )
+
+
+def _derive_thread_title(message: UserMessageItem | None) -> str | None:
+    """Build a short thread title from the first user message.
+
+    ChatKit renders threads without a title as "New thread". Sangam does not run
+    a separate title-generation model, so we name the thread after the opening
+    request: whitespace-collapsed, first line, truncated to a short label.
+    """
+    if message is None:
+        return None
+    text = " ".join(part.text for part in message.content).strip()
+    text = " ".join(text.split())
+    if not text:
+        return None
+    if len(text) <= _MAX_TITLE_LENGTH:
+        return text
+    return text[: _MAX_TITLE_LENGTH - 1].rstrip() + "\u2026"
 
 
 class SangamChatServer(ChatKitServer[ChatRequestContext]):
@@ -30,9 +78,11 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         database: Database,
         workspace: WorkspaceAccessService,
         config: ChatServerConfig,
+        model_catalog: ChatModelCatalog,
     ) -> None:
         self.workspace = workspace
         self.config = config
+        self.model_catalog = model_catalog
         self.store_adapter = SQLiteChatKitStore[ChatRequestContext](database)
         super().__init__(self.store_adapter)
 
@@ -48,6 +98,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         )
         self.tools = self.toolset.as_agent_tools()
         self.model_provider = self._model_provider(config)
+        self.item_converter = SangamThreadItemConverter()
 
     @staticmethod
     def _model_provider(config: ChatServerConfig) -> OpenAIProvider | None:
@@ -65,12 +116,13 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         return OpenAIProvider(openai_client=client, use_responses=True)
 
     def runtime_config(self) -> ChatRuntimeConfig:
+        state = self.model_catalog.state()
         return ChatRuntimeConfig(
-            configured=self.model_provider is not None,
+            configured=self.model_provider is not None and state.openrouter_enabled,
             provider="openrouter_openai_agents",
             domain_key=self.config.domain_key,
-            default_model=self.config.default_model,
-            available_models=list(self.config.available_models),
+            default_model=state.default_model,
+            available_models=list(state.enabled_models),
             reasoning_effort=self.config.reasoning_effort,
         )
 
@@ -84,11 +136,19 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             raise CustomStreamError(
                 "Workspace chat needs SANGAM_OPENROUTER_API_KEY before it can respond."
             )
-        model = self.config.default_model
+        state = self.model_catalog.state()
+        if not state.openrouter_enabled:
+            raise CustomStreamError("Workspace chat is turned off in Model settings.")
+        model = state.default_model
         if input_user_message and input_user_message.inference_options.model:
             model = input_user_message.inference_options.model
-        if model not in self.config.available_models:
+        if model not in state.enabled_models:
             raise CustomStreamError("That model is not enabled for this Sangam server.")
+
+        if not thread.title:
+            title = _derive_thread_title(input_user_message)
+            if title:
+                thread.title = title
 
         document_id = context.document_id or thread.metadata.get("document_id")
         request_context = replace(context, document_id=document_id)
@@ -100,7 +160,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             order="desc",
             context=request_context,
         )
-        input_items = await simple_to_agent_input(list(reversed(page.data)))
+        input_items = await self.item_converter.to_agent_input(list(reversed(page.data)))
         input_items.insert(
             0,
             {

@@ -9,6 +9,8 @@ from fastapi.responses import StreamingResponse
 from sangam.chat import ChatRequestContext, SangamChatServer
 from sangam.schemas import (
     ApplyChatProposal,
+    ChatModelSelectionUpdate,
+    ChatModelSettings,
     ChatProposal,
     ChatRuntimeConfig,
     DismissChatProposal,
@@ -27,6 +29,25 @@ def create_chat_router(
     @router.get("/chat/config", response_model=ChatRuntimeConfig)
     def runtime_config(_principal: Principal = principal_dependency) -> ChatRuntimeConfig:
         return chat.runtime_config()
+
+    @router.get("/chat/models", response_model=ChatModelSettings)
+    def get_models(_principal: Principal = principal_dependency) -> ChatModelSettings:
+        return chat.model_catalog.as_schema()
+
+    @router.put("/chat/models", response_model=ChatModelSettings)
+    def update_models(
+        body: ChatModelSelectionUpdate,
+        _principal: Principal = principal_dependency,
+    ) -> ChatModelSettings:
+        return chat.model_catalog.update(
+            openrouter_enabled=body.openrouter_enabled,
+            default_model=body.default_model,
+            enabled_models=body.enabled_models,
+        )
+
+    @router.post("/chat/models/refresh", response_model=ChatModelSettings)
+    def refresh_models(_principal: Principal = principal_dependency) -> ChatModelSettings:
+        return chat.model_catalog.refresh_from_openrouter()
 
     @router.post("/chatkit")
     async def chatkit_endpoint(

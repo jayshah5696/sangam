@@ -475,6 +475,28 @@ class ChatRuntimeConfig(BaseModel):
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 
+class ChatModelInfo(BaseModel):
+    id: str
+    name: str
+    provider: str
+    enabled: bool
+
+
+class ChatModelSettings(BaseModel):
+    openrouter_configured: bool
+    openrouter_enabled: bool
+    default_model: str
+    enabled_models: list[str]
+    catalog: list[ChatModelInfo]
+    catalog_fetched_at: str | None
+
+
+class ChatModelSelectionUpdate(BaseModel):
+    openrouter_enabled: bool
+    default_model: str = Field(min_length=1, max_length=160)
+    enabled_models: list[str] = Field(min_length=1, max_length=100)
+
+
 class ChatProposal(BaseModel):
     proposal_id: str
     thread_id: str

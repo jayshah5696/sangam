@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api, type Folder, type Tag } from '../api'
 import { AgentAccessSettings } from '../components/AgentAccessSettings'
+import { ChatModelSettings } from '../components/ChatModelSettings'
 import { themes, useTheme } from '../theme'
 import { useWorkbench } from '../workbench'
 
@@ -80,6 +81,8 @@ export function WorkspaceSettings() {
         </SettingsSection>
 
         <AgentAccessSettings />
+
+        <ChatModelSettings />
 
         <SettingsSection
           id="workbench"

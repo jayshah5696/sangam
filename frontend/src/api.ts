@@ -347,6 +347,31 @@ export const chatRuntimeConfigSchema = z.object({
 
 export type ChatRuntimeConfig = z.infer<typeof chatRuntimeConfigSchema>
 
+export const chatModelInfoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  provider: z.string(),
+  enabled: z.boolean(),
+})
+
+export const chatModelSettingsSchema = z.object({
+  openrouter_configured: z.boolean(),
+  openrouter_enabled: z.boolean(),
+  default_model: z.string(),
+  enabled_models: z.array(z.string()),
+  catalog: z.array(chatModelInfoSchema),
+  catalog_fetched_at: z.string().nullable(),
+})
+
+export type ChatModelInfo = z.infer<typeof chatModelInfoSchema>
+export type ChatModelSettings = z.infer<typeof chatModelSettingsSchema>
+
+export type ChatModelSelectionUpdate = {
+  openrouter_enabled: boolean
+  default_model: string
+  enabled_models: string[]
+}
+
 export const chatProposalSchema = z.object({
   proposal_id: z.string(),
   thread_id: z.string(),
@@ -436,6 +461,20 @@ export const api = {
   async chatConfig(): Promise<ChatRuntimeConfig> {
     return chatRuntimeConfigSchema.parse(await request('/chat/config'))
   },
+  async chatModels(): Promise<ChatModelSettings> {
+    return chatModelSettingsSchema.parse(await request('/chat/models'))
+  },
+  async updateChatModels(selection: ChatModelSelectionUpdate): Promise<ChatModelSettings> {
+    return chatModelSettingsSchema.parse(
+      await request('/chat/models', {
+        method: 'PUT',
+        body: JSON.stringify(selection),
+      }),
+    )
+  },
+  async refreshChatModels(): Promise<ChatModelSettings> {
+    return chatModelSettingsSchema.parse(await request('/chat/models/refresh', { method: 'POST' }))
+  },
   async listChatProposals(documentId: string, threadId?: string): Promise<ChatProposal[]> {
     const params = new URLSearchParams({ document_id: documentId })
     if (threadId) params.set('thread_id', threadId)
@@ -450,11 +489,12 @@ export const api = {
       }),
     )
   },
-  async dismissChatProposal(proposalId: string): Promise<ChatProposal> {
+  async dismissChatProposal(proposalId: string, reason?: string): Promise<ChatProposal> {
+    const trimmed = reason?.trim()
     return chatProposalSchema.parse(
       await request(`/chat/proposals/${proposalId}/dismiss`, {
         method: 'POST',
-        body: JSON.stringify({ reason: 'Dismissed in the chat panel' }),
+        body: JSON.stringify({ reason: trimmed ? trimmed.slice(0, 500) : null }),
       }),
     )
   },

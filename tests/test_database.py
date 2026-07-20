@@ -38,6 +38,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "010",
         "011",
         "012",
+        "013",
     ]
     assert {
         "operation_events_revision_outcome_created_idx",

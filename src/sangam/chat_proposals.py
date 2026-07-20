@@ -144,14 +144,18 @@ class ChatProposalRepository:
         with self.database.transaction() as connection:
             row = self._owned_row(connection, principal, proposal_id)
             proposal = _proposal_from_row(row)
-            if proposal.status != "pending":
+            if proposal.status not in ("pending", "stale"):
                 raise ConflictError(f"The proposal is already {proposal.status}")
-            if row["apply_idempotency_key"] is not None:
+            # A stale proposal's apply has already terminated, so its reserved
+            # idempotency key is spent and dismissing it is safe. Only a pending
+            # proposal with a live reservation is still mid-apply and must not be
+            # dismissed out from under the in-flight document update.
+            if proposal.status == "pending" and row["apply_idempotency_key"] is not None:
                 raise ConflictError("The proposal is already being applied")
             connection.execute(
                 """
                 UPDATE chat_proposals SET status = 'dismissed', summary = ?
-                WHERE proposal_id = ? AND status = 'pending'
+                WHERE proposal_id = ? AND status IN ('pending', 'stale')
                 """,
                 (summary, proposal_id),
             )

@@ -9,6 +9,7 @@ from sangam.authorization import AuthorizationPolicy
 from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
 from sangam.chat import SangamChatServer
+from sangam.chat_models import ChatModelCatalog, ChatModelSettingsRepository
 from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.idempotency import IdempotencyStore
@@ -162,10 +163,23 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         publications=publications,
         pdf_research=pdf_research,
     )
+    chat_config = settings.chat_server_config()
+    model_settings_repository = ChatModelSettingsRepository(
+        database,
+        seed_default_model=chat_config.default_model,
+        seed_enabled_models=chat_config.available_models,
+    )
+    model_catalog = ChatModelCatalog(
+        model_settings_repository,
+        api_key=chat_config.api_key,
+        base_url=chat_config.base_url,
+        timeout_seconds=chat_config.timeout_seconds,
+    )
     chat = SangamChatServer(
         database=database,
         workspace=workspace_access,
-        config=settings.chat_server_config(),
+        config=chat_config,
+        model_catalog=model_catalog,
     )
     return ApplicationServices(
         documents=documents,

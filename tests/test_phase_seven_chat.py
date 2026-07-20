@@ -2,15 +2,30 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator, Sequence
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from agents.models.interface import Model, ModelProvider
 from agents.tool_context import ToolContext as AgentsToolContext
 from chatkit.agents import AgentContext
 from chatkit.types import CustomTask
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
+from openai.types.responses import (
+    Response,
+    ResponseCompletedEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
+    ResponseCreatedEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputText,
+    ResponseTextDeltaEvent,
+    ResponseTextDoneEvent,
+)
 
 from sangam.chat_context import ChatRequestContext
 from sangam.errors import ValidationError
@@ -185,6 +200,53 @@ def test_chat_proposal_detects_a_concurrent_edit(client: TestClient) -> None:
     assert current["content"] == "human version"
 
 
+def test_stale_chat_proposal_can_be_dismissed_with_a_reason(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Dismiss stale", "content": "one"},
+        headers=headers("phase-seven-stale-dismiss-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="stale-dismiss"
+    )
+    proposal = client.app.state.services.chat.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="chat version",
+        summary="Chat proposal",
+    )
+    client.patch(
+        f"/api/v1/documents/{document['document_id']}",
+        json={"expected_revision_id": document["current_revision_id"], "content": "human version"},
+        headers=headers("phase-seven-stale-dismiss-edit"),
+    )
+    conflict = client.post(
+        f"/api/v1/chat/proposals/{proposal.proposal_id}/apply",
+        json={"expected_revision_id": proposal.expected_revision_id},
+        headers=headers("phase-seven-stale-dismiss-apply"),
+    )
+    assert conflict.status_code == 409
+
+    # A stale proposal offers a Dismiss button in the review UI, so dismissing it
+    # must succeed and clear it from the reviewable list rather than deadlocking on
+    # the spent apply reservation.
+    dismissed = client.post(
+        f"/api/v1/chat/proposals/{proposal.proposal_id}/dismiss",
+        json={"reason": "Wrong section for this edit"},
+    )
+    assert dismissed.status_code == 200
+    assert dismissed.json()["status"] == "dismissed"
+    assert dismissed.json()["summary"].endswith("Wrong section for this edit")
+
+    listed = client.get(
+        f"/api/v1/chat/proposals?document_id={document['document_id']}&thread_id={thread_id}"
+    ).json()
+    assert [proposal_row["status"] for proposal_row in listed] == ["dismissed"]
+
+
 def test_chat_proposal_apply_recovers_after_status_write_failure(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -318,3 +380,253 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
     assert payload["source"]["revision_id"] == document["current_revision_id"]
     assert agent_context.workflow_item is not None
     assert agent_context.workflow_item.workflow.tasks[0].status_indicator == "complete"
+
+
+def _make_response(text: str, *, status: str = "completed", with_output: bool = True) -> Response:
+    message = ResponseOutputMessage(
+        id="msg_1",
+        type="message",
+        role="assistant",
+        status="completed",
+        content=[ResponseOutputText(type="output_text", text=text, annotations=[])],
+    )
+    return Response(
+        id="resp_1",
+        object="response",
+        created_at=0,
+        model="fake",
+        output=[message] if with_output else [],
+        parallel_tool_calls=False,
+        tool_choice="auto",
+        tools=[],
+        instructions=None,
+        status=cast(Any, status),
+    )
+
+
+class _RecordingResponsesModel(Model):
+    """Minimal streaming Responses model that records the input it is handed.
+
+    It emits the same event sequence OpenAI's Responses streaming API produces so
+    ChatKit builds and persists a real assistant message, and it rejects any
+    replayed assistant content that carries output-only fields (e.g. ``logprobs``)
+    the way OpenRouter's stateless Responses API does.
+    """
+
+    def __init__(self, text: str, captured: list[Any]) -> None:
+        self.text = text
+        self.captured = captured
+
+    async def get_response(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+    async def stream_response(  # type: ignore[override]
+        self,
+        system_instructions: str | None,
+        input: str | list[Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        self.captured.append(input)
+        if isinstance(input, list):
+            for item in input:
+                if not isinstance(item, dict) or item.get("role") != "assistant":
+                    continue
+                for part in item.get("content") or []:
+                    if isinstance(part, dict) and "logprobs" in part:
+                        raise RuntimeError(
+                            "400 invalid_prompt: Unknown parameter: input[].content[].logprobs"
+                        )
+        text = self.text
+        counter = 0
+
+        def seq() -> int:
+            nonlocal counter
+            counter += 1
+            return counter
+
+        yield ResponseCreatedEvent(
+            type="response.created",
+            response=_make_response("", status="in_progress", with_output=False),
+            sequence_number=seq(),
+        )
+        yield ResponseOutputItemAddedEvent(
+            type="response.output_item.added",
+            output_index=0,
+            item=ResponseOutputMessage(
+                id="msg_1", type="message", role="assistant", status="in_progress", content=[]
+            ),
+            sequence_number=seq(),
+        )
+        yield ResponseContentPartAddedEvent(
+            type="response.content_part.added",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            part=ResponseOutputText(type="output_text", text="", annotations=[]),
+            sequence_number=seq(),
+        )
+        yield ResponseTextDeltaEvent(
+            type="response.output_text.delta",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            delta=text,
+            sequence_number=seq(),
+            logprobs=[],
+        )
+        done_part = ResponseOutputText(type="output_text", text=text, annotations=[])
+        yield ResponseTextDoneEvent(
+            type="response.output_text.done",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            text=text,
+            sequence_number=seq(),
+            logprobs=[],
+        )
+        yield ResponseContentPartDoneEvent(
+            type="response.content_part.done",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            part=done_part,
+            sequence_number=seq(),
+        )
+        yield ResponseOutputItemDoneEvent(
+            type="response.output_item.done",
+            output_index=0,
+            item=ResponseOutputMessage(
+                id="msg_1",
+                type="message",
+                role="assistant",
+                status="completed",
+                content=[done_part],
+            ),
+            sequence_number=seq(),
+        )
+        yield ResponseCompletedEvent(
+            type="response.completed",
+            response=_make_response(text),
+            sequence_number=seq(),
+        )
+
+
+def install_fake_model(client: TestClient, replies: Sequence[str]) -> list[Any]:
+    """Point the chat server at a scripted fake model. Returns captured inputs."""
+    captured: list[Any] = []
+    replies = list(replies)
+    index = {"value": 0}
+
+    class Provider(ModelProvider):
+        def get_model(self, model_name: str | None) -> Model:
+            reply = replies[min(index["value"], len(replies) - 1)]
+            index["value"] += 1
+            return _RecordingResponsesModel(reply, captured)
+
+    client.app.state.services.chat.model_provider = Provider()
+    return captured
+
+
+def send_user_message(client: TestClient, thread_id: str, text: str) -> list[dict[str, Any]]:
+    response = chatkit_request(
+        client,
+        {
+            "type": "threads.add_user_message",
+            "params": {
+                "thread_id": thread_id,
+                "input": {
+                    "content": [{"type": "input_text", "text": text}],
+                    "attachments": [],
+                    "inference_options": {"model": "openai/gpt-5.4-nano"},
+                },
+            },
+        },
+    )
+    assert response.status_code == 200
+    return [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+
+def create_thread_with_model(client: TestClient, text: str) -> tuple[str, list[dict[str, Any]]]:
+    response = chatkit_request(
+        client,
+        {
+            "type": "threads.create",
+            "params": {
+                "input": {
+                    "content": [{"type": "input_text", "text": text}],
+                    "attachments": [],
+                    "inference_options": {"model": "openai/gpt-5.4-nano"},
+                }
+            },
+        },
+    )
+    assert response.status_code == 200
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    thread_id = next(event["thread"]["id"] for event in events if event["type"] == "thread.created")
+    return thread_id, events
+
+
+def test_follow_on_request_replays_assistant_history_as_plain_text(client: TestClient) -> None:
+    captured = install_fake_model(client, ["First answer", "Second answer"])
+
+    thread_id, first_events = create_thread_with_model(client, "hi")
+    assert "error" not in {event["type"] for event in first_events}
+
+    follow_on = send_user_message(client, thread_id, "what can you do")
+
+    # The follow-on turn must succeed — this is the regression the user reported.
+    assert "error" not in {event["type"] for event in follow_on}
+
+    # The prior assistant turn is replayed to the model as provider-safe input_text
+    # (no fabricated output-only fields such as ``logprobs``) so OpenRouter accepts it.
+    follow_on_input = captured[1]
+    assistant_items = [item for item in follow_on_input if item.get("role") == "assistant"]
+    assert assistant_items, "prior assistant turn should be replayed as context"
+    for item in assistant_items:
+        for part in item["content"]:
+            assert part["type"] == "input_text"
+            assert "logprobs" not in part
+            assert "annotations" not in part
+    assert [item["content"][0]["text"] for item in assistant_items] == ["First answer"]
+
+
+def test_thread_title_is_derived_from_the_first_user_message(client: TestClient) -> None:
+    install_fake_model(client, ["Answer"])
+
+    thread_id, events = create_thread_with_model(
+        client, "Explain how the authentication module handles refresh tokens"
+    )
+
+    assert "thread.updated" in {event["type"] for event in events}
+    loaded = chatkit_request(
+        client,
+        {"type": "threads.get_by_id", "params": {"thread_id": thread_id}},
+    )
+    title = loaded.json()["title"]
+    assert title is not None
+    assert title != "New thread"
+    assert title.startswith("Explain how the authentication")
+    assert len(title) <= 48
+
+
+def test_long_first_message_title_is_truncated_with_ellipsis(client: TestClient) -> None:
+    install_fake_model(client, ["Answer"])
+    long_prompt = "Summarize " + "the quarterly revenue analysis " * 5
+    thread_id, _ = create_thread_with_model(client, long_prompt)
+
+    loaded = chatkit_request(
+        client,
+        {"type": "threads.get_by_id", "params": {"thread_id": thread_id}},
+    )
+    title = loaded.json()["title"]
+    assert len(title) <= 48
+    assert title.endswith("\u2026")
