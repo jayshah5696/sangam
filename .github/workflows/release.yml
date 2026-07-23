@@ -89,12 +89,20 @@ jobs:
           SANGAM_SMOKE_IMAGE: sangam:release-scan
           SANGAM_SKIP_DOCKER_BUILD: "true"
         run: ./scripts/docker-smoke.sh
-      - name: Block HIGH and CRITICAL findings before registry push
+      - name: Report all HIGH and CRITICAL findings before registry push
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: sangam:release-scan
           format: table
           severity: HIGH,CRITICAL
+          exit-code: "0"
+      - name: Block fixable HIGH and CRITICAL findings before registry push
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: sangam:release-scan
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
 
   publish:

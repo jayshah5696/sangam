@@ -17,9 +17,13 @@ production gates pass.
 The automated preflight covers Python formatting and lint, backend tests, frontend
 formatting/lint/build/tests, UI-token checks, docs links/style/Mermaid, settings
 inventory, frontend/runtime version propagation, wheel and sdist clean installs,
-packaged migrations, Compose parsing, the production-image smoke, and a blocking
-HIGH/CRITICAL vulnerability scan. Python runtime and npm dependency audits use
-the same blocking severity policy before the container scan.
+packaged migrations, Compose parsing, the production-image smoke, and container
+vulnerability scans. Trivy prints every HIGH/CRITICAL finding and blocks every
+HIGH/CRITICAL finding for which the distribution or package ecosystem publishes a
+fix. Unfixed findings remain visible in the job log and must be assessed as release
+risk; they do not make the release gate impossible to satisfy. Python runtime and
+npm dependency audits use their blocking production-dependency policies before the
+container scan.
 
 ## Backup and upgrade proof
 
