@@ -16,7 +16,7 @@ dependencies = [
   "pydantic-settings>=2.10,<3",
   "pyjwt[crypto]>=2.10,<3",
   "pypdf>=6.1,<7",
-  "typer>=0.16,<1",
+  "typer>=0.27.0,<1",
   "uvicorn[standard]>=0.35,<1",
 ]
 
