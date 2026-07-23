@@ -1,7 +1,7 @@
 # Sangam
 
 <!-- markdownlint-disable-next-line MD033 -->
-<img src="./frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
+<img src="https://raw.githubusercontent.com/jayshah5696/sangam/main/frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
 
 A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
 
@@ -80,6 +80,11 @@ server-side; Sangam never sends it to the browser. Apply the configuration with:
 ```bash
 docker compose up -d --build
 ```
+
+Local Compose defaults to development mode. Production must use a signed image
+digest and the fail-closed configuration in `deploy/compose.prod.yaml`; see the
+[release checklist](./docs/operations/RELEASE_CHECKLIST.md) and
+[upgrade/rollback runbook](./docs/operations/UPGRADES_AND_ROLLBACK.md).
 
 Open **Karakeep imports** and confirm that the connection card reports
 **Connected** before searching. See
@@ -223,6 +228,9 @@ agent operation is recorded.
 - [Phase 5 PDF import, extraction, annotation, and recovery operations](./docs/operations/PHASE_5_OPERATIONS.md)
 - [Phase 6 Karakeep connection, import, refresh, and recovery operations](./docs/operations/PHASE_6_OPERATIONS.md)
 - [Phase 7 OpenRouter, ChatKit, and Cloudflare streaming operations](./docs/operations/PHASE_7_OPERATIONS.md)
+- [Release checklist and supply-chain verification](./docs/operations/RELEASE_CHECKLIST.md)
+- [Production upgrades and paired rollback](./docs/operations/UPGRADES_AND_ROLLBACK.md)
+- [Security policy and private vulnerability reporting](./SECURITY.md)
 - [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
 
 ## Quick start
@@ -255,3 +263,23 @@ just docker-smoke
 `http://127.0.0.1:8000`, and mounts the three persistent `data/` directories.
 Override its defaults when needed, for example:
 `just port=8080 image=sangam:dev docker-serve`.
+
+The signed multi-platform container is Sangam's complete application artifact.
+The release workflow also publishes a wheel and source archive for the backend
+and CLI; those Python artifacts deliberately do not contain the browser SPA.
+
+Production deployments pin the verified image digest rather than a mutable tag:
+
+```bash
+cp .env.example .env
+# Replace every production value required by deploy/compose.prod.yaml.
+export SANGAM_IMAGE=ghcr.io/jayshah5696/sangam@sha256:DIGEST
+docker compose -f deploy/compose.prod.yaml pull
+docker compose -f deploy/compose.prod.yaml up -d
+```
+
+`SANGAM_DEPLOYMENT_MODE=production` rejects local authentication, the development
+preview secret, HTTP publication/preview URLs, mismatched preview hosts, unsafe
+parent/connect origins, incomplete Cloudflare settings, and `local-dev` ChatKit
+registration. Follow the [release checklist](./docs/operations/RELEASE_CHECKLIST.md)
+before exposing or upgrading an instance.

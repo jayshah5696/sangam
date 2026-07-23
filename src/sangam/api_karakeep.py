@@ -57,7 +57,6 @@ def create_karakeep_router(
     @router.post("/imports", response_model=KarakeepImportDetail, status_code=201)
     def import_bookmark(
         body: ImportKarakeepBookmark,
-        _idempotency_key: str = Header(alias="Idempotency-Key"),
         _principal: Principal = admin_dependency,
     ) -> KarakeepImportDetail:
         return karakeep.import_bookmark(body.bookmark_id)
@@ -65,7 +64,6 @@ def create_karakeep_router(
     @router.post("/imports/{import_id}/refresh", response_model=KarakeepImportDetail)
     def refresh_import(
         import_id: str,
-        _idempotency_key: str = Header(alias="Idempotency-Key"),
         _principal: Principal = admin_dependency,
     ) -> KarakeepImportDetail:
         return karakeep.refresh_import(import_id)

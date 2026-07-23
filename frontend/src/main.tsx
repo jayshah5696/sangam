@@ -34,8 +34,11 @@ async function bootstrap() {
     reactRoot.render(
       <main className="welcome" role="alert">
         <p className="eyebrow">Local draft recovery paused</p>
-        <h1>Your drafts are still safe.</h1>
-        <p>Sangam could not move older browser drafts into protected storage. No draft data was removed.</p>
+        <h1>Draft storage needs attention.</h1>
+        <p>
+          Sangam could not verify protected browser storage. Older draft data was not intentionally removed,
+          but its durability cannot be confirmed until this check succeeds.
+        </p>
         <button className="primary-button" onClick={() => window.location.reload()}>
           Try again
         </button>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -12,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from sangam import __version__
 from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
@@ -85,9 +87,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     pdf_research = services.pdf_research
     karakeep = services.karakeep
     chat = services.chat
+    readiness = services.readiness
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        application.state.startup_reconciliation = None
+        application.state.startup_reconciliation_error = None
         try:
             application.state.startup_reconciliation = reconciliation.scan()
         except MaterializationError as error:
@@ -105,8 +110,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         backup_task: asyncio.Task[None] | None = None
         if resolved_settings.backups_enabled:
             backup_task = asyncio.create_task(maintain_backups())
+        extraction_cancel = threading.Event()
         extraction_tasks = {
-            asyncio.create_task(asyncio.to_thread(pdf_research.extract_text, document_id))
+            asyncio.create_task(
+                asyncio.to_thread(pdf_research.extract_text, document_id, extraction_cancel)
+            )
             for document_id in pdf_research.pending_extractions()
         }
         yield
@@ -115,11 +123,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with suppress(asyncio.CancelledError):
                 await backup_task
         if extraction_tasks:
-            await asyncio.gather(*extraction_tasks, return_exceptions=True)
+            extraction_cancel.set()
+            _, pending = await asyncio.wait(
+                extraction_tasks,
+                timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds,
+            )
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
     app = FastAPI(
         title="Sangam API",
-        version="0.1.0",
+        version=__version__,
         openapi_url="/api/v1/openapi.json",
         docs_url="/api/v1/docs",
         lifespan=lifespan,
@@ -266,7 +282,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": "0.1.0"}
+        return {"status": "ok", "version": __version__}
+
+    @app.get("/api/v1/readiness")
+    def readiness_status(request: Request) -> JSONResponse:
+        result = readiness.check(
+            startup_complete=request.app.state.startup_reconciliation is not None,
+            startup_reconciliation_error=request.app.state.startup_reconciliation_error,
+        )
+        return JSONResponse(status_code=200 if result["status"] == "ready" else 503, content=result)
 
     @app.get("/api/v1/actors", response_model=list[Actor])
     def list_actors(_principal: Principal = admin_dependency) -> list[Actor]:
@@ -462,7 +486,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             require_administrator=require_administrator,
         )
     )
-    app.include_router(create_chat_router(chat=chat, resolve_principal=resolve_principal))
+    app.include_router(
+        create_chat_router(
+            chat=chat,
+            resolve_principal=resolve_principal,
+            require_administrator=require_administrator,
+        )
+    )
     app.include_router(
         create_karakeep_router(
             karakeep=karakeep,

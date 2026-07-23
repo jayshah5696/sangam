@@ -34,6 +34,7 @@ import { ActionMenu, ActionMenuItem } from '../ActionMenu'
 import { DocumentWorkspace } from '../document/DocumentWorkspace'
 import { DocumentInspector } from '../document/DocumentInspector'
 import { ResizeHandle } from '../ResizeHandle'
+import { activateTabFromKeyboard } from '../tabKeyboard'
 import { EditorGroupErrorBoundary } from './EditorGroupErrorBoundary'
 
 export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) {
@@ -157,6 +158,7 @@ function EditorGroupView({ group }: { group: GroupNode }) {
     >
       {showTabStrip && (
         <TabStrip
+          groupId={group.id}
           tabs={group.tabs}
           activeDocumentId={activeDocumentId ?? ''}
           canReopen={workbench.recentlyClosed.length > 0}
@@ -176,7 +178,14 @@ function EditorGroupView({ group }: { group: GroupNode }) {
       )}
       {/* The editor remounts per document (keyed), but the inspector is a sibling
           that persists across tab switches so chat context and drafts survive. */}
-      <div className={`document-layout tab-document-layout ${isPdf ? 'pdf-document-layout' : ''}`}>
+      <div
+        className={`document-layout tab-document-layout ${isPdf ? 'pdf-document-layout' : ''}`}
+        id={showTabStrip ? `editor-panel-${group.id}` : undefined}
+        role={showTabStrip ? 'tabpanel' : undefined}
+        aria-labelledby={
+          showTabStrip && activeDocumentId ? `editor-tab-${group.id}-${activeDocumentId}` : undefined
+        }
+      >
         <EditorGroupErrorBoundary
           key={resetKey}
           groupId={group.id}
@@ -277,6 +286,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
 }
 
 function TabStrip({
+  groupId,
   tabs,
   activeDocumentId,
   canReopen,
@@ -289,6 +299,7 @@ function TabStrip({
   onSplit,
   onCloseGroup,
 }: {
+  groupId: string
   tabs: WorkbenchTab[]
   activeDocumentId: string
   canReopen: boolean
@@ -308,6 +319,7 @@ function TabStrip({
         {tabs.map((tab) => (
           <DocumentTab
             key={tab.documentId}
+            groupId={groupId}
             tab={tab}
             active={activeDocumentId === tab.documentId}
             onActivate={onActivate}
@@ -387,11 +399,13 @@ function TabStrip({
 }
 
 function DocumentTab({
+  groupId,
   tab,
   active,
   onActivate,
   onClose,
 }: {
+  groupId: string
   tab: WorkbenchTab
   active: boolean
   onActivate: (documentId: string) => void
@@ -400,8 +414,17 @@ function DocumentTab({
   const session = useDocumentSession(tab.documentId)
   const dirty = session.saveState !== 'saved'
   return (
-    <div className={active ? 'editor-tab active' : 'editor-tab'}>
-      <button role="tab" aria-selected={active} title={tab.title} onClick={() => onActivate(tab.documentId)}>
+    <div className={active ? 'editor-tab active' : 'editor-tab'} role="presentation">
+      <button
+        id={`editor-tab-${groupId}-${tab.documentId}`}
+        role="tab"
+        aria-controls={`editor-panel-${groupId}`}
+        aria-selected={active}
+        tabIndex={active ? 0 : -1}
+        title={tab.title}
+        onClick={() => onActivate(tab.documentId)}
+        onKeyDown={activateTabFromKeyboard}
+      >
         {tab.pinned && <Pin size={10} />}
         <span>{tab.title}</span>
         {dirty && <i aria-label="Unsaved changes" />}

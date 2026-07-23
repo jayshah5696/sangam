@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 
 from sangam.db import Database, utc_now
 from sangam.errors import NotFoundError, ValidationError
+from sangam.mutations import MutationCoordinator
 from sangam.schemas import BackupArtifact, BackupSet, BackupVerification
 
 _BACKUP_ID = re.compile(r"^[0-9]{8}T[0-9]{12}Z-[0-9a-f]{8}$")
@@ -56,11 +57,13 @@ class BackupManager:
         workspace_root: Path,
         backup_root: Path,
         retention_count: int,
+        mutations: MutationCoordinator,
     ) -> None:
         self.database = database
         self.workspace_root = workspace_root
         self.backup_root = backup_root
         self.retention_count = retention_count
+        self.mutations = mutations
         self.backup_root.mkdir(parents=True, exist_ok=True)
         self._create_lock = threading.Lock()
 
@@ -105,18 +108,10 @@ class BackupManager:
         staging = Path(tempfile.mkdtemp(prefix=".sangam-backup-", dir=self.backup_root))
         try:
             database_path = staging / "database.sqlite3"
-            source = self.database.connect()
-            target = sqlite3.connect(database_path)
-            try:
-                source.backup(target)
-            finally:
-                target.close()
-                source.close()
-
             workspace_path = staging / "workspace.tar.gz"
-            with tarfile.open(workspace_path, "w:gz", format=tarfile.PAX_FORMAT) as archive:
-                for child in sorted(self.workspace_root.iterdir(), key=lambda item: item.name):
-                    archive.add(child, arcname=child.name, recursive=True)
+            with self.mutations.backup():
+                self._snapshot_database(database_path)
+                self._archive_workspace(workspace_path)
 
             with sqlite3.connect(database_path) as snapshot:
                 document_count = snapshot.execute(
@@ -145,6 +140,20 @@ class BackupManager:
             shutil.rmtree(staging, ignore_errors=True)
             shutil.rmtree(destination, ignore_errors=True)
             raise
+
+    def _snapshot_database(self, destination: Path) -> None:
+        source = self.database.connect()
+        target = sqlite3.connect(destination)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+
+    def _archive_workspace(self, destination: Path) -> None:
+        with tarfile.open(destination, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+            for child in sorted(self.workspace_root.iterdir(), key=lambda item: item.name):
+                archive.add(child, arcname=child.name, recursive=True)
 
     def get(self, backup_id: str) -> BackupSet:
         backup_dir = self._backup_dir(backup_id)
@@ -175,19 +184,60 @@ class BackupManager:
                 raise ValidationError(f"Backup artifact checksum failed: {artifact.name}")
 
         with sqlite3.connect(backup_dir / "database.sqlite3") as snapshot:
+            snapshot.row_factory = sqlite3.Row
             integrity = snapshot.execute("PRAGMA integrity_check").fetchone()[0]
+            materialized = snapshot.execute(
+                """
+                SELECT d.document_id, d.path, d.content_hash, d.file_hash,
+                    d.materialization_state, r.content_hash AS revision_hash
+                FROM documents d
+                JOIN revisions r ON r.revision_id = d.current_revision_id
+                WHERE d.deleted = 0 AND d.path IS NOT NULL
+                ORDER BY d.path
+                """
+            ).fetchall()
         if integrity != "ok":
             raise ValidationError(
                 "Backup database integrity check failed", details={"result": integrity}
             )
 
         member_count = 0
+        member_names: set[str] = set()
+        archived_hashes: dict[str, str] = {}
         with tarfile.open(backup_dir / "workspace.tar.gz", "r:gz") as archive:
             for member in archive.getmembers():
                 member_count += 1
                 path = PurePosixPath(member.name)
                 if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
                     raise ValidationError("Workspace backup contains an unsafe archive member")
+                if member.name in member_names:
+                    raise ValidationError("Workspace backup contains a duplicate archive member")
+                member_names.add(member.name)
+                if member.isfile():
+                    extracted = archive.extractfile(member)
+                    if extracted is None:
+                        raise ValidationError("Workspace backup file could not be read")
+                    digest = hashlib.sha256()
+                    while chunk := extracted.read(1024 * 1024):
+                        digest.update(chunk)
+                    archived_hashes[member.name] = digest.hexdigest()
+
+        for document in materialized:
+            expected_hash = document["content_hash"]
+            if (
+                document["materialization_state"] != "clean"
+                or document["file_hash"] != expected_hash
+                or document["revision_hash"] != expected_hash
+            ):
+                raise ValidationError(
+                    "Backup database contains a non-canonical materialized document",
+                    details={"document_id": document["document_id"], "path": document["path"]},
+                )
+            if archived_hashes.get(document["path"]) != expected_hash:
+                raise ValidationError(
+                    "Workspace backup does not match the database document head",
+                    details={"document_id": document["document_id"], "path": document["path"]},
+                )
 
         verified_at = utc_now()
         verified = BackupVerification(

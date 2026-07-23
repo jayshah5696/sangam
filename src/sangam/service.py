@@ -16,6 +16,7 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.idempotency import IdempotencyStore, request_hash
+from sangam.mutations import MutationCoordinator
 from sangam.organization import WorkspaceOrganizationService
 from sangam.schemas import (
     Document,
@@ -42,6 +43,7 @@ class DocumentService:
         actors: ActorService,
         organization: WorkspaceOrganizationService,
         search_index: SearchIndex,
+        mutations: MutationCoordinator,
         max_document_bytes: int,
     ) -> None:
         self.database = database
@@ -50,6 +52,7 @@ class DocumentService:
         self.actors = actors
         self.organization = organization
         self.search_index = search_index
+        self.mutations = mutations
         self.max_document_bytes = max_document_bytes
 
     def _validate_content_size(self, content: str) -> None:
@@ -373,6 +376,46 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        with self.mutations.creation():
+            fingerprint = request_hash(
+                {
+                    "title": title,
+                    "content": content,
+                    "path": self._normalize_path(path) if path is not None else None,
+                    "content_type": content_type,
+                }
+            )
+            with self.database.connection() as connection:
+                duplicate = self._idempotent_result(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation="create",
+                    request_hash=fingerprint,
+                )
+            document_id = duplicate[0] if duplicate else str(uuid.uuid4())
+            with self.mutations.document(document_id):
+                return self._create_document_locked(
+                    title=title,
+                    content=content,
+                    path=path,
+                    content_type=content_type,
+                    actor_id=actor_id,
+                    idempotency_key=idempotency_key,
+                    document_id=document_id,
+                )
+
+    def _create_document_locked(
+        self,
+        *,
+        title: str,
+        content: str,
+        path: str | None,
+        content_type: str,
+        actor_id: str,
+        idempotency_key: str,
+        document_id: str,
+    ) -> Document:
         self._validate_content_size(content)
         normalized_path = self._normalize_path(path) if path is not None else None
         if content_type not in {"text/markdown", "text/html"}:
@@ -398,7 +441,6 @@ class DocumentService:
                 )
                 if duplicate is None:
                     now = utc_now()
-                    document_id = str(uuid.uuid4())
                     revision_id = str(uuid.uuid4())
                     content_hash = _content_hash(content)
                     size_bytes = len(content.encode("utf-8"))
@@ -468,6 +510,34 @@ class DocumentService:
         return result
 
     def _append_revision(
+        self,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        content: str | None,
+        title: str | None,
+        path: str | None,
+        operation: str,
+        summary: str | None,
+        actor_id: str,
+        idempotency_key: str,
+        deleted: bool | None = None,
+    ) -> tuple[Document, str | None]:
+        with self.mutations.document(document_id):
+            return self._append_revision_locked(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                content=content,
+                title=title,
+                path=path,
+                operation=operation,
+                summary=summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+                deleted=deleted,
+            )
+
+    def _append_revision_locked(
         self,
         *,
         document_id: str,
@@ -894,13 +964,14 @@ class DocumentService:
 
     def rematerialize_document(self, document_id: str) -> Document:
         """Rewrite a materialized document from the canonical database head."""
-        document = self.get_document(document_id)
-        if document.content_type == "application/pdf":
-            raise ValidationError(
-                "Missing PDF bytes must be restored from backup; they are not stored in SQLite"
-            )
-        self._finish_materialization(document)
-        return self.get_document(document_id)
+        with self.mutations.document(document_id):
+            document = self.get_document(document_id)
+            if document.content_type == "application/pdf":
+                raise ValidationError(
+                    "Missing PDF bytes must be restored from backup; they are not stored in SQLite"
+                )
+            self._finish_materialization(document)
+            return self.get_document(document_id)
 
     def _require_text_document(self, document_id: str, message: str) -> Document:
         document = self.get_document(document_id, include_deleted=True)
@@ -909,6 +980,26 @@ class DocumentService:
         return document
 
     def update_document_metadata(
+        self,
+        *,
+        document_id: str,
+        expected_metadata_version: int,
+        category: str | None,
+        tag_ids: list[str],
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        with self.mutations.document(document_id):
+            return self._update_document_metadata_locked(
+                document_id=document_id,
+                expected_metadata_version=expected_metadata_version,
+                category=category,
+                tag_ids=tag_ids,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+    def _update_document_metadata_locked(
         self,
         *,
         document_id: str,

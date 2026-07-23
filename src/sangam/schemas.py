@@ -302,6 +302,7 @@ class CreateAgentToken(BaseModel):
 
 
 class OperationEvent(BaseModel):
+    event_id: str
     operation_id: str
     actor_id: str
     actor_display_name: str

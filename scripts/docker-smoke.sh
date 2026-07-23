@@ -3,12 +3,15 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 STATE=$(mktemp -d "$ROOT/.sangam-smoke.XXXXXX")
-NAME="sangam-phase7-smoke-$$"
+NAME="sangam-smoke-$$"
 KARAKEEP_NAME="sangam-karakeep-smoke-$$"
-NETWORK="sangam-phase7-smoke-$$"
+NETWORK="sangam-smoke-$$"
 PORT=18080
+IMAGE=${SANGAM_SMOKE_IMAGE:-sangam:smoke}
 
 cleanup() {
+  docker exec --user 0 "$NAME" chmod -R a+rwX \
+    /data/database /data/workspace /data/backups >/dev/null 2>&1 || true
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker rm -f "$KARAKEEP_NAME" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
@@ -17,13 +20,16 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$STATE/database" "$STATE/workspace" "$STATE/backups"
-docker build -t sangam:phase7 "$ROOT"
+chmod 0777 "$STATE/database" "$STATE/workspace" "$STATE/backups"
+if [ "${SANGAM_SKIP_DOCKER_BUILD:-false}" != "true" ]; then
+  docker build -t "$IMAGE" "$ROOT"
+fi
 docker network create "$NETWORK" >/dev/null
 docker run -d \
   --name "$KARAKEEP_NAME" \
   --network "$NETWORK" \
   -v "$ROOT/scripts/fake-karakeep.py:/fake-karakeep.py:ro" \
-  sangam:phase7 uv run --no-sync python /fake-karakeep.py >/dev/null
+  "$IMAGE" /app/.venv/bin/python /fake-karakeep.py >/dev/null
 docker run -d \
   --name "$NAME" \
   --network "$NETWORK" \
@@ -33,7 +39,7 @@ docker run -d \
   -v "$STATE/backups:/data/backups" \
   -e "SANGAM_KARAKEEP_BASE_URL=http://$KARAKEEP_NAME:8901/api/v1" \
   -e SANGAM_KARAKEEP_API_KEY=docker-smoke-key \
-  sangam:phase7 >/dev/null
+  "$IMAGE" >/dev/null
 
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
@@ -45,10 +51,29 @@ until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
   sleep 1
 done
 
+attempt=0
+until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/readiness" >/dev/null; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    docker logs "$NAME"
+    echo "Container did not become ready." >&2
+    exit 1
+  fi
+  sleep 1
+done
+echo "Verified container readiness, including database, writable roots, and backup age."
+test "$(docker exec "$NAME" id -u)" = "10001"
+test "$(docker exec "$NAME" id -g)" = "10001"
+echo "Verified the application runs as unprivileged UID/GID 10001:10001."
+
 curl --fail --silent "http://127.0.0.1:$PORT/api/v1/chat/config" \
   | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["provider"] == "openrouter_openai_agents" and data["transport"] == "chatkit" and not data["configured"]'
-curl --fail --silent "http://127.0.0.1:$PORT/" \
-  | grep -q 'https://cdn.platform.openai.com/deployments/chatkit/chatkit.js'
+if curl --fail --silent "http://127.0.0.1:$PORT/" \
+  | grep -q 'https://cdn.platform.openai.com/deployments/chatkit/chatkit.js'; then
+  echo "ChatKit must be loaded on demand rather than eagerly from the application shell." >&2
+  exit 1
+fi
+echo "Verified the application shell defers ChatKit loading until chat activation."
 CHATKIT_STREAM=$(curl --fail --silent \
   -H 'Content-Type: application/json' \
   --data '{"type":"threads.create","params":{"input":{"content":[{"type":"input_text","text":"Docker ChatKit smoke"}],"attachments":[],"inference_options":{"model":"openai/gpt-5.4-nano"}}}}' \
@@ -66,9 +91,9 @@ DOCUMENT_ID=$(printf '%s' "$CREATED" | python3 -c 'import json,sys; print(json.l
 
 CLI_CONTENT=$(docker exec \
   -e SANGAM_API_URL=http://127.0.0.1:8000 \
-  "$NAME" uv run --no-sync sangam read "$DOCUMENT_ID")
+  "$NAME" /app/.venv/bin/sangam read "$DOCUMENT_ID")
 test "$CLI_CONTENT" = "# Through the container"
-test "$(cat "$STATE/workspace/projects/docker-smoke.md")" = "# Through the container"
+test "$(docker exec "$NAME" cat /data/workspace/projects/docker-smoke.md)" = "# Through the container"
 
 SEARCHED_ID=$(curl --fail --silent \
   "http://127.0.0.1:$PORT/api/v1/search?q=container" \
@@ -135,7 +160,7 @@ curl --fail --silent \
   | grep -q 'window.smoke=true'
 echo "Verified HTML materialization, stable publication, and isolated trusted preview."
 
-docker exec -i "$NAME" uv run --no-sync python - <<'PY'
+docker exec -i "$NAME" /app/.venv/bin/python - <<'PY'
 from pathlib import Path
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
@@ -214,7 +239,7 @@ PDF_REPLACEMENT=$(curl --fail --silent \
   --data-binary "@$STATE/research-replacement.pdf" \
   "http://127.0.0.1:$PORT/api/v1/pdfs?title=Replacement%20PDF&path=research%2Fresearch-replacement.pdf&supersedes_document_id=$PDF_DOCUMENT_ID")
 printf '%s' "$PDF_REPLACEMENT" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["supersedes_document_id"] == sys.argv[1] and data["document_id"] != sys.argv[1]' "$PDF_DOCUMENT_ID"
-test "$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$STATE/workspace/research/research.pdf")" = "$PDF_HASH"
+test "$(docker exec "$NAME" /app/.venv/bin/python -c 'import hashlib; print(hashlib.sha256(open("/data/workspace/research/research.pdf", "rb").read()).hexdigest())')" = "$PDF_HASH"
 echo "Verified immutable PDF import, extraction, range serving, annotation history, and replacement relationship."
 
 ISSUED_TOKEN=$(curl --fail --silent \
@@ -296,7 +321,10 @@ curl --fail --silent \
 echo "Verified ChatKit thread recovery after container restart."
 
 docker stop "$NAME" >/dev/null
-printf '%s\n' '# Changed outside Sangam' > "$STATE/workspace/projects/docker-smoke.md"
+docker run --rm --user 10001:10001 \
+  -v "$STATE/workspace:/data/workspace" \
+  --entrypoint /bin/sh "$IMAGE" \
+  -c "printf '%s\n' '# Changed outside Sangam' > /data/workspace/projects/docker-smoke.md"
 docker start "$NAME" >/dev/null
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do

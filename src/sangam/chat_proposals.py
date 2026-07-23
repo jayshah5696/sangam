@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from sangam.access import WorkspaceAccessService
 from sangam.db import Database, utc_now
-from sangam.errors import ConflictError, NotFoundError
+from sangam.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from sangam.schemas import ChatProposal
 from sangam.security import Principal
 
@@ -125,6 +125,27 @@ class ChatProposalRepository:
                 WHERE proposal_id = ? AND status = 'pending'
                 """,
                 (applied_revision_id, utc_now(), proposal_id),
+            )
+        return self.get_owned(principal, proposal_id)
+
+    def release_apply_reservation(
+        self, principal: Principal, proposal_id: str, idempotency_key: str
+    ) -> ChatProposal:
+        """Release a reservation when validation failed before a document commit.
+
+        Ambiguous failures after a commit deliberately retain the reservation so a
+        retry reuses the original document idempotency key. This method is only used
+        for access, existence, and validation failures that occur before mutation.
+        """
+        with self.database.transaction() as connection:
+            self._owned_row(connection, principal, proposal_id)
+            connection.execute(
+                """
+                UPDATE chat_proposals SET apply_idempotency_key = NULL
+                WHERE proposal_id = ? AND status = 'pending'
+                    AND apply_idempotency_key = ?
+                """,
+                (proposal_id, idempotency_key),
             )
         return self.get_owned(principal, proposal_id)
 
@@ -252,6 +273,11 @@ class ChatProposalService:
             )
         except ConflictError:
             self.repository.mark_stale(principal, proposal_id)
+            raise
+        except (AuthorizationError, NotFoundError, ValidationError):
+            self.repository.release_apply_reservation(
+                principal, proposal_id, reserved.idempotency_key
+            )
             raise
         return self.repository.mark_applied(principal, proposal_id, document.current_revision_id)
 

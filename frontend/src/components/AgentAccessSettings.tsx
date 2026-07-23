@@ -1,11 +1,21 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Bot, KeyRound, RefreshCw, ShieldOff } from 'lucide-react'
+import { AlertTriangle, Bot, KeyRound, RefreshCw, ShieldOff } from 'lucide-react'
 import { api, type IssuedAgentToken, type TokenScope } from '../api'
 import { OneTimeSecret } from './OneTimeSecret'
 
-const capabilities: TokenScope['capability'][] = [
+type Capability = TokenScope['capability']
+
+export type ScopePrefixes = {
+  read: string
+  search: string
+  write: string
+}
+
+export type TokenPresetId = 'read-only' | 'scoped-writer'
+
+const capabilities: Capability[] = [
   'read',
   'search',
   'create',
@@ -17,21 +27,76 @@ const capabilities: TokenScope['capability'][] = [
   'publish',
 ]
 
-const defaultCapabilities = new Set<TokenScope['capability']>([
-  'read',
-  'search',
+const mutationCapabilities = new Set<Capability>([
   'create',
   'update',
   'move',
   'tag',
   'restore',
+  'delete',
+  'publish',
 ])
 
-export function buildTokenScopes(selected: Set<TokenScope['capability']>, pathPrefix: string): TokenScope[] {
-  return [...selected].map((capability) => ({
-    capability,
-    path_prefix: capability === 'read' || capability === 'search' ? null : pathPrefix,
-  }))
+const sensitiveCapabilityDescriptions: Partial<Record<Capability, string>> = {
+  restore: 'Restore can replace the current document content with an earlier revision.',
+  delete: 'Delete can move documents out of the active workspace and into trash.',
+  publish: 'Publish can expose document content through a shareable publication.',
+}
+
+export const tokenPresets: Record<
+  TokenPresetId,
+  { label: string; description: string; capabilities: Capability[]; prefixes: ScopePrefixes }
+> = {
+  'read-only': {
+    label: 'Read only',
+    description: 'Read and search only under /agents/**.',
+    capabilities: ['read', 'search'],
+    prefixes: { read: 'agents', search: 'agents', write: 'agents' },
+  },
+  'scoped-writer': {
+    label: 'Scoped writer',
+    description: 'Read, search, and routine edits under /agents/**.',
+    capabilities: ['read', 'search', 'create', 'update', 'move', 'tag'],
+    prefixes: { read: 'agents', search: 'agents', write: 'agents' },
+  },
+}
+
+export const defaultTokenLifetimeHours = 24
+
+function normalizePrefixInput(value: string): string | null {
+  const normalized = value
+    .trim()
+    .replaceAll('\\', '/')
+    .replace(/^\/+|\/+$/g, '')
+    .replace(/\/\*\*$/, '')
+  return normalized || null
+}
+
+export function defaultExpirationValue(now = new Date()): string {
+  const expiresAt = new Date(now.getTime() + defaultTokenLifetimeHours * 60 * 60 * 1000)
+  const localTime = new Date(expiresAt.getTime() - expiresAt.getTimezoneOffset() * 60 * 1000)
+  return localTime.toISOString().slice(0, 16)
+}
+
+export function buildTokenScopes(selected: Set<Capability>, prefixes: ScopePrefixes): TokenScope[] {
+  return capabilities
+    .filter((capability) => selected.has(capability))
+    .map((capability) => ({
+      capability,
+      path_prefix: normalizePrefixInput(
+        capability === 'read' ? prefixes.read : capability === 'search' ? prefixes.search : prefixes.write,
+      ),
+    }))
+}
+
+export function sensitiveCapabilities(selected: Set<Capability>): Capability[] {
+  return capabilities.filter(
+    (capability) => selected.has(capability) && sensitiveCapabilityDescriptions[capability] !== undefined,
+  )
+}
+
+function formatEffectiveScope(scope: TokenScope): string {
+  return `${scope.capability}: ${scope.path_prefix ? `/${scope.path_prefix}/**` : '/** (workspace-wide)'}`
 }
 
 export function AgentAccessSettings() {
@@ -40,10 +105,33 @@ export function AgentAccessSettings() {
   const [actorId, setActorId] = useState('agent:researcher')
   const [displayName, setDisplayName] = useState('Researcher')
   const [label, setLabel] = useState('Research workspace')
-  const [pathPrefix, setPathPrefix] = useState('agents')
-  const [expiresAt, setExpiresAt] = useState('')
-  const [selected, setSelected] = useState(defaultCapabilities)
+  const [prefixes, setPrefixes] = useState<ScopePrefixes>(() => ({ ...tokenPresets['read-only'].prefixes }))
+  const [expiresAt, setExpiresAt] = useState(defaultExpirationValue)
+  const [selected, setSelected] = useState<Set<Capability>>(
+    () => new Set(tokenPresets['read-only'].capabilities),
+  )
+  const [activePreset, setActivePreset] = useState<TokenPresetId | null>('read-only')
+  const [sensitiveConfirmed, setSensitiveConfirmed] = useState(false)
   const [issued, setIssued] = useState<IssuedAgentToken | null>(null)
+
+  const scopes = buildTokenScopes(selected, prefixes)
+  const selectedSensitiveCapabilities = sensitiveCapabilities(selected)
+  const hasMutations = [...selected].some((capability) => mutationCapabilities.has(capability))
+  const writePrefixMissing = hasMutations && normalizePrefixInput(prefixes.write) === null
+  const sensitiveConfirmationMissing = selectedSensitiveCapabilities.length > 0 && !sensitiveConfirmed
+
+  const choosePreset = (presetId: TokenPresetId) => {
+    const preset = tokenPresets[presetId]
+    setSelected(new Set(preset.capabilities))
+    setPrefixes({ ...preset.prefixes })
+    setActivePreset(presetId)
+    setSensitiveConfirmed(false)
+  }
+
+  const updatePrefix = (kind: keyof ScopePrefixes, value: string) => {
+    setPrefixes((current) => ({ ...current, [kind]: value }))
+    setActivePreset(null)
+  }
 
   const issue = useMutation({
     mutationFn: () =>
@@ -51,7 +139,7 @@ export function AgentAccessSettings() {
         actor_id: actorId,
         display_name: displayName,
         label,
-        scopes: buildTokenScopes(selected, pathPrefix),
+        scopes,
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       }),
     onSuccess: async (token) => {
@@ -102,57 +190,172 @@ export function AgentAccessSettings() {
           className="agent-token-form"
           onSubmit={(event) => {
             event.preventDefault()
-            if (selected.size > 0) issue.mutate()
+            if (
+              selected.size > 0 &&
+              !writePrefixMissing &&
+              !sensitiveConfirmationMissing &&
+              actorId &&
+              displayName &&
+              label
+            ) {
+              issue.mutate()
+            }
           }}
         >
+          <fieldset className="agent-token-presets">
+            <legend>Start with a safe preset</legend>
+            <div>
+              {(Object.entries(tokenPresets) as [TokenPresetId, (typeof tokenPresets)[TokenPresetId]][]).map(
+                ([presetId, preset]) => (
+                  <button
+                    key={presetId}
+                    type="button"
+                    className="agent-token-preset"
+                    aria-pressed={activePreset === presetId}
+                    onClick={() => choosePreset(presetId)}
+                  >
+                    <strong>{preset.label}</strong>
+                    <small>{preset.description}</small>
+                  </button>
+                ),
+              )}
+            </div>
+          </fieldset>
+
           <label>
             <span>Actor ID</span>
-            <input value={actorId} onChange={(event) => setActorId(event.target.value)} />
+            <input
+              required
+              value={actorId}
+              onChange={(event) => setActorId(event.target.value)}
+              autoComplete="off"
+            />
           </label>
           <label>
             <span>Display name</span>
-            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            <input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
           </label>
           <label>
             <span>Token label</span>
-            <input value={label} onChange={(event) => setLabel(event.target.value)} />
+            <input required value={label} onChange={(event) => setLabel(event.target.value)} />
           </label>
           <label>
-            <span>Write path prefix</span>
-            <input value={pathPrefix} onChange={(event) => setPathPrefix(event.target.value)} />
-            <small>Read and search are workspace-wide. Mutations stay under this prefix.</small>
-          </label>
-          <label>
-            <span>Expiration (optional)</span>
+            <span>Expiration</span>
             <input
               type="datetime-local"
               value={expiresAt}
               onChange={(event) => setExpiresAt(event.target.value)}
             />
+            <small>
+              Defaults to {defaultTokenLifetimeHours} hours. Clear only for a managed long-lived integration.
+            </small>
           </label>
+
+          <div className="agent-token-prefixes">
+            <label>
+              <span>Read path prefix</span>
+              <input value={prefixes.read} onChange={(event) => updatePrefix('read', event.target.value)} />
+              <small>Empty means the whole workspace.</small>
+            </label>
+            <label>
+              <span>Search path prefix</span>
+              <input
+                value={prefixes.search}
+                onChange={(event) => updatePrefix('search', event.target.value)}
+              />
+              <small>Search is also limited by the read grant.</small>
+            </label>
+            <label>
+              <span>Write path prefix</span>
+              <input
+                value={prefixes.write}
+                aria-invalid={writePrefixMissing}
+                onChange={(event) => updatePrefix('write', event.target.value)}
+              />
+              <small>
+                {writePrefixMissing
+                  ? 'A prefix is required for mutation capabilities.'
+                  : 'Shared by all mutations.'}
+              </small>
+            </label>
+          </div>
+
           <fieldset>
             <legend>Capabilities</legend>
             <div className="capability-grid">
-              {capabilities.map((capability) => (
-                <label key={capability}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(capability)}
-                    onChange={() =>
-                      setSelected((current) => {
-                        const next = new Set(current)
-                        if (next.has(capability)) next.delete(capability)
-                        else next.add(capability)
-                        return next
-                      })
-                    }
-                  />
-                  {capability}
-                </label>
-              ))}
+              {capabilities.map((capability) => {
+                const isSensitive = sensitiveCapabilityDescriptions[capability] !== undefined
+                return (
+                  <label key={capability} className={isSensitive ? 'sensitive' : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(capability)}
+                      onChange={() => {
+                        setSelected((current) => {
+                          const next = new Set(current)
+                          if (next.has(capability)) next.delete(capability)
+                          else next.add(capability)
+                          return next
+                        })
+                        setActivePreset(null)
+                        setSensitiveConfirmed(false)
+                      }}
+                    />
+                    {capability}
+                  </label>
+                )
+              })}
             </div>
           </fieldset>
-          <button disabled={issue.isPending || selected.size === 0}>
+
+          {selectedSensitiveCapabilities.length > 0 && (
+            <div className="agent-capability-warning" role="alert">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>High-impact access selected</strong>
+                <ul>
+                  {selectedSensitiveCapabilities.map((capability) => (
+                    <li key={capability}>{sensitiveCapabilityDescriptions[capability]}</li>
+                  ))}
+                </ul>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={sensitiveConfirmed}
+                    onChange={(event) => setSensitiveConfirmed(event.target.checked)}
+                  />
+                  I understand and intend to grant these high-impact capabilities.
+                </label>
+              </div>
+            </div>
+          )}
+
+          <section className="agent-scope-preview" aria-labelledby="effective-scope-title">
+            <div>
+              <strong id="effective-scope-title">Effective scope</strong>
+              <small>This is the authority encoded in the token.</small>
+            </div>
+            {scopes.length > 0 ? (
+              <ul>
+                {scopes.map((scope) => (
+                  <li key={`${scope.capability}:${scope.path_prefix ?? '*'}`}>
+                    {formatEffectiveScope(scope)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>Choose at least one capability.</p>
+            )}
+            <small>
+              {expiresAt ? `Expires ${new Date(expiresAt).toLocaleString()}` : 'No expiration set.'}
+            </small>
+          </section>
+
+          <button
+            disabled={
+              issue.isPending || selected.size === 0 || writePrefixMissing || sensitiveConfirmationMissing
+            }
+          >
             <KeyRound size={14} /> {issue.isPending ? 'Issuing…' : 'Issue token'}
           </button>
         </form>

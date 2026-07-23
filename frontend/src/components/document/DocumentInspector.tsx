@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { PanelRightClose } from 'lucide-react'
@@ -7,10 +7,13 @@ import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { useTheme, type InspectorTab } from '../../theme'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { HtmlPreview } from '../HtmlPreview'
-import { ChatPanel } from '../ChatPanel'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
+import { activateTabFromKeyboard } from '../tabKeyboard'
 import { TrustedHtmlPreview } from '../TrustedHtmlPreview'
+
+const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
+const inspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
 
 export function DocumentInspector({
   width,
@@ -33,11 +36,23 @@ export function DocumentInspector({
   const session = useDocumentSession(documentId)
   const sessions = useDocumentSessions()
   const queryClient = useQueryClient()
-  const historyQuery = useQuery({ queryKey: ['history', documentId], queryFn: () => api.history(documentId) })
-  const tagsQuery = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
+  const { preferences, updatePreferences } = useTheme()
+  const tab = preferences.rightTab
+  const [chatActivated, setChatActivated] = useState(tab === 'chat')
+  const setTab = (next: InspectorTab) => {
+    if (next === 'chat') setChatActivated(true)
+    updatePreferences({ rightTab: next })
+  }
+  const historyQuery = useQuery({
+    queryKey: ['history', documentId],
+    queryFn: () => api.history(documentId),
+    enabled: tab === 'history',
+  })
+  const tagsQuery = useQuery({ queryKey: ['tags'], queryFn: api.listTags, enabled: tab === 'properties' })
   const publicationQuery = useQuery({
     queryKey: ['publication', documentId],
     queryFn: () => api.getDocumentPublication(documentId),
+    enabled: tab === 'properties' || tab === 'history',
   })
   const restore = useMutation({
     mutationFn: (revisionId: string) => api.restore(document, revisionId),
@@ -49,9 +64,6 @@ export function DocumentInspector({
   const history = historyQuery.data ?? []
   const compareFrom = session.compareFrom
   const compareTo = session.compareTo ?? document.current_revision_id
-  const { preferences, updatePreferences } = useTheme()
-  const tab = preferences.rightTab
-  const setTab = (next: InspectorTab) => updatePreferences({ rightTab: next })
   const [previewRevision, setPreviewRevision] = useState<Revision | null>(null)
   const exposeRevision = useMutation({
     mutationFn: (revisionId: string) => {
@@ -89,154 +101,167 @@ export function DocumentInspector({
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
-        {(['properties', 'outline', 'history', 'chat'] as const).map((candidate) => (
+        {inspectorTabs.map((candidate) => (
           <button
             role="tab"
+            id={`inspector-tab-${candidate}`}
+            aria-controls="inspector-panel"
             aria-selected={tab === candidate}
+            tabIndex={tab === candidate ? 0 : -1}
             className={tab === candidate ? 'active' : ''}
             key={candidate}
             onClick={() => setTab(candidate)}
+            onKeyDown={activateTabFromKeyboard}
           >
             {candidate}
           </button>
         ))}
       </div>
-      {tab === 'properties' && (
-        <>
-          <MetadataEditor
-            key={document.metadata_version}
-            document={document}
-            tags={tagsQuery.data ?? []}
-            onUpdated={onUpdated}
-          />
-          {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
-            <PublicationEditor
+      <div
+        className="inspector-tab-panel"
+        id="inspector-panel"
+        role="tabpanel"
+        aria-labelledby={`inspector-tab-${tab}`}
+      >
+        {tab === 'properties' && (
+          <>
+            <MetadataEditor
+              key={document.metadata_version}
               document={document}
-              publication={publicationQuery.data ?? null}
-              onDocumentUpdated={onUpdated}
+              tags={tagsQuery.data ?? []}
+              onUpdated={onUpdated}
             />
-          )}
-        </>
-      )}
-      {tab === 'outline' && (
-        <section className="outline-panel">
-          {document.content_type === 'application/pdf' && (
-            <div className="pdf-inspector-summary">
-              <strong>{document.pdf_page_count ?? '…'} pages</strong>
-              <small>Extraction: {document.pdf_extraction_status ?? 'pending'}</small>
-              <small>SHA-256 {document.content_hash}</small>
-            </div>
-          )}
-          {document.content_type !== 'application/pdf' &&
-            headings.map((heading) => (
-              <button
-                key={`${heading.line}:${heading.text}`}
-                style={{ paddingLeft: 8 + (heading.level - 1) * 10 }}
-              >
-                <span>{heading.text}</span>
-                <small>Ln {heading.line}</small>
-              </button>
-            ))}
-          {document.content_type !== 'application/pdf' && headings.length === 0 && (
-            <p className="small-muted">No Markdown headings in this document.</p>
-          )}
-        </section>
-      )}
-      {tab === 'history' && (
-        <>
-          {document.content_type !== 'application/pdf' && (
-            <section className="compare-controls">
-              <label>
-                From
-                <select
-                  value={compareFrom ?? ''}
-                  onChange={(event) => {
-                    if (event.target.value) setComparison(event.target.value, compareTo)
-                  }}
-                >
-                  <option value="">Choose a revision…</option>
-                  {history.map((revision) => (
-                    <option key={revision.revision_id} value={revision.revision_id}>
-                      {revision.operation} · {new Date(revision.created_at).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                To
-                <select
-                  value={compareTo}
-                  onChange={(event) => {
-                    if (compareFrom) setComparison(compareFrom, event.target.value)
-                  }}
-                >
-                  {history.map((revision) => (
-                    <option key={revision.revision_id} value={revision.revision_id}>
-                      {revision.operation} · {new Date(revision.created_at).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {fromRevision && toRevision && fromRevision.revision_id !== toRevision.revision_id && (
-                <button
-                  onClick={() =>
-                    sessions.updateSession(documentId, { compareFrom: undefined, compareTo: undefined })
-                  }
-                >
-                  Close comparison
-                </button>
-              )}
-            </section>
-          )}
-          {document.content_type !== 'application/pdf' &&
-            fromRevision &&
-            toRevision &&
-            fromRevision.revision_id !== toRevision.revision_id && (
-              <RevisionMergeView original={fromRevision.content} modified={toRevision.content} />
+            {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
+              <PublicationEditor
+                document={document}
+                publication={publicationQuery.data ?? null}
+                onDocumentUpdated={onUpdated}
+              />
             )}
-          {document.content_type !== 'application/pdf' && previewRevision && (
-            <section className="revision-render-preview">
-              <header>
-                <strong>Rendered revision</strong>
-                <button className="secondary-action" onClick={() => setPreviewRevision(null)}>
-                  Close
+          </>
+        )}
+        {tab === 'outline' && (
+          <section className="outline-panel">
+            {document.content_type === 'application/pdf' && (
+              <div className="pdf-inspector-summary">
+                <strong>{document.pdf_page_count ?? '…'} pages</strong>
+                <small>Extraction: {document.pdf_extraction_status ?? 'pending'}</small>
+                <small>SHA-256 {document.content_hash}</small>
+              </div>
+            )}
+            {document.content_type !== 'application/pdf' &&
+              headings.map((heading) => (
+                <button
+                  key={`${heading.line}:${heading.text}`}
+                  style={{ paddingLeft: 8 + (heading.level - 1) * 10 }}
+                >
+                  <span>{heading.text}</span>
+                  <small>Ln {heading.line}</small>
                 </button>
-              </header>
-              {document.content_type === 'text/markdown' ? (
-                <MarkdownPreview content={previewRevision.content} />
-              ) : document.trust_level === 'trusted_interactive' ? (
-                <TrustedHtmlPreview document={document} revisionId={previewRevision.revision_id} />
-              ) : (
-                <HtmlPreview content={previewRevision.content} />
+              ))}
+            {document.content_type !== 'application/pdf' && headings.length === 0 && (
+              <p className="small-muted">No Markdown headings in this document.</p>
+            )}
+          </section>
+        )}
+        {tab === 'history' && (
+          <>
+            {document.content_type !== 'application/pdf' && (
+              <section className="compare-controls">
+                <label>
+                  From
+                  <select
+                    value={compareFrom ?? ''}
+                    onChange={(event) => {
+                      if (event.target.value) setComparison(event.target.value, compareTo)
+                    }}
+                  >
+                    <option value="">Choose a revision…</option>
+                    {history.map((revision) => (
+                      <option key={revision.revision_id} value={revision.revision_id}>
+                        {revision.operation} · {new Date(revision.created_at).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  To
+                  <select
+                    value={compareTo}
+                    onChange={(event) => {
+                      if (compareFrom) setComparison(compareFrom, event.target.value)
+                    }}
+                  >
+                    {history.map((revision) => (
+                      <option key={revision.revision_id} value={revision.revision_id}>
+                        {revision.operation} · {new Date(revision.created_at).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {fromRevision && toRevision && fromRevision.revision_id !== toRevision.revision_id && (
+                  <button
+                    onClick={() =>
+                      sessions.updateSession(documentId, { compareFrom: undefined, compareTo: undefined })
+                    }
+                  >
+                    Close comparison
+                  </button>
+                )}
+              </section>
+            )}
+            {document.content_type !== 'application/pdf' &&
+              fromRevision &&
+              toRevision &&
+              fromRevision.revision_id !== toRevision.revision_id && (
+                <RevisionMergeView original={fromRevision.content} modified={toRevision.content} />
               )}
-            </section>
-          )}
-          <HistoryList
-            binary={document.content_type === 'application/pdf'}
-            history={history}
-            currentRevisionId={document.current_revision_id}
-            busy={restore.isPending || session.saveState !== 'saved'}
-            onCompare={(revisionId) => setComparison(revisionId, document.current_revision_id)}
-            onPreview={(revision) => setPreviewRevision(revision)}
-            onExpose={
-              publicationQuery.data?.active ? (revisionId) => exposeRevision.mutate(revisionId) : undefined
-            }
-            onCopy={(revision) => {
-              sessions.updateSession(documentId, {
-                content: revision.content,
-                baseRevisionId: document.current_revision_id,
-              })
-              onFocusEditor()
-            }}
-            onRestore={(revisionId) => restore.mutate(revisionId)}
-          />
-        </>
-      )}
-      {/* ChatKit keeps its own composer draft and streaming state internally, so
-          the panel stays mounted across inspector-tab switches and is only hidden
-          with CSS. Unmounting it would reload the ChatKit iframe and lose context. */}
-      <div className="chat-panel-host" hidden={tab !== 'chat'}>
-        <ChatPanel document={document} selectedText={selectedText} onDocumentUpdated={onUpdated} />
+            {document.content_type !== 'application/pdf' && previewRevision && (
+              <section className="revision-render-preview">
+                <header>
+                  <strong>Rendered revision</strong>
+                  <button className="secondary-action" onClick={() => setPreviewRevision(null)}>
+                    Close
+                  </button>
+                </header>
+                {document.content_type === 'text/markdown' ? (
+                  <MarkdownPreview content={previewRevision.content} />
+                ) : document.trust_level === 'trusted_interactive' ? (
+                  <TrustedHtmlPreview document={document} revisionId={previewRevision.revision_id} />
+                ) : (
+                  <HtmlPreview content={previewRevision.content} />
+                )}
+              </section>
+            )}
+            <HistoryList
+              binary={document.content_type === 'application/pdf'}
+              history={history}
+              currentRevisionId={document.current_revision_id}
+              busy={restore.isPending || session.saveState !== 'saved'}
+              onCompare={(revisionId) => setComparison(revisionId, document.current_revision_id)}
+              onPreview={(revision) => setPreviewRevision(revision)}
+              onExpose={
+                publicationQuery.data?.active ? (revisionId) => exposeRevision.mutate(revisionId) : undefined
+              }
+              onCopy={(revision) => {
+                sessions.updateSession(documentId, {
+                  content: revision.content,
+                  baseRevisionId: document.current_revision_id,
+                })
+                onFocusEditor()
+              }}
+              onRestore={(revisionId) => restore.mutate(revisionId)}
+            />
+          </>
+        )}
+        {/* Lazy-load ChatKit after first use, then keep its composer and stream mounted. */}
+        {chatActivated && (
+          <div className="chat-panel-host" hidden={tab !== 'chat'}>
+            <Suspense fallback={<div className="center-message">Preparing workspace chat…</div>}>
+              <ChatPanel document={document} selectedText={selectedText} onDocumentUpdated={onUpdated} />
+            </Suspense>
+          </div>
+        )}
       </div>
     </aside>
   )

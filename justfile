@@ -1,6 +1,6 @@
 set dotenv-load
 
-image := "sangam:phase7"
+image := "sangam:dev"
 container := "sangam"
 port := "8000"
 
@@ -17,6 +17,13 @@ test:
     npm --prefix frontend run build
     npm --prefix frontend run lint
     npm --prefix frontend run test
+
+# Run source, documentation, version, configuration, and distribution gates.
+check: test test-docs
+    uv run python scripts/verify-release-config.py
+    uv run python scripts/verify-version.py --frontend-dist
+    ./scripts/audit-dependencies.sh
+    ./scripts/smoke-package.sh
 
 # Run only the Python service and API tests.
 test-backend:
@@ -37,7 +44,7 @@ format:
 test-docs:
     uv run python scripts/verify-docs.py
     node frontend/scripts/verify-mermaid.mjs
-    npm --prefix frontend exec markdownlint-cli2 "README.md" "docs/**/*.md"
+    npm --prefix frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
 
 # Serve the API and frontend development server with live reload.
 serve:
@@ -71,3 +78,7 @@ docker-serve: docker-build
 # Build and exercise the production image with persistent state and restart recovery.
 docker-smoke:
     ./scripts/docker-smoke.sh
+
+# Run the release checklist's automatable gates for a SemVer version.
+release-check version:
+    ./scripts/release-preflight.sh "{{ version }}"

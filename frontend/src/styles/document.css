@@ -171,6 +171,7 @@ button:disabled { cursor: default; opacity: .55; }
 .revision-diff-error { margin: 0; padding: 12px; color: var(--danger); font-size: var(--text-meta); }
 .document-inspector.mode-chat { display: flex; flex-direction: column; overflow: hidden; }
 .document-inspector.mode-chat > .right-panel-header, .document-inspector.mode-chat > .inspector-tabs { flex: none; }
+.document-inspector.mode-chat > .inspector-tab-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .chat-panel-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat-panel-host[hidden] { display: none; }
 .chat-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: var(--space-3); overflow-y: auto; }
@@ -184,8 +185,43 @@ button:disabled { cursor: default; opacity: .55; }
 .chat-proposal-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .notice { padding: 12px 14px; margin-bottom: 12px; border-radius: var(--radius-panel); font-size: var(--text-control); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .conflict-notice { background: #f2d9ae; color: #633f08; }
+.conflict-recovery { align-items: flex-start; }
+.conflict-recovery-copy { min-width: 0; flex: 1; display: grid; gap: var(--space-2); line-height: var(--leading-body); }
+.conflict-metadata { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.conflict-metadata > div { min-width: 0; display: grid; gap: var(--space-1); padding: var(--space-2); border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface) 45%, transparent); }
+.conflict-metadata dt { font-size: var(--text-label); font-weight: 600; }
+.conflict-metadata dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-meta); }
+.conflict-comparison { min-width: 0; }
+.conflict-comparison summary { cursor: pointer; font-weight: 600; }
+.conflict-comparison .revision-merge-view { max-height: 24rem; margin: var(--space-2) 0 0; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: var(--radius-panel); }
+.conflict-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.conflict-discard-confirmation { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--danger); border-radius: var(--radius-panel); background: var(--danger-soft); color: var(--danger); }
+.conflict-discard-confirmation .conflict-actions { justify-content: flex-start; }
 .error-notice { background: var(--danger-soft); color: #812e22; }
 .offline-notice { background: var(--surface-soft); color: var(--muted); border: 1px dashed var(--muted); }
+.draft-recovery-notice { align-items: flex-start; }
+.draft-recovery-copy { min-width: 0; display: grid; gap: var(--space-1); line-height: var(--leading-body); }
+.draft-recovery-copy small { overflow-wrap: anywhere; }
+.draft-recovery-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.citation-evidence { margin-bottom: var(--space-3); overflow: hidden; border: 1px solid var(--accent); border-radius: var(--radius-panel); background: var(--surface); }
+.citation-evidence > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); background: var(--accent-soft); }
+.citation-evidence > header > div { min-width: 0; display: grid; gap: var(--space-1); }
+.citation-evidence > header .eyebrow { margin: 0; }
+.citation-evidence > header small { overflow-wrap: anywhere; font-family: var(--font-mono); }
+.citation-evidence > p { margin: 0; padding: var(--space-3); }
+.citation-evidence > details > summary { min-height: var(--control-height); display: flex; align-items: center; padding: 0 var(--space-3); cursor: pointer; border-top: 1px solid var(--line); font-size: var(--text-control); font-weight: 600; }
+.citation-evidence .markdown-preview { min-height: 18rem; max-height: 32rem; overflow: auto; border: 0; border-top: 1px solid var(--line); }
+.citation-evidence .html-preview { min-height: 24rem; border-top: 1px solid var(--line); }
+.chat-effect-confirmation { display: grid; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--danger); border-radius: var(--radius-panel); background: var(--danger-soft); }
+.chat-effect-confirmation > div:first-child { display: grid; gap: var(--space-1); }
+.chat-effect-confirmation .eyebrow { margin: 0; color: var(--danger); }
+.chat-effect-confirmation code { overflow-wrap: anywhere; }
+.chat-effect-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.chat-effect-complete, .chat-citation-status { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); font-size: var(--text-control); }
+.chat-effect-complete { flex-wrap: wrap; }
+.chat-citation-status > div { min-width: 0; display: grid; gap: var(--space-1); }
+.chat-citation-status small { overflow-wrap: anywhere; font-family: var(--font-mono); }
+.chat-citation-status.stale { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
 .error-text { color: var(--danger); font-size: var(--text-label); }
 .success-text { color: var(--accent); font-size: var(--text-label); }
 .center-message { margin: 20vh auto; text-align: center; }
@@ -338,6 +374,10 @@ button:disabled { cursor: default; opacity: .55; }
   .utility-page { width: calc(100% - 30px); padding-top: 30px; }
   .utility-header, .trash-card { align-items: stretch; flex-direction: column; }
   .document-header { flex-direction: column; }
+  .notice, .draft-recovery-notice, .conflict-recovery { align-items: stretch; flex-direction: column; }
+  .draft-recovery-actions, .conflict-actions { justify-content: flex-start; }
+  .conflict-metadata { grid-template-columns: 1fr; }
+  .citation-evidence > header, .chat-citation-status { align-items: stretch; flex-direction: column; }
   .document-toolbar { align-items: flex-start; }
   .editor-tools > span { width: 100%; margin-left: 0; }
   .backup-card li { grid-template-columns: 1fr auto; }

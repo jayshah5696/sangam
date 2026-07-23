@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from sangam.access import WorkspaceAccessService
 from sangam.errors import ValidationError
@@ -46,6 +47,31 @@ def _parse_byte_range(value: str, size: int) -> tuple[int, int]:
     return start, min(end, size - 1)
 
 
+async def _read_limited_body(request: Request, *, max_bytes: int) -> bytes:
+    raw_length = request.headers.get("content-length")
+    if raw_length is not None:
+        try:
+            declared_length = int(raw_length)
+        except ValueError as error:
+            raise ValidationError("Content-Length must be a non-negative integer") from error
+        if declared_length < 0:
+            raise ValidationError("Content-Length must be a non-negative integer")
+        if declared_length > max_bytes:
+            raise ValidationError(
+                "PDF exceeds the configured size limit",
+                details={"size_bytes": declared_length, "max_pdf_bytes": max_bytes},
+            )
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > max_bytes:
+            raise ValidationError(
+                "PDF exceeds the configured size limit",
+                details={"size_bytes": len(content) + len(chunk), "max_pdf_bytes": max_bytes},
+            )
+        content.extend(chunk)
+    return bytes(content)
+
+
 def create_pdf_router(
     *,
     workspace: WorkspaceAccessService,
@@ -71,8 +97,9 @@ def create_pdf_router(
         content_type = request.headers.get("content-type", "").split(";", 1)[0].casefold()
         if content_type != "application/pdf":
             raise ValidationError("PDF imports require Content-Type: application/pdf")
-        content = await request.body()
-        document = workspace.import_pdf(
+        content = await _read_limited_body(request, max_bytes=pdf_research.max_pdf_bytes)
+        document = await asyncio.to_thread(
+            workspace.import_pdf,
             principal,
             title=title,
             path=path,
@@ -89,28 +116,29 @@ def create_pdf_router(
         range_header: str | None = Header(default=None, alias="Range"),
         principal: Principal = principal_dependency,
     ) -> Response:
-        document, content = workspace.pdf_bytes(principal, document_id)
+        document, size = workspace.pdf_stream_info(principal, document_id)
         common_headers = {
             "Accept-Ranges": "bytes",
             "Content-Disposition": (
-                "inline; filename*=UTF-8''" + quote(document.path.rsplit("/", 1)[-1])
+                "inline; filename*=UTF-8''"
+                + quote((document.path or document.title).rsplit("/", 1)[-1])
             ),
             "Cache-Control": "private, no-store",
         }
         if not range_header:
-            return Response(
-                content=content,
+            return StreamingResponse(
+                workspace.pdf_stream(principal, document_id),
                 media_type="application/pdf",
-                headers={**common_headers, "Content-Length": str(len(content))},
+                headers={**common_headers, "Content-Length": str(size)},
             )
-        start, end = _parse_byte_range(range_header, len(content))
-        return Response(
+        start, end = _parse_byte_range(range_header, size)
+        return StreamingResponse(
             status_code=206,
-            content=content[start : end + 1],
+            content=workspace.pdf_stream(principal, document_id, start=start, end=end),
             media_type="application/pdf",
             headers={
                 **common_headers,
-                "Content-Range": f"bytes {start}-{end}/{len(content)}",
+                "Content-Range": f"bytes {start}-{end}/{size}",
                 "Content-Length": str(end - start + 1),
             },
         )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 from sangam.db import Database, utc_now
 from sangam.schemas import OperationEvent
@@ -42,12 +43,13 @@ class ActivityService:
             connection.execute(
                 """
                 INSERT INTO operation_events(
-                    operation_id, actor_id, token_id, action, resource_type,
+                    event_id, operation_id, actor_id, token_id, action, resource_type,
                     resource_id, path, outcome, error_code, revision_id,
                     detail_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    str(uuid.uuid4()),
                     principal.operation_id,
                     principal.actor_id,
                     principal.token_id,
@@ -94,13 +96,14 @@ class ActivityService:
                 JOIN actors a ON a.actor_id = e.actor_id
                 LEFT JOIN actor_tokens t ON t.token_id = e.token_id
                 {where}
-                ORDER BY e.created_at DESC, e.operation_id DESC
+                ORDER BY e.created_at DESC, e.event_id DESC
                 LIMIT ? OFFSET ?
                 """,
                 parameters,
             ).fetchall()
         return [
             OperationEvent(
+                event_id=row["event_id"],
                 operation_id=row["operation_id"],
                 actor_id=row["actor_id"],
                 actor_display_name=row["actor_display_name"],

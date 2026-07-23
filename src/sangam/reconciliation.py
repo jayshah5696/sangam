@@ -207,8 +207,7 @@ class ReconciliationService:
         for document_id in plan.rematerialize_document_ids:
             self.documents.rematerialize_document(document_id)
             repaired.append(document_id)
-        for conflict in plan.conflicts:
-            self._record_conflict(conflict)
+        self._synchronize_conflicts(plan.conflicts, disk_state)
         return ReconciliationReport(repaired_document_ids=repaired, conflicts=self.list_conflicts())
 
     def reindex_path(self, path: str) -> Document:
@@ -333,31 +332,121 @@ class ReconciliationService:
                         "DELETE FROM ignored_workspace_files WHERE path = ?", (ignored["path"],)
                     )
 
-    def _record_conflict(self, conflict: PlannedConflict) -> None:
+    def _synchronize_conflicts(
+        self, conflicts: Sequence[PlannedConflict], disk_state: Mapping[str, str]
+    ) -> None:
+        """Make persisted open conflicts match the latest complete workspace scan."""
+        planned = {self._planned_conflict_key(conflict): conflict for conflict in conflicts}
+        now = utc_now()
         with self.database.transaction() as connection:
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO reconciliation_conflicts(
-                    conflict_id, conflict_type, document_id, path, candidate_path,
-                    expected_hash, actual_hash, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    conflict.conflict_type,
-                    conflict.document_id,
-                    conflict.path,
-                    conflict.candidate_path,
-                    conflict.expected_hash,
-                    conflict.actual_hash,
-                    utc_now(),
-                ),
+            open_rows = connection.execute(
+                "SELECT * FROM reconciliation_conflicts WHERE status = 'open'"
+            ).fetchall()
+            existing = {self._stored_conflict_key(row): row for row in open_rows}
+            affected_document_ids = {
+                row["document_id"] for row in open_rows if row["document_id"] is not None
+            }
+            affected_document_ids.update(
+                conflict.document_id for conflict in conflicts if conflict.document_id is not None
             )
-            if conflict.document_id:
-                connection.execute(
-                    "UPDATE documents SET materialization_state = 'conflict' WHERE document_id = ?",
-                    (conflict.document_id,),
+
+            stale_ids = [row["conflict_id"] for key, row in existing.items() if key not in planned]
+            if stale_ids:
+                connection.executemany(
+                    """
+                    UPDATE reconciliation_conflicts
+                    SET status = 'resolved', resolved_at = ?
+                    WHERE conflict_id = ? AND status = 'open'
+                    """,
+                    [(now, conflict_id) for conflict_id in stale_ids],
                 )
+
+            for key, conflict in planned.items():
+                current = existing.get(key)
+                if current is None:
+                    connection.execute(
+                        """
+                        INSERT INTO reconciliation_conflicts(
+                            conflict_id, conflict_type, document_id, path, candidate_path,
+                            expected_hash, actual_hash, status, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            conflict.conflict_type,
+                            conflict.document_id,
+                            conflict.path,
+                            conflict.candidate_path,
+                            conflict.expected_hash,
+                            conflict.actual_hash,
+                            now,
+                        ),
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE reconciliation_conflicts
+                        SET expected_hash = ?, actual_hash = ?
+                        WHERE conflict_id = ?
+                        """,
+                        (conflict.expected_hash, conflict.actual_hash, current["conflict_id"]),
+                    )
+                if conflict.document_id:
+                    connection.execute(
+                        """
+                        UPDATE documents SET materialization_state = 'conflict'
+                        WHERE document_id = ?
+                        """,
+                        (conflict.document_id,),
+                    )
+
+            for document_id in affected_document_ids:
+                row = connection.execute(
+                    """
+                    SELECT path, content_hash, deleted FROM documents WHERE document_id = ?
+                    """,
+                    (document_id,),
+                ).fetchone()
+                if (
+                    row is not None
+                    and not row["deleted"]
+                    and row["path"] is not None
+                    and disk_state.get(row["path"]) == row["content_hash"]
+                    and connection.execute(
+                        """
+                        SELECT 1 FROM reconciliation_conflicts
+                        WHERE document_id = ? AND status = 'open'
+                        """,
+                        (document_id,),
+                    ).fetchone()
+                    is None
+                ):
+                    connection.execute(
+                        """
+                        UPDATE documents
+                        SET materialization_state = 'clean', file_hash = content_hash
+                        WHERE document_id = ?
+                        """,
+                        (document_id,),
+                    )
+
+    @staticmethod
+    def _planned_conflict_key(conflict: PlannedConflict) -> tuple[str, str, str, str]:
+        return (
+            conflict.conflict_type,
+            conflict.document_id or "",
+            conflict.path,
+            conflict.candidate_path or "",
+        )
+
+    @staticmethod
+    def _stored_conflict_key(conflict: sqlite3.Row) -> tuple[str, str, str, str]:
+        return (
+            conflict["conflict_type"],
+            conflict["document_id"] or "",
+            conflict["path"],
+            conflict["candidate_path"] or "",
+        )
 
     def _get_open_conflict(self, conflict_id: str, expected_type: str) -> sqlite3.Row:
         with self.database.connection() as connection:
