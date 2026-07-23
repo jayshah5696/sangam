@@ -1,19 +1,24 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, type Document } from './api'
-import { IndexedDbDraftStorage, type DraftStorage } from './browserState/draftStorage'
+import { IndexedDbDraftStorage, type DraftRecord, type DraftStorage } from './browserState/draftStorage'
 import type { EditorSelection, EditorViewState } from './components/MarkdownEditor'
 
 export type { DraftStorage } from './browserState/draftStorage'
 
 export type EditorMode = 'edit' | 'split' | 'preview'
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'failed' | 'offline'
+export type DraftPersistenceState = 'idle' | 'pending' | 'persisted' | 'failed'
+export type DraftPersistenceOperation = 'read' | 'write' | 'delete'
 
 export type DocumentSession = {
   content?: string
   baseRevisionId?: string
   mode: EditorMode
   saveState: SaveState
+  draftPersistenceState: DraftPersistenceState
+  draftPersistenceOperation?: DraftPersistenceOperation
+  draftPersistenceError?: string
   selection: EditorSelection
   viewState?: EditorViewState
   compareFrom?: string
@@ -25,6 +30,7 @@ type SessionRuntime = {
   savedContent: string
   saveTimer?: number
   persistTimer?: number
+  persistenceGeneration: number
   inFlight: boolean
   queued: boolean
 }
@@ -79,6 +85,7 @@ export class DocumentSessionStore {
     const session: DocumentSession = {
       mode: 'edit',
       saveState: 'saved',
+      draftPersistenceState: 'idle',
       selection: initialSelection,
     }
     this.sessions.set(documentId, session)
@@ -117,6 +124,7 @@ export class DocumentSessionStore {
       savedContent: document.content,
       inFlight: false,
       queued: false,
+      persistenceGeneration: 0,
     })
     if (session.content === undefined) {
       this.setSession(document.document_id, {
@@ -126,18 +134,50 @@ export class DocumentSessionStore {
       })
     }
 
-    const draft = await this.options.storage.get(document.document_id)
-    const current = this.getSession(document.document_id)
-    if (!draft || (current.content !== undefined && current.content !== document.content)) return
-    const saveState = draft.content === document.content ? 'saved' : this.online ? 'dirty' : 'offline'
-    this.setSession(document.document_id, {
+    await this.loadDraft(document.document_id)
+  }
+
+  private async loadDraft(documentId: string) {
+    const runtime = this.runtimes.get(documentId)
+    if (!runtime) return
+    const generation = ++runtime.persistenceGeneration
+    const session = this.getSession(documentId)
+    this.setSession(documentId, {
+      ...session,
+      draftPersistenceState: 'pending',
+      draftPersistenceOperation: 'read',
+      draftPersistenceError: undefined,
+    })
+    let draft: DraftRecord | undefined
+    try {
+      draft = await this.options.storage.get(documentId)
+    } catch (error) {
+      this.failDraftPersistence(documentId, generation, 'read', error)
+      return
+    }
+    if (runtime.persistenceGeneration !== generation) return
+    const current = this.getSession(documentId)
+    if (!draft || (current.content !== undefined && current.content !== runtime.document.content)) {
+      this.setSession(documentId, {
+        ...current,
+        draftPersistenceState: 'idle',
+        draftPersistenceOperation: undefined,
+        draftPersistenceError: undefined,
+      })
+      return
+    }
+    const saveState = draft.content === runtime.document.content ? 'saved' : this.online ? 'dirty' : 'offline'
+    this.setSession(documentId, {
       ...current,
       content: draft.content,
-      baseRevisionId: draft.baseRevisionId ?? document.current_revision_id,
+      baseRevisionId: draft.baseRevisionId ?? runtime.document.current_revision_id,
       saveState,
+      draftPersistenceState: saveState === 'saved' ? 'pending' : 'persisted',
+      draftPersistenceOperation: saveState === 'saved' ? 'delete' : undefined,
+      draftPersistenceError: undefined,
     })
-    if (saveState === 'saved') void this.options.storage.delete(document.document_id)
-    else this.scheduleSave(document.document_id)
+    if (saveState === 'saved') this.deleteDraft(documentId)
+    else this.scheduleSave(documentId)
   }
 
   updateSession(documentId: string, patch: Partial<DocumentSession>) {
@@ -171,6 +211,7 @@ export class DocumentSessionStore {
         savedContent: document.content,
         inFlight: false,
         queued: false,
+        persistenceGeneration: 0,
       })
     }
     const shouldReplace =
@@ -182,7 +223,7 @@ export class DocumentSessionStore {
       baseRevisionId: document.current_revision_id,
       saveState: deriveSaveState(content, document.content, current.saveState, this.online),
     })
-    if (content === document.content) void this.options.storage.delete(documentId)
+    if (content === document.content) this.deleteDraft(documentId)
     else {
       this.scheduleDraftPersistence(documentId)
       this.scheduleSave(documentId)
@@ -196,6 +237,27 @@ export class DocumentSessionStore {
       if (current.content === runtime.savedContent || current.saveState === 'conflict') continue
       this.setSession(documentId, { ...current, saveState: online ? 'dirty' : 'offline' })
       if (online) this.scheduleSave(documentId, 0)
+    }
+  }
+
+  retrySave = (documentId: string) => {
+    const runtime = this.runtimes.get(documentId)
+    const current = this.getSession(documentId)
+    if (!runtime || current.content === runtime.savedContent || current.saveState === 'conflict') return
+    this.setSession(documentId, { ...current, saveState: this.online ? 'dirty' : 'offline' })
+    if (this.online) this.scheduleSave(documentId, 0)
+  }
+
+  retryDraftPersistence = (documentId: string) => {
+    const runtime = this.runtimes.get(documentId)
+    const current = this.getSession(documentId)
+    if (!runtime || current.draftPersistenceState === 'pending') return
+    if (current.content !== undefined && current.content !== runtime.savedContent) {
+      this.scheduleDraftPersistence(documentId, 0)
+    } else if (current.draftPersistenceOperation === 'read') {
+      void this.loadDraft(documentId)
+    } else {
+      this.deleteDraft(documentId)
     }
   }
 
@@ -256,7 +318,7 @@ export class DocumentSessionStore {
         baseRevisionId: savedDocument.current_revision_id,
         saveState: deriveSaveState(current.content, runtime.savedContent, current.saveState, this.online),
       })
-      if (isCurrent) void this.options.storage.delete(documentId)
+      if (isCurrent) this.deleteDraft(documentId)
       else this.scheduleDraftPersistence(documentId)
     } catch (error) {
       const current = this.getSession(documentId)
@@ -271,6 +333,7 @@ export class DocumentSessionStore {
       if (
         (runtime.queued || current.content !== runtime.savedContent) &&
         current.saveState !== 'conflict' &&
+        current.saveState !== 'failed' &&
         this.online
       ) {
         this.scheduleSave(documentId)
@@ -278,24 +341,91 @@ export class DocumentSessionStore {
     }
   }
 
-  private scheduleDraftPersistence(documentId: string) {
+  private scheduleDraftPersistence(documentId: string, delay = this.options.persistDelay ?? 150) {
     const runtime = this.runtimes.get(documentId)
     if (!runtime) return
     if (runtime.persistTimer !== undefined) window.clearTimeout(runtime.persistTimer)
+    const generation = ++runtime.persistenceGeneration
+    const current = this.getSession(documentId)
+    this.setSession(documentId, {
+      ...current,
+      draftPersistenceState: 'pending',
+      draftPersistenceOperation: 'write',
+      draftPersistenceError: undefined,
+    })
     runtime.persistTimer = window.setTimeout(() => {
       runtime.persistTimer = undefined
       const session = this.getSession(documentId)
       if (session.content === undefined || session.content === runtime.savedContent) {
-        void this.options.storage.delete(documentId)
+        this.deleteDraft(documentId)
         return
       }
-      void this.options.storage.set({
-        documentId,
-        content: session.content,
-        baseRevisionId: session.baseRevisionId,
-        updatedAt: Date.now(),
+      const persistedContent = session.content
+      void this.options.storage
+        .set({
+          documentId,
+          content: persistedContent,
+          baseRevisionId: session.baseRevisionId,
+          updatedAt: Date.now(),
+        })
+        .then(() => {
+          if (runtime.persistenceGeneration !== generation) return
+          const latest = this.getSession(documentId)
+          if (latest.content !== persistedContent || latest.content === runtime.savedContent) return
+          this.setSession(documentId, {
+            ...latest,
+            draftPersistenceState: 'persisted',
+            draftPersistenceOperation: undefined,
+            draftPersistenceError: undefined,
+          })
+        })
+        .catch((error: unknown) => this.failDraftPersistence(documentId, generation, 'write', error))
+    }, delay)
+  }
+
+  private deleteDraft(documentId: string) {
+    const runtime = this.runtimes.get(documentId)
+    if (!runtime) return
+    if (runtime.persistTimer !== undefined) window.clearTimeout(runtime.persistTimer)
+    runtime.persistTimer = undefined
+    const generation = ++runtime.persistenceGeneration
+    const current = this.getSession(documentId)
+    this.setSession(documentId, {
+      ...current,
+      draftPersistenceState: 'pending',
+      draftPersistenceOperation: 'delete',
+      draftPersistenceError: undefined,
+    })
+    void this.options.storage
+      .delete(documentId)
+      .then(() => {
+        if (runtime.persistenceGeneration !== generation) return
+        const latest = this.getSession(documentId)
+        this.setSession(documentId, {
+          ...latest,
+          draftPersistenceState: 'idle',
+          draftPersistenceOperation: undefined,
+          draftPersistenceError: undefined,
+        })
       })
-    }, this.options.persistDelay ?? 150)
+      .catch((error: unknown) => this.failDraftPersistence(documentId, generation, 'delete', error))
+  }
+
+  private failDraftPersistence(
+    documentId: string,
+    generation: number,
+    operation: DraftPersistenceOperation,
+    error: unknown,
+  ) {
+    const runtime = this.runtimes.get(documentId)
+    if (!runtime || runtime.persistenceGeneration !== generation) return
+    const current = this.getSession(documentId)
+    this.setSession(documentId, {
+      ...current,
+      draftPersistenceState: 'failed',
+      draftPersistenceOperation: operation,
+      draftPersistenceError: error instanceof Error ? error.message : 'Browser draft storage failed.',
+    })
   }
 }
 

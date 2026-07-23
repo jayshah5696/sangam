@@ -39,6 +39,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "011",
         "012",
         "013",
+        "014",
     ]
     assert {
         "operation_events_revision_outcome_created_idx",
@@ -47,6 +48,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "document_trust_events_document_created_idx",
         "publication_events_publication_created_idx",
         "chat_proposals_apply_key_idx",
+        "operation_events_operation_created_idx",
     } <= indexes
 
 
@@ -74,6 +76,68 @@ def test_failing_migration_rolls_back_the_whole_file(
         applied = connection.execute("SELECT version FROM schema_migrations").fetchall()
     assert partial_table is None
     assert applied == []
+
+
+def test_audit_event_identity_migration_preserves_events_and_allows_correlation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migration_source = resources.files("sangam.migrations")
+
+    def stage_migrations(destination: Path, *, through: str) -> None:
+        destination.mkdir()
+        for migration in migration_source.iterdir():
+            if migration.name.endswith(".sql") and migration.name.split("_", 1)[0] <= through:
+                (destination / migration.name).write_text(
+                    migration.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+
+    previous_migrations = tmp_path / "previous-migrations"
+    stage_migrations(previous_migrations, through="013")
+    monkeypatch.setattr("sangam.db.resources.files", lambda _package: previous_migrations)
+    database = Database(tmp_path / "audit-upgrade.sqlite3")
+    database.initialize()
+    created_at = "2026-07-22T12:00:00.000000+00:00"
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO actors(actor_id, display_name, actor_type, identity_kind, created_at)
+            VALUES ('agent:test', 'Test Agent', 'client', 'agent', ?)
+            """,
+            (created_at,),
+        )
+        connection.execute(
+            """
+            INSERT INTO operation_events(
+                operation_id, actor_id, action, resource_type, outcome, created_at
+            ) VALUES ('request-1', 'agent:test', 'read', 'document', 'accepted', ?)
+            """,
+            (created_at,),
+        )
+
+    current_migrations = tmp_path / "current-migrations"
+    stage_migrations(current_migrations, through="014")
+    monkeypatch.setattr("sangam.db.resources.files", lambda _package: current_migrations)
+    database.initialize()
+
+    with database.transaction() as connection:
+        preserved = connection.execute(
+            "SELECT event_id, operation_id, action FROM operation_events"
+        ).fetchone()
+        connection.execute(
+            """
+            INSERT INTO operation_events(
+                event_id, operation_id, actor_id, action, resource_type, outcome, created_at
+            ) VALUES ('event-2', 'request-1', 'agent:test', 'search', 'document',
+                'accepted', ?)
+            """,
+            (created_at,),
+        )
+        correlated_count = connection.execute(
+            "SELECT count(*) AS count FROM operation_events WHERE operation_id = 'request-1'"
+        ).fetchone()["count"]
+
+    assert tuple(preserved) == ("request-1", "request-1", "read")
+    assert correlated_count == 2
 
 
 def test_publication_idempotency_migration_preserves_existing_keys(

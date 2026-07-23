@@ -43,7 +43,8 @@ export class IndexedDbDraftStorage implements DraftStorage {
 let databasePromise: Promise<IDBDatabase> | undefined
 
 function openDraftDatabase() {
-  databasePromise ??= new Promise<IDBDatabase>((resolve, reject) => {
+  if (databasePromise) return databasePromise
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(databaseName, 1)
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(storeName)) {
@@ -53,5 +54,9 @@ function openDraftDatabase() {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('Browser draft storage could not be opened.'))
   })
-  return databasePromise
+  databasePromise = opening
+  void opening.catch(() => {
+    if (databasePromise === opening) databasePromise = undefined
+  })
+  return opening
 }

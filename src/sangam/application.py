@@ -17,9 +17,11 @@ from sangam.karakeep import KarakeepService
 from sangam.karakeep_extraction import KarakeepExtractor
 from sangam.karakeep_gateway import KarakeepClient
 from sangam.karakeep_repository import KarakeepRepository
+from sangam.mutations import MutationCoordinator
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
 from sangam.publication import PreviewTokenService, PublicationService
+from sangam.readiness import ReadinessService
 from sangam.reconciliation import ReconciliationPlanner, ReconciliationService
 from sangam.search import SearchIndex
 from sangam.security import AuthenticationService, CloudflareAccessVerifier, IdentityService
@@ -44,6 +46,7 @@ class ApplicationServices:
     pdf_research: PdfResearchService
     karakeep: KarakeepService
     chat: SangamChatServer
+    readiness: ReadinessService
 
 
 def build_application_services(settings: Settings) -> ApplicationServices:
@@ -62,6 +65,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         actors=actors,
     )
     search_index = SearchIndex(database)
+    mutations = MutationCoordinator()
     documents = DocumentService(
         database=database,
         workspace=workspace,
@@ -69,6 +73,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         actors=actors,
         organization=organization,
         search_index=search_index,
+        mutations=mutations,
         max_document_bytes=settings.max_document_bytes,
     )
     search_index.rebuild(documents.list_documents(include_deleted=True))
@@ -77,6 +82,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         workspace_root=settings.workspace_root,
         backup_root=settings.backup_root,
         retention_count=settings.backup_retention_count,
+        mutations=mutations,
     )
     backups = BackupService(
         database=database,
@@ -84,6 +90,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         manager=backup_manager,
         actors=actors,
     )
+    readiness = ReadinessService(database=database, backups=backups, settings=settings)
     reconciliation = ReconciliationService(
         database=database,
         workspace=workspace,
@@ -138,8 +145,10 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         idempotency=idempotency,
         actors=actors,
         search_index=search_index,
+        mutations=mutations,
         max_pdf_bytes=settings.max_pdf_bytes,
     )
+    pdf_research.recover_interrupted_extractions()
     karakeep_client = None
     if settings.karakeep_base_url and settings.karakeep_api_key:
         karakeep_client = KarakeepClient(
@@ -195,6 +204,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         pdf_research=pdf_research,
         karakeep=karakeep,
         chat=chat,
+        readiness=readiness,
     )
 
 

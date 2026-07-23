@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import TypeVar
 
 from sangam.activity import ActivityService
@@ -114,6 +114,28 @@ class WorkspaceAccessService:
             current=current,
             operation=lambda: self.pdf_research.pdf_bytes(document_id),
         )
+
+    def pdf_stream_info(self, principal: Principal, document_id: str) -> tuple[Document, int]:
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="read_pdf",
+            current=current,
+            operation=lambda: self.pdf_research.pdf_stream_info(document_id),
+        )
+
+    def pdf_stream(
+        self,
+        principal: Principal,
+        document_id: str,
+        *,
+        start: int = 0,
+        end: int | None = None,
+    ) -> Iterator[bytes]:
+        current = self.documents.get_document(document_id)
+        self.policy.require(principal, Capability.READ, current.path)
+        return self.pdf_research.pdf_stream(document_id, start=start, end=end)
 
     def pdf_pages(self, principal: Principal, document_id: str) -> list[PdfPage]:
         current = self.documents.get_document(document_id)

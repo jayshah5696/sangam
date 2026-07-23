@@ -21,10 +21,14 @@ PrincipalResolver = Callable[..., Principal]
 
 
 def create_chat_router(
-    *, chat: SangamChatServer, resolve_principal: PrincipalResolver
+    *,
+    chat: SangamChatServer,
+    resolve_principal: PrincipalResolver,
+    require_administrator: PrincipalResolver,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["chat"])
     principal_dependency = Depends(resolve_principal)
+    admin_dependency = Depends(require_administrator)
 
     @router.get("/chat/config", response_model=ChatRuntimeConfig)
     def runtime_config(_principal: Principal = principal_dependency) -> ChatRuntimeConfig:
@@ -32,12 +36,15 @@ def create_chat_router(
 
     @router.get("/chat/models", response_model=ChatModelSettings)
     def get_models(_principal: Principal = principal_dependency) -> ChatModelSettings:
+        # The catalog contains no provider credentials and authenticated chat clients
+        # need it to render valid model choices. Only the mutations below are global
+        # operator actions.
         return chat.model_catalog.as_schema()
 
     @router.put("/chat/models", response_model=ChatModelSettings)
     def update_models(
         body: ChatModelSelectionUpdate,
-        _principal: Principal = principal_dependency,
+        _principal: Principal = admin_dependency,
     ) -> ChatModelSettings:
         return chat.model_catalog.update(
             openrouter_enabled=body.openrouter_enabled,
@@ -46,7 +53,7 @@ def create_chat_router(
         )
 
     @router.post("/chat/models/refresh", response_model=ChatModelSettings)
-    def refresh_models(_principal: Principal = principal_dependency) -> ChatModelSettings:
+    def refresh_models(_principal: Principal = admin_dependency) -> ChatModelSettings:
         return chat.model_catalog.refresh_from_openrouter()
 
     @router.post("/chatkit")

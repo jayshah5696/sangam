@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from conftest import issue_agent_token
 from fastapi.testclient import TestClient
 
 
@@ -133,3 +134,31 @@ def test_refresh_replaces_catalog_from_openrouter(
 def test_refresh_without_api_key_is_rejected(client: TestClient) -> None:
     response = client.post("/api/v1/chat/models/refresh")
     assert response.status_code == 422
+
+
+def test_agents_can_read_but_cannot_mutate_global_chat_model_settings(
+    client: TestClient,
+) -> None:
+    token = issue_agent_token(client, capabilities=("read",))
+    authorization = {"Authorization": f"Bearer {token}"}
+
+    readable = client.get("/api/v1/chat/models", headers=authorization)
+    assert readable.status_code == 200
+    original = readable.json()
+
+    update = client.put(
+        "/api/v1/chat/models",
+        headers=authorization,
+        json={
+            "openrouter_enabled": False,
+            "default_model": original["default_model"],
+            "enabled_models": original["enabled_models"],
+        },
+    )
+    refresh = client.post("/api/v1/chat/models/refresh", headers=authorization)
+
+    assert update.status_code == 403
+    assert update.json()["error"]["code"] == "forbidden"
+    assert refresh.status_code == 403
+    assert refresh.json()["error"]["code"] == "forbidden"
+    assert client.get("/api/v1/chat/models").json() == original

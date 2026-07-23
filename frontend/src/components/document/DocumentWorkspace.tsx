@@ -2,7 +2,12 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { Columns2, MoreHorizontal, PanelRightClose, Rows2 } from 'lucide-react'
-import { api, type Document } from '../../api'
+import { api, type Document, type Revision } from '../../api'
+import {
+  CITATION_NAVIGATION_EVENT,
+  citationTargetFromLocation,
+  type CitationTarget,
+} from '../../citationNavigation'
 import {
   useDocumentSession,
   useDocumentSessions,
@@ -14,6 +19,8 @@ import { useWorkbenchActions } from '../../workbench'
 import { canSplitActiveGroup } from '../../splitPolicy'
 import { ActionMenu, ActionMenuItem } from '../ActionMenu'
 import type { MarkdownEditorHandle } from '../MarkdownEditor'
+import { ConflictRecoveryNotice } from './ConflictRecoveryNotice'
+import { DraftRecoveryNotice, offlineRecoveryMessage } from './DraftRecoveryNotice'
 
 const MarkdownPreview = lazy(() =>
   import('../MarkdownPreview').then((module) => ({ default: module.MarkdownPreview })),
@@ -53,11 +60,14 @@ export function DocumentWorkspace({
   const saveState = session.saveState
   const mode = session.mode
   const selection = session.selection
-  const documentsQuery = useQuery({ queryKey: ['documents', 'links'], queryFn: api.listDocuments })
+  const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
   const [materializePath, setMaterializePath] = useState(
     document.content_type === 'text/html' ? 'projects/interactive.html' : 'projects/first-document.md',
   )
   const [linkTarget, setLinkTarget] = useState('')
+  const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(() =>
+    citationTargetFromLocation(documentId),
+  )
 
   useEffect(() => {
     void sessions.initializeDocument(initialDocument)
@@ -70,6 +80,14 @@ export function DocumentWorkspace({
     () => sessions.registerEditor(documentId, () => editorRef.current?.focus()),
     [documentId, sessions],
   )
+  useEffect(() => {
+    const receiveCitation = (event: Event) => {
+      const target = (event as CustomEvent<CitationTarget>).detail
+      if (target.documentId === documentId) setCitationTarget(target)
+    }
+    window.addEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
+    return () => window.removeEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
+  }, [documentId])
 
   const updateCachedDocument = (nextDocument: Document, replaceContent = false) => {
     queryClient.setQueryData(['document', documentId], nextDocument)
@@ -91,9 +109,33 @@ export function DocumentWorkspace({
     mutationFn: ({ base, path }: { base: Document; path: string }) => api.materializeDocument(base, path),
     onSuccess: (nextDocument) => updateCachedDocument(nextDocument),
   })
-  const reloadAfterConflict = async () => {
-    const current = await api.getDocument(documentId)
-    updateCachedDocument(current, true)
+  const conflictHeadQuery = useQuery({
+    queryKey: ['document-conflict-head', documentId],
+    queryFn: () => api.getDocument(documentId),
+    enabled: saveState === 'conflict',
+    retry: false,
+  })
+  const citedHistoryQuery = useQuery({
+    queryKey: ['history', documentId],
+    queryFn: () => api.history(documentId),
+    enabled: Boolean(citationTarget?.revisionId),
+  })
+  const citedRevision = citedHistoryQuery.data?.find(
+    (revision) => revision.revision_id === citationTarget?.revisionId,
+  )
+  const rebaseAndRetry = () => {
+    const serverHead = conflictHeadQuery.data
+    if (!serverHead) return
+    updateCachedDocument(serverHead)
+    sessions.updateSession(documentId, {
+      content,
+      baseRevisionId: serverHead.current_revision_id,
+      saveState: 'dirty',
+    })
+  }
+  const discardLocalDraft = () => {
+    const serverHead = conflictHeadQuery.data
+    if (serverHead) updateCachedDocument(serverHead, true)
   }
   const handleEditorChange = (nextContent: string) => {
     sessions.updateSession(documentId, {
@@ -142,7 +184,7 @@ export function DocumentWorkspace({
             <time>{new Date(document.updated_at).toLocaleString()}</time>
           </div>
         </div>
-        <span className={`save-state ${saveState}`}>
+        <span className={`save-state ${saveState}`} role="status" aria-live="polite" aria-atomic="true">
           {document.content_type === 'application/pdf' ? 'Immutable source' : saveLabel(saveState)}
         </span>
       </header>
@@ -164,20 +206,42 @@ export function DocumentWorkspace({
         />
       )}
       {document.content_type !== 'application/pdf' && saveState === 'conflict' && (
-        <div className="notice conflict-notice">
-          This document changed elsewhere. Your text is still here.
-          <button onClick={() => void reloadAfterConflict()}>Reload current revision</button>
-        </div>
+        <ConflictRecoveryNotice
+          document={document}
+          localContent={content}
+          baseRevisionId={session.baseRevisionId}
+          serverHead={conflictHeadQuery.data}
+          loading={conflictHeadQuery.isLoading || conflictHeadQuery.isFetching}
+          error={conflictHeadQuery.isError}
+          retrying={false}
+          onRefresh={() => void conflictHeadQuery.refetch()}
+          onRebaseAndRetry={rebaseAndRetry}
+          onDiscard={discardLocalDraft}
+        />
       )}
       {document.content_type !== 'application/pdf' && saveState === 'failed' && (
-        <div className="notice error-notice">
-          Save failed. Your text remains in this editor; edit again to retry.
+        <div className="notice error-notice" role="alert">
+          <span>Save failed. Sangam stopped retrying so it will not keep sending a failing request.</span>
+          <button type="button" onClick={() => sessions.retrySave(documentId)}>
+            Retry save
+          </button>
         </div>
       )}
       {document.content_type !== 'application/pdf' && saveState === 'offline' && (
-        <div className="notice offline-notice">
-          You are offline. Changes remain in this browser and will save after reconnecting.
+        <div className="notice offline-notice" role="status" aria-live="polite">
+          {offlineRecoveryMessage(session.draftPersistenceState)}
         </div>
+      )}
+      {document.content_type !== 'application/pdf' && session.draftPersistenceState === 'failed' && (
+        <DraftRecoveryNotice
+          title={document.title}
+          contentType={document.content_type}
+          content={content}
+          operation={session.draftPersistenceOperation}
+          error={session.draftPersistenceError}
+          retrying={false}
+          onRetry={() => sessions.retryDraftPersistence(documentId)}
+        />
       )}
       {document.content_type !== 'application/pdf' && !document.path && (
         <form
@@ -196,6 +260,21 @@ export function DocumentWorkspace({
             {materialize.isPending ? 'Saving file…' : 'Save to workspace'}
           </button>
         </form>
+      )}
+      {citationTarget?.revisionId && (
+        <CitedRevisionEvidence
+          document={document}
+          target={citationTarget}
+          revision={citedRevision}
+          loading={citedHistoryQuery.isLoading}
+          error={citedHistoryQuery.isError || (citedHistoryQuery.isSuccess && !citedRevision)}
+          onClose={() => {
+            const url = new URL(window.location.href)
+            url.searchParams.delete('revision')
+            window.history.replaceState(window.history.state, '', url)
+            setCitationTarget(null)
+          }}
+        />
       )}
       {document.content_type !== 'application/pdf' && mode !== 'preview' && (
         <div className="editor-tools">
@@ -261,6 +340,68 @@ export function DocumentWorkspace({
       </div>
     </section>
   )
+}
+
+function CitedRevisionEvidence({
+  document,
+  target,
+  revision,
+  loading,
+  error,
+  onClose,
+}: {
+  document: Document
+  target: CitationTarget
+  revision?: Revision
+  loading: boolean
+  error: boolean
+  onClose: () => void
+}) {
+  const current = target.revisionId === document.current_revision_id
+  return (
+    <section className="citation-evidence" aria-labelledby="citation-evidence-title">
+      <header>
+        <div>
+          <p className="eyebrow">Pinned chat citation</p>
+          <strong id="citation-evidence-title">
+            {current ? 'Cited revision is the current head' : 'Source changed since this citation'}
+          </strong>
+          <small>
+            Cited {shortRevision(target.revisionId)} · current {shortRevision(document.current_revision_id)}
+          </small>
+        </div>
+        <button type="button" className="secondary-action" onClick={onClose}>
+          Close cited revision
+        </button>
+      </header>
+      {loading && <p className="small-muted">Loading the immutable cited revision…</p>}
+      {error && (
+        <p className="error-text">
+          The cited revision is not available in this document’s history. The current head has not been
+          substituted.
+        </p>
+      )}
+      {!current && revision && (
+        <details open>
+          <summary>Exact cited content</summary>
+          {document.content_type === 'text/markdown' ? (
+            <Suspense fallback={<div className="markdown-preview muted">Preparing cited Markdown…</div>}>
+              <MarkdownPreview content={revision.content} />
+            </Suspense>
+          ) : document.content_type === 'text/html' ? (
+            <Suspense fallback={<div className="markdown-preview muted">Preparing cited HTML…</div>}>
+              <HtmlPreview content={revision.content} />
+            </Suspense>
+          ) : null}
+        </details>
+      )}
+    </section>
+  )
+}
+
+function shortRevision(value?: string) {
+  if (!value) return 'unknown revision'
+  return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 
 function DocumentToolbar({

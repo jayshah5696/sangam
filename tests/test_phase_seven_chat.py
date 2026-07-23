@@ -36,8 +36,11 @@ def chatkit_request(client: TestClient, body: dict, **request_headers: str):
     return client.post("/api/v1/chatkit", json=body, headers=request_headers)
 
 
-def create_thread(client: TestClient, *, document_id: str | None = None) -> str:
+def create_thread(
+    client: TestClient, *, document_id: str | None = None, **extra_headers: str
+) -> str:
     request_headers = {"X-Sangam-Document-ID": document_id} if document_id else {}
+    request_headers.update(extra_headers)
     response = chatkit_request(
         client,
         {
@@ -305,6 +308,45 @@ def test_chat_proposal_apply_recovers_after_status_write_failure(
     assert [revision["content"] for revision in history] == ["after", "before"]
 
 
+def test_chat_proposal_validation_failure_releases_apply_reservation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Invalid proposal", "content": "before"},
+        headers=headers("phase-seven-invalid-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-invalid"
+    )
+    proposals = client.app.state.services.chat.proposals
+    proposal = proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="after",
+        summary="Invalid after review",
+    )
+    monkeypatch.setattr(
+        proposals.workspace,
+        "update_document",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValidationError("invalid content")),
+    )
+
+    with pytest.raises(ValidationError, match="invalid content"):
+        proposals.apply(
+            principal,
+            proposal_id=proposal.proposal_id,
+            expected_revision_id=proposal.expected_revision_id,
+            idempotency_key="invalid-apply-key",
+        )
+
+    dismissed = proposals.dismiss(principal, proposal.proposal_id, "Cannot apply safely")
+    assert dismissed.status == "dismissed"
+
+
 def test_chat_tool_wrapper_tracks_task_identity_and_serializes_failures(client: TestClient) -> None:
     toolset = client.app.state.services.chat.toolset
 
@@ -347,9 +389,14 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
         json={"title": "Tool invocation", "content": "orchid-compass-93"},
         headers=headers("phase-seven-tool-invocation"),
     ).json()
-    thread_id = create_thread(client, document_id=document["document_id"])
-    principal = Principal.trusted_human(
-        actor_id="human:jay", display_name="Jay", operation_id="tool-invocation"
+    token = issue_agent_token(client, capabilities=("read",))
+    thread_id = create_thread(
+        client,
+        document_id=document["document_id"],
+        Authorization=f"Bearer {token}",
+    )
+    principal = client.app.state.services.identity.authenticate(
+        token, operation_id="tool-invocation"
     )
     request_context = ChatRequestContext(principal=principal, document_id=document["document_id"])
     chat = client.app.state.services.chat
@@ -374,12 +421,70 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
             arguments,
         )
     )
+    second_result = asyncio.run(
+        read_tool.on_invoke_tool(
+            run_context,
+            arguments,
+        )
+    )
 
     payload = json.loads(result)
     assert payload["content"] == "orchid-compass-93"
+    assert json.loads(second_result)["content"] == "orchid-compass-93"
     assert payload["source"]["revision_id"] == document["current_revision_id"]
     assert agent_context.workflow_item is not None
     assert agent_context.workflow_item.workflow.tasks[0].status_indicator == "complete"
+    events = client.get("/api/v1/activity", params={"actor_id": principal.actor_id}).json()
+    tool_events = [event for event in events if event["operation_id"] == "tool-invocation"]
+    assert len(tool_events) == 2
+    assert len({event["event_id"] for event in tool_events}) == 2
+    assert {event["outcome"] for event in tool_events} == {"accepted"}
+
+
+def test_publish_tool_requires_client_confirmation_before_any_side_effect(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Release notes", "content": "Not public yet"},
+        headers=headers("chat-publish-confirm-source"),
+    ).json()
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="chat-publish-confirm"
+    )
+    toolset = client.app.state.services.chat.toolset
+    agent_context = SimpleNamespace(
+        request_context=ChatRequestContext(
+            principal=principal, document_id=document["document_id"]
+        ),
+        client_tool_call=None,
+    )
+    ctx = cast(Any, SimpleNamespace(context=agent_context))
+    monkeypatch.setattr(
+        toolset.workspace,
+        "create_publication",
+        lambda *_args, **_kwargs: pytest.fail("publish must not run before browser approval"),
+    )
+
+    result = asyncio.run(
+        toolset.publish_document(
+            ctx,
+            document_id=document["document_id"],
+            slug="release-notes",
+            access_policy="public",
+        )
+    )
+
+    assert result is None
+    assert agent_context.client_tool_call.name == "confirm_publish_document"
+    assert agent_context.client_tool_call.arguments == {
+        "document_id": document["document_id"],
+        "document_title": "Release notes",
+        "slug": "release-notes",
+        "access_policy": "public",
+    }
+    assert "token" not in json.dumps(agent_context.client_tool_call.arguments)
+    assert client.get(f"/api/v1/publications/by-document/{document['document_id']}").json() is None
 
 
 def _make_response(text: str, *, status: str = "completed", with_output: bool = True) -> Response:

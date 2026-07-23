@@ -4,6 +4,7 @@ import hashlib
 import mimetypes
 import os
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
@@ -65,6 +66,14 @@ class WorkspaceFilesystem(Protocol):
     def read_document(self, path: str) -> str: ...
 
     def read_binary(self, path: str) -> bytes: ...
+
+    def binary_size(self, path: str) -> int: ...
+
+    def binary_hash(self, path: str) -> str: ...
+
+    def iter_binary(
+        self, path: str, *, start: int = 0, end: int | None = None, chunk_size: int = 1024 * 1024
+    ) -> Iterator[bytes]: ...
 
     def title_from_path(self, path: str) -> str: ...
 
@@ -158,6 +167,32 @@ class DiskWorkspaceFilesystem:
 
     def read_binary(self, path: str) -> bytes:
         return self._document_path(path).read_bytes()
+
+    def binary_size(self, path: str) -> int:
+        return self._document_path(path).stat().st_size
+
+    def binary_hash(self, path: str) -> str:
+        digest = hashlib.sha256()
+        with self._document_path(path).open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def iter_binary(
+        self, path: str, *, start: int = 0, end: int | None = None, chunk_size: int = 1024 * 1024
+    ) -> Iterator[bytes]:
+        document = self._document_path(path)
+        remaining = None if end is None else end - start + 1
+        with document.open("rb") as handle:
+            handle.seek(start)
+            while remaining is None or remaining > 0:
+                size = chunk_size if remaining is None else min(chunk_size, remaining)
+                chunk = handle.read(size)
+                if not chunk:
+                    break
+                yield chunk
+                if remaining is not None:
+                    remaining -= len(chunk)
 
     def title_from_path(self, path: str) -> str:
         document = self._document_path(path)

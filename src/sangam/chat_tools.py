@@ -64,7 +64,8 @@ class ChatToolset:
             function_tool(
                 self.publish_document,
                 description_override=(
-                    "Publish a document only when the user explicitly requests it."
+                    "Request a browser confirmation before publishing a document. "
+                    "This tool never publishes without the user's separate approval."
                 ),
             ),
         ]
@@ -189,27 +190,21 @@ class ChatToolset:
 
     async def publish_document(
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
-    ) -> str:
-        def operation() -> dict[str, Any]:
-            if access_policy not in {"private", "unlisted", "public"}:
-                raise ValidationError("Unsupported publication access policy")
-            key = self._tool_idempotency_key(
-                ctx, "publish_document", document_id, slug, access_policy
-            )
-            publication = self.workspace.create_publication(
-                ctx.context.request_context.principal,
-                document_id=document_id,
-                slug=slug,
-                access_policy=access_policy,
-                idempotency_key=key,
-            )
-            return {
-                "publication_id": publication.publication_id,
-                "url": publication.url,
-                "access_policy": publication.access_policy,
-            }
-
-        return await self._run_tool(ctx, "Publish document", slug, operation)
+    ) -> None:
+        if access_policy not in {"private", "unlisted", "public"}:
+            raise ValidationError("Unsupported publication access policy")
+        document = self.workspace.get_document(ctx.context.request_context.principal, document_id)
+        if document.content_type == "application/pdf":
+            raise ValidationError("PDF documents cannot be published")
+        ctx.context.client_tool_call = ClientToolCall(
+            name="confirm_publish_document",
+            arguments={
+                "document_id": document.document_id,
+                "document_title": document.title,
+                "slug": slug,
+                "access_policy": access_policy,
+            },
+        )
 
     async def _run_tool(
         self,

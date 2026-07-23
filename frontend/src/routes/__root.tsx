@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
@@ -19,9 +19,11 @@ import { api, type DocumentSummary } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
 import { ResizeHandle } from '../components/ResizeHandle'
+import { activateTabFromKeyboard } from '../components/tabKeyboard'
 import { workspaceBasename } from '../workspaceTree'
 import { useTheme } from '../theme'
 import { useWorkbenchRecovery } from '../workbench'
+import { useMediaQuery } from '../useMediaQuery'
 
 type RouterContext = { queryClient: QueryClient }
 type SidebarMode = 'files' | 'search'
@@ -34,7 +36,17 @@ function RootLayout() {
   const { preferences, updatePreferences } = useTheme()
   const layoutRecovery = useWorkbenchRecovery()
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('files')
+  const [mobileSidebarLocationKey, setMobileSidebarLocationKey] = useState<string | null>(null)
+  const narrowSidebar = useMediaQuery('(max-width: 1100px)')
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
+  const locationKey = location.state.__TSR_key ?? location.href
+  const sidebarVisible = narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible
+
+  useEffect(() => {
+    if (mobileSidebarLocationKey === null || mobileSidebarLocationKey === locationKey) return
+    const frame = window.requestAnimationFrame(() => setMobileSidebarLocationKey(null))
+    return () => window.cancelAnimationFrame(frame)
+  }, [locationKey, mobileSidebarLocationKey])
 
   if (location.pathname.startsWith('/p/')) return <Outlet />
 
@@ -43,13 +55,31 @@ function RootLayout() {
     if (!isDocumentWorkspace) await navigate({ to: '/' })
   }
 
+  const showSidebar = () => {
+    if (narrowSidebar) setMobileSidebarLocationKey(locationKey)
+    else updatePreferences({ leftVisible: true })
+  }
+
+  const hideSidebar = () => {
+    if (narrowSidebar) {
+      setMobileSidebarLocationKey(null)
+      window.requestAnimationFrame(() =>
+        document.querySelector<HTMLButtonElement>('.sidebar-reveal')?.focus(),
+      )
+    } else updatePreferences({ leftVisible: false })
+  }
+
   return (
-    <div className={`workbench-shell ${preferences.leftVisible ? '' : 'sidebar-collapsed'}`}>
-      {preferences.leftVisible ? (
+    <div className={`workbench-shell ${sidebarVisible ? '' : 'sidebar-collapsed'}`}>
+      {sidebarVisible ? (
         <>
+          {narrowSidebar && (
+            <button className="sidebar-backdrop" aria-label="Close workspace sidebar" onClick={hideSidebar} />
+          )}
           <PrimarySidebar
             mode={sidebarMode}
-            onCollapse={() => updatePreferences({ leftVisible: false })}
+            modal={narrowSidebar}
+            onCollapse={hideSidebar}
             onMode={(next) => void chooseSidebarMode(next)}
             style={{ width: preferences.leftWidth }}
           />
@@ -66,7 +96,7 @@ function RootLayout() {
           className="sidebar-reveal icon-button"
           aria-label="Show workspace sidebar"
           title="Show workspace sidebar"
-          onClick={() => updatePreferences({ leftVisible: true })}
+          onClick={showSidebar}
         >
           <PanelLeftOpen size={17} />
         </button>
@@ -85,10 +115,12 @@ function RootLayout() {
       <CommandPalette
         onFiles={() => {
           setSidebarMode('files')
+          showSidebar()
           if (!isDocumentWorkspace) void navigate({ to: '/' })
         }}
         onSearch={() => {
           setSidebarMode('search')
+          showSidebar()
           if (!isDocumentWorkspace) void navigate({ to: '/' })
         }}
       />
@@ -98,17 +130,70 @@ function RootLayout() {
 
 function PrimarySidebar({
   mode,
+  modal,
   onCollapse,
   onMode,
   style,
 }: {
   mode: SidebarMode
+  modal: boolean
   onCollapse: () => void
   onMode: (mode: SidebarMode) => void
   style: CSSProperties
 }) {
+  const sidebarRef = useRef<HTMLElement>(null)
+  const onCollapseRef = useRef(onCollapse)
+
+  useEffect(() => {
+    onCollapseRef.current = onCollapse
+  }, [onCollapse])
+
+  useEffect(() => {
+    if (!modal) return
+    const sidebar = sidebarRef.current
+    if (!sidebar) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    sidebar.querySelector<HTMLElement>('button, a, input, select')?.focus()
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCollapseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(
+        sidebar.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled)',
+        ),
+      )
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      previouslyFocused?.focus()
+    }
+  }, [modal])
+
   return (
-    <aside className="primary-sidebar ui-rail ui-rail--inverse" style={style}>
+    <aside
+      ref={sidebarRef}
+      className="primary-sidebar ui-rail ui-rail--inverse"
+      style={style}
+      aria-label="Workspace sidebar"
+      aria-modal={modal || undefined}
+      role={modal ? 'dialog' : undefined}
+    >
       <header className="sidebar-brandbar ui-rail-header">
         <Link to="/" className="sidebar-brand" aria-label="Sangam home">
           <img src="/sangam-mark.svg" alt="" />
@@ -129,23 +214,49 @@ function PrimarySidebar({
       <div className="sidebar-mode-switch" role="tablist" aria-label="Workspace navigation">
         <button
           role="tab"
+          id="workspace-tab-files"
+          aria-controls="workspace-panel"
           aria-selected={mode === 'files'}
+          tabIndex={mode === 'files' ? 0 : -1}
           className={mode === 'files' ? 'active' : ''}
           onClick={() => onMode('files')}
+          onKeyDown={activateTabFromKeyboard}
         >
           <FileText size={14} /> Files
         </button>
         <button
           role="tab"
+          id="workspace-tab-search"
+          aria-controls="workspace-panel"
           aria-selected={mode === 'search'}
+          tabIndex={mode === 'search' ? 0 : -1}
           className={mode === 'search' ? 'active' : ''}
           onClick={() => onMode('search')}
+          onKeyDown={activateTabFromKeyboard}
         >
           <Search size={14} /> Search
         </button>
       </div>
-      {mode === 'files' && <FileExplorerPanel onSearch={() => onMode('search')} />}
-      {mode === 'search' && <SearchPanel />}
+      {mode === 'files' && (
+        <div
+          className="sidebar-tab-panel"
+          id="workspace-panel"
+          role="tabpanel"
+          aria-labelledby="workspace-tab-files"
+        >
+          <FileExplorerPanel onSearch={() => onMode('search')} />
+        </div>
+      )}
+      {mode === 'search' && (
+        <div
+          className="sidebar-tab-panel"
+          id="workspace-panel"
+          role="tabpanel"
+          aria-labelledby="workspace-tab-search"
+        >
+          <SearchPanel />
+        </div>
+      )}
       <SidebarLinks />
     </aside>
   )

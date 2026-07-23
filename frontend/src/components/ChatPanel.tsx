@@ -2,15 +2,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { ChatKit, useChatKit } from '@openai/chatkit-react'
-import { api, type ChatProposal, type Document } from '../api'
+import { api, type ChatProposal, type Document, type IssuedPublication, type Publication } from '../api'
+import {
+  announceCitationNavigation,
+  citationHref,
+  citationTargetFromData,
+  type CitationTarget,
+} from '../citationNavigation'
 import { useTheme } from '../theme'
+import { OneTimeSecret } from './OneTimeSecret'
 import { RevisionMergeView } from './RevisionMergeView'
 
 const SELECTION_LIMIT = 20_000
+const CHATKIT_SCRIPT_SRC = 'https://cdn.platform.openai.com/deployments/chatkit/chatkit.js'
 
 // One workspace-scoped chat thread persists across document tabs; the active
 // document is passed as live context rather than switching threads per tab.
 const THREAD_STORAGE_KEY = 'sangam.chat-thread.workspace'
+
+export type PublishConfirmationRequest = {
+  documentId: string
+  documentTitle: string
+  slug: string
+  accessPolicy: Publication['access_policy']
+}
 
 export function ChatPanel({
   document,
@@ -26,17 +41,50 @@ export function ChatPanel({
   const { preferences } = useTheme()
   const threadStorageKey = THREAD_STORAGE_KEY
   const [threadId, setThreadId] = useState<string | null>(() => localStorage.getItem(threadStorageKey))
+  const [pendingPublication, setPendingPublication] = useState<PublishConfirmationRequest | null>(null)
+  const [publishError, setPublishError] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [published, setPublished] = useState<IssuedPublication | null>(null)
+  const [openedCitation, setOpenedCitation] = useState<CitationTarget | null>(null)
+  const publishResolver = useRef<((result: Record<string, unknown>) => void) | null>(null)
   const configQuery = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
   const proposalsQuery = useQuery({
     queryKey: ['chat-proposals', document.document_id, threadId],
     queryFn: () => api.listChatProposals(document.document_id, threadId ?? undefined),
+    enabled: configQuery.data?.configured === true,
   })
+  useEffect(() => {
+    if (!configQuery.data?.configured || customElements.get('openai-chatkit')) return
+    if (window.document.querySelector(`script[src="${CHATKIT_SCRIPT_SRC}"]`)) return
+    const script = window.document.createElement('script')
+    script.src = CHATKIT_SCRIPT_SRC
+    script.async = true
+    window.document.head.append(script)
+  }, [configQuery.data?.configured])
   const refreshProposals = useCallback(
     () =>
       queryClient.invalidateQueries({
         queryKey: ['chat-proposals', document.document_id, threadId],
       }),
     [document.document_id, queryClient, threadId],
+  )
+  const requestPublishConfirmation = useCallback((params: Record<string, unknown>) => {
+    const request = parsePublishConfirmation(params)
+    if (!request) return Promise.resolve({ approved: false, error: 'Invalid publication request' })
+    publishResolver.current?.({ approved: false, status: 'superseded' })
+    setPendingPublication(request)
+    setPublishError(false)
+    setPublished(null)
+    return new Promise<Record<string, unknown>>((resolve) => {
+      publishResolver.current = resolve
+    })
+  }, [])
+  useEffect(
+    () => () => {
+      publishResolver.current?.({ approved: false, status: 'cancelled', reason: 'Chat panel closed' })
+      publishResolver.current = null
+    },
+    [],
   )
   // ChatKit initializes a heavy web-component session from its options. To keep a
   // single instance alive across document-tab switches, the options must stay
@@ -48,6 +96,7 @@ export function ChatPanel({
     selectedText,
     refreshProposals,
     navigate,
+    requestPublishConfirmation,
   })
   useEffect(() => {
     liveRef.current = {
@@ -56,6 +105,7 @@ export function ChatPanel({
       selectedText,
       refreshProposals,
       navigate,
+      requestPublishConfirmation,
     }
   })
   const customFetch = useCallback((input: RequestInfo | URL, init?: RequestInit) => {
@@ -99,13 +149,16 @@ export function ChatPanel({
     disclaimer: { text: 'Edits stay as proposals until you review and apply the diff.' },
     threadItemActions: { retry: true, feedback: false },
     thread: { autoScroll: true },
-    onClientTool: ({ name }) => {
-      if (name !== 'get_editor_selection') return { error: 'Unknown client tool' }
-      return {
-        document_id: liveRef.current.documentId,
-        revision_id: liveRef.current.revisionId,
-        selected_text: liveRef.current.selectedText.slice(0, SELECTION_LIMIT),
+    onClientTool: ({ name, params }) => {
+      if (name === 'get_editor_selection') {
+        return {
+          document_id: liveRef.current.documentId,
+          revision_id: liveRef.current.revisionId,
+          selected_text: liveRef.current.selectedText.slice(0, SELECTION_LIMIT),
+        }
       }
+      if (name === 'confirm_publish_document') return liveRef.current.requestPublishConfirmation(params)
+      return { error: 'Unknown client tool' }
     },
     onThreadChange: ({ threadId: nextThreadId }) => {
       setThreadId(nextThreadId)
@@ -114,13 +167,49 @@ export function ChatPanel({
     },
     onResponseEnd: () => void liveRef.current.refreshProposals(),
     onDeeplink: ({ name, data }) => {
-      if (name !== 'document' || typeof data?.document_id !== 'string') return
-      void liveRef.current.navigate({
-        to: '/documents/$documentId',
-        params: { documentId: data.document_id },
+      if (name !== 'document') return
+      const target = citationTargetFromData(data)
+      if (!target) return
+      setOpenedCitation(target)
+      void liveRef.current.navigate({ href: citationHref(target) }).then(() => {
+        announceCitationNavigation(target)
       })
     },
   })
+
+  const cancelPublication = () => {
+    publishResolver.current?.({ approved: false, status: 'cancelled' })
+    publishResolver.current = null
+    setPendingPublication(null)
+    setPublishError(false)
+  }
+  const approvePublication = async () => {
+    if (!pendingPublication || publishing) return
+    setPublishing(true)
+    setPublishError(false)
+    try {
+      const result = await api.createPublication(
+        pendingPublication.documentId,
+        pendingPublication.slug,
+        pendingPublication.accessPolicy,
+      )
+      await queryClient.invalidateQueries({ queryKey: ['publication', pendingPublication.documentId] })
+      publishResolver.current?.({
+        approved: true,
+        status: 'published',
+        publication_id: result.publication_id,
+        url: result.url,
+        access_policy: result.access_policy,
+      })
+      publishResolver.current = null
+      setPublished(result)
+      setPendingPublication(null)
+    } catch {
+      setPublishError(true)
+    } finally {
+      setPublishing(false)
+    }
+  }
 
   if (configQuery.isLoading) return <div className="center-message">Preparing workspace chat…</div>
   if (configQuery.isError || !configQuery.data) {
@@ -137,6 +226,23 @@ export function ChatPanel({
   return (
     <div className="chat-panel">
       <SelectionChip selectedText={selectedText} />
+      {openedCitation && (
+        <CitationNavigationStatus
+          target={openedCitation}
+          currentDocument={document}
+          onClose={() => setOpenedCitation(null)}
+        />
+      )}
+      {pendingPublication && (
+        <PublishConfirmationCard
+          request={pendingPublication}
+          publishing={publishing}
+          error={publishError}
+          onApprove={() => void approvePublication()}
+          onCancel={cancelPublication}
+        />
+      )}
+      {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
       <ChatKit control={chatkit.control} className="chatkit-frame" />
       <ProposalReviewList
         proposals={proposalsQuery.data ?? []}
@@ -146,6 +252,139 @@ export function ChatPanel({
       />
     </div>
   )
+}
+
+export function parsePublishConfirmation(params: Record<string, unknown>): PublishConfirmationRequest | null {
+  const documentId = typeof params.document_id === 'string' ? params.document_id.trim() : ''
+  const documentTitle = typeof params.document_title === 'string' ? params.document_title.trim() : ''
+  const slug = typeof params.slug === 'string' ? params.slug.trim() : ''
+  const accessPolicy = params.access_policy
+  if (
+    !documentId ||
+    documentId.length > 200 ||
+    !slug ||
+    slug.length > 200 ||
+    !['private', 'unlisted', 'public'].includes(String(accessPolicy))
+  ) {
+    return null
+  }
+  return {
+    documentId,
+    documentTitle: documentTitle || 'Untitled document',
+    slug,
+    accessPolicy: accessPolicy as Publication['access_policy'],
+  }
+}
+
+export function PublishConfirmationCard({
+  request,
+  publishing,
+  error,
+  onApprove,
+  onCancel,
+}: {
+  request: PublishConfirmationRequest
+  publishing: boolean
+  error: boolean
+  onApprove: () => void
+  onCancel: () => void
+}) {
+  const reach = {
+    private: 'Only authenticated Sangam users can open it.',
+    unlisted: 'Anyone with the one-time access link can open it.',
+    public: 'Anyone who knows or discovers the URL can open it.',
+  }[request.accessPolicy]
+  return (
+    <section className="chat-effect-confirmation" role="alertdialog" aria-labelledby="publish-confirm-title">
+      <div>
+        <p className="eyebrow">External side effect</p>
+        <strong id="publish-confirm-title">Publish “{request.documentTitle}”?</strong>
+        <span>
+          Chat requested <b>{request.accessPolicy}</b> access at <code>/p/{request.slug}</code>. {reach}
+        </span>
+        <small>No publication is created unless you approve this exact request.</small>
+        {error && (
+          <p className="error-text">
+            Publishing failed. Nothing was confirmed to the assistant; retry or cancel.
+          </p>
+        )}
+      </div>
+      <div className="chat-effect-actions">
+        <button type="button" className="primary-button" disabled={publishing} onClick={onApprove}>
+          {publishing ? 'Publishing…' : `Approve ${request.accessPolicy} publication`}
+        </button>
+        <button type="button" className="secondary-action" disabled={publishing} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function PublishedFromChat({ result, onDismiss }: { result: IssuedPublication; onDismiss: () => void }) {
+  const href = result.url
+  if (result.token) {
+    return (
+      <OneTimeSecret
+        compact
+        title="Publication approved · copy this link now"
+        description="The access token is shown only in your browser and is not returned to the assistant."
+        value={`${href}#token=${result.token}`}
+        copyLabel="Copy publication link"
+        dismissLabel="I saved it"
+        onDismiss={onDismiss}
+      />
+    )
+  }
+  return (
+    <div className="chat-effect-complete" role="status">
+      <span>Publication approved and created.</span>
+      <a href={href} target="_blank" rel="noreferrer">
+        Open publication
+      </a>
+      <button type="button" className="secondary-action" onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
+export function CitationNavigationStatus({
+  target,
+  currentDocument,
+  onClose,
+}: {
+  target: CitationTarget
+  currentDocument: Document
+  onClose: () => void
+}) {
+  const atDocument = currentDocument.document_id === target.documentId
+  const stale = atDocument && target.revisionId && target.revisionId !== currentDocument.current_revision_id
+  return (
+    <aside className={`chat-citation-status ${stale ? 'stale' : ''}`} aria-label="Opened chat citation">
+      <div>
+        <strong>
+          {stale
+            ? 'Source changed since the answer'
+            : atDocument
+              ? 'Opened cited evidence'
+              : 'Opening cited evidence…'}
+        </strong>
+        <small>
+          {target.revisionId ? `Revision ${shortId(target.revisionId)}` : 'Current revision'}
+          {target.pageNumber ? ` · PDF page ${target.pageNumber}` : ''}
+          {target.annotationId ? ` · annotation ${shortId(target.annotationId)}` : ''}
+        </small>
+      </div>
+      <button type="button" className="secondary-action" onClick={onClose}>
+        Dismiss
+      </button>
+    </aside>
+  )
+}
+
+function shortId(value: string) {
+  return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 
 export function SelectionChip({ selectedText }: { selectedText: string }) {

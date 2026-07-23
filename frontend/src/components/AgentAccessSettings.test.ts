@@ -1,14 +1,57 @@
 import { describe, expect, it } from 'vitest'
 import { agentTokenSchema, issuedAgentTokenSchema } from '../api'
-import { buildTokenScopes } from './AgentAccessSettings'
+import {
+  buildTokenScopes,
+  defaultExpirationValue,
+  defaultTokenLifetimeHours,
+  sensitiveCapabilities,
+  tokenPresets,
+} from './AgentAccessSettings'
 
 describe('agent access contracts', () => {
-  it('keeps read/search global and mutations inside the selected prefix', () => {
-    expect(buildTokenScopes(new Set(['read', 'search', 'create', 'update']), 'agents')).toEqual([
-      { capability: 'read', path_prefix: null },
-      { capability: 'search', path_prefix: null },
+  it('keeps read, search, and mutation prefixes independently scoped', () => {
+    expect(
+      buildTokenScopes(new Set(['read', 'search', 'create', 'update']), {
+        read: 'sources',
+        search: '/sources/research/**',
+        write: '/agents/**',
+      }),
+    ).toEqual([
+      { capability: 'read', path_prefix: 'sources' },
+      { capability: 'search', path_prefix: 'sources/research' },
       { capability: 'create', path_prefix: 'agents' },
       { capability: 'update', path_prefix: 'agents' },
+    ])
+  })
+
+  it('starts from a scoped read-only grant and offers a routine scoped writer', () => {
+    expect(tokenPresets['read-only'].capabilities).toEqual(['read', 'search'])
+    expect(tokenPresets['read-only'].prefixes).toMatchObject({ read: 'agents', search: 'agents' })
+    expect(tokenPresets['scoped-writer'].capabilities).toEqual([
+      'read',
+      'search',
+      'create',
+      'update',
+      'move',
+      'tag',
+    ])
+    expect(tokenPresets['scoped-writer'].capabilities).not.toContain('restore')
+    expect(tokenPresets['scoped-writer'].capabilities).not.toContain('delete')
+    expect(tokenPresets['scoped-writer'].capabilities).not.toContain('publish')
+  })
+
+  it('uses a short default expiration', () => {
+    const now = new Date('2026-07-22T12:00:00.000Z')
+    const expiration = new Date(defaultExpirationValue(now))
+    expect(expiration.getTime() - now.getTime()).toBe(defaultTokenLifetimeHours * 60 * 60 * 1000)
+    expect(defaultTokenLifetimeHours).toBe(24)
+  })
+
+  it('identifies only high-impact capabilities for explicit confirmation', () => {
+    expect(sensitiveCapabilities(new Set(['read', 'restore', 'delete', 'publish']))).toEqual([
+      'restore',
+      'delete',
+      'publish',
     ])
   })
 

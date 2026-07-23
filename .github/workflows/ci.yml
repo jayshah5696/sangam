@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Source, UI, and docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+          enable-cache: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+          package-manager-cache: false
+      - run: uv sync --frozen
+      - run: npm ci --prefix frontend
+      - name: Python and frontend gates
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pytest
+          npm --prefix frontend run format:check
+          npm --prefix frontend run build
+          npm --prefix frontend run lint
+          npm --prefix frontend run test
+      - name: Documentation gates
+        run: |
+          uv run python scripts/verify-docs.py
+          node frontend/scripts/verify-mermaid.mjs
+          npm --prefix frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
+      - run: uv run python scripts/verify-release-config.py
+      - run: uv run python scripts/verify-version.py --frontend-dist
+      - run: ./scripts/audit-dependencies.sh
+
+  artifacts:
+    name: Wheel and sdist clean install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+          enable-cache: true
+      - run: ./scripts/smoke-package.sh
+
+  container:
+    name: Container, Compose, and blocking scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - run: ./scripts/validate-compose.sh
+      - run: ./scripts/docker-smoke.sh
+      - name: Block HIGH and CRITICAL container vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: sangam:smoke
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"

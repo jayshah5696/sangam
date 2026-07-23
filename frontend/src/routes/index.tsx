@@ -12,7 +12,7 @@ function Welcome() {
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
   const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
-  const documents = useQuery({ queryKey: ['documents', 'welcome'], queryFn: api.listDocuments })
+  const documents = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
   const createDocument = useMutation({
     mutationFn: () =>
       api.createDocument(

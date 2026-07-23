@@ -5,7 +5,9 @@ import io
 import json
 import re
 import sqlite3
+import threading
 import uuid
+from collections.abc import Iterator
 
 from pypdf import PdfReader
 
@@ -13,6 +15,7 @@ from sangam.actors import ActorService
 from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, NotFoundError, ValidationError
 from sangam.idempotency import IdempotencyStore, request_hash
+from sangam.mutations import MutationCoordinator
 from sangam.schemas import (
     Annotation,
     AnnotationEvent,
@@ -29,6 +32,10 @@ from sangam.service import DocumentService
 from sangam.workspace import WorkspaceFilesystem
 
 
+class _ExtractionCancelled(Exception):
+    """Internal cooperative shutdown signal for PDF extraction workers."""
+
+
 class PdfResearchService:
     """Owns immutable PDF bytes, extracted pages, and versioned research annotations."""
 
@@ -41,6 +48,7 @@ class PdfResearchService:
         idempotency: IdempotencyStore,
         actors: ActorService,
         search_index: SearchIndex,
+        mutations: MutationCoordinator,
         max_pdf_bytes: int,
     ) -> None:
         self.database = database
@@ -49,9 +57,30 @@ class PdfResearchService:
         self.idempotency = idempotency
         self.actors = actors
         self.search_index = search_index
+        self.mutations = mutations
         self.max_pdf_bytes = max_pdf_bytes
 
     def import_pdf(
+        self,
+        *,
+        title: str,
+        path: str,
+        content: bytes,
+        supersedes_document_id: str | None,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        with self.mutations.creation():
+            return self._import_pdf_locked(
+                title=title,
+                path=path,
+                content=content,
+                supersedes_document_id=supersedes_document_id,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+    def _import_pdf_locked(
         self,
         *,
         title: str,
@@ -94,97 +123,101 @@ class PdfResearchService:
         if duplicate is not None:
             return self.documents.get_document(duplicate.resource_id)
 
-        created_file = not self.workspace.is_document_file(normalized_path)
-        if created_file:
-            file_hash = self.workspace.write_atomic_bytes(normalized_path, content)
-        else:
-            # An import may have been interrupted after the durable file rename but
-            # before SQLite committed. Adopt only the exact bytes the caller supplied;
-            # a different existing file must remain a visible reconciliation conflict.
-            file_hash = hashlib.sha256(self.workspace.read_binary(normalized_path)).hexdigest()
-            if file_hash != content_hash:
-                raise ValidationError("A different workspace file already exists at that path")
         document_id = str(uuid.uuid4())
         revision_id = str(uuid.uuid4())
-        try:
-            with self.database.transaction() as connection:
-                self.actors.require_known(connection, actor_id)
-                if supersedes_document_id:
-                    previous = connection.execute(
-                        "SELECT content_type FROM documents WHERE document_id = ? AND deleted = 0",
-                        (supersedes_document_id,),
-                    ).fetchone()
-                    if not previous or previous["content_type"] != "application/pdf":
-                        raise ValidationError("A replacement can only supersede an existing PDF")
-                now = utc_now()
-                connection.execute(
-                    """
-                    INSERT INTO documents(
-                        document_id, title, content_type, path, current_revision_id,
-                        content_hash, size_bytes, materialization_state, file_hash,
-                        deleted, created_by, created_at, updated_at
-                    ) VALUES (?, ?, 'application/pdf', ?, NULL, ?, ?, 'clean', ?, 0, ?, ?, ?)
-                    """,
-                    (
-                        document_id,
-                        title,
-                        normalized_path,
-                        content_hash,
-                        len(content),
-                        file_hash,
-                        actor_id,
-                        now,
-                        now,
-                    ),
-                )
-                self.documents.organization.ensure_document_folder_hierarchy(
-                    connection, normalized_path
-                )
-                connection.execute(
-                    """
-                    INSERT INTO revisions(
-                        revision_id, document_id, parent_revision_id, content,
-                        content_hash, size_bytes, actor_id, operation, summary, created_at
-                    ) VALUES (?, ?, NULL, '', ?, ?, ?, 'create', 'Imported immutable PDF', ?)
-                    """,
-                    (revision_id, document_id, content_hash, len(content), actor_id, now),
-                )
-                connection.execute(
-                    "UPDATE documents SET current_revision_id = ? WHERE document_id = ?",
-                    (revision_id, document_id),
-                )
-                connection.execute(
-                    """
-                    INSERT INTO pdf_documents(
-                        document_id, extraction_status, supersedes_document_id, imported_at
-                    ) VALUES (?, 'pending', ?, ?)
-                    """,
-                    (document_id, supersedes_document_id, now),
-                )
-                connection.execute(
-                    """
-                    UPDATE reconciliation_conflicts
-                    SET status = 'resolved', resolved_at = ?
-                    WHERE status = 'open' AND conflict_type = 'unknown_file' AND path = ?
-                    """,
-                    (now, normalized_path),
-                )
-                self.idempotency.record_mutation(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation="pdf_import",
-                    request_hash=fingerprint,
-                    resource_type="pdf_document",
-                    resource_id=document_id,
-                )
-        except Exception:
+        with self.mutations.document(document_id):
+            created_file = not self.workspace.is_document_file(normalized_path)
             if created_file:
-                self.workspace.delete_document(normalized_path)
-            raise
-        document = self.documents.get_document(document_id)
-        self.search_index.sync(document)
-        return document
+                file_hash = self.workspace.write_atomic_bytes(normalized_path, content)
+            else:
+                # An import may have been interrupted after the durable file rename but
+                # before SQLite committed. Adopt only the exact bytes the caller supplied;
+                # a different existing file must remain a visible reconciliation conflict.
+                file_hash = hashlib.sha256(self.workspace.read_binary(normalized_path)).hexdigest()
+                if file_hash != content_hash:
+                    raise ValidationError("A different workspace file already exists at that path")
+            try:
+                with self.database.transaction() as connection:
+                    self.actors.require_known(connection, actor_id)
+                    if supersedes_document_id:
+                        previous = connection.execute(
+                            "SELECT content_type FROM documents "
+                            "WHERE document_id = ? AND deleted = 0",
+                            (supersedes_document_id,),
+                        ).fetchone()
+                        if not previous or previous["content_type"] != "application/pdf":
+                            raise ValidationError(
+                                "A replacement can only supersede an existing PDF"
+                            )
+                    now = utc_now()
+                    connection.execute(
+                        """
+                        INSERT INTO documents(
+                            document_id, title, content_type, path, current_revision_id,
+                            content_hash, size_bytes, materialization_state, file_hash,
+                            deleted, created_by, created_at, updated_at
+                        ) VALUES (?, ?, 'application/pdf', ?, NULL, ?, ?, 'clean', ?, 0, ?, ?, ?)
+                        """,
+                        (
+                            document_id,
+                            title,
+                            normalized_path,
+                            content_hash,
+                            len(content),
+                            file_hash,
+                            actor_id,
+                            now,
+                            now,
+                        ),
+                    )
+                    self.documents.organization.ensure_document_folder_hierarchy(
+                        connection, normalized_path
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO revisions(
+                            revision_id, document_id, parent_revision_id, content,
+                            content_hash, size_bytes, actor_id, operation, summary, created_at
+                        ) VALUES (?, ?, NULL, '', ?, ?, ?, 'create', 'Imported immutable PDF', ?)
+                        """,
+                        (revision_id, document_id, content_hash, len(content), actor_id, now),
+                    )
+                    connection.execute(
+                        "UPDATE documents SET current_revision_id = ? WHERE document_id = ?",
+                        (revision_id, document_id),
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO pdf_documents(
+                            document_id, extraction_status, supersedes_document_id, imported_at
+                        ) VALUES (?, 'pending', ?, ?)
+                        """,
+                        (document_id, supersedes_document_id, now),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE reconciliation_conflicts
+                        SET status = 'resolved', resolved_at = ?
+                        WHERE status = 'open' AND conflict_type = 'unknown_file' AND path = ?
+                        """,
+                        (now, normalized_path),
+                    )
+                    self.idempotency.record_mutation(
+                        connection,
+                        actor_id=actor_id,
+                        key=idempotency_key,
+                        operation="pdf_import",
+                        request_hash=fingerprint,
+                        resource_type="pdf_document",
+                        resource_id=document_id,
+                    )
+            except Exception:
+                if created_file:
+                    self.workspace.delete_document(normalized_path)
+                raise
+            document = self.documents.get_document(document_id)
+            self.search_index.sync(document)
+            return document
 
     def pdf_bytes(self, document_id: str) -> tuple[Document, bytes]:
         document = self._require_pdf(document_id)
@@ -203,33 +236,80 @@ class PdfResearchService:
             )
         return document, content
 
+    def pdf_stream_info(self, document_id: str) -> tuple[Document, int]:
+        """Validate immutable PDF state without loading the source into memory."""
+        document = self._require_pdf(document_id)
+        if not document.path:
+            raise ValidationError("PDF document is not materialized")
+        size = self.workspace.binary_size(document.path)
+        actual_hash = self.workspace.binary_hash(document.path)
+        if size != document.size_bytes or actual_hash != document.content_hash:
+            raise ConflictError(
+                "PDF bytes differ from the imported immutable source",
+                details={
+                    "document_id": document_id,
+                    "expected_hash": document.content_hash,
+                    "actual_hash": actual_hash,
+                },
+            )
+        return document, size
+
+    def pdf_stream(
+        self, document_id: str, *, start: int = 0, end: int | None = None
+    ) -> Iterator[bytes]:
+        document = self._require_pdf(document_id)
+        if not document.path:
+            raise ValidationError("PDF document is not materialized")
+        return self.workspace.iter_binary(document.path, start=start, end=end)
+
+    def recover_interrupted_extractions(self) -> int:
+        """Return process-owned extraction claims to the durable pending queue."""
+        with self.database.transaction() as connection:
+            updated = connection.execute(
+                """
+                UPDATE pdf_documents SET extraction_status = 'pending'
+                WHERE extraction_status = 'processing'
+                """
+            )
+        return updated.rowcount
+
     def pending_extractions(self) -> list[str]:
         with self.database.connection() as connection:
             rows = connection.execute(
                 """
                 SELECT document_id FROM pdf_documents
-                WHERE extraction_status IN ('pending', 'processing')
+                WHERE extraction_status = 'pending'
                 ORDER BY imported_at
                 """
             ).fetchall()
         return [row["document_id"] for row in rows]
 
-    def extract_text(self, document_id: str) -> None:
+    def extract_text(self, document_id: str, cancel_event: threading.Event | None = None) -> bool:
         self._require_pdf(document_id)
         with self.database.transaction() as connection:
-            connection.execute(
+            claimed = connection.execute(
                 """
                 UPDATE pdf_documents
                 SET extraction_status = 'processing', extraction_error = NULL,
                     extraction_attempts = extraction_attempts + 1
-                WHERE document_id = ?
+                WHERE document_id = ? AND extraction_status = 'pending'
                 """,
                 (document_id,),
             )
+        if claimed.rowcount != 1:
+            return False
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise _ExtractionCancelled
             _, content = self.pdf_bytes(document_id)
             reader = PdfReader(io.BytesIO(content), strict=False)
-            pages = [page.extract_text() or "" for page in reader.pages]
+            pages: list[str] = []
+            for page in reader.pages:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise _ExtractionCancelled
+                pages.append(page.extract_text() or "")
+            if cancel_event is not None and cancel_event.is_set():
+                raise _ExtractionCancelled
             with self.database.transaction() as connection:
                 connection.execute("DELETE FROM pdf_pages WHERE document_id = ?", (document_id,))
                 connection.executemany(
@@ -241,26 +321,45 @@ class PdfResearchService:
                     UPDATE pdf_documents
                     SET page_count = ?, extraction_status = 'ready', extraction_error = NULL,
                         extracted_at = ?
-                    WHERE document_id = ?
+                    WHERE document_id = ? AND extraction_status = 'processing'
                     """,
                     (len(pages), utc_now(), document_id),
                 )
+        except _ExtractionCancelled:
+            with self.database.transaction() as connection:
+                connection.execute(
+                    """
+                    UPDATE pdf_documents SET extraction_status = 'pending'
+                    WHERE document_id = ? AND extraction_status = 'processing'
+                    """,
+                    (document_id,),
+                )
+            return False
         except Exception as error:
             with self.database.transaction() as connection:
                 connection.execute(
                     """
                     UPDATE pdf_documents
                     SET extraction_status = 'failed', extraction_error = ?
-                    WHERE document_id = ?
+                    WHERE document_id = ? AND extraction_status = 'processing'
                     """,
                     (str(error)[:1000], document_id),
                 )
-            return
+            return False
         self.search_index.sync(self.documents.get_document(document_id))
+        return True
 
     def retry_extraction(self, document_id: str) -> Document:
         self._require_pdf(document_id)
         with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT extraction_status FROM pdf_documents WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"PDF document not found: {document_id}")
+            if row["extraction_status"] == "processing":
+                raise ConflictError("PDF text extraction is already running")
             connection.execute(
                 """
                 UPDATE pdf_documents

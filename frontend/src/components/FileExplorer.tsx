@@ -43,7 +43,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
   const activeDocumentId = findGroup(workbench.root, workbench.activeGroupId)?.activeTabId
-  const documents = useQuery({ queryKey: ['documents', 'explorer'], queryFn: api.listDocuments })
+  const documents = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
   const adapter = useMemo(
     () => buildWorkspaceTreeAdapter(documents.data ?? [], folders.data ?? []),
@@ -139,10 +139,10 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       return api.moveDocument(document, joinWorkspacePath(folderPath, workspaceBasename(document.path)))
     },
     onMutate: async ({ document, folderPath }) => {
-      await queryClient.cancelQueries({ queryKey: ['documents', 'explorer'] })
-      const previous = queryClient.getQueryData<DocumentSummary[]>(['documents', 'explorer'])
+      await queryClient.cancelQueries({ queryKey: ['documents'] })
+      const previous = queryClient.getQueryData<DocumentSummary[]>(['documents'])
       if (document.path)
-        queryClient.setQueryData<DocumentSummary[]>(['documents', 'explorer'], (current) =>
+        queryClient.setQueryData<DocumentSummary[]>(['documents'], (current) =>
           current?.map((candidate) =>
             candidate.document_id === document.document_id
               ? { ...candidate, path: joinWorkspacePath(folderPath, workspaceBasename(document.path!)) }
@@ -152,7 +152,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       return { previous }
     },
     onError: (cause, _variables, context) => {
-      if (context?.previous) queryClient.setQueryData(['documents', 'explorer'], context.previous)
+      if (context?.previous) queryClient.setQueryData(['documents'], context.previous)
       setError(cause instanceof Error ? cause.message : 'The document could not be moved.')
     },
     onSettled: refresh,

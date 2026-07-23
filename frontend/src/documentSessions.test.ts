@@ -128,4 +128,90 @@ describe('document session autosave', () => {
     })
     store.dispose()
   })
+
+  it('surfaces a browser storage open/read failure and retries it explicitly', async () => {
+    const { storage } = memoryStorage()
+    vi.mocked(storage.get)
+      .mockRejectedValueOnce(new Error('IndexedDB open blocked'))
+      .mockResolvedValueOnce(undefined)
+    const store = new DocumentSessionStore({ storage, saveDocument: vi.fn() })
+
+    await store.initializeDocument(documentAt('rev-1', 'original'))
+    expect(store.getSession('doc-1')).toMatchObject({
+      draftPersistenceState: 'failed',
+      draftPersistenceOperation: 'read',
+      draftPersistenceError: 'IndexedDB open blocked',
+    })
+
+    store.retryDraftPersistence('doc-1')
+    await vi.waitFor(() => expect(store.getSession('doc-1').draftPersistenceState).toBe('idle'))
+    expect(storage.get).toHaveBeenCalledTimes(2)
+  })
+
+  it('marks a draft durable only after storage succeeds and supports explicit retry', async () => {
+    vi.useFakeTimers()
+    const { storage } = memoryStorage()
+    vi.mocked(storage.set).mockRejectedValueOnce(new Error('quota exceeded')).mockResolvedValueOnce(undefined)
+    const store = new DocumentSessionStore({
+      storage,
+      saveDocument: vi.fn(),
+      saveDelay: 10_000,
+      persistDelay: 5,
+    })
+    await store.initializeDocument(documentAt('rev-1', 'original'))
+
+    store.updateSession('doc-1', { content: 'edited' })
+    expect(store.getSession('doc-1').draftPersistenceState).toBe('pending')
+    await vi.advanceTimersByTimeAsync(5)
+    expect(store.getSession('doc-1')).toMatchObject({
+      draftPersistenceState: 'failed',
+      draftPersistenceOperation: 'write',
+      draftPersistenceError: 'quota exceeded',
+    })
+
+    store.retryDraftPersistence('doc-1')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.getSession('doc-1').draftPersistenceState).toBe('persisted')
+    expect(storage.set).toHaveBeenCalledTimes(2)
+    store.dispose()
+  })
+
+  it('surfaces failure to remove a stale browser draft', async () => {
+    const { storage } = memoryStorage()
+    vi.mocked(storage.delete).mockRejectedValueOnce(new Error('transaction aborted'))
+    const store = new DocumentSessionStore({ storage, saveDocument: vi.fn() })
+    const document = documentAt('rev-1', 'original')
+    await store.initializeDocument(document)
+
+    store.acceptServerDocument(document, true)
+    await vi.waitFor(() => expect(store.getSession('doc-1').draftPersistenceState).toBe('failed'))
+    expect(store.getSession('doc-1')).toMatchObject({
+      draftPersistenceOperation: 'delete',
+      draftPersistenceError: 'transaction aborted',
+    })
+  })
+
+  it('stops automatic save retries after failure and waits for explicit retry', async () => {
+    vi.useFakeTimers()
+    const { storage } = memoryStorage()
+    const saveDocument = vi.fn(async () => Promise.reject(new Error('server unavailable')))
+    const store = new DocumentSessionStore({
+      storage,
+      saveDocument,
+      saveDelay: 10,
+      persistDelay: 1,
+    })
+    await store.initializeDocument(documentAt('rev-1', 'original'))
+    store.updateSession('doc-1', { content: 'edited' })
+
+    await vi.advanceTimersByTimeAsync(10)
+    expect(store.getSession('doc-1').saveState).toBe('failed')
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(saveDocument).toHaveBeenCalledTimes(1)
+
+    store.retrySave('doc-1')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(saveDocument).toHaveBeenCalledTimes(2)
+    store.dispose()
+  })
 })
