@@ -10,6 +10,8 @@ PORT=18080
 IMAGE=${SANGAM_SMOKE_IMAGE:-sangam:smoke}
 
 cleanup() {
+  docker exec --user 0 "$NAME" chmod -R a+rwX \
+    /data/database /data/workspace /data/backups >/dev/null 2>&1 || true
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker rm -f "$KARAKEEP_NAME" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
@@ -91,7 +93,7 @@ CLI_CONTENT=$(docker exec \
   -e SANGAM_API_URL=http://127.0.0.1:8000 \
   "$NAME" /app/.venv/bin/sangam read "$DOCUMENT_ID")
 test "$CLI_CONTENT" = "# Through the container"
-test "$(cat "$STATE/workspace/projects/docker-smoke.md")" = "# Through the container"
+test "$(docker exec "$NAME" cat /data/workspace/projects/docker-smoke.md)" = "# Through the container"
 
 SEARCHED_ID=$(curl --fail --silent \
   "http://127.0.0.1:$PORT/api/v1/search?q=container" \
@@ -237,7 +239,7 @@ PDF_REPLACEMENT=$(curl --fail --silent \
   --data-binary "@$STATE/research-replacement.pdf" \
   "http://127.0.0.1:$PORT/api/v1/pdfs?title=Replacement%20PDF&path=research%2Fresearch-replacement.pdf&supersedes_document_id=$PDF_DOCUMENT_ID")
 printf '%s' "$PDF_REPLACEMENT" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["supersedes_document_id"] == sys.argv[1] and data["document_id"] != sys.argv[1]' "$PDF_DOCUMENT_ID"
-test "$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$STATE/workspace/research/research.pdf")" = "$PDF_HASH"
+test "$(docker exec "$NAME" /app/.venv/bin/python -c 'import hashlib; print(hashlib.sha256(open("/data/workspace/research/research.pdf", "rb").read()).hexdigest())')" = "$PDF_HASH"
 echo "Verified immutable PDF import, extraction, range serving, annotation history, and replacement relationship."
 
 ISSUED_TOKEN=$(curl --fail --silent \
@@ -319,7 +321,10 @@ curl --fail --silent \
 echo "Verified ChatKit thread recovery after container restart."
 
 docker stop "$NAME" >/dev/null
-printf '%s\n' '# Changed outside Sangam' > "$STATE/workspace/projects/docker-smoke.md"
+docker run --rm --user 10001:10001 \
+  -v "$STATE/workspace:/data/workspace" \
+  --entrypoint /bin/sh "$IMAGE" \
+  -c "printf '%s\n' '# Changed outside Sangam' > /data/workspace/projects/docker-smoke.md"
 docker start "$NAME" >/dev/null
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$PORT/api/v1/health" >/dev/null; do
