@@ -3,68 +3,238 @@
 <!-- markdownlint-disable-next-line MD033 -->
 <img src="https://raw.githubusercontent.com/jayshah5696/sangam/main/frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
 
-A single-user, self-hosted document server where a human and identified AI agents work with ordinary files through the same small API.
+[![Release](https://img.shields.io/github/v/release/jayshah5696/sangam?display_name=tag&sort=semver)](https://github.com/jayshah5696/sangam/releases/latest)
+[![CI](https://github.com/jayshah5696/sangam/actions/workflows/ci.yml/badge.svg)](https://github.com/jayshah5696/sangam/actions/workflows/ci.yml)
+[![Container](https://img.shields.io/badge/GHCR-linux%2Famd64%20%7C%20linux%2Farm64-2496ED?logo=docker&logoColor=white)](https://github.com/jayshah5696/sangam/pkgs/container/sangam)
+[![License](https://img.shields.io/github/license/jayshah5696/sangam)](./LICENSE)
 
-All seven vertical phases are implemented locally. The document core now supports a daily-use
-Markdown, HTML, and immutable PDF research workspace through the browser, HTTP
-API, CLI, SQLite revision and annotation history, and ordinary workspace files.
+A single-user, self-hosted document workspace where a human and identified AI
+agents work with ordinary files through the same small, revision-aware API.
 
-The workspace opens with one focused editor and reveals tabs only when a group
-contains more than one document. Users can add persistent horizontal,
-vertical, or nested editor groups from file actions, document actions, or the
-command palette. Narrow horizontal layouts stack automatically instead of
-crushing the editor. Sangam also includes a keyboard-accessible file explorer,
-rich FTS5 search, stable internal links,
-rendered Markdown and Mermaid preview, two-revision comparison, explicit
-reconciliation, trash/restore, verified nightly backups, a command palette,
-resizable panels, and four selectable themes. Validated editor-group and tab
-state persists in the browser, while unsaved document drafts use separate
-browser storage.
-Per-document saves are serialized so a slow response can never replace newer
-text in the editor.
+> **Release status:** [Sangam 0.1.0](https://github.com/jayshah5696/sangam/releases/tag/v0.1.0)
+> is a published and verified self-hosted beta. Its signed application image is
+> public on [GitHub Container Registry](https://github.com/jayshah5696/sangam/pkgs/container/sangam).
+> A technically capable operator can deploy it privately by immutable digest;
+> production acceptance still requires evidence from that operator's real
+> identity, network, storage, backup, and monitoring environment. See the
+> [release report](./docs/0.1_RELEASE_REPORT.md) for the exact boundary.
 
-External agents can now authenticate with one-time Sangam bearer tokens,
-receive deny-by-default capabilities and path scopes, work through the same
-optimistic document API as the human, and leave reviewable accepted, denied,
-and conflicted activity. Token secrets are stored only as secure hashes and can
-be expired, revoked, or rotated from the browser.
+[Install 0.1.0](#install-010) · [Deploy safely](#production-deployment) ·
+[Verify the release](#verify-the-release) · [Explore features](#what-sangam-does) ·
+[Develop](#development) · [Read the docs](#documentation)
 
-Markdown and safe HTML can now be published at stable private, public, or
-unlisted URLs. Explicit historical revisions remain non-enumerable until
-exposed. Trusted interactive HTML runs only through a separate preview origin
-with a short-lived HMAC grant and an opaque sandbox; published HTML remains
-sanitized.
+## Why Sangam
 
-PDFs can now be imported as immutable binary Documents, rendered with PDF.js,
-searched by extracted page text, and researched with text or area highlights,
-notes, comments, bookmarks, citation markers, colors, tags, stable deep links,
-and actor-attributed annotation history. Replacement PDFs receive new stable
-IDs and explicit `supersedes` relationships, so prior citations continue to
-reference the exact original bytes.
+Sangam keeps the files you care about ordinary and portable while preserving the
+history and trust information that a filesystem alone cannot express. SQLite is
+the canonical record for stable identity, immutable revisions, metadata,
+provenance, annotations, publications, imports, agent activity, and chat state;
+workspace files are readable materializations of the current document revisions.
 
-Selected Karakeep bookmarks can now be searched and imported as editable
-Markdown without turning Sangam into a second archive. Sangam keeps stable
-Karakeep provenance, source tags and attachment descriptors, attributes the
-initial revision to `integration:karakeep`, and prevents duplicate Documents by
-bookmark ID. Refreshes preserve the corrected working copy and wait in a
-side-by-side review state until a human applies a normal attributed revision.
+Humans, the CLI, integrations, and scoped agents all use the same service path.
+Every mutation carries an actor, an expected revision, and an idempotency boundary.
+That makes concurrent edits recoverable, external actions reviewable, and AI edits
+proposals instead of invisible writes.
 
-Workspace chat uses ChatKit React and ChatKit Python for the UI, durable thread
-protocol, streaming, stop, retry, and history. The OpenAI Agents SDK owns the
-tool loop, while OpenRouter supplies configurable OpenAI-compatible Responses
-models. Sangam's code remains limited to authorized workspace tools,
-revision-pinned citations, and human-reviewed edit proposals.
+## What Sangam does
 
-## Configure Karakeep
+- **Daily document workspace.** Edit Markdown and safe HTML, preview Mermaid,
+  search with SQLite FTS5, compare or restore revisions, organize files, recover
+  drafts and conflicts, and use keyboard-accessible split editor groups.
+- **PDF research.** Import immutable PDFs, search extracted page text, annotate
+  text or regions, add notes and citation markers, and keep deep links pinned to
+  the exact PDF and page.
+- **Controlled publishing.** Publish stable private, public, or unlisted pages.
+  Safe HTML stays sanitized; reviewed interactive HTML uses a separate origin,
+  short-lived grants, and an opaque sandbox.
+- **Scoped agent collaboration.** Issue one-time bearer tokens with explicit
+  capabilities, path boundaries, expiry, rotation, and revocation. Accepted,
+  denied, conflicted, and failed operations remain attributable and reviewable.
+- **Workspace-grounded chat.** Use ChatKit with OpenRouter Responses models,
+  durable threads, streaming, stop/retry, revision-pinned citations, and
+  human-reviewed edit proposals.
+- **Karakeep bridge.** Selectively import archived bookmarks as editable Markdown
+  while retaining provenance and keeping refreshes from overwriting human edits.
+- **Recovery-aware operations.** Reconcile SQLite with materialized files, create
+  generation-consistent paired backups, verify their contents, and expose separate
+  health and readiness endpoints.
 
-For a Docker Compose deployment, copy the example environment file and set a
-read-capable Karakeep API key:
+## Install 0.1.0
+
+The container is the supported complete application artifact. It includes the
+browser client, API, migration set, background workers, and CLI and runs as the
+unprivileged UID/GID `10001:10001`. The separately published Python wheel and
+source archive contain the backend and CLI only; they deliberately do not contain
+the browser SPA.
+
+### Requirements
+
+- Docker with Linux container support; the release provides `linux/amd64` and
+  `linux/arm64` images.
+- Three persistent volumes for the SQLite database, workspace materializations,
+  and paired backups.
+- A loopback or private-network binding for evaluation. Never expose the default
+  `single_user` mode directly to an untrusted network.
+
+### Try the released container locally
+
+Release tags are convenient for evaluation. These named volumes survive container
+replacement without requiring host-directory ownership changes:
 
 ```bash
+docker volume create sangam-database
+docker volume create sangam-workspace
+docker volume create sangam-backups
+
+docker run --detach --init \
+  --name sangam \
+  --publish 127.0.0.1:8000:8000 \
+  --volume sangam-database:/data/database \
+  --volume sangam-workspace:/data/workspace \
+  --volume sangam-backups:/data/backups \
+  ghcr.io/jayshah5696/sangam:0.1.0
+```
+
+Open <http://127.0.0.1:8000>. The public package can be pulled without signing in
+to GitHub. Confirm the exact running version and readiness:
+
+```bash
+curl --fail http://127.0.0.1:8000/api/v1/health
+curl --fail http://127.0.0.1:8000/api/v1/readiness
+docker logs sangam
+```
+
+Stop and later restart the same data with `docker stop sangam` and
+`docker start sangam`. Removing the container does not remove its named volumes.
+
+This path is for private evaluation on localhost. Chat, Karakeep, public
+publishing, and trusted interactive preview need their own configuration. A remote
+or internet-accessible instance must use the production contract below.
+
+## Production deployment
+
+Production deployments must use the fail-closed Compose definition and pin the
+verified immutable image digest, not a mutable release tag:
+
+```text
+ghcr.io/jayshah5696/sangam@sha256:8ee161116bfc2976524ccfe57c4ecc1697f151fa7481434a76264137009d4974
+```
+
+The digest identifies the exact multi-platform 0.1.0 image index. The `:0.1.0`
+tag is easier to read, but a registry tag can be moved; the digest cannot.
+
+### Prepare the host
+
+Clone the release, create the persistent bind-mount directories with the
+container's unprivileged identity, and create a deployment environment:
+
+```bash
+git clone --branch v0.1.0 --depth 1 https://github.com/jayshah5696/sangam.git
+cd sangam
+sudo install -d -m 0750 -o 10001 -g 10001 \
+  data/database data/workspace data/backups
 cp .env.example .env
 ```
 
-Uncomment and edit these values in `.env`:
+Set the following deployment-specific values in `.env` before starting:
+
+- the Cloudflare Access team URL, application audience, and allowed administrator;
+- the HTTPS application/publication URL and a separate HTTPS trusted-preview
+  hostname;
+- allowed preview parent origins and an independently generated preview HMAC
+  secret;
+- the registered production ChatKit domain key and application origin; and
+- optional OpenRouter and Karakeep server-side credentials when those integrations
+  are enabled.
+
+Generate the preview secret with a password manager or:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
+
+Keep secrets out of the repository, browser configuration, URLs, documents, and
+support logs. The production definition binds Sangam only to
+`127.0.0.1:8000`; use an authenticated reverse proxy or Cloudflare Tunnel and do
+not add a public router port-forward.
+
+### Validate and start
+
+```bash
+export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:8ee161116bfc2976524ccfe57c4ecc1697f151fa7481434a76264137009d4974'
+scripts/validate-compose.sh
+docker compose -f deploy/compose.prod.yaml config --quiet
+docker compose -f deploy/compose.prod.yaml pull
+docker compose -f deploy/compose.prod.yaml up -d
+docker compose -f deploy/compose.prod.yaml ps
+curl --fail http://127.0.0.1:8000/api/v1/readiness
+```
+
+`SANGAM_DEPLOYMENT_MODE=production` refuses to start with local authentication,
+the development preview secret, HTTP publication or preview URLs, mismatched
+preview hosts, unsafe parent/connect origins, incomplete Cloudflare settings, or
+the `local-dev` ChatKit registration.
+
+Deployment is not complete when the container merely becomes healthy. Follow the
+[release checklist](./docs/operations/RELEASE_CHECKLIST.md) to test Access allow
+and deny behavior, trust-zone isolation, publishing policies, real ChatKit and
+Karakeep flows, desktop and narrow browser behavior, monitoring, and off-host
+restore evidence. Use the [upgrade and rollback runbook](./docs/operations/UPGRADES_AND_ROLLBACK.md)
+before changing a running digest.
+
+## Verify the release
+
+Sangam 0.1.0 is built for `linux/amd64` and `linux/arm64`, scanned before push,
+signed keylessly with Sigstore, and published with BuildKit SBOM/provenance plus a
+GitHub artifact attestation. The [GitHub Release](https://github.com/jayshah5696/sangam/releases/tag/v0.1.0)
+also contains the backend/CLI wheel, source archive, and `SHA256SUMS`.
+
+Inspect and verify the exact application image:
+
+```bash
+export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:8ee161116bfc2976524ccfe57c4ecc1697f151fa7481434a76264137009d4974'
+
+docker buildx imagetools inspect "$SANGAM_IMAGE"
+
+cosign verify "$SANGAM_IMAGE" \
+  --certificate-identity-regexp \
+  'https://github.com/jayshah5696/sangam/.github/workflows/release.yml@refs/tags/v[0-9].*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+gh attestation verify "oci://$SANGAM_IMAGE" \
+  --repo jayshah5696/sangam
+```
+
+The GitHub CLI command requires a GitHub login with package read access; anonymous
+Docker pulls do not. The [0.1.0 release report](./docs/0.1_RELEASE_REPORT.md) links
+the successful release workflow, exact commit, platform manifests, attestations,
+Rekor record, checksum verification, and published-image smoke evidence.
+
+## Data, backups, and upgrades
+
+Treat these paths as one recoverable system:
+
+- `/data/database` contains canonical SQLite state;
+- `/data/workspace` contains ordinary current-revision materializations; and
+- `/data/backups` contains verified paired snapshots.
+
+Never restore a database and workspace tree from different backup generations.
+Local verification does not encrypt or replicate a backup and does not prove an
+off-host copy exists. Before an upgrade, quiesce writes, create and verify a fresh
+paired backup, copy the complete set to a separate failure domain, rehearse the
+target digest against a clean restore, and record both the previous digest and
+backup ID. Sangam uses forward-only migrations, so rollback after a migration means
+restoring the complete pre-upgrade pair as well as the previous image.
+
+The exact commands and acceptance checks live in the
+[upgrade and rollback runbook](./docs/operations/UPGRADES_AND_ROLLBACK.md).
+
+## Optional integrations
+
+### Karakeep
+
+Set a read-capable API key and an API root reachable from the Sangam process or
+container. The URL must include `/api/v1`:
 
 ```dotenv
 SANGAM_KARAKEEP_BASE_URL=http://karakeep:3000/api/v1
@@ -73,41 +243,29 @@ SANGAM_KARAKEEP_TIMEOUT_SECONDS=20
 SANGAM_MAX_KARAKEEP_SOURCE_BYTES=5000000
 ```
 
-The base URL must be reachable from the Sangam process or container and must
-include `/api/v1`. Generate the key from Karakeep's API-key settings and keep it
-server-side; Sangam never sends it to the browser. Apply the configuration with:
+Keep the key server-side; Sangam never returns it to the browser. After restarting,
+open **Karakeep imports** and confirm **Connected** before searching. The
+[Karakeep operations guide](./docs/operations/PHASE_6_OPERATIONS.md) covers
+credential rotation, source limits, retry behavior, refresh review, and recovery.
 
-```bash
-docker compose up -d --build
-```
+### Workspace chat
 
-Local Compose defaults to development mode. Production must use a signed image
-digest and the fail-closed configuration in `deploy/compose.prod.yaml`; see the
-[release checklist](./docs/operations/RELEASE_CHECKLIST.md) and
-[upgrade/rollback runbook](./docs/operations/UPGRADES_AND_ROLLBACK.md).
-
-Open **Karakeep imports** and confirm that the connection card reports
-**Connected** before searching. See
-[Phase 6 operations](./docs/operations/PHASE_6_OPERATIONS.md) for native-process
-configuration, credential rotation, source limits, retry behavior, and recovery.
-
-## Configure workspace chat
-
-Add an OpenRouter key and an explicit model allowlist to `.env`:
+Add an OpenRouter key, explicit model allowlist, and ChatKit domain registration:
 
 ```dotenv
 SANGAM_OPENROUTER_API_KEY=replace-with-openrouter-api-key
+SANGAM_OPENROUTER_HTTP_REFERER=http://127.0.0.1:8000
 SANGAM_CHAT_DEFAULT_MODEL=openai/gpt-5.4-mini
 SANGAM_CHAT_AVAILABLE_MODELS=["openai/gpt-5.4-mini","openai/gpt-5.4-nano","openai/gpt-5.6-terra"]
 SANGAM_CHATKIT_DOMAIN_KEY=local-dev
 SANGAM_OPENROUTER_APP_TITLE=Sangam
 ```
 
-Open a document, select **Chat** in its inspector, and choose an enabled model
-from ChatKit's composer. Existing-document edits remain proposals until the
-human reviews and applies the diff. See
-[Phase 7 operations](./docs/operations/PHASE_7_OPERATIONS.md) for production
-domain registration, Cloudflare streaming checks, model changes, and key rotation.
+Use the real HTTPS application origin and its registered ChatKit domain key in
+production. The provider key stays in the backend. Existing-document edits remain
+revision-pinned proposals until a human reviews and applies the diff. The
+[chat operations guide](./docs/operations/PHASE_7_OPERATIONS.md) covers domain
+registration, model policy, streaming proxies, key rotation, and recovery.
 
 ## Screenshots
 
@@ -208,32 +366,10 @@ agent operation is recorded.
 
 ![Current Sangam agent activity empty state with actor and outcome filters](./docs/assets/phase-3-activity.png)
 
-## Project documents
+## Development
 
-- [Product vision and technical decisions](./docs/VISION.md)
-- [Brand identity and logo usage](./docs/BRAND.md)
-- [UI typography, dimensions, rails, and enforcement](./docs/UI_SYSTEM.md)
-- [Seven-phase vertical implementation](./docs/IMPLEMENTATION_PHASES.md)
-- [Phase 1 implementation and verification](./docs/PHASE_1.md)
-- [Phase 2 implementation and verification](./docs/PHASE_2.md)
-- [Phase 3 implementation and verification](./docs/PHASE_3.md)
-- [Phase 4 implementation and verification](./docs/PHASE_4.md)
-- [Phase 5 implementation and verification](./docs/PHASE_5.md)
-- [Phase 6 implementation and verification](./docs/PHASE_6.md)
-- [Phase 7 implementation and verification](./docs/PHASE_7.md)
-- [Phase 1 development, deployment, and recovery operations](./docs/operations/PHASE_1_OPERATIONS.md)
-- [Phase 2 development, backup, and restore operations](./docs/operations/PHASE_2_OPERATIONS.md)
-- [Phase 3 agent-token and incident-response operations](./docs/operations/PHASE_3_OPERATIONS.md)
-- [Phase 4 publication, preview, and Cloudflare operations](./docs/operations/PHASE_4_OPERATIONS.md)
-- [Phase 5 PDF import, extraction, annotation, and recovery operations](./docs/operations/PHASE_5_OPERATIONS.md)
-- [Phase 6 Karakeep connection, import, refresh, and recovery operations](./docs/operations/PHASE_6_OPERATIONS.md)
-- [Phase 7 OpenRouter, ChatKit, and Cloudflare streaming operations](./docs/operations/PHASE_7_OPERATIONS.md)
-- [Release checklist and supply-chain verification](./docs/operations/RELEASE_CHECKLIST.md)
-- [Production upgrades and paired rollback](./docs/operations/UPGRADES_AND_ROLLBACK.md)
-- [Security policy and private vulnerability reporting](./SECURITY.md)
-- [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
-
-## Quick start
+Sangam uses Python 3.13+, `uv`, Node.js, npm, Docker, and `just`. Install the
+locked backend and frontend dependencies, then start both live-reload servers:
 
 ```bash
 uv sync --all-groups
@@ -241,22 +377,26 @@ npm --prefix frontend ci
 just serve
 ```
 
-The development server runs the API on `http://127.0.0.1:8000` and the Vite
-frontend on `http://127.0.0.1:5173`.
+The API runs on <http://127.0.0.1:8000>, the Vite client runs on
+<http://127.0.0.1:5173>, and interactive API documentation is available at
+<http://127.0.0.1:8000/api/v1/docs>. Development defaults to loopback-only
+single-user authentication and local trust-zone URLs; it is not a production
+security configuration.
 
-Run the backend tests and frontend verification:
+The main verification recipes are:
 
 ```bash
-just test
-just test-docs
+just test           # Python and frontend format, build, lint, and tests
+just test-docs      # links, Markdown style, and strict Mermaid parsing
+just check          # source, docs, config, dependencies, and package smoke
+just docker-smoke   # complete application image and restart recovery
 ```
 
-Build or serve the production container:
+Build and run a local development image with persistent bind mounts:
 
 ```bash
 just docker-build
 just docker-serve
-just docker-smoke
 ```
 
 `just docker-serve` rebuilds the image, binds Sangam to
@@ -264,22 +404,94 @@ just docker-smoke
 Override its defaults when needed, for example:
 `just port=8080 image=sangam:dev docker-serve`.
 
-The signed multi-platform container is Sangam's complete application artifact.
-The release workflow also publishes a wheel and source archive for the backend
-and CLI; those Python artifacts deliberately do not contain the browser SPA.
-
-Production deployments pin the verified image digest rather than a mutable tag:
+External clients and agents can use the installed `sangam` CLI against the same
+HTTP API:
 
 ```bash
-cp .env.example .env
-# Replace every production value required by deploy/compose.prod.yaml.
-export SANGAM_IMAGE=ghcr.io/jayshah5696/sangam@sha256:DIGEST
-docker compose -f deploy/compose.prod.yaml pull
-docker compose -f deploy/compose.prod.yaml up -d
+export SANGAM_API_URL=http://127.0.0.1:8000
+uv run sangam --help
+uv run sangam list
 ```
 
-`SANGAM_DEPLOYMENT_MODE=production` rejects local authentication, the development
-preview secret, HTTP publication/preview URLs, mismatched preview hosts, unsafe
-parent/connect origins, incomplete Cloudflare settings, and `local-dev` ChatKit
-registration. Follow the [release checklist](./docs/operations/RELEASE_CHECKLIST.md)
-before exposing or upgrading an instance.
+Remote agent or CLI access requires a one-time token issued from **Agents &
+tokens** and supplied through `SANGAM_TOKEN`. The
+[agent operations guide](./docs/operations/PHASE_3_OPERATIONS.md) documents
+capabilities, path scopes, rotation, revocation, and incident response.
+
+## Architecture and trust model
+
+The repository follows a few non-negotiable boundaries:
+
+- SQLite owns identity and revision truth; workspace files are materializations.
+- All human, CLI, integration, agent, and chat writes use the same application
+  service and optimistic-revision path.
+- Agent identity comes from scoped bearer credentials, never a caller-selected
+  actor header.
+- Existing-document AI edits remain proposals until a human applies them.
+- Safe publication, trusted interactive preview, and the authenticated application
+  are separate trust zones.
+- PDFs are immutable; replacement creates a new stable Document and preserves old
+  citations.
+- Karakeep remains the archive of record; imported working copies are normal Sangam
+  Documents.
+- A backup is valid only when its canonical database and workspace snapshot belong
+  to the same verified generation.
+
+Start with the [product vision](./docs/VISION.md) for the complete rationale and
+the [seven implementation phases](./docs/IMPLEMENTATION_PHASES.md) for the shipped
+vertical slices.
+
+## Documentation
+
+### Release and operations
+
+- [0.1.0 release report and evidence](./docs/0.1_RELEASE_REPORT.md)
+- [Release checklist and supply-chain verification](./docs/operations/RELEASE_CHECKLIST.md)
+- [Production upgrades and paired rollback](./docs/operations/UPGRADES_AND_ROLLBACK.md)
+- [After 0.1 discussion backlog](./docs/AFTER_0.1.md)
+- [Security policy and private vulnerability reporting](./SECURITY.md)
+
+### Product and implementation
+
+- [Product vision and technical decisions](./docs/VISION.md)
+- [Seven-phase vertical implementation](./docs/IMPLEMENTATION_PHASES.md)
+- [Phase 1: one Markdown document end to end](./docs/PHASE_1.md)
+- [Phase 2: daily workspace](./docs/PHASE_2.md)
+- [Phase 3: authenticated scoped agents](./docs/PHASE_3.md)
+- [Phase 4: publishing and trusted preview](./docs/PHASE_4.md)
+- [Phase 5: PDF research](./docs/PHASE_5.md)
+- [Phase 6: Karakeep import](./docs/PHASE_6.md)
+- [Phase 7: workspace-grounded chat](./docs/PHASE_7.md)
+- [Workspace organization and theming enhancements](./docs/WORKSPACE_BASE.md)
+
+### Design system
+
+- [Brand identity and logo usage](./docs/BRAND.md)
+- [UI typography, dimensions, rails, and enforcement](./docs/UI_SYSTEM.md)
+
+### Detailed runbooks
+
+- [Development, deployment, and recovery](./docs/operations/PHASE_1_OPERATIONS.md)
+- [Backup, restore, and reconciliation](./docs/operations/PHASE_2_OPERATIONS.md)
+- [Agent tokens and incident response](./docs/operations/PHASE_3_OPERATIONS.md)
+- [Publication, trusted preview, and Cloudflare](./docs/operations/PHASE_4_OPERATIONS.md)
+- [PDF import, extraction, annotation, and recovery](./docs/operations/PHASE_5_OPERATIONS.md)
+- [Karakeep connection, import, refresh, and recovery](./docs/operations/PHASE_6_OPERATIONS.md)
+- [OpenRouter, ChatKit, and streaming operations](./docs/operations/PHASE_7_OPERATIONS.md)
+
+## Project status and support
+
+Sangam 0.1.0 is a self-hosted beta, not a hosted service or a promise that every
+deployment environment has passed production acceptance. Review the
+[known follow-up work](./docs/AFTER_0.1.md) before relying on it for irreplaceable
+data. In particular, operators still own encrypted off-host replication, restore
+drills, monitoring, provider credentials, domain policy, and network exposure.
+
+Use [GitHub Issues](https://github.com/jayshah5696/sangam/issues) for reproducible
+bugs and focused feature proposals. Report security problems privately using the
+process in [SECURITY.md](./SECURITY.md); do not open a public vulnerability issue.
+
+## License
+
+Sangam is licensed under the [Apache License 2.0](./LICENSE). Third-party
+attributions are recorded in [NOTICE.md](./NOTICE.md).
