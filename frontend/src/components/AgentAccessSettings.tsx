@@ -257,7 +257,10 @@ export function AgentAccessSettings() {
               <div className="agent-token-prefixes">
                 <label>
                   <span>Read path prefix</span>
-                  <input value={prefixes.read} onChange={(event) => updatePrefix('read', event.target.value)} />
+                  <input
+                    value={prefixes.read}
+                    onChange={(event) => updatePrefix('read', event.target.value)}
+                  />
                   <small>Empty means the whole workspace.</small>
                 </label>
                 <label>

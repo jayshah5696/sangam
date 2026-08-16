@@ -26,7 +26,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md LICENSE NOTICE.md ./
 COPY src/ ./src/
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev && rm -f /bin/uv /bin/uvx
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 RUN groupadd --gid 10001 sangam \

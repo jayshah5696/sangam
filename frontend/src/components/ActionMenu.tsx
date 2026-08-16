@@ -61,7 +61,9 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
     place()
     requestAnimationFrame(() => {
       place()
-      menuRef.current?.querySelector<HTMLElement>('button:not(:disabled), [role="menuitem"]:not(:disabled)')?.focus()
+      menuRef.current
+        ?.querySelector<HTMLElement>('button:not(:disabled), [role="menuitem"]:not(:disabled)')
+        ?.focus()
     })
     document.addEventListener('pointerdown', outside, true)
     window.addEventListener('keydown', escape)
@@ -78,7 +80,9 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
     const items = [
-      ...(menuRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), [role="menuitem"]:not(:disabled)') ?? []),
+      ...(menuRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [role="menuitem"]:not(:disabled)',
+      ) ?? []),
     ]
     if (items.length === 0) return
     event.preventDefault()
@@ -166,7 +170,10 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
         below + dialog.height <= window.innerHeight - edge
           ? below
           : Math.max(edge, trigger.top - dialog.height - gap)
-      const left = Math.min(window.innerWidth - dialog.width - edge, Math.max(edge, trigger.right - dialog.width))
+      const left = Math.min(
+        window.innerWidth - dialog.width - edge,
+        Math.max(edge, trigger.right - dialog.width),
+      )
       setPosition({ top, left, visible: true })
     }
     const outside = (event: PointerEvent) => {
@@ -180,9 +187,7 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
         return
       }
       if (event.key === 'Tab') {
-        const focusable = [
-          ...(dialogRef.current?.querySelectorAll<HTMLElement>('*') ?? []),
-        ].filter((el) => {
+        const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>('*') ?? [])].filter((el) => {
           if (el.hasAttribute('disabled')) return false
           const tag = el.tagName.toLowerCase()
           if (['button', 'input', 'select', 'textarea'].includes(tag)) return true
@@ -192,7 +197,10 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
         if (focusable.length === 0) return
         const first = focusable[0]
         const last = focusable[focusable.length - 1]
-        if (event.shiftKey && (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))) {
+        if (
+          event.shiftKey &&
+          (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))
+        ) {
           event.preventDefault()
           last?.focus()
         } else if (!event.shiftKey && document.activeElement === last) {
@@ -203,9 +211,11 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
     }
     const dismissAll = () => closeDialog(false)
     place()
-    dialogRef.current?.querySelector<HTMLElement>(
-      'input:not(:disabled), button:not(:disabled), select:not(:disabled), textarea:not(:disabled)',
-    )?.focus()
+    dialogRef.current
+      ?.querySelector<HTMLElement>(
+        'input:not(:disabled), button:not(:disabled), select:not(:disabled), textarea:not(:disabled)',
+      )
+      ?.focus()
     document.addEventListener('pointerdown', outside, true)
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('resize', dismissAll)

@@ -10,11 +10,7 @@ describe('ActionMenu', () => {
   it('renders menu role and aria-haspopup="menu"', () => {
     render(
       <ActionMenu label="File actions" icon={<span>•••</span>}>
-        {(close) => (
-          <ActionMenuItem onSelect={close}>
-            Rename
-          </ActionMenuItem>
-        )}
+        {(close) => <ActionMenuItem onSelect={close}>Rename</ActionMenuItem>}
       </ActionMenu>,
     )
 

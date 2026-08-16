@@ -71,11 +71,7 @@ export class DocumentSessionStore {
     this.online = options.isOnline?.() ?? true
   }
 
-  registerEditor = (
-    documentId: string,
-    focus: () => void,
-    scrollToLine?: (line: number) => void,
-  ) => {
+  registerEditor = (documentId: string, focus: () => void, scrollToLine?: (line: number) => void) => {
     this.editorHandles.set(documentId, { focus, scrollToLine })
     return () => {
       if (this.editorHandles.get(documentId)?.focus === focus) this.editorHandles.delete(documentId)

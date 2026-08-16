@@ -222,7 +222,8 @@ export function PdfViewer({
             title={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
             onClick={isSelectingArea ? cancelAreaSelection : startAreaSelection}
           >
-            <Map size={14} /> <span className="pdf-action-text">{isSelectingArea ? 'Cancel area' : 'Area highlight'}</span>
+            <Map size={14} />{' '}
+            <span className="pdf-action-text">{isSelectingArea ? 'Cancel area' : 'Area highlight'}</span>
           </button>
           <button
             type="button"

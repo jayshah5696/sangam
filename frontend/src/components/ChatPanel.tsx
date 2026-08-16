@@ -235,7 +235,8 @@ export function ChatPanel({
         <div className="chat-context-switch-event" role="status" aria-live="polite">
           <FileText size={13} />
           <span>
-            Context switched to <strong>{contextSwitchEvent.documentTitle}</strong> (<code>rev {shortId(contextSwitchEvent.revisionId)}</code>)
+            Context switched to <strong>{contextSwitchEvent.documentTitle}</strong> (
+            <code>rev {shortId(contextSwitchEvent.revisionId)}</code>)
           </span>
         </div>
       )}
@@ -413,22 +414,14 @@ function shortId(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 
-export function ChatContextBanner({
-  document,
-  selectedText,
-}: {
-  document: Document
-  selectedText: string
-}) {
+export function ChatContextBanner({ document, selectedText }: { document: Document; selectedText: string }) {
   return (
     <div className="chat-context-banner" aria-label="Active chat context">
       <div className="chat-context-main">
         <span className="chat-context-title">{document.title}</span>
         <span className="chat-context-meta">
           <code>rev {shortId(document.current_revision_id)}</code>
-          {selectedText.length > 0 && (
-            <span> · {selectedText.length.toLocaleString()} chars selected</span>
-          )}
+          {selectedText.length > 0 && <span> · {selectedText.length.toLocaleString()} chars selected</span>}
         </span>
       </div>
     </div>
