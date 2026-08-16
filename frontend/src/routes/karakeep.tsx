@@ -57,7 +57,7 @@ function KarakeepConfluence() {
   }
 
   return (
-    <main className="karakeep-page">
+    <section className="karakeep-page">
       <header className="karakeep-header">
         <div>
           <p className="eyebrow">Archive confluence</p>
@@ -152,7 +152,7 @@ function KarakeepConfluence() {
           {(importBookmark.error ?? refreshImport.error ?? applyRefresh.error)?.message}
         </p>
       )}
-    </main>
+    </section>
   )
 }
 

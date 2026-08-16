@@ -1,12 +1,12 @@
-:root, :root[data-theme="river"] {
+:root, :root[data-theme="midnight"] {
   /* Shared UI system. Keep application chrome on this scale. */
   --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-display: Georgia, "Times New Roman", serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --text-meta: 0.625rem;
-  --text-label: 0.6875rem;
-  --text-control: 0.75rem;
-  --text-body: 0.8125rem;
+  --text-meta: 0.6875rem;
+  --text-label: 0.75rem;
+  --text-control: 0.8125rem;
+  --text-body: 0.875rem;
   --text-editor: 0.875rem;
   --text-title-sm: 1.25rem;
   --text-title: 1.5625rem;
@@ -24,12 +24,40 @@
   --radius-control: 0.375rem;
   --radius-panel: 0.5rem;
   --radius-pill: 999px;
+  --transition-fast: 150ms ease;
+
+  --app-bg: #08090a;
+  --surface: #191a1b;
+  --surface-soft: #23252a;
+  --text: #f7f8f8;
+  --text-secondary: #d0d6e0;
+  --muted: #8a8f98;
+  --text-subtle: #62666d;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-subtle: rgba(255, 255, 255, 0.05);
+  --sidebar: #0f1011;
+  --sidebar-raised: #191a1b;
+  --sidebar-text: #f7f8f8;
+  --sidebar-muted: #8a8f98;
+  --accent: #7170ff;
+  --accent-soft: rgba(113, 112, 255, 0.16);
+  --accent-text: #f7f8f8;
+  --success: #27a644;
+  --danger: #ef6b73;
+  --danger-soft: rgba(239, 107, 115, 0.18);
+  --shadow: rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="river"] {
   --app-bg: #f3f0e7;
   --surface: #fffdf8;
   --surface-soft: #ebe7dc;
   --text: #20241f;
+  --text-secondary: #3b423a;
   --muted: #626b65;
+  --text-subtle: #7d8780;
   --line: #d5d0c5;
+  --line-subtle: #e4dfd4;
   --sidebar: #1d2b25;
   --sidebar-raised: #2b3b33;
   --sidebar-text: #f7f3e9;
@@ -37,27 +65,10 @@
   --accent: #327a62;
   --accent-soft: #d8f0df;
   --accent-text: #173c2f;
+  --success: #27a644;
   --danger: #bd493c;
   --danger-soft: #f2cbc2;
   --shadow: rgba(51, 56, 50, .09);
-}
-:root[data-theme="midnight"] {
-  --app-bg: #111827;
-  --surface: #182235;
-  --surface-soft: #202d43;
-  --text: #e8eef8;
-  --muted: #9cabc2;
-  --line: #34425a;
-  --sidebar: #090f1c;
-  --sidebar-raised: #17243b;
-  --sidebar-text: #eef4ff;
-  --sidebar-muted: #8091ad;
-  --accent: #76a7ff;
-  --accent-soft: #243d68;
-  --accent-text: #dce9ff;
-  --danger: #ff8b80;
-  --danger-soft: #5c2d35;
-  --shadow: rgba(0, 0, 0, .25);
 }
 
 :root[data-theme="parchment"] {
@@ -65,8 +76,11 @@
   --surface: #fff8e8;
   --surface-soft: #e7d7ba;
   --text: #3d3024;
+  --text-secondary: #564433;
   --muted: #6d5c48;
+  --text-subtle: #8a755d;
   --line: #cfb995;
+  --line-subtle: #ded0b7;
   --sidebar: #4a3728;
   --sidebar-raised: #624a37;
   --sidebar-text: #fff4dc;
@@ -74,6 +88,7 @@
   --accent: #b85c38;
   --accent-soft: #f3c7a8;
   --accent-text: #552514;
+  --success: #27a644;
   --danger: #9d3f28;
   --danger-soft: #efb8a3;
   --shadow: rgba(75, 49, 25, .13);
@@ -84,8 +99,11 @@
   --surface: #ffffff;
   --surface-soft: #dfeaf5;
   --text: #102a43;
+  --text-secondary: #1d4062;
   --muted: #566b81;
+  --text-subtle: #71879e;
   --line: #c8d9e9;
+  --line-subtle: #dbe7f2;
   --sidebar: #102a43;
   --sidebar-raised: #173f63;
   --sidebar-text: #f4f9ff;
@@ -93,6 +111,7 @@
   --accent: #2f80ed;
   --accent-soft: #d6e8ff;
   --accent-text: #123f78;
+  --success: #27a644;
   --danger: #c94c42;
   --danger-soft: #ffd7d2;
   --shadow: rgba(22, 69, 112, .1);

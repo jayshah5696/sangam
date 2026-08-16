@@ -12,6 +12,9 @@
 .settings-content { width: min(920px, calc(100% - 36px)); margin: 0 auto; padding: 22px 0 64px; }
 .settings-compact-header { min-height: 62px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .settings-compact-header h1 { margin: 3px 0 0; font-size: var(--text-title); line-height: 1.15; letter-spacing: -.02em; }
+.settings-group-header { margin: var(--space-4) 0 var(--space-2); padding: 0 var(--space-1); }
+.settings-group-header h2 { font-size: var(--text-label); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 2px; }
+.settings-group-header p { font-size: var(--text-meta); color: var(--muted); margin: 0; }
 .settings-panel { scroll-margin-top: 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-panel); overflow: hidden; background: var(--surface); box-shadow: 0 7px 20px color-mix(in srgb, var(--shadow) 42%, transparent); }
 .settings-panel > header { min-height: 66px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 14px 15px 11px; border-bottom: 1px solid var(--line); }
 .settings-panel > header > svg { margin-top: 1px; color: var(--accent); }

@@ -51,6 +51,11 @@ export function WorkspaceSettings() {
           <ScopeBadge scope="browser" />
         </header>
 
+        <div className="settings-group-header">
+          <h2>Workspace Preferences</h2>
+          <p>Configure interface theme, workbench layout, and shared taxonomy.</p>
+        </div>
+
         <SettingsSection
           id="appearance"
           icon={Paintbrush}
@@ -79,10 +84,6 @@ export function WorkspaceSettings() {
             ))}
           </div>
         </SettingsSection>
-
-        <AgentAccessSettings />
-
-        <ChatModelSettings />
 
         <SettingsSection
           id="workbench"
@@ -182,6 +183,20 @@ export function WorkspaceSettings() {
           </div>
         </SettingsSection>
 
+        <div className="settings-group-header">
+          <h2>AI & Integrations</h2>
+          <p>Manage model selections and API access tokens for external agents.</p>
+        </div>
+
+        <AgentAccessSettings />
+
+        <ChatModelSettings />
+
+        <div className="settings-group-header">
+          <h2>Operations & Maintenance</h2>
+          <p>Derived index and recovery utilities.</p>
+        </div>
+
         <SettingsSection
           id="maintenance"
           icon={SearchCheck}
@@ -255,7 +270,14 @@ function SettingsSection({
 
 function ScopeBadge({ scope }: { scope: 'browser' | 'workspace' }) {
   return (
-    <span className={`scope-badge ${scope}`}>
+    <span
+      className={`scope-badge ${scope}`}
+      title={
+        scope === 'browser'
+          ? 'Settings apply only to this local browser profile'
+          : 'Settings apply to all users sharing this workspace'
+      }
+    >
       {scope === 'browser' ? 'This browser' : 'Shared workspace'}
     </span>
   )

@@ -24,15 +24,16 @@ export function ActionMenu({ label, icon, children, className = '', role = 'menu
   const menuRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0, visible: false })
-  const dismiss = useCallback(() => setOpen(false), [])
-
-  const close = (restoreFocus = true) => {
+  const dismiss = useCallback(() => {
     setOpen(false)
-    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus())
-  }
+  }, [])
 
   useLayoutEffect(() => {
     if (!open) return
+    const closeMenu = (restoreFocus = true) => {
+      setOpen(false)
+      if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus())
+    }
     const place = () => {
       const trigger = triggerRef.current?.getBoundingClientRect()
       const menu = menuRef.current?.getBoundingClientRect()
@@ -49,15 +50,15 @@ export function ActionMenu({ label, icon, children, className = '', role = 'menu
     }
     const outside = (event: PointerEvent) => {
       const target = event.target as Node
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) close(false)
+      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) closeMenu(false)
     }
     const escape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        close()
+        closeMenu(true)
       }
     }
-    const dismiss = () => close(false)
+    const dismissAll = () => closeMenu(false)
     place()
     requestAnimationFrame(() => {
       place()
@@ -65,17 +66,27 @@ export function ActionMenu({ label, icon, children, className = '', role = 'menu
     })
     document.addEventListener('pointerdown', outside, true)
     window.addEventListener('keydown', escape)
-    window.addEventListener('resize', dismiss)
-    window.addEventListener('scroll', dismiss, true)
+    window.addEventListener('resize', dismissAll)
+    window.addEventListener('scroll', dismissAll, true)
     return () => {
       document.removeEventListener('pointerdown', outside, true)
       window.removeEventListener('keydown', escape)
-      window.removeEventListener('resize', dismiss)
-      window.removeEventListener('scroll', dismiss, true)
+      window.removeEventListener('resize', dismissAll)
+      window.removeEventListener('scroll', dismissAll, true)
     }
   }, [open])
 
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable)
+    ) {
+      return
+    }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
     const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? [])]
     if (items.length === 0) return

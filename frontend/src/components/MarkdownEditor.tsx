@@ -21,6 +21,7 @@ export type EditorViewState = {
 export type MarkdownEditorHandle = {
   focus: () => void
   insertText: (text: string) => void
+  scrollToLine: (lineNumber: number) => void
 }
 
 type MarkdownEditorProps = {
@@ -61,6 +62,17 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         view.dispatch({
           changes: { from: selection.from, to: selection.to, insert: text },
           selection: { anchor: selection.from + text.length },
+          scrollIntoView: true,
+        })
+        view.focus()
+      },
+      scrollToLine: (lineNumber: number) => {
+        const view = viewRef.current
+        if (!view) return
+        const safeLineNumber = Math.max(1, Math.min(lineNumber, view.state.doc.lines))
+        const line = view.state.doc.line(safeLineNumber)
+        view.dispatch({
+          selection: { anchor: line.from },
           scrollIntoView: true,
         })
         view.focus()

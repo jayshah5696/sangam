@@ -225,6 +225,7 @@ export function ChatPanel({
 
   return (
     <div className="chat-panel">
+      <ChatContextBanner document={document} selectedText={selectedText} />
       <SelectionChip selectedText={selectedText} />
       {openedCitation && (
         <CitationNavigationStatus
@@ -385,6 +386,28 @@ export function CitationNavigationStatus({
 
 function shortId(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
+}
+
+export function ChatContextBanner({
+  document,
+  selectedText,
+}: {
+  document: Document
+  selectedText: string
+}) {
+  return (
+    <div className="chat-context-banner" aria-label="Active chat context">
+      <div className="chat-context-main">
+        <span className="chat-context-title">{document.title}</span>
+        <span className="chat-context-meta">
+          <code>rev {shortId(document.current_revision_id)}</code>
+          {selectedText.length > 0 && (
+            <span> · {selectedText.length.toLocaleString()} chars selected</span>
+          )}
+        </span>
+      </div>
+    </div>
+  )
 }
 
 export function SelectionChip({ selectedText }: { selectedText: string }) {

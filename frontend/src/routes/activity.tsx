@@ -15,7 +15,7 @@ function AgentActivity() {
   })
 
   return (
-    <main className="activity-page">
+    <section className="activity-page">
       <header>
         <div>
           <p className="eyebrow">Human review</p>
@@ -81,6 +81,6 @@ function AgentActivity() {
         {events.isError && <p className="operation-result error-text">{events.error.message}</p>}
         {events.data?.length === 0 && <p className="small-muted">No matching activity.</p>}
       </section>
-    </main>
+    </section>
   )
 }

@@ -23,6 +23,7 @@ export function DocumentInspector({
   onCollapse,
   onUpdated,
   onFocusEditor,
+  onScrollToLine,
 }: {
   width: number
   document: Document
@@ -31,6 +32,7 @@ export function DocumentInspector({
   onCollapse: () => void
   onUpdated: (document: Document, replaceContent?: boolean) => void
   onFocusEditor: () => void
+  onScrollToLine?: (line: number) => void
 }) {
   const documentId = document.document_id
   const session = useDocumentSession(documentId)
@@ -154,6 +156,11 @@ export function DocumentInspector({
                 <button
                   key={`${heading.line}:${heading.text}`}
                   style={{ paddingLeft: 8 + (heading.level - 1) * 10 }}
+                  onClick={() => {
+                    onScrollToLine?.(heading.line)
+                    onFocusEditor()
+                  }}
+                  title={`Jump to line ${heading.line}`}
                 >
                   <span>{heading.text}</span>
                   <small>Ln {heading.line}</small>
@@ -511,6 +518,35 @@ function MetadataEditor({
   })
   return (
     <section className="metadata-editor">
+      <div className="document-properties-summary">
+        <p className="eyebrow">Document info</p>
+        <div className="properties-meta-grid">
+          <div>
+            <small>Format</small>
+            <span>
+              {document.content_type === 'application/pdf'
+                ? 'PDF Document'
+                : document.content_type === 'text/html'
+                  ? document.trust_level === 'trusted_interactive'
+                    ? 'Interactive HTML'
+                    : 'Safe HTML'
+                  : 'Markdown'}
+            </span>
+          </div>
+          <div>
+            <small>Last edited by</small>
+            <span>{document.updated_by_name}</span>
+          </div>
+          <div>
+            <small>Last updated</small>
+            <span>{new Date(document.updated_at).toLocaleString()}</span>
+          </div>
+          <div>
+            <small>Head revision</small>
+            <code>{document.current_revision_id.slice(0, 8)}</code>
+          </div>
+        </div>
+      </div>
       <label>
         <span>Category</span>
         <input
