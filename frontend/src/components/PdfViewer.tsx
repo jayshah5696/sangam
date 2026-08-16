@@ -218,19 +218,23 @@ export function PdfViewer({
           <button
             className={isSelectingArea ? 'active' : ''}
             type="button"
+            aria-label={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
+            title={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
             onClick={isSelectingArea ? cancelAreaSelection : startAreaSelection}
           >
-            <Map size={14} /> {isSelectingArea ? 'Cancel area' : 'Area highlight'}
+            <Map size={14} /> <span className="pdf-action-text">{isSelectingArea ? 'Cancel area' : 'Area highlight'}</span>
           </button>
           <button
             type="button"
+            aria-label="Copy page link"
+            title="Copy page link"
             onClick={() =>
               void navigator.clipboard.writeText(
                 `[${document.title}, p. ${pageNumber}](sangam://document/${document.document_id}?page=${pageNumber})`,
               )
             }
           >
-            <Copy size={14} /> Copy page link
+            <Copy size={14} /> <span className="pdf-action-text">Copy page link</span>
           </button>
         </div>
       </div>

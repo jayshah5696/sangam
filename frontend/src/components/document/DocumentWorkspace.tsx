@@ -17,7 +17,7 @@ import {
 import { internalDocumentMarkdown } from '../../internalLinks'
 import { useWorkbenchActions } from '../../workbench'
 import { canSplitActiveGroup } from '../../splitPolicy'
-import { ActionMenu, ActionMenuItem } from '../ActionMenu'
+import { ActionDialog } from '../ActionMenu'
 import type { MarkdownEditorHandle } from '../MarkdownEditor'
 import { ConflictRecoveryNotice } from './ConflictRecoveryNotice'
 import { DraftRecoveryNotice, offlineRecoveryMessage } from './DraftRecoveryNotice'
@@ -438,42 +438,47 @@ function DocumentToolbar({
           </button>
         ))}
       </div>
-      <ActionMenu
+      <ActionDialog
         label="Document actions"
         icon={<MoreHorizontal size={16} />}
         className="document-actions-trigger"
-        role="dialog"
       >
         {(close) => (
           <div className="document-actions-form">
             <div className="document-layout-actions">
-              <ActionMenuItem
+              <button
+                type="button"
+                className="secondary-action"
                 disabled={!canSplitActiveGroup('horizontal')}
-                onSelect={() => {
+                onClick={() => {
                   onSplit('horizontal')
                   close()
                 }}
               >
                 <Columns2 size={13} /> Split right
-              </ActionMenuItem>
-              <ActionMenuItem
+              </button>
+              <button
+                type="button"
+                className="secondary-action"
                 disabled={!canSplitActiveGroup('vertical')}
-                onSelect={() => {
+                onClick={() => {
                   onSplit('vertical')
                   close()
                 }}
               >
                 <Rows2 size={13} /> Split down
-              </ActionMenuItem>
+              </button>
               {canCloseGroup && (
-                <ActionMenuItem
-                  onSelect={() => {
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() => {
                     onCloseGroup()
                     close()
                   }}
                 >
                   <PanelRightClose size={13} /> Close group
-                </ActionMenuItem>
+                </button>
               )}
             </div>
             <hr />
@@ -482,7 +487,8 @@ function DocumentToolbar({
               <input value={title} onChange={(event) => setTitle(event.target.value)} />
             </label>
             <button
-              disabled={busy || !title.trim() || title === document.title}
+              type="button"
+              disabled={busy || title.trim().length === 0 || title.trim() === document.title}
               onClick={() => rename.mutate(undefined, { onSuccess: close })}
             >
               Rename
@@ -490,11 +496,16 @@ function DocumentToolbar({
             {document.path && (
               <>
                 <label>
-                  Path
-                  <input value={path} onChange={(event) => setPath(event.target.value)} />
+                  Move path
+                  <input
+                    value={path}
+                    placeholder="folder/document.md"
+                    onChange={(event) => setPath(event.target.value)}
+                  />
                 </label>
                 <button
-                  disabled={busy || path === document.path}
+                  type="button"
+                  disabled={busy || path.trim() === document.path}
                   onClick={() => move.mutate(undefined, { onSuccess: close })}
                 >
                   Move
@@ -502,20 +513,21 @@ function DocumentToolbar({
               </>
             )}
             <button
+              type="button"
+              className="secondary-action"
               disabled={busy}
-              onClick={() => {
-                duplicate.mutate()
-                close()
-              }}
+              onClick={() => duplicate.mutate(undefined, { onSuccess: close })}
             >
-              Duplicate as draft
+              Duplicate
             </button>
             <button
-              className="danger-button"
+              type="button"
+              className="secondary-action danger"
               disabled={busy}
               onClick={() => {
-                if (window.confirm(`Move “${document.title}” to trash?`)) remove.mutate()
-                close()
+                if (window.confirm(`Move “${document.title}” to trash?`)) {
+                  remove.mutate(undefined, { onSuccess: close })
+                }
               }}
             >
               Move to trash
@@ -525,7 +537,7 @@ function DocumentToolbar({
             )}
           </div>
         )}
-      </ActionMenu>
+      </ActionDialog>
     </div>
   )
 }

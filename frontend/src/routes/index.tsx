@@ -39,14 +39,16 @@ function Welcome() {
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
     },
   })
+  const isEmpty = Boolean(documents.data && documents.data.length === 0)
   const recentDocuments = documents.data?.slice(0, 3) ?? []
   return (
     <section className="welcome">
       <p className="eyebrow">Your workspace</p>
-      <h1>Files with memory.</h1>
+      <h1>{isEmpty ? 'Your workspace is empty' : 'Files with memory.'}</h1>
       <p>
-        Create Markdown documents, group them into folders, organize them with categories and tags, and find
-        them again through full-text search.
+        {isEmpty
+          ? 'Create a Markdown document or import a PDF to begin.'
+          : 'Create Markdown documents, group them into folders, organize them with categories and tags, and find them again through full-text search.'}
       </p>
       <div className="welcome-actions">
         <label>

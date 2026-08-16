@@ -391,7 +391,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           )}
         />
         {!documents.isLoading && adapter.paths.length === 0 && (
-          <p className="sidebar-message explorer-empty">No documents yet.</p>
+          <div className="explorer-empty">
+            <p className="sidebar-message">No documents yet.</p>
+            <button
+              type="button"
+              className="secondary-action explorer-empty-action"
+              onClick={() => setCreateMode({ kind: 'file', parentPath: '' })}
+            >
+              <FilePlus2 size={13} /> New document
+            </button>
+          </div>
         )}
       </div>
     </div>
