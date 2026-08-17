@@ -18,6 +18,7 @@ def settings(tmp_path: Path) -> Settings:
         backup_root=tmp_path / "backups",
         backups_enabled=False,
         frontend_dist=tmp_path / "missing-frontend",
+        openrouter_api_key=None,
     )
 
 

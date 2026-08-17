@@ -41,6 +41,7 @@ export function PdfViewer({
   const textLayerRef = useRef<HTMLDivElement>(null)
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [scale, setScale] = useState(1.2)
+  const [isSelectingArea, setIsSelectingArea] = useState(false)
   const [areaStart, setAreaStart] = useState<Point | null>(null)
   const [areaPreview, setAreaPreview] = useState<PdfRect | null>(null)
   const retryExtraction = useMutation({
@@ -103,7 +104,7 @@ export function PdfViewer({
   }, [pageNumber, pdf, scale])
 
   const selectText = () => {
-    if (areaStart) return
+    if (isSelectingArea || areaStart) return
     const host = pageHostRef.current
     const selection = window.getSelection()
     if (!host || !selection || selection.isCollapsed || !selection.toString().trim()) return
@@ -122,13 +123,15 @@ export function PdfViewer({
   }
 
   const beginArea = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!areaStart || !pageHostRef.current) return
+    if (!isSelectingArea || !pageHostRef.current) return
     event.currentTarget.setPointerCapture(event.pointerId)
-    setAreaStart(pointInHost(event, pageHostRef.current))
+    const startPoint = pointInHost(event, pageHostRef.current)
+    setAreaStart(startPoint)
+    setAreaPreview(rectFromPoints(startPoint, startPoint))
   }
 
   const updateArea = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!areaStart || !pageHostRef.current) return
+    if (!isSelectingArea || !areaStart || !pageHostRef.current) return
     setAreaPreview(rectFromPoints(areaStart, pointInHost(event, pageHostRef.current)))
   }
 
@@ -138,10 +141,19 @@ export function PdfViewer({
     }
     setAreaStart(null)
     setAreaPreview(null)
+    setIsSelectingArea(false)
+  }
+
+  const cancelAreaSelection = () => {
+    setAreaStart(null)
+    setAreaPreview(null)
+    setIsSelectingArea(false)
   }
 
   const startAreaSelection = () => {
-    setAreaStart({ x: 0, y: 0 })
+    setIsSelectingArea(true)
+    setAreaStart(null)
+    setAreaPreview(null)
     setDraft(null)
     window.getSelection()?.removeAllRanges()
   }
@@ -204,21 +216,26 @@ export function PdfViewer({
         </div>
         <div className="pdf-toolbar-actions">
           <button
-            className={areaStart ? 'active' : ''}
+            className={isSelectingArea ? 'active' : ''}
             type="button"
-            onClick={areaStart ? finishArea : startAreaSelection}
+            aria-label={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
+            title={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
+            onClick={isSelectingArea ? cancelAreaSelection : startAreaSelection}
           >
-            <Map size={14} /> {areaStart ? 'Cancel area' : 'Area highlight'}
+            <Map size={14} />{' '}
+            <span className="pdf-action-text">{isSelectingArea ? 'Cancel area' : 'Area highlight'}</span>
           </button>
           <button
             type="button"
+            aria-label="Copy page link"
+            title="Copy page link"
             onClick={() =>
               void navigator.clipboard.writeText(
                 `[${document.title}, p. ${pageNumber}](sangam://document/${document.document_id}?page=${pageNumber})`,
               )
             }
           >
-            <Copy size={14} /> Copy page link
+            <Copy size={14} /> <span className="pdf-action-text">Copy page link</span>
           </button>
         </div>
       </div>
@@ -243,7 +260,7 @@ export function PdfViewer({
       )}
       <div className="pdf-page-scroll">
         <div
-          className={`pdf-page ${areaStart ? 'is-selecting-area' : ''}`}
+          className={`pdf-page ${isSelectingArea ? 'is-selecting-area' : ''}`}
           ref={pageHostRef}
           onMouseUp={selectText}
           onPointerDown={beginArea}

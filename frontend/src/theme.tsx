@@ -6,16 +6,16 @@ export type InspectorTab = 'properties' | 'outline' | 'history' | 'chat'
 
 export const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
   {
+    id: 'midnight',
+    name: 'Midnight',
+    description: 'Dark-native near-black workspace',
+    colors: ['#08090a', '#191a1b', '#7170ff'],
+  },
+  {
     id: 'river',
     name: 'River',
     description: 'Calm green and warm paper',
     colors: ['#202b26', '#f3f0e7', '#d8f0df'],
-  },
-  {
-    id: 'midnight',
-    name: 'Midnight',
-    description: 'Deep navy for focused work',
-    colors: ['#111827', '#182235', '#76a7ff'],
   },
   {
     id: 'parchment',
@@ -46,7 +46,7 @@ type ThemeContextValue = {
 }
 
 const defaults: WorkspacePreferences = {
-  theme: 'river',
+  theme: 'midnight',
   leftWidth: 282,
   rightWidth: 320,
   leftVisible: true,

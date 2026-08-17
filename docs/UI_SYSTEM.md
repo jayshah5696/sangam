@@ -10,13 +10,13 @@ spacing, control dimensions, and component anatomy.
 - `--font-ui`: all application chrome, controls, navigation, labels, and menus.
 - `--font-display`: document titles, rendered Markdown headings, and major display headings only.
 - `--font-mono`: editor content, diffs, paths, identifiers, shortcuts, and code.
-- `--text-meta` (10px): timestamps, IDs, secondary descriptions, and badges.
-- `--text-label` (11px): section labels and field labels.
-- `--text-control` (12px): buttons, inputs, tabs, menu items, and tree rows.
-- `--text-body` (13px): primary UI values and compact body copy.
+- `--text-meta` (11px): timestamps, IDs, secondary descriptions, and badges.
+- `--text-label` (12px): section labels and field labels.
+- `--text-control` (13px): buttons, inputs, tabs, menu items, and tree rows.
+- `--text-body` (14px): primary UI values and descriptions.
 - `--text-editor` (14px): editable document content.
 
-Interactive text must not be smaller than `--text-control`. New styles must use
+Interactive text must not be smaller than `--text-control` (13px). New styles must use
 these semantic tokens instead of hard-coded font sizes.
 
 ## Dimensions

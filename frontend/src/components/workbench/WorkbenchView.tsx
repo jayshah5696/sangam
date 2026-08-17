@@ -280,6 +280,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
         onCollapse={() => updatePreferences({ rightVisible: false })}
         onUpdated={updateCachedDocument}
         onFocusEditor={() => sessions.focusEditor(documentId)}
+        onScrollToLine={(line) => sessions.scrollToLine(documentId, line)}
       />
     </>
   )

@@ -251,105 +251,113 @@ export function AgentAccessSettings() {
             </small>
           </label>
 
-          <div className="agent-token-prefixes">
-            <label>
-              <span>Read path prefix</span>
-              <input value={prefixes.read} onChange={(event) => updatePrefix('read', event.target.value)} />
-              <small>Empty means the whole workspace.</small>
-            </label>
-            <label>
-              <span>Search path prefix</span>
-              <input
-                value={prefixes.search}
-                onChange={(event) => updatePrefix('search', event.target.value)}
-              />
-              <small>Search is also limited by the read grant.</small>
-            </label>
-            <label>
-              <span>Write path prefix</span>
-              <input
-                value={prefixes.write}
-                aria-invalid={writePrefixMissing}
-                onChange={(event) => updatePrefix('write', event.target.value)}
-              />
-              <small>
-                {writePrefixMissing
-                  ? 'A prefix is required for mutation capabilities.'
-                  : 'Shared by all mutations.'}
-              </small>
-            </label>
-          </div>
-
-          <fieldset>
-            <legend>Capabilities</legend>
-            <div className="capability-grid">
-              {capabilities.map((capability) => {
-                const isSensitive = sensitiveCapabilityDescriptions[capability] !== undefined
-                return (
-                  <label key={capability} className={isSensitive ? 'sensitive' : undefined}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(capability)}
-                      onChange={() => {
-                        setSelected((current) => {
-                          const next = new Set(current)
-                          if (next.has(capability)) next.delete(capability)
-                          else next.add(capability)
-                          return next
-                        })
-                        setActivePreset(null)
-                        setSensitiveConfirmed(false)
-                      }}
-                    />
-                    {capability}
-                  </label>
-                )
-              })}
-            </div>
-          </fieldset>
-
-          {selectedSensitiveCapabilities.length > 0 && (
-            <div className="agent-capability-warning" role="alert">
-              <AlertTriangle size={18} />
-              <div>
-                <strong>High-impact access selected</strong>
-                <ul>
-                  {selectedSensitiveCapabilities.map((capability) => (
-                    <li key={capability}>{sensitiveCapabilityDescriptions[capability]}</li>
-                  ))}
-                </ul>
+          <details className="agent-advanced-disclosure" open={activePreset === null}>
+            <summary>Custom capabilities and workspace boundaries</summary>
+            <div className="agent-advanced-content">
+              <div className="agent-token-prefixes">
                 <label>
+                  <span>Read path prefix</span>
                   <input
-                    type="checkbox"
-                    checked={sensitiveConfirmed}
-                    onChange={(event) => setSensitiveConfirmed(event.target.checked)}
+                    value={prefixes.read}
+                    onChange={(event) => updatePrefix('read', event.target.value)}
                   />
-                  I understand and intend to grant these high-impact capabilities.
+                  <small>Empty means the whole workspace.</small>
+                </label>
+                <label>
+                  <span>Search path prefix</span>
+                  <input
+                    value={prefixes.search}
+                    onChange={(event) => updatePrefix('search', event.target.value)}
+                  />
+                  <small>Search is also limited by the read grant.</small>
+                </label>
+                <label>
+                  <span>Write path prefix</span>
+                  <input
+                    value={prefixes.write}
+                    aria-invalid={writePrefixMissing}
+                    onChange={(event) => updatePrefix('write', event.target.value)}
+                  />
+                  <small>
+                    {writePrefixMissing
+                      ? 'A prefix is required for mutation capabilities.'
+                      : 'Shared by all mutations.'}
+                  </small>
                 </label>
               </div>
-            </div>
-          )}
 
-          <section className="agent-scope-preview" aria-labelledby="effective-scope-title">
-            <div>
-              <strong id="effective-scope-title">Effective scope</strong>
-              <small>This is the authority encoded in the token.</small>
+              <fieldset>
+                <legend>Capabilities</legend>
+                <div className="capability-grid">
+                  {capabilities.map((capability) => {
+                    const isSensitive = sensitiveCapabilityDescriptions[capability] !== undefined
+                    return (
+                      <label key={capability} className={isSensitive ? 'sensitive' : undefined}>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(capability)}
+                          onChange={() => {
+                            setSelected((current) => {
+                              const next = new Set(current)
+                              if (next.has(capability)) next.delete(capability)
+                              else next.add(capability)
+                              return next
+                            })
+                            setActivePreset(null)
+                            setSensitiveConfirmed(false)
+                          }}
+                        />
+                        {capability}
+                      </label>
+                    )
+                  })}
+                </div>
+              </fieldset>
+
+              {selectedSensitiveCapabilities.length > 0 && (
+                <div className="agent-capability-warning" role="alert">
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>High-impact access selected</strong>
+                    <ul>
+                      {selectedSensitiveCapabilities.map((capability) => (
+                        <li key={capability}>{sensitiveCapabilityDescriptions[capability]}</li>
+                      ))}
+                    </ul>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={sensitiveConfirmed}
+                        onChange={(event) => setSensitiveConfirmed(event.target.checked)}
+                      />
+                      I understand and intend to grant these high-impact capabilities.
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              <section className="agent-scope-preview" aria-labelledby="effective-scope-title">
+                <div>
+                  <strong id="effective-scope-title">Effective scope</strong>
+                  <small>This is the authority encoded in the token.</small>
+                </div>
+                {scopes.length > 0 ? (
+                  <ul>
+                    {scopes.map((scope) => (
+                      <li key={`${scope.capability}:${scope.path_prefix ?? '*'}`}>
+                        {formatEffectiveScope(scope)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>Choose at least one capability.</p>
+                )}
+                <small>
+                  {expiresAt ? `Expires ${new Date(expiresAt).toLocaleString()}` : 'No expiration set.'}
+                </small>
+              </section>
             </div>
-            {scopes.length > 0 ? (
-              <ul>
-                {scopes.map((scope) => (
-                  <li key={`${scope.capability}:${scope.path_prefix ?? '*'}`}>
-                    {formatEffectiveScope(scope)}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>Choose at least one capability.</p>
-            )}
-            <small>
-              {expiresAt ? `Expires ${new Date(expiresAt).toLocaleString()}` : 'No expiration set.'}
-            </small>
-          </section>
+          </details>
 
           <button
             disabled={

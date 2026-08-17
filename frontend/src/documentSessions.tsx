@@ -61,22 +61,31 @@ export class DocumentSessionStore {
   private readonly sessions = new Map<string, DocumentSession>()
   private readonly runtimes = new Map<string, SessionRuntime>()
   private readonly listeners = new Map<string, Set<() => void>>()
-  private readonly editorFocusers = new Map<string, () => void>()
+  private readonly editorHandles = new Map<
+    string,
+    { focus: () => void; scrollToLine?: (line: number) => void }
+  >()
   private online = true
 
   constructor(private readonly options: StoreOptions) {
     this.online = options.isOnline?.() ?? true
   }
 
-  registerEditor = (documentId: string, focus: () => void) => {
-    this.editorFocusers.set(documentId, focus)
+  registerEditor = (documentId: string, focus: () => void, scrollToLine?: (line: number) => void) => {
+    this.editorHandles.set(documentId, { focus, scrollToLine })
     return () => {
-      if (this.editorFocusers.get(documentId) === focus) this.editorFocusers.delete(documentId)
+      if (this.editorHandles.get(documentId)?.focus === focus) this.editorHandles.delete(documentId)
     }
   }
 
   focusEditor = (documentId: string) => {
-    this.editorFocusers.get(documentId)?.()
+    this.editorHandles.get(documentId)?.focus()
+  }
+
+  scrollToLine = (documentId: string, line: number) => {
+    const handle = this.editorHandles.get(documentId)
+    handle?.scrollToLine?.(line)
+    handle?.focus()
   }
 
   getSession = (documentId: string): DocumentSession => {

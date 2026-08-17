@@ -443,6 +443,12 @@
   }
 }
 
+@media (max-width: 600px) {
+  .pdf-toolbar .pdf-action-text {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .pdf-document-layout {
     overflow: auto;

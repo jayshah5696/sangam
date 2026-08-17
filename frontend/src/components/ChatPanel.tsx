@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { ChatKit, useChatKit } from '@openai/chatkit-react'
+import { FileText } from 'lucide-react'
 import { api, type ChatProposal, type Document, type IssuedPublication, type Publication } from '../api'
 import {
   announceCitationNavigation,
@@ -211,45 +212,71 @@ export function ChatPanel({
     }
   }
 
-  if (configQuery.isLoading) return <div className="center-message">Preparing workspace chat…</div>
-  if (configQuery.isError || !configQuery.data) {
-    return <p className="error-text">Chat configuration could not be loaded.</p>
-  }
-  if (!configQuery.data.configured) {
-    return (
-      <div className="chat-unconfigured notice">
-        Set <code>SANGAM_OPENROUTER_API_KEY</code> to enable the OpenRouter agent runtime.
-      </div>
-    )
-  }
+  const lastDocumentIdRef = useRef(document.document_id)
+  const [contextSwitchEvent, setContextSwitchEvent] = useState<{
+    documentTitle: string
+    revisionId: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (lastDocumentIdRef.current !== document.document_id) {
+      lastDocumentIdRef.current = document.document_id
+      setContextSwitchEvent({
+        documentTitle: document.title,
+        revisionId: document.current_revision_id,
+      })
+    }
+  }, [document.document_id, document.title, document.current_revision_id])
 
   return (
     <div className="chat-panel">
-      <SelectionChip selectedText={selectedText} />
-      {openedCitation && (
-        <CitationNavigationStatus
-          target={openedCitation}
-          currentDocument={document}
-          onClose={() => setOpenedCitation(null)}
-        />
+      <ChatContextBanner document={document} selectedText={selectedText} />
+      {contextSwitchEvent && (
+        <div className="chat-context-switch-event" role="status" aria-live="polite">
+          <FileText size={13} />
+          <span>
+            Context switched to <strong>{contextSwitchEvent.documentTitle}</strong> (
+            <code>rev {shortId(contextSwitchEvent.revisionId)}</code>)
+          </span>
+        </div>
       )}
-      {pendingPublication && (
-        <PublishConfirmationCard
-          request={pendingPublication}
-          publishing={publishing}
-          error={publishError}
-          onApprove={() => void approvePublication()}
-          onCancel={cancelPublication}
-        />
+      {configQuery.isLoading ? (
+        <div className="center-message">Preparing workspace chat…</div>
+      ) : configQuery.isError || !configQuery.data ? (
+        <p className="error-text">Chat configuration could not be loaded.</p>
+      ) : !configQuery.data.configured ? (
+        <div className="chat-unconfigured notice">
+          Set <code>SANGAM_OPENROUTER_API_KEY</code> to enable the OpenRouter agent runtime.
+        </div>
+      ) : (
+        <>
+          <SelectionChip selectedText={selectedText} />
+          {openedCitation && (
+            <CitationNavigationStatus
+              target={openedCitation}
+              currentDocument={document}
+              onClose={() => setOpenedCitation(null)}
+            />
+          )}
+          {pendingPublication && (
+            <PublishConfirmationCard
+              request={pendingPublication}
+              publishing={publishing}
+              error={publishError}
+              onApprove={() => void approvePublication()}
+              onCancel={cancelPublication}
+            />
+          )}
+          {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
+          <ChatKit control={chatkit.control} className="chatkit-frame" />
+          <ProposalReviewList
+            proposals={proposalsQuery.data ?? []}
+            document={document}
+            onDocumentUpdated={onDocumentUpdated}
+            onChanged={() => void refreshProposals()}
+          />
+        </>
       )}
-      {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
-      <ChatKit control={chatkit.control} className="chatkit-frame" />
-      <ProposalReviewList
-        proposals={proposalsQuery.data ?? []}
-        document={document}
-        onDocumentUpdated={onDocumentUpdated}
-        onChanged={() => void refreshProposals()}
-      />
     </div>
   )
 }
@@ -385,6 +412,20 @@ export function CitationNavigationStatus({
 
 function shortId(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
+}
+
+export function ChatContextBanner({ document, selectedText }: { document: Document; selectedText: string }) {
+  return (
+    <div className="chat-context-banner" aria-label="Active chat context">
+      <div className="chat-context-main">
+        <span className="chat-context-title">{document.title}</span>
+        <span className="chat-context-meta">
+          <code>rev {shortId(document.current_revision_id)}</code>
+          {selectedText.length > 0 && <span> · {selectedText.length.toLocaleString()} chars selected</span>}
+        </span>
+      </div>
+    </div>
+  )
 }
 
 export function SelectionChip({ selectedText }: { selectedText: string }) {
