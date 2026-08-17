@@ -17,7 +17,7 @@ agents work with ordinary files through the same small, revision-aware API.
 > A technically capable operator can deploy it privately by immutable digest;
 > production acceptance still requires evidence from that operator's real
 > identity, network, storage, backup, and monitoring environment. See the
-> [release report](./docs/0.1_RELEASE_REPORT.md) for the exact baseline boundary.
+> [0.2.0 release report](./docs/0.2_RELEASE_REPORT.md) for the exact boundary.
 
 [Install 0.2.0](#install-020) · [Deploy safely](#production-deployment) ·
 [Verify the release](#verify-the-release) · [Explore features](#what-sangam-does) ·
@@ -446,7 +446,8 @@ vertical slices.
 
 ### Release and operations
 
-- [0.1.0 release report and evidence](./docs/0.1_RELEASE_REPORT.md)
+- [0.2.0 release report and evidence](./docs/0.2_RELEASE_REPORT.md)
+- [0.1.0 release baseline report](./docs/0.1_RELEASE_REPORT.md)
 - [Release checklist and supply-chain verification](./docs/operations/RELEASE_CHECKLIST.md)
 - [Production upgrades and paired rollback](./docs/operations/UPGRADES_AND_ROLLBACK.md)
 - [After 0.1 discussion backlog](./docs/AFTER_0.1.md)
