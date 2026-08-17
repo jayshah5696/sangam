@@ -36,7 +36,7 @@ accepted mutations; they need not equal the proxy assertion value.
 
 ## Issue a scoped agent token
 
-Use Settings → Agents & tokens. Recommended first scope:
+Use Settings → Operations & AI → Agents & tokens. Recommended first scope:
 
 - `read: /**`
 - `search: /**`
@@ -86,7 +86,7 @@ optimistic concurrency.
 
 ## Revoke or rotate
 
-Use Settings → Agents & tokens:
+Use Settings → Operations & AI → Agents & tokens:
 
 - **Rotate** creates a replacement token and revokes the old token atomically.
 - **Revoke** immediately rejects future authentication while retaining the

@@ -11,15 +11,15 @@
 A single-user, self-hosted document workspace where a human and identified AI
 agents work with ordinary files through the same small, revision-aware API.
 
-> **Release status:** [Sangam 0.1.0](https://github.com/jayshah5696/sangam/releases/tag/v0.1.0)
+> **Release status:** [Sangam 0.2.0](https://github.com/jayshah5696/sangam/releases/tag/v0.2.0)
 > is a published and verified self-hosted beta. Its signed application image is
 > public on [GitHub Container Registry](https://github.com/jayshah5696/sangam/pkgs/container/sangam).
 > A technically capable operator can deploy it privately by immutable digest;
 > production acceptance still requires evidence from that operator's real
 > identity, network, storage, backup, and monitoring environment. See the
-> [release report](./docs/0.1_RELEASE_REPORT.md) for the exact boundary.
+> [release report](./docs/0.1_RELEASE_REPORT.md) for the exact baseline boundary.
 
-[Install 0.1.0](#install-010) · [Deploy safely](#production-deployment) ·
+[Install 0.2.0](#install-020) · [Deploy safely](#production-deployment) ·
 [Verify the release](#verify-the-release) · [Explore features](#what-sangam-does) ·
 [Develop](#development) · [Read the docs](#documentation)
 
@@ -59,7 +59,7 @@ proposals instead of invisible writes.
   generation-consistent paired backups, verify their contents, and expose separate
   health and readiness endpoints.
 
-## Install 0.1.0
+## Install 0.2.0
 
 The container is the supported complete application artifact. It includes the
 browser client, API, migration set, background workers, and CLI and runs as the
@@ -92,7 +92,7 @@ docker run --detach --init \
   --volume sangam-database:/data/database \
   --volume sangam-workspace:/data/workspace \
   --volume sangam-backups:/data/backups \
-  ghcr.io/jayshah5696/sangam:0.1.0
+  ghcr.io/jayshah5696/sangam:0.2.0
 ```
 
 Open <http://127.0.0.1:8000>. The public package can be pulled without signing in
@@ -117,10 +117,10 @@ Production deployments must use the fail-closed Compose definition and pin the
 verified immutable image digest, not a mutable release tag:
 
 ```text
-ghcr.io/jayshah5696/sangam@sha256:8ee161116bfc2976524ccfe57c4ecc1697f151fa7481434a76264137009d4974
+ghcr.io/jayshah5696/sangam@sha256:6be01d6a7f450f0d206e9f024c36b12db116cad814658d0e8975ba50e99bae40
 ```
 
-The digest identifies the exact multi-platform 0.1.0 image index. The `:0.1.0`
+The digest identifies the exact multi-platform 0.2.0 image index. The `:0.2.0`
 tag is easier to read, but a registry tag can be moved; the digest cannot.
 
 ### Prepare the host
@@ -129,7 +129,7 @@ Clone the release, create the persistent bind-mount directories with the
 container's unprivileged identity, and create a deployment environment:
 
 ```bash
-git clone --branch v0.1.0 --depth 1 https://github.com/jayshah5696/sangam.git
+git clone --branch v0.2.0 --depth 1 https://github.com/jayshah5696/sangam.git
 cd sangam
 sudo install -d -m 0750 -o 10001 -g 10001 \
   data/database data/workspace data/backups
@@ -161,7 +161,7 @@ not add a public router port-forward.
 ### Validate and start
 
 ```bash
-export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:8ee161116bfc2976524ccfe57c4ecc1697f151fa7481434a76264137009d4974'
+export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:6be01d6a7f450f0d206e9f024c36b12db116cad814658d0e8975ba50e99bae40'
 scripts/validate-compose.sh
 docker compose -f deploy/compose.prod.yaml config --quiet
 docker compose -f deploy/compose.prod.yaml pull
@@ -184,15 +184,15 @@ before changing a running digest.
 
 ## Verify the release
 
-Sangam 0.1.0 is built for `linux/amd64` and `linux/arm64`, scanned before push,
+Sangam 0.2.0 is built for `linux/amd64` and `linux/arm64`, scanned before push,
 signed keylessly with Sigstore, and published with BuildKit SBOM/provenance plus a
-GitHub artifact attestation. The [GitHub Release](https://github.com/jayshah5696/sangam/releases/tag/v0.1.0)
+GitHub artifact attestation. The [GitHub Release](https://github.com/jayshah5696/sangam/releases/tag/v0.2.0)
 also contains the backend/CLI wheel, source archive, and `SHA256SUMS`.
 
 Inspect and verify the exact application image:
 
 ```bash
-export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:8ee161116bfc2976524ccfe57c4ecc1697f151fa7481434a76264137009d4974'
+export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:6be01d6a7f450f0d206e9f024c36b12db116cad814658d0e8975ba50e99bae40'
 
 docker buildx imagetools inspect "$SANGAM_IMAGE"
 
@@ -351,11 +351,12 @@ document, revision metadata, and restore or copy actions.
 
 ### Scoped agent access
 
-The Agents & tokens settings issue one-time credentials with explicit
-capabilities, optional expiry, and workspace path boundaries. Issued tokens can
-be rotated or revoked without erasing their historical attribution.
+The **Operations & AI** settings tab issues one-time credentials with explicit
+capabilities, optional expiry, and workspace path boundaries with progressive
+disclosure for advanced capability customization. Issued tokens can be rotated
+or revoked without erasing their historical attribution.
 
-![Current Sangam Agents and tokens settings with appearance choices, scoped capabilities, and path controls](./docs/assets/phase-3-agents.png)
+![Current Sangam Operations and AI settings with agent tokens, progressive capability disclosure, and path controls](./docs/assets/phase-3-agents.png)
 
 ### Reviewable agent activity
 
@@ -481,7 +482,7 @@ vertical slices.
 
 ## Project status and support
 
-Sangam 0.1.0 is a self-hosted beta, not a hosted service or a promise that every
+Sangam 0.2.0 is a self-hosted beta, not a hosted service or a promise that every
 deployment environment has passed production acceptance. Review the
 [known follow-up work](./docs/AFTER_0.1.md) before relying on it for irreplaceable
 data. In particular, operators still own encrypted off-host replication, restore
