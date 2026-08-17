@@ -7,6 +7,19 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.2.0] - 2026-08-16
+
+### Added
+
+- Native near-black workspace styling with Midnight dark theme as default, semantic typography tokens, and responsive transitions.
+- Dedicated `ActionDialog` with ARIA modal focus trapping, DOM document order navigation, and synchronous focus restoration.
+- Persistent active document Chat Context banner and visible context switch notification.
+- Actionable empty workspace and explorer states with quick document creation and PDF import CTAs.
+- Responsive PDF research workspace toolbar eliminating narrow viewport overflow.
+- 2-tier settings navigation dividing Workspace Preferences from Operations & AI with progressive disclosure for agent capabilities.
+- Enforced split-editor minimum group dimensions policy.
+- Security updates for container runtime, cryptography, and pypdf dependencies.
+
 ## [0.1.0] - 2026-07-22
 
 ### Added
@@ -21,5 +34,6 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.1.0
