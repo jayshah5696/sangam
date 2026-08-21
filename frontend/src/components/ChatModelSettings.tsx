@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Cpu, RefreshCw } from 'lucide-react'
+import { Check, Cpu, Plus, RefreshCw } from 'lucide-react'
 import { api, type ChatModelInfo, type ChatModelSettings as ChatModelSettingsData } from '../api'
 
 function signatureOf(data: ChatModelSettingsData): string {
@@ -27,6 +27,8 @@ export function ChatModelSettings() {
   const [defaultModel, setDefaultModel] = useState('')
   const [openrouterEnabled, setOpenrouterEnabled] = useState(true)
   const [search, setSearch] = useState('')
+  const [customSlug, setCustomSlug] = useState('')
+  const [customModels, setCustomModels] = useState<ChatModelInfo[]>([])
   const syncedSignature = useRef<string | null>(null)
 
   useEffect(() => {
@@ -57,14 +59,45 @@ export function ChatModelSettings() {
     onSuccess: invalidate,
   })
 
+  const addCustomModel = (e?: FormEvent) => {
+    if (e) e.preventDefault()
+    const trimmed = customSlug.trim()
+    if (!trimmed) return
+    const provider = (trimmed.includes('/') ? trimmed.split('/')[0] : 'custom') || 'custom'
+    const name = trimmed
+      .split('/')
+      .pop()!
+      .replace(/[-:]/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+
+    const newModel: ChatModelInfo = {
+      id: trimmed,
+      name,
+      provider,
+      enabled: true,
+    }
+    setCustomModels((prev) => (prev.some((m) => m.id === trimmed) ? prev : [...prev, newModel]))
+    setEnabled((prev) => new Set([...prev, trimmed]))
+    if (!defaultModel) setDefaultModel(trimmed)
+    setCustomSlug('')
+  }
+
   const groups = useMemo(() => {
-    const catalog = models.data?.catalog ?? []
+    const catalog = [...(models.data?.catalog ?? []), ...customModels]
+    const seen = new Set<string>()
+    const deduped: ChatModelInfo[] = []
+    for (const model of catalog) {
+      if (!seen.has(model.id)) {
+        seen.add(model.id)
+        deduped.push(model)
+      }
+    }
     const term = search.trim().toLowerCase()
     const filtered = term
-      ? catalog.filter(
+      ? deduped.filter(
           (model) => model.name.toLowerCase().includes(term) || model.id.toLowerCase().includes(term),
         )
-      : catalog
+      : deduped
     const byProvider = new Map<string, ChatModelInfo[]>()
     for (const model of filtered) {
       const list = byProvider.get(model.provider) ?? []
@@ -72,7 +105,7 @@ export function ChatModelSettings() {
       byProvider.set(model.provider, list)
     }
     return [...byProvider.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [models.data, search])
+  }, [models.data, customModels, search])
 
   const toggleModel = (id: string) => {
     setEnabled((current) => {
@@ -160,6 +193,20 @@ export function ChatModelSettings() {
             Models could not be fetched: {(refresh.error as Error).message}
           </p>
         )}
+
+        <form className="chat-model-add" onSubmit={addCustomModel}>
+          <input
+            type="text"
+            placeholder="Add custom model slug (e.g. meta-llama/llama-3.3-70b-instruct)"
+            aria-label="Add custom model slug"
+            value={customSlug}
+            onChange={(event) => setCustomSlug(event.target.value)}
+          />
+          <button type="submit" className="secondary-action" disabled={!customSlug.trim()}>
+            <Plus size={14} />
+            Add model
+          </button>
+        </form>
 
         <input
           className="chat-model-search"

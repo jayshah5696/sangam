@@ -94,4 +94,31 @@ describe('ChatModelSettings', () => {
     const save = screen.getByRole('button', { name: /save model selection/i }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
   })
+
+  it('allows adding a custom model slug and saving it', async () => {
+    renderPanel()
+    await screen.findByText('GPT-5.4 Mini')
+    const input = screen.getByPlaceholderText(/Add custom model slug/i)
+    const addButton = screen.getByRole('button', { name: /Add model/i })
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'meta-llama/llama-3.3-70b-instruct' } })
+      fireEvent.click(addButton)
+    })
+
+    await screen.findByText('meta-llama/llama-3.3-70b-instruct')
+    const save = screen.getByRole('button', { name: /save model selection/i }) as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+
+    await act(async () => {
+      fireEvent.click(save)
+    })
+
+    await waitFor(() => expect(updateChatModels).toHaveBeenCalledTimes(1))
+    expect(updateChatModels).toHaveBeenCalledWith({
+      openrouter_enabled: true,
+      default_model: 'openai/gpt-5.4-mini',
+      enabled_models: ['openai/gpt-5.4-mini', 'openai/gpt-5.4-nano', 'meta-llama/llama-3.3-70b-instruct'],
+    })
+  })
 })

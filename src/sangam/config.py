@@ -52,8 +52,9 @@ class Settings(BaseSettings):
     openrouter_http_referer: str | None = None
     openrouter_app_title: str = "Sangam"
     chatkit_domain_key: str = "local-dev"
-    chat_default_model: str = Field(default="openai/gpt-5.4-mini", min_length=1, max_length=160)
+    chat_default_model: str = Field(default="openai/gpt-5.6-luna", min_length=1, max_length=160)
     chat_available_models: tuple[str, ...] = (
+        "openai/gpt-5.6-luna",
         "openai/gpt-5.4-mini",
         "openai/gpt-5.4-nano",
         "openai/gpt-5.6-terra",

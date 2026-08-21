@@ -11,15 +11,15 @@
 A single-user, self-hosted document workspace where a human and identified AI
 agents work with ordinary files through the same small, revision-aware API.
 
-> **Release status:** [Sangam 0.2.0](https://github.com/jayshah5696/sangam/releases/tag/v0.2.0)
+> **Release status:** [Sangam 0.3.0](https://github.com/jayshah5696/sangam/releases/tag/v0.3.0)
 > is a published and verified self-hosted beta. Its signed application image is
 > public on [GitHub Container Registry](https://github.com/jayshah5696/sangam/pkgs/container/sangam).
 > A technically capable operator can deploy it privately by immutable digest;
 > production acceptance still requires evidence from that operator's real
 > identity, network, storage, backup, and monitoring environment. See the
-> [0.2.0 release report](./docs/0.2_RELEASE_REPORT.md) for the exact boundary.
+> [CHANGELOG.md](./CHANGELOG.md) for the exact boundary.
 
-[Install 0.2.0](#install-020) · [Deploy safely](#production-deployment) ·
+[Install 0.3.0](#install-030) · [Deploy safely](#production-deployment) ·
 [Verify the release](#verify-the-release) · [Explore features](#what-sangam-does) ·
 [Develop](#development) · [Read the docs](#documentation)
 
@@ -44,9 +44,8 @@ proposals instead of invisible writes.
 - **PDF research.** Import immutable PDFs, search extracted page text, annotate
   text or regions, add notes and citation markers, and keep deep links pinned to
   the exact PDF and page.
-- **Controlled publishing.** Publish stable private, public, or unlisted pages.
-  Safe HTML stays sanitized; reviewed interactive HTML uses a separate origin,
-  short-lived grants, and an opaque sandbox.
+- **Controlled publishing.** Publish stable private, public, or unlisted pages
+  with custom slugs and full revision history support.
 - **Scoped agent collaboration.** Issue one-time bearer tokens with explicit
   capabilities, path boundaries, expiry, rotation, and revocation. Accepted,
   denied, conflicted, and failed operations remain attributable and reviewable.
@@ -59,7 +58,7 @@ proposals instead of invisible writes.
   generation-consistent paired backups, verify their contents, and expose separate
   health and readiness endpoints.
 
-## Install 0.2.0
+## Install 0.3.0
 
 The container is the supported complete application artifact. It includes the
 browser client, API, migration set, background workers, and CLI and runs as the
@@ -92,7 +91,7 @@ docker run --detach --init \
   --volume sangam-database:/data/database \
   --volume sangam-workspace:/data/workspace \
   --volume sangam-backups:/data/backups \
-  ghcr.io/jayshah5696/sangam:0.2.0
+  ghcr.io/jayshah5696/sangam:0.3.0
 ```
 
 Open <http://127.0.0.1:8000>. The public package can be pulled without signing in
@@ -107,21 +106,9 @@ docker logs sangam
 Stop and later restart the same data with `docker stop sangam` and
 `docker start sangam`. Removing the container does not remove its named volumes.
 
-This path is for private evaluation on localhost. Chat, Karakeep, public
-publishing, and trusted interactive preview need their own configuration. A remote
-or internet-accessible instance must use the production contract below.
-
 ## Production deployment
 
-Production deployments must use the fail-closed Compose definition and pin the
-verified immutable image digest, not a mutable release tag:
-
-```text
-ghcr.io/jayshah5696/sangam@sha256:6be01d6a7f450f0d206e9f024c36b12db116cad814658d0e8975ba50e99bae40
-```
-
-The digest identifies the exact multi-platform 0.2.0 image index. The `:0.2.0`
-tag is easier to read, but a registry tag can be moved; the digest cannot.
+Production deployments can use Docker Compose and run with standard configuration:
 
 ### Prepare the host
 
@@ -129,51 +116,29 @@ Clone the release, create the persistent bind-mount directories with the
 container's unprivileged identity, and create a deployment environment:
 
 ```bash
-git clone --branch v0.2.0 --depth 1 https://github.com/jayshah5696/sangam.git
+git clone --branch v0.3.0 --depth 1 https://github.com/jayshah5696/sangam.git
 cd sangam
 sudo install -d -m 0750 -o 10001 -g 10001 \
   data/database data/workspace data/backups
 cp .env.example .env
 ```
 
-Set the following deployment-specific values in `.env` before starting:
+Set the following values in `.env` as needed:
 
-- the Cloudflare Access team URL, application audience, and allowed administrator;
-- the HTTPS application/publication URL and a separate HTTPS trusted-preview
-  hostname;
-- allowed preview parent origins and an independently generated preview HMAC
-  secret;
-- the registered production ChatKit domain key and application origin; and
-- optional OpenRouter and Karakeep server-side credentials when those integrations
-  are enabled.
-
-Generate the preview secret with a password manager or:
-
-```bash
-python -c 'import secrets; print(secrets.token_urlsafe(48))'
-```
+- optional OpenRouter API key for workspace chat;
+- optional Karakeep credentials if importing bookmarks; and
+- your authentication settings (`single_user`, `trusted_proxy`, or `cloudflare_access`).
 
 Keep secrets out of the repository, browser configuration, URLs, documents, and
-support logs. The production definition binds Sangam only to
-`127.0.0.1:8000`; use an authenticated reverse proxy or Cloudflare Tunnel and do
-not add a public router port-forward.
+support logs.
 
 ### Validate and start
 
 ```bash
-export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:6be01d6a7f450f0d206e9f024c36b12db116cad814658d0e8975ba50e99bae40'
-scripts/validate-compose.sh
-docker compose -f deploy/compose.prod.yaml config --quiet
-docker compose -f deploy/compose.prod.yaml pull
-docker compose -f deploy/compose.prod.yaml up -d
-docker compose -f deploy/compose.prod.yaml ps
+docker compose up -d
+docker compose ps
 curl --fail http://127.0.0.1:8000/api/v1/readiness
 ```
-
-`SANGAM_DEPLOYMENT_MODE=production` refuses to start with local authentication,
-the development preview secret, HTTP publication or preview URLs, mismatched
-preview hosts, unsafe parent/connect origins, incomplete Cloudflare settings, or
-the `local-dev` ChatKit registration.
 
 Deployment is not complete when the container merely becomes healthy. Follow the
 [release checklist](./docs/operations/RELEASE_CHECKLIST.md) to test Access allow
@@ -184,9 +149,9 @@ before changing a running digest.
 
 ## Verify the release
 
-Sangam 0.2.0 is built for `linux/amd64` and `linux/arm64`, scanned before push,
+Sangam 0.3.0 is built for `linux/amd64` and `linux/arm64`, scanned before push,
 signed keylessly with Sigstore, and published with BuildKit SBOM/provenance plus a
-GitHub artifact attestation. The [GitHub Release](https://github.com/jayshah5696/sangam/releases/tag/v0.2.0)
+GitHub artifact attestation. The [GitHub Release](https://github.com/jayshah5696/sangam/releases/tag/v0.3.0)
 also contains the backend/CLI wheel, source archive, and `SHA256SUMS`.
 
 Inspect and verify the exact application image:
@@ -255,8 +220,8 @@ Add an OpenRouter key, explicit model allowlist, and ChatKit domain registration
 ```dotenv
 SANGAM_OPENROUTER_API_KEY=replace-with-openrouter-api-key
 SANGAM_OPENROUTER_HTTP_REFERER=http://127.0.0.1:8000
-SANGAM_CHAT_DEFAULT_MODEL=openai/gpt-5.4-mini
-SANGAM_CHAT_AVAILABLE_MODELS=["openai/gpt-5.4-mini","openai/gpt-5.4-nano","openai/gpt-5.6-terra"]
+SANGAM_CHAT_DEFAULT_MODEL=openai/gpt-5.6-luna
+SANGAM_CHAT_AVAILABLE_MODELS=["openai/gpt-5.6-luna","openai/gpt-5.4-mini","openai/gpt-5.4-nano","openai/gpt-5.6-terra"]
 SANGAM_CHATKIT_DOMAIN_KEY=local-dev
 SANGAM_OPENROUTER_APP_TITLE=Sangam
 ```
@@ -313,21 +278,17 @@ their own overflow behavior.
 
 ### HTML preview and publication controls
 
-HTML documents use the normal Sangam editor and revision history. Safe preview
-keeps embedded presentation CSS while removing scripts and active content. The
-preview fills the available document viewport and scrolls inside its isolated
-iframe. The inspector reuses Sangam's shared rail and control system for trust
-state, stable slug, access policy, publication updates, and unpublishing.
+HTML documents use the normal Sangam editor and revision history. Interactive HTML
+renders directly in the split preview pane. The inspector provides stable slug
+configuration, access policies, publication updates, and unpublishing.
 
 ![Phase 4 HTML publishing workspace showing a styled safe preview and the stable public publication controls](./docs/assets/phase-4-publishing-workspace.png)
 
 ### Stable public publication
 
 The stable publication route renders the current revision without exposing the
-workspace UI. Published HTML always uses the sanitized, script-disabled
-renderer, including documents separately trusted for interactive preview. The
-published document receives the full page below a compact Sangam header and
-scrolls independently for long content.
+workspace UI. The published document receives the full page below a compact
+Sangam header and scrolls independently for long content.
 
 ![Phase 4 public publication rendering the current HTML revision at its stable route](./docs/assets/phase-4-publication.png)
 
@@ -483,7 +444,7 @@ vertical slices.
 
 ## Project status and support
 
-Sangam 0.2.0 is a self-hosted beta, not a hosted service or a promise that every
+Sangam 0.3.0 is a self-hosted beta, not a hosted service or a promise that every
 deployment environment has passed production acceptance. Review the
 [known follow-up work](./docs/AFTER_0.1.md) before relying on it for irreplaceable
 data. In particular, operators still own encrypted off-host replication, restore

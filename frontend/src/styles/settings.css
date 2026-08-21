@@ -72,6 +72,8 @@
 .spin { animation: settings-spin .9s linear infinite; }
 @keyframes settings-spin { to { transform: rotate(360deg); } }
 .chat-model-settings { display: grid; gap: 12px; }
+.chat-model-add { display: flex; gap: 8px; align-items: center; }
+.chat-model-add input { flex: 1; height: var(--control-height); min-height: var(--control-height); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--text-control); }
 .chat-model-search { height: var(--control-height); min-height: var(--control-height); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--text-control); }
 .chat-model-groups { display: grid; gap: 14px; max-height: 22rem; overflow: auto; padding: 2px; }
 .chat-model-group { display: grid; gap: 4px; }
