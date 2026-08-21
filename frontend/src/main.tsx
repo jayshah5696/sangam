@@ -5,7 +5,7 @@ import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { IndexedDbDraftStorage } from './browserState/draftStorage'
 import { migrateLegacyDrafts } from './browserState/legacyDraftMigration'
 import { routeTree } from './routeTree.gen'
-import { ThemeProvider } from './theme'
+import { ThemeProvider, useTheme } from './theme'
 import { DocumentSessionsProvider } from './documentSessions'
 import { WorkbenchProvider } from './workbench'
 import './styles.css'
@@ -31,6 +31,17 @@ declare module '@tanstack/react-router' {
 const root = document.getElementById('root')
 if (!root) throw new Error('Sangam root element is missing')
 const reactRoot = createRoot(root)
+
+function WorkspaceSessions({ storage }: { storage: IndexedDbDraftStorage }) {
+  const { preferences } = useTheme()
+  return (
+    <WorkbenchProvider>
+      <DocumentSessionsProvider storage={storage} defaultMode={() => preferences.editorMode}>
+        <RouterProvider router={router} />
+      </DocumentSessionsProvider>
+    </WorkbenchProvider>
+  )
+}
 
 async function bootstrap() {
   const draftStorage = new IndexedDbDraftStorage()
@@ -58,11 +69,7 @@ async function bootstrap() {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
-          <WorkbenchProvider>
-            <DocumentSessionsProvider storage={draftStorage}>
-              <RouterProvider router={router} />
-            </DocumentSessionsProvider>
-          </WorkbenchProvider>
+          <WorkspaceSessions storage={draftStorage} />
         </ThemeProvider>
       </QueryClientProvider>
     </StrictMode>,

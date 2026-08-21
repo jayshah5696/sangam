@@ -44,6 +44,17 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .welcome h1, .settings-header h1 { font-family: var(--font-display); font-weight: 400; line-height: var(--leading-tight); font-size: clamp(2.5rem, 6vw, 4.5rem); margin: var(--space-2) 0 var(--space-4); color: var(--text); letter-spacing: -.035em; }
 .welcome > p, .settings-header > p:last-child { max-width: 620px; color: var(--muted); line-height: var(--leading-body); font-size: var(--text-body); }
 .welcome-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 11px 17px; margin-top: 26px; }
+.welcome-search { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); padding: 0 var(--space-4); min-height: var(--control-height); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--muted); }
+.welcome-search:focus-within { border-color: var(--accent); }
+.welcome-search input[type='search'] { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: var(--text-body); outline: none; }
+.welcome-search-hint { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; color: var(--muted); font-size: var(--text-meta); }
+.welcome-search-hint kbd, .welcome-shortcuts kbd { padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: var(--radius-control); background: var(--surface); }
+.welcome-search-results { display: grid; gap: 2px; margin-top: var(--space-3); padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
+.welcome-search-results a { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); color: var(--text); text-decoration: none; font-size: var(--text-label); }
+.welcome-search-results a:hover, .welcome-search-results a:focus-visible { background: var(--surface-soft); }
+.welcome-search-results a span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.welcome-shortcuts { display: flex; flex-wrap: wrap; gap: 11px 17px; margin-top: var(--space-4); color: var(--muted); font-size: var(--text-meta); }
+.welcome-shortcuts .desktop-shortcut { display: inline-flex; align-items: center; gap: 5px; }
 .welcome-actions .primary-button { display: inline-flex; align-items: center; gap: 8px; }
 .welcome-actions > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--text-meta); }
 .welcome-actions kbd { padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: var(--radius-control); background: var(--surface); }
