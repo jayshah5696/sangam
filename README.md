@@ -1,7 +1,7 @@
 # Sangam
 
 <!-- markdownlint-disable-next-line MD033 -->
-<img src="https://raw.githubusercontent.com/jayshah5696/sangam/main/frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
+<p align="center"><img src="https://raw.githubusercontent.com/jayshah5696/sangam/main/frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" /></p>
 
 [![Release](https://img.shields.io/github/v/release/jayshah5696/sangam?display_name=tag&sort=semver)](https://github.com/jayshah5696/sangam/releases/latest)
 [![CI](https://github.com/jayshah5696/sangam/actions/workflows/ci.yml/badge.svg)](https://github.com/jayshah5696/sangam/actions/workflows/ci.yml)
