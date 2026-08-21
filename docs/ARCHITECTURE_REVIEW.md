@@ -7,6 +7,22 @@ agent runtimes, UI state, and Python type boundaries. It is a static review of
 the repository and its tests. It does not claim that a production provider,
 Cloudflare path, or ChatKit domain registration was exercised.
 
+## Implementation follow-up
+
+The architecture-foundation change implements Packages 1 through 6 below. It
+keeps Packages 7 and 8 as explicit evidence gates: ChatKit remains the UI, and
+the OpenAI Agents SDK remains the runtime until a named workflow proves that a
+CopilotKit, AG-UI, or LangGraph migration would pay for itself.
+
+| Package | Result |
+| --- | --- |
+| Truthful runtime state | Implemented with disabled, missing, ready, unreachable, and incompatible states |
+| Provider connections | Implemented with versioned SQLite records and environment credential references |
+| Generic endpoints | Implemented for OpenAI Responses and Chat Completions protocols |
+| Model compatibility | Implemented with connection-scoped IDs and explicit unknown-model override |
+| Tool policy and traces | Implemented with effect, approval, bounded trace, inference scope, and budgets |
+| Type and API boundaries | Implemented with dataclasses, private Pydantic wire models, mypy, and OpenAPI drift detection |
+
 ## The short version
 
 Sangam does not need a rewrite, LangGraph, or a wholesale switch to

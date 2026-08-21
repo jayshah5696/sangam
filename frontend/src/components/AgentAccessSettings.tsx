@@ -13,7 +13,7 @@ export type ScopePrefixes = {
   write: string
 }
 
-export type TokenPresetId = 'read-only' | 'scoped-writer'
+export type TokenPresetId = 'read-only' | 'assistant' | 'scoped-writer'
 
 const capabilities: Capability[] = [
   'read',
@@ -25,6 +25,7 @@ const capabilities: Capability[] = [
   'restore',
   'delete',
   'publish',
+  'inference',
 ]
 
 const mutationCapabilities = new Set<Capability>([
@@ -41,6 +42,7 @@ const sensitiveCapabilityDescriptions: Partial<Record<Capability, string>> = {
   restore: 'Restore can replace the current document content with an earlier revision.',
   delete: 'Delete can move documents out of the active workspace and into trash.',
   publish: 'Publish can expose document content through a shareable publication.',
+  inference: 'Inference can spend the server operator’s external model budget.',
 }
 
 export const tokenPresets: Record<
@@ -57,6 +59,12 @@ export const tokenPresets: Record<
     label: 'Scoped writer',
     description: 'Read, search, and routine edits under /agents/**.',
     capabilities: ['read', 'search', 'create', 'update', 'move', 'tag'],
+    prefixes: { read: 'agents', search: 'agents', write: 'agents' },
+  },
+  assistant: {
+    label: 'Workspace assistant',
+    description: 'Read, search, and spend inference under /agents/**.',
+    capabilities: ['read', 'search', 'inference'],
     prefixes: { read: 'agents', search: 'agents', write: 'agents' },
   },
 }
@@ -83,9 +91,16 @@ export function buildTokenScopes(selected: Set<Capability>, prefixes: ScopePrefi
     .filter((capability) => selected.has(capability))
     .map((capability) => ({
       capability,
-      path_prefix: normalizePrefixInput(
-        capability === 'read' ? prefixes.read : capability === 'search' ? prefixes.search : prefixes.write,
-      ),
+      path_prefix:
+        capability === 'inference'
+          ? null
+          : normalizePrefixInput(
+              capability === 'read'
+                ? prefixes.read
+                : capability === 'search'
+                  ? prefixes.search
+                  : prefixes.write,
+            ),
     }))
 }
 

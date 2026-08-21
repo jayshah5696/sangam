@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +18,7 @@ from sangam import __version__
 from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
-from sangam.application import build_application_services
+from sangam.application import build_application_services, initialize_application_state
 from sangam.config import Settings
 from sangam.errors import (
     AuthenticationError,
@@ -45,6 +46,7 @@ from sangam.schemas import (
     Document,
     DocumentSummary,
     DuplicateDocument,
+    ErrorResponse,
     ExposePublicationRevision,
     Folder,
     IssuedAgentToken,
@@ -74,7 +76,8 @@ logger = logging.getLogger(__name__)
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or Settings()
-    services = build_application_services(resolved_settings)
+    database = initialize_application_state(resolved_settings)
+    services = build_application_services(resolved_settings, initialized_database=database)
     documents = services.documents
     reconciliation = services.reconciliation
     backups = services.backups
@@ -139,6 +142,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/v1/openapi.json",
         docs_url="/api/v1/docs",
         lifespan=lifespan,
+        responses={
+            status: {
+                "model": ErrorResponse,
+                "description": "Sangam error envelope",
+            }
+            for status in (400, 401, 403, 404, 409, 422, 500, 502, 503)
+        },
     )
     app.state.services = services
 
@@ -276,6 +286,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "code": error.code,
                     "message": error.message,
                     "details": error.details,
+                }
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation(
+        _request: Request, error: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "validation_error",
+                    "message": "The request body or parameters are invalid",
+                    "details": {
+                        "errors": [
+                            {
+                                "location": list(item.get("loc", ())),
+                                "message": item.get("msg", "Invalid value"),
+                                "type": item.get("type", "validation_error"),
+                            }
+                            for item in error.errors()
+                        ]
+                    },
                 }
             },
         )

@@ -67,7 +67,7 @@ test "$(docker exec "$NAME" id -g)" = "10001"
 echo "Verified the application runs as unprivileged UID/GID 10001:10001."
 
 curl --fail --silent "http://127.0.0.1:$PORT/api/v1/chat/config" \
-  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["provider"] == "openrouter_openai_agents" and data["transport"] == "chatkit" and not data["configured"]'
+  | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"] == "missing_credential" and data["transport"] == "chatkit" and not data["inference_enabled"] and data["default_model"].startswith("openrouter::")'
 if curl --fail --silent "http://127.0.0.1:$PORT/" \
   | grep -q 'https://cdn.platform.openai.com/deployments/chatkit/chatkit.js'; then
   echo "ChatKit must be loaded on demand rather than eagerly from the application shell." >&2

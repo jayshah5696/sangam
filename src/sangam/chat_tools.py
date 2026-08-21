@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
@@ -14,6 +15,25 @@ from sangam.access import WorkspaceAccessService
 from sangam.chat_context import ToolContext
 from sangam.chat_proposals import ChatProposalService
 from sangam.errors import NotFoundError, SangamError, ValidationError
+
+
+@dataclass(frozen=True)
+class ToolPolicy:
+    name: str
+    title: str
+    effect: str
+    approval: str
+
+
+TOOL_POLICIES: tuple[ToolPolicy, ...] = (
+    ToolPolicy("get_editor_selection", "Read editor selection", "read", "none"),
+    ToolPolicy("search_workspace", "Search workspace", "read", "none"),
+    ToolPolicy("read_document", "Read document", "read", "none"),
+    ToolPolicy("read_pdf_page", "Read PDF page", "read", "none"),
+    ToolPolicy("propose_update", "Prepare edit proposal", "proposal", "human_review"),
+    ToolPolicy("create_document", "Create document", "write", "client_confirmation"),
+    ToolPolicy("publish_document", "Publish document", "external", "client_confirmation"),
+)
 
 
 class ChatToolset:
@@ -29,6 +49,7 @@ class ChatToolset:
         self.workspace = workspace
         self.proposals = proposals
         self.max_result_bytes = max_result_bytes
+        self.policies = {item.name: item for item in TOOL_POLICIES}
 
     def as_agent_tools(self) -> list[Any]:
         return [
@@ -96,7 +117,7 @@ class ChatToolset:
                 ]
             }
 
-        return await self._run_tool(ctx, "Search workspace", query, operation)
+        return await self._run_tool(ctx, self.policies["search_workspace"], query, operation)
 
     async def read_document(self, ctx: ToolContext, document_id: str) -> str:
         def operation() -> dict[str, Any]:
@@ -105,12 +126,34 @@ class ChatToolset:
             )
             if document.content_type == "application/pdf":
                 raise ValidationError("Use read_pdf_page for PDF documents")
+            pinned_revision = ctx.context.request_context.pinned_revision_id
+            if (
+                pinned_revision
+                and ctx.context.request_context.document_id == document_id
+                and pinned_revision != document.current_revision_id
+            ):
+                revision = next(
+                    (
+                        item
+                        for item in self.workspace.history(
+                            ctx.context.request_context.principal, document_id
+                        )
+                        if item.revision_id == pinned_revision
+                    ),
+                    None,
+                )
+                if revision is None:
+                    raise NotFoundError(f"Pinned document revision not found: {pinned_revision}")
+                return {
+                    "source": self._document_source(document, revision_id=revision.revision_id),
+                    "content": self._bounded_text(revision.content),
+                }
             return {
                 "source": self._document_source(document),
                 "content": self._bounded_text(document.content),
             }
 
-        return await self._run_tool(ctx, "Read document", document_id, operation)
+        return await self._run_tool(ctx, self.policies["read_document"], document_id, operation)
 
     async def read_pdf_page(self, ctx: ToolContext, document_id: str, page_number: int) -> str:
         def operation() -> dict[str, Any]:
@@ -145,7 +188,10 @@ class ChatToolset:
             }
 
         return await self._run_tool(
-            ctx, "Read PDF page", f"{document_id} page {page_number}", operation
+            ctx,
+            self.policies["read_pdf_page"],
+            f"{document_id} page {page_number}",
+            operation,
         )
 
     async def propose_update(
@@ -171,22 +217,20 @@ class ChatToolset:
                 "message": "Waiting for human diff review and approval.",
             }
 
-        return await self._run_tool(ctx, "Prepare edit proposal", summary, operation)
+        return await self._run_tool(ctx, self.policies["propose_update"], summary, operation)
 
-    async def create_document(self, ctx: ToolContext, title: str, content: str) -> str:
-        def operation() -> dict[str, Any]:
-            key = self._tool_idempotency_key(ctx, "create_document", title, content)
-            document = self.workspace.create_document(
-                ctx.context.request_context.principal,
-                title=title,
-                content=content,
-                path=None,
-                content_type="text/markdown",
-                idempotency_key=key,
-            )
-            return {"document": self._document_source(document)}
-
-        return await self._run_tool(ctx, "Create document", title, operation)
+    async def create_document(self, ctx: ToolContext, title: str, content: str) -> None:
+        normalized_title = " ".join(title.strip().split())
+        if not normalized_title:
+            raise ValidationError("Document title is required")
+        ctx.context.client_tool_call = ClientToolCall(
+            name="confirm_create_document",
+            arguments={
+                "title": normalized_title[:240],
+                "content": self._bounded_text(content, self.max_result_bytes),
+                "content_type": "text/markdown",
+            },
+        )
 
     async def publish_document(
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
@@ -209,12 +253,12 @@ class ChatToolset:
     async def _run_tool(
         self,
         ctx: ToolContext,
-        title: str,
+        policy: ToolPolicy,
         detail: str,
         operation: Callable[[], dict[str, Any]],
     ) -> str:
         task = CustomTask(
-            title=title,
+            title=policy.title,
             content=self._bounded_text(detail, 500),
             status_indicator="loading",
         )
@@ -223,11 +267,12 @@ class ChatToolset:
         if workflow_item is None:
             raise RuntimeError("ChatKit did not create a workflow item for the tool call")
         task_index = workflow_item.workflow.tasks.index(task)
+        started = time.monotonic()
+        outcome = "accepted"
         try:
             payload = operation()
-            task.status_indicator = "complete"
-            task.content = "Complete"
         except SangamError as error:
+            outcome = "failed"
             payload = {
                 "ok": False,
                 "error": {
@@ -236,18 +281,35 @@ class ChatToolset:
                     "details": error.details,
                 },
             }
-            task.status_indicator = "complete"
-            task.content = f"Failed: {error.message}"
+        duration_ms = max(0, round((time.monotonic() - started) * 1000))
+        citations = _citation_count(payload)
+        payload["_trace"] = {
+            "tool": policy.name,
+            "effect": policy.effect,
+            "approval": policy.approval,
+            "outcome": outcome,
+            "duration_ms": duration_ms,
+            "citations": citations,
+        }
+        task.status_indicator = "complete"
+        task.content = f"{outcome.capitalize()} · {policy.effect} · {duration_ms} ms" + (
+            f" · {citations} citation{'s' if citations != 1 else ''}" if citations else ""
+        )
         await ctx.context.update_workflow_task(task, task_index)
         return self._bounded_text(json.dumps(payload, ensure_ascii=False), self.max_result_bytes)
 
     def _document_source(
-        self, document: Any, *, page_number: int | None = None, snippet: str | None = None
+        self,
+        document: Any,
+        *,
+        page_number: int | None = None,
+        snippet: str | None = None,
+        revision_id: str | None = None,
     ) -> dict[str, Any]:
         data = {
             "document_id": document.document_id,
             "title": document.title,
-            "revision_id": document.current_revision_id,
+            "revision_id": revision_id or document.current_revision_id,
         }
         if page_number is not None:
             data["page_number"] = page_number
@@ -255,13 +317,16 @@ class ChatToolset:
         return {**data, "path": document.path, "snippet": snippet, "citation": deeplink}
 
     @staticmethod
-    def _tool_idempotency_key(ctx: ToolContext, operation: str, *parts: str) -> str:
-        value = "\0".join((ctx.context.thread.id, operation, *parts)).encode()
-        return f"chat:{hashlib.sha256(value).hexdigest()}"
-
-    @staticmethod
     def _bounded_text(value: str, limit: int = 40_000) -> str:
         encoded = value.encode("utf-8")
         if len(encoded) <= limit:
             return value
         return encoded[:limit].decode("utf-8", errors="ignore") + "\n[truncated]"
+
+
+def _citation_count(value: object) -> int:
+    if isinstance(value, dict):
+        return int("citation" in value) + sum(_citation_count(item) for item in value.values())
+    if isinstance(value, list):
+        return sum(_citation_count(item) for item in value)
+    return 0

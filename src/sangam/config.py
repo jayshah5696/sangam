@@ -13,10 +13,11 @@ ChatReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 @dataclass(frozen=True)
 class ChatServerConfig:
-    api_key: str | None
-    base_url: str
-    http_referer: str | None
-    app_title: str
+    openrouter_api_key: str | None
+    openrouter_base_url: str
+    openrouter_http_referer: str | None
+    openrouter_app_title: str
+    deployment_mode: Literal["development", "production"]
     domain_key: str
     available_models: tuple[str, ...]
     default_model: str
@@ -25,6 +26,9 @@ class ChatServerConfig:
     max_tool_result_bytes: int
     max_context_messages: int
     timeout_seconds: float
+    max_request_bytes: int
+    max_output_tokens: int
+    max_concurrent_runs: int
 
 
 class Settings(BaseSettings):
@@ -64,6 +68,9 @@ class Settings(BaseSettings):
     chat_max_tool_rounds: int = Field(default=8, ge=1, le=20)
     chat_max_tool_result_bytes: int = Field(default=40_000, ge=1_024, le=500_000)
     chat_max_context_messages: int = Field(default=20, ge=2, le=100)
+    chat_max_request_bytes: int = Field(default=1_000_000, ge=16_384, le=10_000_000)
+    chat_max_output_tokens: int = Field(default=4_096, ge=128, le=32_768)
+    chat_max_concurrent_runs: int = Field(default=4, ge=1, le=32)
     auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"
     trusted_identity_value: str = "human:jay"
@@ -161,12 +168,13 @@ class Settings(BaseSettings):
 
     def chat_server_config(self) -> ChatServerConfig:
         return ChatServerConfig(
-            api_key=(
+            openrouter_api_key=(
                 self.openrouter_api_key.get_secret_value() if self.openrouter_api_key else None
             ),
-            base_url=self.openrouter_base_url,
-            http_referer=self.openrouter_http_referer,
-            app_title=self.openrouter_app_title,
+            openrouter_base_url=self.openrouter_base_url,
+            openrouter_http_referer=self.openrouter_http_referer,
+            openrouter_app_title=self.openrouter_app_title,
+            deployment_mode=self.deployment_mode,
             domain_key=self.chatkit_domain_key,
             available_models=self.chat_available_models,
             default_model=self.chat_default_model,
@@ -175,6 +183,9 @@ class Settings(BaseSettings):
             max_tool_result_bytes=self.chat_max_tool_result_bytes,
             max_context_messages=self.chat_max_context_messages,
             timeout_seconds=self.chat_timeout_seconds,
+            max_request_bytes=self.chat_max_request_bytes,
+            max_output_tokens=self.chat_max_output_tokens,
+            max_concurrent_runs=self.chat_max_concurrent_runs,
         )
 
 

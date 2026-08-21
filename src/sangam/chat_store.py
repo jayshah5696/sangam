@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Protocol, TypeVar
 
 from chatkit.store import Store
@@ -7,7 +8,7 @@ from chatkit.types import Attachment, Page, ThreadItem, ThreadMetadata
 from pydantic import TypeAdapter
 
 from sangam.db import Database, utc_now
-from sangam.errors import NotFoundError
+from sangam.errors import IntegrationError, NotFoundError
 from sangam.security import Principal
 
 
@@ -23,6 +24,7 @@ TContext = TypeVar("TContext", bound=OwnerContext)
 
 _THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
 _ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
+_CHAT_PAYLOAD_VERSION = 1
 
 
 class SQLiteChatKitStore(Store[TContext]):
@@ -55,7 +57,7 @@ class SQLiteChatKitStore(Store[TContext]):
             ).fetchone()
         if row is None or row["created_by"] != self._actor_id(context):
             raise NotFoundError(f"Chat thread not found: {thread_id}")
-        return ThreadMetadata.model_validate_json(row["data_json"])
+        return ThreadMetadata.model_validate(_decode_payload(row["data_json"]))
 
     async def save_thread(self, thread: ThreadMetadata, context: TContext) -> None:
         now = utc_now()
@@ -84,7 +86,7 @@ class SQLiteChatKitStore(Store[TContext]):
                     thread.id,
                     self._actor_id(context),
                     document_id,
-                    stored.model_dump_json(),
+                    _encode_payload(stored),
                     thread.created_at.isoformat(),
                     now,
                 ),
@@ -130,7 +132,10 @@ class SQLiteChatKitStore(Store[TContext]):
         has_more = len(rows) > limit
         visible = rows[:limit]
         return Page(
-            data=[_THREAD_ITEM_ADAPTER.validate_json(row["data_json"]) for row in visible],
+            data=[
+                _THREAD_ITEM_ADAPTER.validate_python(_decode_payload(row["data_json"]))
+                for row in visible
+            ],
             has_more=has_more,
             after=visible[-1]["item_id"] if has_more and visible else None,
         )
@@ -173,7 +178,9 @@ class SQLiteChatKitStore(Store[TContext]):
         has_more = len(rows) > limit
         visible = rows[:limit]
         return Page(
-            data=[ThreadMetadata.model_validate_json(row["data_json"]) for row in visible],
+            data=[
+                ThreadMetadata.model_validate(_decode_payload(row["data_json"])) for row in visible
+            ],
             has_more=has_more,
             after=visible[-1]["thread_id"] if has_more and visible else None,
         )
@@ -190,7 +197,7 @@ class SQLiteChatKitStore(Store[TContext]):
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(item_id) DO UPDATE SET data_json = excluded.data_json
                 """,
-                (item.id, thread_id, item.model_dump_json(), item.created_at.isoformat()),
+                (item.id, thread_id, _encode_payload(item), item.created_at.isoformat()),
             )
             connection.execute(
                 "UPDATE chat_threads SET updated_at = ? WHERE thread_id = ?",
@@ -209,7 +216,7 @@ class SQLiteChatKitStore(Store[TContext]):
             ).fetchone()
         if row is None:
             raise NotFoundError(f"Chat item not found: {item_id}")
-        return _THREAD_ITEM_ADAPTER.validate_json(row["data_json"])
+        return _THREAD_ITEM_ADAPTER.validate_python(_decode_payload(row["data_json"]))
 
     async def delete_thread(self, thread_id: str, context: TContext) -> None:
         self._require_thread_owner(thread_id, context)
@@ -238,7 +245,7 @@ class SQLiteChatKitStore(Store[TContext]):
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(attachment_id) DO UPDATE SET data_json = excluded.data_json
                 """,
-                (attachment.id, self._actor_id(context), attachment.model_dump_json(), utc_now()),
+                (attachment.id, self._actor_id(context), _encode_payload(attachment), utc_now()),
             )
 
     async def load_attachment(self, attachment_id: str, context: TContext) -> Attachment:
@@ -251,7 +258,7 @@ class SQLiteChatKitStore(Store[TContext]):
             ).fetchone()
         if row is None or row["created_by"] != self._actor_id(context):
             raise NotFoundError(f"Chat attachment not found: {attachment_id}")
-        return _ATTACHMENT_ADAPTER.validate_json(row["data_json"])
+        return _ATTACHMENT_ADAPTER.validate_python(_decode_payload(row["data_json"]))
 
     async def delete_attachment(self, attachment_id: str, context: TContext) -> None:
         attachment = await self.load_attachment(attachment_id, context)
@@ -259,3 +266,28 @@ class SQLiteChatKitStore(Store[TContext]):
             connection.execute(
                 "DELETE FROM chat_attachments WHERE attachment_id = ?", (attachment.id,)
             )
+
+
+def _encode_payload(value) -> str:
+    return json.dumps(
+        {
+            "schema_version": _CHAT_PAYLOAD_VERSION,
+            "payload": value.model_dump(mode="json"),
+        },
+        separators=(",", ":"),
+    )
+
+
+def _decode_payload(value: str) -> object:
+    try:
+        decoded = json.loads(value)
+    except ValueError as error:
+        raise IntegrationError("Stored ChatKit payload is not valid JSON") from error
+    if not isinstance(decoded, dict) or "schema_version" not in decoded:
+        return decoded
+    if decoded.get("schema_version") != _CHAT_PAYLOAD_VERSION or "payload" not in decoded:
+        raise IntegrationError(
+            "Stored ChatKit payload uses an unsupported schema version",
+            details={"schema_version": decoded.get("schema_version")},
+        )
+    return decoded["payload"]

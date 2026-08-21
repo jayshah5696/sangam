@@ -13,10 +13,14 @@ import {
 import { useTheme } from '../theme'
 import { OneTimeSecret } from './OneTimeSecret'
 import { RevisionMergeView } from './RevisionMergeView'
+import {
+  ChatCreateConfirmation,
+  parseCreateConfirmation,
+  type CreateConfirmationRequest,
+} from './ChatCreateConfirmation'
+import { useChatKitScript } from './useChatKitScript'
 
 const SELECTION_LIMIT = 20_000
-const CHATKIT_SCRIPT_SRC = 'https://cdn.platform.openai.com/deployments/chatkit/chatkit.js'
-
 // One workspace-scoped chat thread persists across document tabs; the active
 // document is passed as live context rather than switching threads per tab.
 const THREAD_STORAGE_KEY = 'sangam.chat-thread.workspace'
@@ -46,22 +50,19 @@ export function ChatPanel({
   const [publishError, setPublishError] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState<IssuedPublication | null>(null)
+  const [pendingCreate, setPendingCreate] = useState<CreateConfirmationRequest | null>(null)
+  const [createError, setCreateError] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [openedCitation, setOpenedCitation] = useState<CitationTarget | null>(null)
   const publishResolver = useRef<((result: Record<string, unknown>) => void) | null>(null)
+  const createResolver = useRef<((result: Record<string, unknown>) => void) | null>(null)
   const configQuery = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
+  const script = useChatKitScript(configQuery.isSuccess)
   const proposalsQuery = useQuery({
     queryKey: ['chat-proposals', document.document_id, threadId],
     queryFn: () => api.listChatProposals(document.document_id, threadId ?? undefined),
-    enabled: configQuery.data?.configured === true,
+    enabled: configQuery.isSuccess,
   })
-  useEffect(() => {
-    if (!configQuery.data?.configured || customElements.get('openai-chatkit')) return
-    if (window.document.querySelector(`script[src="${CHATKIT_SCRIPT_SRC}"]`)) return
-    const script = window.document.createElement('script')
-    script.src = CHATKIT_SCRIPT_SRC
-    script.async = true
-    window.document.head.append(script)
-  }, [configQuery.data?.configured])
   const refreshProposals = useCallback(
     () =>
       queryClient.invalidateQueries({
@@ -80,10 +81,22 @@ export function ChatPanel({
       publishResolver.current = resolve
     })
   }, [])
+  const requestCreateConfirmation = useCallback((params: Record<string, unknown>) => {
+    const request = parseCreateConfirmation(params)
+    if (!request) return Promise.resolve({ approved: false, error: 'Invalid creation request' })
+    createResolver.current?.({ approved: false, status: 'superseded' })
+    setPendingCreate(request)
+    setCreateError(false)
+    return new Promise<Record<string, unknown>>((resolve) => {
+      createResolver.current = resolve
+    })
+  }, [])
   useEffect(
     () => () => {
       publishResolver.current?.({ approved: false, status: 'cancelled', reason: 'Chat panel closed' })
       publishResolver.current = null
+      createResolver.current?.({ approved: false, status: 'cancelled', reason: 'Chat panel closed' })
+      createResolver.current = null
     },
     [],
   )
@@ -98,6 +111,7 @@ export function ChatPanel({
     refreshProposals,
     navigate,
     requestPublishConfirmation,
+    requestCreateConfirmation,
   })
   useEffect(() => {
     liveRef.current = {
@@ -107,6 +121,7 @@ export function ChatPanel({
       refreshProposals,
       navigate,
       requestPublishConfirmation,
+      requestCreateConfirmation,
     }
   })
   const customFetch = useCallback((input: RequestInfo | URL, init?: RequestInit) => {
@@ -117,10 +132,10 @@ export function ChatPanel({
   const models = useMemo(
     () =>
       (configQuery.data?.available_models ?? []).map((model) => ({
-        id: model,
-        label: model.replace(/^openai\//, ''),
-        description: 'OpenRouter · OpenAI Responses',
-        default: model === configQuery.data?.default_model,
+        id: model.id,
+        label: model.name,
+        description: `${model.connection_name} · ${model.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions'} · ${model.compatibility}`,
+        default: model.id === configQuery.data?.default_model,
       })),
     [configQuery.data],
   )
@@ -143,7 +158,9 @@ export function ChatPanel({
       ],
     },
     composer: {
-      placeholder: 'Ask about this workspace…',
+      placeholder: configQuery.data?.inference_enabled
+        ? 'Ask about this workspace…'
+        : 'Inference unavailable · history remains readable',
       models,
       attachments: { enabled: false },
     },
@@ -159,6 +176,7 @@ export function ChatPanel({
         }
       }
       if (name === 'confirm_publish_document') return liveRef.current.requestPublishConfirmation(params)
+      if (name === 'confirm_create_document') return liveRef.current.requestCreateConfirmation(params)
       return { error: 'Unknown client tool' }
     },
     onThreadChange: ({ threadId: nextThreadId }) => {
@@ -211,6 +229,38 @@ export function ChatPanel({
       setPublishing(false)
     }
   }
+  const cancelCreate = () => {
+    createResolver.current?.({ approved: false, status: 'cancelled' })
+    createResolver.current = null
+    setPendingCreate(null)
+    setCreateError(false)
+  }
+  const approveCreate = async () => {
+    if (!pendingCreate || creating) return
+    setCreating(true)
+    setCreateError(false)
+    try {
+      const result = await api.createDocument(
+        pendingCreate.title,
+        undefined,
+        pendingCreate.contentType,
+        pendingCreate.content,
+      )
+      createResolver.current?.({
+        approved: true,
+        status: 'created',
+        document_id: result.document_id,
+        revision_id: result.current_revision_id,
+      })
+      createResolver.current = null
+      setPendingCreate(null)
+      await navigate({ href: `/documents/${result.document_id}` })
+    } catch {
+      setCreateError(true)
+    } finally {
+      setCreating(false)
+    }
+  }
 
   const lastDocumentIdRef = useRef(document.document_id)
   const [contextSwitchEvent, setContextSwitchEvent] = useState<{
@@ -243,13 +293,20 @@ export function ChatPanel({
       {configQuery.isLoading ? (
         <div className="center-message">Preparing workspace chat…</div>
       ) : configQuery.isError || !configQuery.data ? (
-        <p className="error-text">Chat configuration could not be loaded.</p>
-      ) : !configQuery.data.configured ? (
-        <div className="chat-unconfigured notice">
-          Set <code>SANGAM_OPENROUTER_API_KEY</code> to enable the OpenRouter agent runtime.
+        <div className="chat-unconfigured notice" role="alert">
+          <p>Chat configuration could not be loaded.</p>
+          <button className="secondary-action" onClick={() => void configQuery.refetch()}>
+            Retry
+          </button>
         </div>
       ) : (
         <>
+          {!configQuery.data.inference_enabled && (
+            <div className={`chat-runtime-status status-${configQuery.data.status}`} role="status">
+              <strong>{configQuery.data.status.replace('_', ' ')}</strong>
+              <span>{configQuery.data.message} History and proposal review remain available.</span>
+            </div>
+          )}
           <SelectionChip selectedText={selectedText} />
           {openedCitation && (
             <CitationNavigationStatus
@@ -267,14 +324,43 @@ export function ChatPanel({
               onCancel={cancelPublication}
             />
           )}
+          {pendingCreate && (
+            <ChatCreateConfirmation
+              request={pendingCreate}
+              pending={creating}
+              error={createError}
+              onApprove={() => void approveCreate()}
+              onCancel={cancelCreate}
+            />
+          )}
           {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
-          <ChatKit control={chatkit.control} className="chatkit-frame" />
-          <ProposalReviewList
-            proposals={proposalsQuery.data ?? []}
-            document={document}
-            onDocumentUpdated={onDocumentUpdated}
-            onChanged={() => void refreshProposals()}
-          />
+          {script.status === 'loading' && <div className="center-message">Loading chat interface…</div>}
+          {script.status === 'error' && (
+            <div className="chat-unconfigured notice" role="alert">
+              <p>The ChatKit interface could not be loaded.</p>
+              <button className="secondary-action" onClick={script.retry}>
+                Retry ChatKit
+              </button>
+            </div>
+          )}
+          {script.status === 'ready' && <ChatKit control={chatkit.control} className="chatkit-frame" />}
+          {proposalsQuery.isLoading ? (
+            <p className="small-muted">Loading edit proposals…</p>
+          ) : proposalsQuery.isError ? (
+            <div className="chat-proposals-error" role="alert">
+              <span>Proposals could not be loaded.</span>
+              <button className="secondary-action" onClick={() => void proposalsQuery.refetch()}>
+                Retry
+              </button>
+            </div>
+          ) : (
+            <ProposalReviewList
+              proposals={proposalsQuery.data ?? []}
+              document={document}
+              onDocumentUpdated={onDocumentUpdated}
+              onChanged={() => void refreshProposals()}
+            />
+          )}
         </>
       )}
     </div>

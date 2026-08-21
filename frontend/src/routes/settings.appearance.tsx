@@ -14,6 +14,7 @@ import {
 import { api, type Folder, type Tag } from '../api'
 import { AgentAccessSettings } from '../components/AgentAccessSettings'
 import { ChatModelSettings } from '../components/ChatModelSettings'
+import { activateTabFromKeyboard } from '../components/tabKeyboard'
 import { themes, useTheme } from '../theme'
 import { useWorkbench } from '../workbench'
 
@@ -57,25 +58,33 @@ export function WorkspaceSettings() {
           <button
             type="button"
             role="tab"
+            id="settings-tab-workspace"
+            aria-controls="settings-panel-workspace"
             aria-selected={activeCategory === 'workspace'}
+            tabIndex={activeCategory === 'workspace' ? 0 : -1}
             className={activeCategory === 'workspace' ? 'active' : ''}
             onClick={() => setActiveCategory('workspace')}
+            onKeyDown={activateTabFromKeyboard}
           >
             Workspace
           </button>
           <button
             type="button"
             role="tab"
+            id="settings-tab-operations"
+            aria-controls="settings-panel-operations"
             aria-selected={activeCategory === 'operations'}
+            tabIndex={activeCategory === 'operations' ? 0 : -1}
             className={activeCategory === 'operations' ? 'active' : ''}
             onClick={() => setActiveCategory('operations')}
+            onKeyDown={activateTabFromKeyboard}
           >
             Operations & AI
           </button>
         </div>
 
         {activeCategory === 'workspace' ? (
-          <>
+          <div id="settings-panel-workspace" role="tabpanel" aria-labelledby="settings-tab-workspace">
             <div className="settings-group-header">
               <h2>Workspace Preferences</h2>
               <p>Configure interface theme, workbench layout, and shared taxonomy.</p>
@@ -207,9 +216,9 @@ export function WorkspaceSettings() {
                 </div>
               </div>
             </SettingsSection>
-          </>
+          </div>
         ) : (
-          <>
+          <div id="settings-panel-operations" role="tabpanel" aria-labelledby="settings-tab-operations">
             <div className="settings-group-header">
               <h2>AI & Integrations</h2>
               <p>Manage model selections and API access tokens for external agents.</p>
@@ -260,7 +269,7 @@ export function WorkspaceSettings() {
                 </p>
               )}
             </SettingsSection>
-          </>
+          </div>
         )}
       </div>
     </div>

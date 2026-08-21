@@ -72,6 +72,25 @@
 .spin { animation: settings-spin .9s linear infinite; }
 @keyframes settings-spin { to { transform: rotate(360deg); } }
 .chat-model-settings { display: grid; gap: 12px; }
+.settings-query-error { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); }
+.connection-list { display: grid; gap: var(--space-3); }
+.connection-card { display: grid; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-soft); }
+.connection-card-heading, .connection-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.connection-card-heading > div { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.connection-card-heading strong { font-size: var(--text-body); }
+.connection-card-heading code { color: var(--muted); font-size: var(--text-meta); }
+.connection-status { padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--muted); font-size: var(--text-meta); text-transform: capitalize; }
+.connection-status.status-ready { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); color: var(--accent); }
+.connection-status.status-unreachable, .connection-status.status-incompatible, .connection-status.status-missing_credential { border-color: color-mix(in srgb, var(--danger) 42%, var(--line)); color: var(--danger); }
+.connection-fields, .connection-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.connection-fields label, .connection-form label { display: grid; gap: var(--space-1); color: var(--muted); font-size: var(--text-label); }
+.connection-fields input, .connection-fields select, .connection-form input, .connection-form select, .chat-model-add select { min-width: 0; height: var(--control-height); padding: 0 var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--text-control); }
+.connection-form { padding: var(--space-3); }
+.connection-form .connection-credential-field { grid-column: 1 / -1; }
+.connection-form > button { justify-self: start; }
+.connection-form > .error-text { grid-column: 1 / -1; }
+.connection-actions { justify-content: flex-end; }
+.connection-actions .compact-switch { margin-right: auto; }
 .chat-model-add { display: flex; gap: 8px; align-items: center; }
 .chat-model-add input { flex: 1; height: var(--control-height); min-height: var(--control-height); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--text-control); }
 .chat-model-search { height: var(--control-height); min-height: var(--control-height); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--text-control); }
@@ -85,6 +104,8 @@
 .chat-model-name { display: grid; gap: 1px; min-width: 0; }
 .chat-model-name strong { font-size: var(--text-body); }
 .chat-model-name small { color: var(--muted); font-size: var(--text-meta); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.chat-model-name i { color: var(--muted); font-size: var(--text-meta); font-style: normal; text-transform: capitalize; }
+.chat-model-row.compatibility-unsupported { opacity: .62; }
 .chat-model-default { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--text-control); white-space: nowrap; cursor: pointer; }
 .chat-model-default input { accent-color: var(--accent); }
 .chat-model-default.is-hidden { visibility: hidden; }
@@ -180,4 +201,9 @@
   .agent-token-prefixes, .agent-token-presets > div { grid-template-columns: 1fr; }
   .capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .token-row { align-items: flex-start; flex-direction: column; }
+  .connection-fields, .connection-form { grid-template-columns: 1fr; }
+  .connection-form .connection-credential-field { grid-column: 1; }
+  .connection-actions { align-items: stretch; flex-direction: column; }
+  .connection-actions .compact-switch { margin-right: 0; }
+  .chat-model-add { align-items: stretch; flex-direction: column; }
 }

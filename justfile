@@ -12,6 +12,8 @@ default:
 test:
     uv run ruff check .
     uv run ruff format --check .
+    just typecheck
+    uv run python scripts/verify_openapi_contract.py
     uv run pytest
     npm --prefix frontend run format:check
     npm --prefix frontend run build
@@ -28,6 +30,15 @@ check: test test-docs
 # Run only the Python service and API tests.
 test-backend:
     uv run pytest
+
+# Type-check the provider and chat boundary introduced by the architecture foundation.
+typecheck:
+    uv run mypy \
+        src/sangam/provider_connections.py \
+        src/sangam/chat_models.py \
+        src/sangam/chat_context.py \
+        src/sangam/chat.py \
+        src/sangam/chat_tools.py
 
 # Run only the browser client build, lint, and unit tests.
 test-frontend:

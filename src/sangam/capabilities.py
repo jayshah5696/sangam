@@ -15,3 +15,4 @@ class Capability(StrEnum):
     RESTORE = "restore"
     DELETE = "delete"
     PUBLISH = "publish"
+    INFERENCE = "inference"

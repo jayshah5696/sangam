@@ -37,7 +37,11 @@ def chatkit_request(client: TestClient, body: dict, **request_headers: str):
 
 
 def create_thread(
-    client: TestClient, *, document_id: str | None = None, **extra_headers: str
+    client: TestClient,
+    *,
+    document_id: str | None = None,
+    model: str = "openai/gpt-5.4-nano",
+    **extra_headers: str,
 ) -> str:
     request_headers = {"X-Sangam-Document-ID": document_id} if document_id else {}
     request_headers.update(extra_headers)
@@ -49,7 +53,7 @@ def create_thread(
                 "input": {
                     "content": [{"type": "input_text", "text": "Review this document"}],
                     "attachments": [],
-                    "inference_options": {"model": "openai/gpt-5.4-nano"},
+                    "inference_options": {"model": model},
                 }
             },
         },
@@ -72,24 +76,74 @@ def create_thread(
     return events[0]["thread"]["id"]
 
 
+def test_external_agent_requires_inference_scope_to_spend_provider_budget(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/v1/chat/connections",
+        json={
+            "connection_id": "local",
+            "name": "Local",
+            "protocol": "openai_chat_completions",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "credential_env": None,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 201
+    current = client.get("/api/v1/chat/models").json()
+    model = "local::demo/tool-model"
+    selected = client.put(
+        "/api/v1/chat/models",
+        json={
+            "expected_version": current["version"],
+            "workspace_enabled": True,
+            "default_model": model,
+            "enabled_models": [model],
+            "unknown_model_overrides": [model],
+        },
+    )
+    assert selected.status_code == 200
+    entry = next(item for item in selected.json()["catalog"] if item["id"] == model)
+    assert entry["protocol"] == "openai_chat_completions"
+
+    token = issue_agent_token(client, capabilities=("read",))
+    response = chatkit_request(
+        client,
+        {
+            "type": "threads.create",
+            "params": {
+                "input": {
+                    "content": [{"type": "input_text", "text": "Read this"}],
+                    "attachments": [],
+                    "inference_options": {"model": model},
+                }
+            },
+        },
+        Authorization=f"Bearer {token}",
+    )
+
+    assert response.status_code == 200
+    assert "does not include the inference capability" in response.text
+
+
 def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -> None:
     response = client.get("/api/v1/chat/config")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "configured": False,
-        "provider": "openrouter_openai_agents",
-        "transport": "chatkit",
-        "domain_key": "local-dev",
-        "default_model": "openai/gpt-5.6-luna",
-        "available_models": [
-            "openai/gpt-5.6-luna",
-            "openai/gpt-5.4-mini",
-            "openai/gpt-5.4-nano",
-            "openai/gpt-5.6-terra",
-        ],
-        "reasoning_effort": "low",
+    config = response.json()
+    assert config["status"] == "missing_credential"
+    assert config["inference_enabled"] is False
+    assert config["transport"] == "chatkit"
+    assert config["domain_key"] == "local-dev"
+    assert config["default_model"] == "openrouter::openai/gpt-5.6-luna"
+    assert {item["id"] for item in config["available_models"]} == {
+        "openrouter::openai/gpt-5.6-luna",
+        "openrouter::openai/gpt-5.4-mini",
+        "openrouter::openai/gpt-5.4-nano",
+        "openrouter::openai/gpt-5.6-terra",
     }
+    assert config["reasoning_effort"] == "low"
     assert "api_key" not in response.text
     assert {tool.name for tool in client.app.state.services.chat.tools} == {
         "get_editor_selection",
@@ -371,15 +425,18 @@ def test_chat_tool_wrapper_tracks_task_identity_and_serializes_failures(client: 
     result = asyncio.run(
         toolset._run_tool(
             ctx,
-            "Read document",
+            toolset.policies["read_document"],
             "missing",
             lambda: (_ for _ in ()).throw(ValidationError("cannot read document")),
         )
     )
 
     assert agent_context.updated_index == 1
-    assert json.loads(result)["error"]["code"] == "validation_error"
-    assert agent_context.workflow_item.workflow.tasks[1].content == "Failed: cannot read document"
+    payload = json.loads(result)
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["_trace"]["effect"] == "read"
+    assert payload["_trace"]["outcome"] == "failed"
+    assert agent_context.workflow_item.workflow.tasks[1].content.startswith("Failed · read ·")
 
 
 def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
@@ -486,6 +543,73 @@ def test_publish_tool_requires_client_confirmation_before_any_side_effect(
     }
     assert "token" not in json.dumps(agent_context.client_tool_call.arguments)
     assert client.get(f"/api/v1/publications/by-document/{document['document_id']}").json() is None
+
+
+def test_create_document_tool_requires_client_confirmation_before_any_side_effect(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="chat-create-confirm"
+    )
+    toolset = client.app.state.services.chat.toolset
+    agent_context = SimpleNamespace(
+        request_context=ChatRequestContext(principal=principal),
+        client_tool_call=None,
+    )
+    ctx = cast(Any, SimpleNamespace(context=agent_context))
+    monkeypatch.setattr(
+        toolset.workspace,
+        "create_document",
+        lambda *_args, **_kwargs: pytest.fail("create must not run before browser approval"),
+    )
+
+    result = asyncio.run(
+        toolset.create_document(ctx, title="  Research   note  ", content="# Evidence")
+    )
+
+    assert result is None
+    assert agent_context.client_tool_call.name == "confirm_create_document"
+    assert agent_context.client_tool_call.arguments == {
+        "title": "Research note",
+        "content": "# Evidence",
+        "content_type": "text/markdown",
+    }
+    assert client.get("/api/v1/documents").json() == []
+
+
+def test_chat_store_loads_legacy_payloads_and_rejects_unknown_versions(
+    client: TestClient,
+) -> None:
+    thread_id = create_thread(client)
+    chat = client.app.state.services.chat
+    database = chat.store_adapter.database
+    with database.transaction() as connection:
+        row = connection.execute(
+            "SELECT data_json FROM chat_threads WHERE thread_id = ?", (thread_id,)
+        ).fetchone()
+        envelope = json.loads(row["data_json"])
+        connection.execute(
+            "UPDATE chat_threads SET data_json = ? WHERE thread_id = ?",
+            (json.dumps(envelope["payload"]), thread_id),
+        )
+
+    legacy = chatkit_request(
+        client,
+        {"type": "threads.get_by_id", "params": {"thread_id": thread_id}},
+    )
+    assert legacy.status_code == 200
+
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE chat_threads SET data_json = ? WHERE thread_id = ?",
+            (json.dumps({"schema_version": 99, "payload": {}}), thread_id),
+        )
+    unsupported = chatkit_request(
+        client,
+        {"type": "threads.get_by_id", "params": {"thread_id": thread_id}},
+    )
+    assert unsupported.status_code == 502
+    assert "unsupported schema version" in unsupported.json()["error"]["message"]
 
 
 def _make_response(text: str, *, status: str = "completed", with_output: bool = True) -> Response:
@@ -630,7 +754,9 @@ def install_fake_model(client: TestClient, replies: Sequence[str]) -> list[Any]:
             index["value"] += 1
             return _RecordingResponsesModel(reply, captured)
 
-    client.app.state.services.chat.model_provider = Provider()
+    connections = client.app.state.services.provider_connections
+    connections._credential_overrides["openrouter"] = "sk-test"
+    connections.model_provider = lambda _connection_id: Provider()
     return captured
 
 

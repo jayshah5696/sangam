@@ -184,7 +184,18 @@ export const backupSetSchema = z.object({
 export type BackupSet = z.infer<typeof backupSetSchema>
 
 export const tokenScopeSchema = z.object({
-  capability: z.enum(['read', 'search', 'create', 'update', 'move', 'tag', 'restore', 'delete', 'publish']),
+  capability: z.enum([
+    'read',
+    'search',
+    'create',
+    'update',
+    'move',
+    'tag',
+    'restore',
+    'delete',
+    'publish',
+    'inference',
+  ]),
   path_prefix: z.string().nullable(),
 })
 
@@ -336,12 +347,13 @@ export const annotationEventSchema = z.object({
 export type AnnotationEvent = z.infer<typeof annotationEventSchema>
 
 export const chatRuntimeConfigSchema = z.object({
-  configured: z.boolean(),
-  provider: z.literal('openrouter_openai_agents'),
+  status: z.enum(['disabled', 'missing_credential', 'ready', 'unreachable', 'incompatible']),
+  inference_enabled: z.boolean(),
+  message: z.string(),
   transport: z.literal('chatkit'),
   domain_key: z.string(),
   default_model: z.string(),
-  available_models: z.array(z.string()),
+  available_models: z.array(z.lazy(() => chatModelInfoSchema)),
   reasoning_effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']),
 })
 
@@ -349,28 +361,59 @@ export type ChatRuntimeConfig = z.infer<typeof chatRuntimeConfigSchema>
 
 export const chatModelInfoSchema = z.object({
   id: z.string(),
+  model_id: z.string(),
+  connection_id: z.string(),
+  connection_name: z.string(),
   name: z.string(),
-  provider: z.string(),
+  publisher: z.string(),
+  protocol: z.enum(['openai_responses', 'openai_chat_completions']),
+  compatibility: z.enum(['verified', 'unknown', 'unsupported']),
+  supports_tools: z.boolean().nullable(),
+  supports_reasoning: z.boolean().nullable(),
+  operator_override: z.boolean(),
   enabled: z.boolean(),
 })
 
 export const chatModelSettingsSchema = z.object({
-  openrouter_configured: z.boolean(),
-  openrouter_enabled: z.boolean(),
+  workspace_enabled: z.boolean(),
   default_model: z.string(),
   enabled_models: z.array(z.string()),
   catalog: z.array(chatModelInfoSchema),
   catalog_fetched_at: z.string().nullable(),
+  version: z.number(),
 })
 
 export type ChatModelInfo = z.infer<typeof chatModelInfoSchema>
 export type ChatModelSettings = z.infer<typeof chatModelSettingsSchema>
 
 export type ChatModelSelectionUpdate = {
-  openrouter_enabled: boolean
+  expected_version: number
+  workspace_enabled: boolean
   default_model: string
   enabled_models: string[]
+  unknown_model_overrides: string[]
 }
+
+export const providerConnectionSchema = z.object({
+  connection_id: z.string(),
+  name: z.string(),
+  preset: z.string().nullable(),
+  protocol: z.enum(['openai_responses', 'openai_chat_completions']),
+  base_url: z.string(),
+  credential_env: z.string().nullable(),
+  credential_present: z.boolean(),
+  enabled: z.boolean(),
+  version: z.number(),
+  status: z.enum(['disabled', 'missing_credential', 'ready', 'unreachable', 'incompatible']),
+  last_checked_at: z.string().nullable(),
+  last_error: z.string().nullable(),
+})
+
+export type ProviderConnection = z.infer<typeof providerConnectionSchema>
+export type ProviderConnectionInput = Pick<
+  ProviderConnection,
+  'name' | 'protocol' | 'base_url' | 'credential_env' | 'enabled'
+>
 
 export const chatProposalSchema = z.object({
   proposal_id: z.string(),
@@ -474,6 +517,37 @@ export const api = {
   },
   async refreshChatModels(): Promise<ChatModelSettings> {
     return chatModelSettingsSchema.parse(await request('/chat/models/refresh', { method: 'POST' }))
+  },
+  async chatConnections(): Promise<ProviderConnection[]> {
+    return z.array(providerConnectionSchema).parse(await request('/chat/connections'))
+  },
+  async createChatConnection(
+    input: ProviderConnectionInput & { connection_id: string },
+  ): Promise<ProviderConnection> {
+    return providerConnectionSchema.parse(
+      await request('/chat/connections', { method: 'POST', body: JSON.stringify(input) }),
+    )
+  },
+  async updateChatConnection(
+    connection: ProviderConnection,
+    input: ProviderConnectionInput,
+  ): Promise<ProviderConnection> {
+    return providerConnectionSchema.parse(
+      await request(`/chat/connections/${connection.connection_id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...input, expected_version: connection.version }),
+      }),
+    )
+  },
+  async testChatConnection(connectionId: string): Promise<{ message: string; discovered_models: number }> {
+    return z
+      .object({ connection: providerConnectionSchema, message: z.string(), discovered_models: z.number() })
+      .parse(await request(`/chat/connections/${connectionId}/test`, { method: 'POST' }))
+  },
+  async refreshConnectionModels(connectionId: string): Promise<ChatModelSettings> {
+    return chatModelSettingsSchema.parse(
+      await request(`/chat/connections/${connectionId}/models/refresh`, { method: 'POST' }),
+    )
   },
   async listChatProposals(documentId: string, threadId?: string): Promise<ChatProposal[]> {
     const params = new URLSearchParams({ document_id: documentId })
@@ -620,11 +694,13 @@ export const api = {
     title: string,
     path?: string,
     contentType: Document['content_type'] = 'text/markdown',
+    initialContent?: string,
   ): Promise<Document> {
     const content =
-      contentType === 'text/html'
+      initialContent ??
+      (contentType === 'text/html'
         ? `<!doctype html>\n<html>\n  <head><title>${title}</title></head>\n  <body>\n    <h1>${title}</h1>\n  </body>\n</html>\n`
-        : `# ${title}\n\n`
+        : `# ${title}\n\n`)
     return documentSchema.parse(
       await request('/documents', {
         method: 'POST',

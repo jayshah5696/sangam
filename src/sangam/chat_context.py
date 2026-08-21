@@ -12,6 +12,8 @@ from sangam.security import Principal
 class ChatRequestContext:
     principal: Principal
     document_id: str | None = None
+    pinned_revision_id: str | None = None
+    model_ref: str | None = None
 
 
 AgentRunContext = AgentContext[ChatRequestContext]

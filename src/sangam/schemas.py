@@ -7,6 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sangam.capabilities import Capability
 
 
+class MutationRequest(BaseModel):
+    """Public mutation bodies reject misspelled or stale client fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class Tag(BaseModel):
     tag_id: str
     name: str
@@ -107,11 +113,11 @@ class KarakeepImportDetail(KarakeepImport):
     pending_markdown: str | None = None
 
 
-class ImportKarakeepBookmark(BaseModel):
+class ImportKarakeepBookmark(MutationRequest):
     bookmark_id: str = Field(min_length=1, max_length=240)
 
 
-class ApplyKarakeepRefresh(BaseModel):
+class ApplyKarakeepRefresh(MutationRequest):
     expected_revision_id: str
     content: str | None = None
 
@@ -144,61 +150,61 @@ class Revision(BaseModel):
     created_at: str
 
 
-class CreateDocument(BaseModel):
+class CreateDocument(MutationRequest):
     title: str = Field(min_length=1, max_length=240)
     content: str = ""
     path: str | None = None
     content_type: Literal["text/markdown", "text/html"] = "text/markdown"
 
 
-class UpdateDocumentMetadata(BaseModel):
+class UpdateDocumentMetadata(MutationRequest):
     expected_metadata_version: int = Field(ge=0)
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
-class CreateTag(BaseModel):
+class CreateTag(MutationRequest):
     name: str = Field(min_length=1, max_length=60)
     color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
 
 
-class CreateFolder(BaseModel):
+class CreateFolder(MutationRequest):
     path: str = Field(min_length=1, max_length=500)
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
-class UpdateFolderMetadata(BaseModel):
+class UpdateFolderMetadata(MutationRequest):
     expected_metadata_version: int = Field(ge=0)
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
-class UpdateDocument(BaseModel):
+class UpdateDocument(MutationRequest):
     expected_revision_id: str
     content: str
     title: str | None = Field(default=None, min_length=1, max_length=240)
     summary: str | None = Field(default=None, max_length=500)
 
 
-class PathMutation(BaseModel):
+class PathMutation(MutationRequest):
     expected_revision_id: str
     path: str
     summary: str | None = Field(default=None, max_length=500)
 
 
-class DeleteDocument(BaseModel):
+class DeleteDocument(MutationRequest):
     expected_revision_id: str
     summary: str | None = Field(default=None, max_length=500)
 
 
-class RestoreDocument(BaseModel):
+class RestoreDocument(MutationRequest):
     expected_revision_id: str
     revision_id: str
     summary: str | None = Field(default=None, max_length=500)
 
 
-class DuplicateDocument(BaseModel):
+class DuplicateDocument(MutationRequest):
     expected_revision_id: str
     title: str | None = Field(default=None, min_length=1, max_length=240)
     path: str | None = Field(default=None, max_length=500)
@@ -213,7 +219,7 @@ class RevisionDiff(BaseModel):
     deletions: int
 
 
-class ReindexPath(BaseModel):
+class ReindexPath(MutationRequest):
     path: str
 
 
@@ -264,6 +270,10 @@ class ErrorBody(BaseModel):
     details: dict[str, object] = Field(default_factory=dict)
 
 
+class ErrorResponse(BaseModel):
+    error: ErrorBody
+
+
 class TokenScope(BaseModel):
     capability: Capability
     path_prefix: str | None = None
@@ -293,7 +303,7 @@ class IssuedAgentToken(AgentToken):
     token: str
 
 
-class CreateAgentToken(BaseModel):
+class CreateAgentToken(MutationRequest):
     actor_id: str = Field(pattern=r"^agent:[a-z0-9][a-z0-9._-]{1,63}$")
     display_name: str = Field(min_length=1, max_length=120)
     label: str = Field(min_length=1, max_length=120)
@@ -320,7 +330,7 @@ class OperationEvent(BaseModel):
     created_at: str
 
 
-class UpdateDocumentTrust(BaseModel):
+class UpdateDocumentTrust(MutationRequest):
     expected_trust_version: int = Field(ge=0)
     trust_level: Literal["untrusted", "trusted_interactive"]
 
@@ -345,13 +355,13 @@ class IssuedPublication(Publication):
     token: str | None = None
 
 
-class CreatePublication(BaseModel):
+class CreatePublication(MutationRequest):
     document_id: str
     slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
     access_policy: Literal["private", "public", "unlisted"] = "private"
 
 
-class UpdatePublication(BaseModel):
+class UpdatePublication(MutationRequest):
     expected_version: int = Field(ge=0)
     slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
     access_policy: Literal["private", "public", "unlisted"]
@@ -364,7 +374,7 @@ class PublicationRevision(BaseModel):
     exposed_at: str
 
 
-class ExposePublicationRevision(BaseModel):
+class ExposePublicationRevision(MutationRequest):
     revision_id: str
 
 
@@ -445,11 +455,13 @@ class Annotation(AnnotationSnapshot):
 
 
 class CreateAnnotation(AnnotationFields):
+    model_config = ConfigDict(extra="forbid")
     page_number: int = Field(ge=1)
     annotation_type: AnnotationType
 
 
 class UpdateAnnotation(AnnotationFields):
+    model_config = ConfigDict(extra="forbid")
     expected_version: int = Field(ge=1)
 
 
@@ -467,35 +479,91 @@ class AnnotationEvent(BaseModel):
 
 
 class ChatRuntimeConfig(BaseModel):
-    configured: bool
-    provider: Literal["openrouter_openai_agents"]
+    status: Literal["disabled", "missing_credential", "ready", "unreachable", "incompatible"]
+    inference_enabled: bool
+    message: str
     transport: Literal["chatkit"] = "chatkit"
     domain_key: str
     default_model: str
-    available_models: list[str]
+    available_models: list[ChatModelInfo]
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 
 class ChatModelInfo(BaseModel):
     id: str
+    model_id: str
+    connection_id: str
+    connection_name: str
     name: str
-    provider: str
+    publisher: str
+    protocol: Literal["openai_responses", "openai_chat_completions"]
+    compatibility: Literal["verified", "unknown", "unsupported"]
+    supports_tools: bool | None
+    supports_reasoning: bool | None
+    operator_override: bool
     enabled: bool
 
 
 class ChatModelSettings(BaseModel):
-    openrouter_configured: bool
-    openrouter_enabled: bool
+    workspace_enabled: bool
     default_model: str
     enabled_models: list[str]
     catalog: list[ChatModelInfo]
     catalog_fetched_at: str | None
+    version: int
 
 
 class ChatModelSelectionUpdate(BaseModel):
-    openrouter_enabled: bool
-    default_model: str = Field(min_length=1, max_length=160)
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    workspace_enabled: bool
+    default_model: str = Field(min_length=1, max_length=320)
     enabled_models: list[str] = Field(min_length=1, max_length=100)
+    unknown_model_overrides: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ProviderConnection(BaseModel):
+    connection_id: str
+    name: str
+    preset: str | None
+    protocol: Literal["openai_responses", "openai_chat_completions"]
+    base_url: str
+    credential_env: str | None
+    credential_present: bool
+    enabled: bool
+    version: int
+    status: Literal["disabled", "missing_credential", "ready", "unreachable", "incompatible"]
+    last_checked_at: str | None
+    last_error: str | None
+
+
+class CreateProviderConnection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connection_id: str = Field(min_length=2, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    protocol: Literal["openai_responses", "openai_chat_completions"]
+    base_url: str = Field(min_length=8, max_length=500)
+    credential_env: str | None = Field(default=None, max_length=128)
+    enabled: bool = True
+
+
+class UpdateProviderConnection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=120)
+    protocol: Literal["openai_responses", "openai_chat_completions"]
+    base_url: str = Field(min_length=8, max_length=500)
+    credential_env: str | None = Field(default=None, max_length=128)
+    enabled: bool
+
+
+class ProviderConnectionTest(BaseModel):
+    connection: ProviderConnection
+    discovered_models: int
+    message: str
 
 
 class ChatProposal(BaseModel):
@@ -511,9 +579,9 @@ class ChatProposal(BaseModel):
     applied_at: str | None
 
 
-class ApplyChatProposal(BaseModel):
+class ApplyChatProposal(MutationRequest):
     expected_revision_id: str
 
 
-class DismissChatProposal(BaseModel):
+class DismissChatProposal(MutationRequest):
     reason: str | None = Field(default=None, max_length=500)
