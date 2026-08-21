@@ -253,6 +253,17 @@ while explicit save and freshness states keep background work visible.
 
 ![Sangam document workbench showing the compact workspace rail, active Markdown editor, save state, and document inspector](./docs/assets/crisp-workspace.png)
 
+<details>
+<summary>📱 Mobile workspace and bottom-sheet inspector</summary>
+
+![Sangam document workbench on mobile with clean tab clearance and responsive touch toolbar](./docs/assets/crisp-workspace-narrow.png)
+
+![Sangam document inspector on mobile as a slide-up modal bottom sheet](./docs/assets/crisp-inspector-narrow.png)
+
+![Sangam AI chat on mobile embedded within the inspector bottom sheet](./docs/assets/crisp-chat-narrow.png)
+
+</details>
+
 ### Searchable settings
 
 Settings uses one dedicated navigation rail. Search opens the correct category
@@ -263,7 +274,7 @@ reflow without clipping on narrow screens.
 ![Sangam appearance settings showing the dedicated settings rail and four workspace theme previews](./docs/assets/crisp-settings.png)
 
 <details>
-<summary>Narrow settings layout</summary>
+<summary>📱 Narrow settings layout</summary>
 
 ![Sangam appearance settings at a 390 pixel viewport with horizontal category navigation and stacked theme previews](./docs/assets/crisp-settings-narrow.png)
 
@@ -313,11 +324,12 @@ bytes.
 
 ![Phase 5 PDF research workspace showing the PDF reader, page-text search result, and an actor-attributed page note](./docs/assets/phase-5-pdf-research.png)
 
-At narrow widths, the reader and research rail stack into one continuous
-workspace. The toolbar wraps while the PDF viewport and research rail retain
-their own overflow behavior.
+<details>
+<summary>📱 Mobile PDF research workspace</summary>
 
-![Phase 5 PDF research workspace at a narrow viewport with the fitted PDF reader above the page search and annotation controls](./docs/assets/phase-5-pdf-research-narrow.png)
+![Phase 5 PDF research workspace at a narrow viewport with responsive auto-fit width and segmented reader or notes toggle](./docs/assets/phase-5-pdf-research-narrow.png)
+
+</details>
 
 ### HTML preview and publication controls
 
@@ -326,6 +338,13 @@ renders directly in the split preview pane. The inspector provides stable slug
 configuration, access policies, publication updates, and unpublishing.
 
 ![Phase 4 HTML publishing workspace showing a styled safe preview and the stable public publication controls](./docs/assets/phase-4-publishing-workspace.png)
+
+<details>
+<summary>📱 Mobile HTML preview</summary>
+
+![Phase 4 HTML publishing workspace on mobile with isolated safe preview](./docs/assets/phase-4-publishing-narrow.png)
+
+</details>
 
 ### Stable public publication
 
