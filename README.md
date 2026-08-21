@@ -11,7 +11,7 @@
 A single-user, self-hosted document workspace where a human and identified AI
 agents work with ordinary files through the same small, revision-aware API.
 
-> **Release status:** [Sangam 0.4.0](https://github.com/jayshah5696/sangam/releases/tag/v0.4.0)
+> **Release status:** [Sangam 0.5.0](https://github.com/jayshah5696/sangam/releases/tag/v0.5.0)
 > is a published and verified self-hosted beta. Its signed application image is
 > public on [GitHub Container Registry](https://github.com/jayshah5696/sangam/pkgs/container/sangam).
 > A technically capable operator can deploy it privately by immutable digest;
@@ -19,7 +19,7 @@ agents work with ordinary files through the same small, revision-aware API.
 > identity, network, storage, backup, and monitoring environment. See the
 > [CHANGELOG.md](./CHANGELOG.md) for the exact boundary.
 
-[Install 0.4.0](#install-040) · [Deploy safely](#production-deployment) ·
+[Install 0.5.0](#install-050) · [Deploy safely](#production-deployment) ·
 [Verify the release](#verify-the-release) · [Explore features](#what-sangam-does) ·
 [Develop](#development) · [Read the docs](#documentation)
 
@@ -63,7 +63,7 @@ proposals instead of invisible writes.
   generation-consistent paired backups, verify their contents, and expose separate
   health and readiness endpoints.
 
-## Install 0.4.0
+## Install 0.5.0
 
 The container is the supported complete application artifact. It includes the
 browser client, API, migration set, background workers, and CLI and runs as the
@@ -96,7 +96,7 @@ docker run --detach --init \
   --volume sangam-database:/data/database \
   --volume sangam-workspace:/data/workspace \
   --volume sangam-backups:/data/backups \
-  ghcr.io/jayshah5696/sangam:0.4.0
+  ghcr.io/jayshah5696/sangam:0.5.0
 ```
 
 Open <http://127.0.0.1:8000>. The public package can be pulled without signing in
@@ -121,7 +121,7 @@ Clone the release, create the persistent bind-mount directories with the
 container's unprivileged identity, and create a deployment environment:
 
 ```bash
-git clone --branch v0.4.0 --depth 1 https://github.com/jayshah5696/sangam.git
+git clone --branch v0.5.0 --depth 1 https://github.com/jayshah5696/sangam.git
 cd sangam
 sudo install -d -m 0750 -o 10001 -g 10001 \
   data/database data/workspace data/backups
@@ -154,9 +154,9 @@ before changing a running digest.
 
 ## Verify the release
 
-Sangam 0.4.0 is built for `linux/amd64` and `linux/arm64`, scanned before push,
+Sangam 0.5.0 is built for `linux/amd64` and `linux/arm64`, scanned before push,
 signed keylessly with Sigstore, and published with BuildKit SBOM/provenance plus a
-GitHub artifact attestation. The [GitHub Release](https://github.com/jayshah5696/sangam/releases/tag/v0.4.0)
+GitHub artifact attestation. The [GitHub Release](https://github.com/jayshah5696/sangam/releases/tag/v0.5.0)
 also contains the backend/CLI wheel, source archive, and `SHA256SUMS`.
 
 Inspect and verify the exact application image:
@@ -533,7 +533,7 @@ vertical slices.
 
 ## Project status and support
 
-Sangam 0.4.0 is a self-hosted beta, not a hosted service or a promise that every
+Sangam 0.5.0 is a self-hosted beta, not a hosted service or a promise that every
 deployment environment has passed production acceptance. Review the
 [known follow-up work](./docs/AFTER_0.1.md) before relying on it for irreplaceable
 data. In particular, operators still own encrypted off-host replication, restore

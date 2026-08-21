@@ -7,6 +7,21 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.5.0] - 2026-08-21
+
+### Added
+
+- Enhanced mobile touch UX/UI across document workbench, PDF viewer, and settings optimized for narrow mobile viewports (e.g. 390px iPhone width).
+- Smooth horizontal tab scrolling and mobile-adaptive document action toolbar.
+- Standardized touch target dimensions (≥44px) across interactive buttons, switches, and navigation controls.
+- Mobile PDF research workspace optimizations with responsive toolbar and page controls.
+- Verified desktop and collapsible mobile screenshot galleries in documentation.
+
+### Changed
+
+- Center-aligned brand logo and refreshed responsive visual previews in README.
+- Refined responsive padding, font sizing, and drawer transitions on mobile devices.
+
 ## [0.4.0] - 2026-08-20
 
 ### Added
@@ -61,7 +76,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.2.0
