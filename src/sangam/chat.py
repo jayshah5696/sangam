@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
 
 from agents import Agent, ModelSettings, RunConfig, Runner
-from agents.models.openai_provider import OpenAIProvider
 from chatkit.agents import AgentContext, ThreadItemConverter, stream_agent_response
 from chatkit.errors import CustomStreamError
 from chatkit.server import ChatKitServer
@@ -14,10 +14,11 @@ from chatkit.types import (
     ThreadStreamEvent,
     UserMessageItem,
 )
-from openai import AsyncOpenAI
 from openai.types.responses import EasyInputMessageParam, ResponseInputTextParam
+from openai.types.shared.reasoning import Reasoning
 
 from sangam.access import WorkspaceAccessService
+from sangam.capabilities import Capability
 from sangam.chat_context import AgentRunContext, ChatRequestContext
 from sangam.chat_models import ChatModelCatalog
 from sangam.chat_proposals import ChatProposalRepository, ChatProposalService
@@ -25,6 +26,7 @@ from sangam.chat_store import SQLiteChatKitStore
 from sangam.chat_tools import ChatToolset
 from sangam.config import ChatServerConfig
 from sangam.db import Database
+from sangam.provider_connections import ProviderConnectionService, ProviderStatus
 from sangam.schemas import ChatRuntimeConfig
 
 _MAX_TITLE_LENGTH = 48
@@ -70,7 +72,7 @@ def _derive_thread_title(message: UserMessageItem | None) -> str | None:
 
 
 class SangamChatServer(ChatKitServer[ChatRequestContext]):
-    """ChatKit server that runs an OpenAI Agent against OpenRouter's Responses API."""
+    """ChatKit server backed by connection-scoped OpenAI-compatible providers."""
 
     def __init__(
         self,
@@ -79,10 +81,12 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         workspace: WorkspaceAccessService,
         config: ChatServerConfig,
         model_catalog: ChatModelCatalog,
+        provider_connections: ProviderConnectionService,
     ) -> None:
         self.workspace = workspace
         self.config = config
         self.model_catalog = model_catalog
+        self.provider_connections = provider_connections
         self.store_adapter = SQLiteChatKitStore[ChatRequestContext](database)
         super().__init__(self.store_adapter)
 
@@ -97,32 +101,40 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             max_result_bytes=config.max_tool_result_bytes,
         )
         self.tools = self.toolset.as_agent_tools()
-        self.model_provider = self._model_provider(config)
         self.item_converter = SangamThreadItemConverter()
-
-    @staticmethod
-    def _model_provider(config: ChatServerConfig) -> OpenAIProvider | None:
-        if not config.api_key:
-            return None
-        headers = {"X-Title": config.app_title}
-        if config.http_referer:
-            headers["HTTP-Referer"] = config.http_referer
-        client = AsyncOpenAI(
-            api_key=config.api_key,
-            base_url=config.base_url.rstrip("/"),
-            timeout=config.timeout_seconds,
-            default_headers=headers,
-        )
-        return OpenAIProvider(openai_client=client, use_responses=True)
+        self._run_semaphore = asyncio.Semaphore(config.max_concurrent_runs)
 
     def runtime_config(self) -> ChatRuntimeConfig:
         state = self.model_catalog.state()
+        model = self.model_catalog.get_model(state.default_model)
+        connection = self.provider_connections.get(model.connection_id)
+        if not state.workspace_enabled:
+            status: ProviderStatus = "disabled"
+            message = "Workspace inference is disabled in AI settings."
+        else:
+            status = connection.status
+            message = {
+                "disabled": "The selected provider connection is disabled.",
+                "missing_credential": (
+                    f"Set {connection.credential_env} in the server environment."
+                ),
+                "ready": f"Ready through {connection.name}.",
+                "unreachable": f"{connection.name} could not be reached during its last test.",
+                "incompatible": f"{connection.name} is not OpenAI API compatible.",
+            }[status]
+        schema = self.model_catalog.as_schema()
+        available = [
+            item
+            for item in schema.catalog
+            if item.id in state.enabled_models and item.compatibility != "unsupported"
+        ]
         return ChatRuntimeConfig(
-            configured=self.model_provider is not None and state.openrouter_enabled,
-            provider="openrouter_openai_agents",
+            status=status,
+            inference_enabled=status == "ready" and state.workspace_enabled,
+            message=message,
             domain_key=self.config.domain_key,
             default_model=state.default_model,
-            available_models=list(state.enabled_models),
+            available_models=available,
             reasoning_effort=self.config.reasoning_effort,
         )
 
@@ -132,18 +144,25 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         input_user_message: UserMessageItem | None,
         context: ChatRequestContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
-        if self.model_provider is None:
-            raise CustomStreamError(
-                "Workspace chat needs SANGAM_OPENROUTER_API_KEY before it can respond."
-            )
         state = self.model_catalog.state()
-        if not state.openrouter_enabled:
-            raise CustomStreamError("Workspace chat is turned off in Model settings.")
-        model = state.default_model
+        if not state.workspace_enabled:
+            raise CustomStreamError("Workspace inference is disabled in AI settings.")
+        selected_ref = state.default_model
         if input_user_message and input_user_message.inference_options.model:
-            model = input_user_message.inference_options.model
-        if model not in state.enabled_models:
+            selected_ref = input_user_message.inference_options.model
+        selected_model = self.model_catalog.get_model(selected_ref)
+        if selected_model.id not in state.enabled_models:
             raise CustomStreamError("That model is not enabled for this Sangam server.")
+        connection = self.provider_connections.get(selected_model.connection_id)
+        if connection.status != "ready":
+            raise CustomStreamError(self.runtime_config().message)
+        if not context.principal.administrator and context.principal.identity_kind != "system":
+            try:
+                self.workspace.policy.require(context.principal, Capability.INFERENCE, None)
+            except Exception as error:
+                raise CustomStreamError(
+                    "This agent token does not include the inference capability."
+                ) from error
 
         if not thread.title:
             title = _derive_thread_title(input_user_message)
@@ -151,7 +170,34 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                 thread.title = title
 
         document_id = context.document_id or thread.metadata.get("document_id")
-        request_context = replace(context, document_id=document_id)
+        turn_contexts = dict(thread.metadata.get("turn_contexts", {}))
+        item_id = input_user_message.id if input_user_message else None
+        snapshot = turn_contexts.get(item_id) if item_id else None
+        if snapshot is None:
+            revision_id = None
+            if document_id:
+                revision_id = self.workspace.get_document(
+                    context.principal, document_id
+                ).current_revision_id
+            snapshot = {
+                "document_id": document_id,
+                "revision_id": revision_id,
+                "model_ref": selected_model.id,
+            }
+            if item_id:
+                turn_contexts[item_id] = snapshot
+                thread.metadata = {**thread.metadata, "turn_contexts": turn_contexts}
+                await self.store.save_thread(thread, context)
+        else:
+            document_id = snapshot.get("document_id")
+            selected_model = self.model_catalog.get_model(snapshot["model_ref"])
+            connection = self.provider_connections.get(selected_model.connection_id)
+        request_context = replace(
+            context,
+            document_id=document_id,
+            pinned_revision_id=snapshot.get("revision_id"),
+            model_ref=selected_model.id,
+        )
         app_context = await self._app_context(request_context)
         page = await self.store.load_thread_items(
             thread.id,
@@ -178,38 +224,43 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             instructions=_AGENT_INSTRUCTIONS,
             tools=self.tools,
         )
-        reasoning = None
-        if self.config.reasoning_effort != "none":
-            reasoning = {"effort": self.config.reasoning_effort}
-        result = Runner.run_streamed(
-            agent,
-            input=input_items,
-            context=agent_context,
-            max_turns=self.config.max_turns,
-            run_config=RunConfig(
-                model=model,
-                model_provider=self.model_provider,
-                model_settings=ModelSettings(
-                    reasoning=reasoning,
-                    store=False,
-                    parallel_tool_calls=False,
+        reasoning: Reasoning | None = None
+        if self.config.reasoning_effort != "none" and selected_model.supports_reasoning is True:
+            reasoning = Reasoning(effort=self.config.reasoning_effort)
+        async with self._run_semaphore:
+            result = Runner.run_streamed(
+                agent,
+                input=input_items,
+                context=agent_context,
+                max_turns=self.config.max_turns,
+                run_config=RunConfig(
+                    model=selected_model.model_id,
+                    model_provider=self.provider_connections.model_provider(
+                        connection.connection_id
+                    ),
+                    model_settings=ModelSettings(
+                        reasoning=reasoning,
+                        max_tokens=self.config.max_output_tokens,
+                        store=False,
+                        parallel_tool_calls=False,
+                    ),
+                    tracing_disabled=True,
+                    workflow_name="Sangam workspace chat",
                 ),
-                tracing_disabled=True,
-                workflow_name="Sangam workspace chat",
-            ),
-        )
-        async for event in stream_agent_response(agent_context, result):
-            yield event
+            )
+            async for event in stream_agent_response(agent_context, result):
+                yield event
 
     async def _app_context(self, context: ChatRequestContext) -> str:
         if not context.document_id:
             return "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
         document = self.workspace.get_document(context.principal, context.document_id)
+        revision_id = context.pinned_revision_id or document.current_revision_id
         return (
             "<SANGAM_CONTEXT>\n"
             f"Current document id: {document.document_id}\n"
             f"Title: {document.title}\n"
-            f"Revision: {document.current_revision_id}\n"
+            f"Revision pinned for this turn: {revision_id}\n"
             f"Content type: {document.content_type}\n"
             "Call read_document or read_pdf_page before making claims about its content. "
             "Call get_editor_selection when the user's request refers to selected text.\n"

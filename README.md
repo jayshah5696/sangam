@@ -49,9 +49,9 @@ proposals instead of invisible writes.
 - **Scoped agent collaboration.** Issue one-time bearer tokens with explicit
   capabilities, path boundaries, expiry, rotation, and revocation. Accepted,
   denied, conflicted, and failed operations remain attributable and reviewable.
-- **Workspace-grounded chat.** Use ChatKit with OpenRouter Responses models,
-  durable threads, streaming, stop/retry, revision-pinned citations, and
-  human-reviewed edit proposals.
+- **Workspace-grounded chat.** Use ChatKit with connection-scoped models from
+  OpenRouter or another OpenAI-compatible endpoint, durable threads, streaming,
+  revision-pinned citations, and human-reviewed edit proposals.
 - **Karakeep bridge.** Selectively import archived bookmarks as editable Markdown
   while retaining provenance and keeping refreshes from overwriting human edits.
 - **Recovery-aware operations.** Reconcile SQLite with materialized files, create
@@ -125,7 +125,7 @@ cp .env.example .env
 
 Set the following values in `.env` as needed:
 
-- optional OpenRouter API key for workspace chat;
+- optional provider credentials for workspace chat;
 - optional Karakeep credentials if importing bookmarks; and
 - your authentication settings (`single_user`, `trusted_proxy`, or `cloudflare_access`).
 
@@ -215,34 +215,48 @@ credential rotation, source limits, retry behavior, refresh review, and recovery
 
 ### Workspace chat
 
-Add an OpenRouter key, explicit model allowlist, and ChatKit domain registration:
+OpenRouter ships as the first connection preset. To use it, add its server-side
+key and the ChatKit domain registration:
 
 ```dotenv
 SANGAM_OPENROUTER_API_KEY=replace-with-openrouter-api-key
 SANGAM_OPENROUTER_HTTP_REFERER=http://127.0.0.1:8000
-SANGAM_CHAT_DEFAULT_MODEL=openai/gpt-5.6-luna
-SANGAM_CHAT_AVAILABLE_MODELS=["openai/gpt-5.6-luna","openai/gpt-5.4-mini","openai/gpt-5.4-nano","openai/gpt-5.6-terra"]
 SANGAM_CHATKIT_DOMAIN_KEY=local-dev
 SANGAM_OPENROUTER_APP_TITLE=Sangam
 ```
 
 Use the real HTTPS application origin and its registered ChatKit domain key in
-production. The provider key stays in the backend. Existing-document edits remain
-revision-pinned proposals until a human reviews and applies the diff. The
+production. Then open **Settings > Operations & AI** to test the preset, discover
+models, and select the workspace default. The same page can add direct OpenAI,
+local, or gateway endpoints that implement OpenAI Responses or Chat Completions.
+Connection records store only an environment-variable name, never a credential.
+
+The legacy `SANGAM_CHAT_DEFAULT_MODEL` and `SANGAM_CHAT_AVAILABLE_MODELS` values
+seed a new database. After that first seed, SQLite owns model selection and the
+settings page owns changes. Existing-document edits remain revision-pinned
+proposals until a human reviews and applies the diff. The
 [chat operations guide](./docs/operations/PHASE_7_OPERATIONS.md) covers domain
 registration, model policy, streaming proxies, key rotation, and recovery.
 
 ## Screenshots
 
+### Provider-neutral AI settings
+
+The shared settings surface treats OpenRouter as one preset. Operators can test
+the connection, discover models, enter an explicit model when discovery is not
+available, and see credential and compatibility state before enabling inference.
+
+![Provider-neutral AI settings showing the OpenRouter preset, protocol, credential reference, health state, and connection-scoped model catalog](./docs/assets/architecture-foundation-settings-desktop.png)
+
 ### Workspace-grounded agent chat
 
-The document inspector embeds ChatKit's streaming conversation UI, enabled
-OpenRouter model picker, durable history, and retry controls beside the active
-document. The OpenAI Agents SDK can read authorized workspace context and use
-Sangam tools while existing-document changes remain outside the editor until
+The document inspector embeds ChatKit's streaming conversation UI,
+connection-scoped model picker, durable history, and retry controls beside the
+active document. The OpenAI Agents SDK can read authorized workspace context and
+use Sangam tools while existing-document changes remain outside the editor until
 the human reviews them.
 
-![Phase 7 workspace-grounded chat showing the active launch brief, ChatKit composer with an OpenRouter model, and a pending agent edit proposal](./docs/assets/phase-7-chat-workspace.jpg)
+![Phase 7 workspace-grounded chat showing the active launch brief, ChatKit composer with a connection-scoped model, and a pending agent edit proposal](./docs/assets/phase-7-chat-workspace.jpg)
 
 ### Human-reviewed chat proposal
 
@@ -382,6 +396,32 @@ capabilities, path scopes, rotation, revocation, and incident response.
 
 ## Architecture and trust model
 
+```mermaid
+flowchart LR
+    Browser["Browser: editor, settings, ChatKit"] --> API["Sangam HTTP API"]
+    API --> App["Application services"]
+    App --> Access["WorkspaceAccessService"]
+    Access --> Canonical["Documents, PDFs, proposals, publish"]
+    App --> Connections["ProviderConnectionService"]
+    Connections --> Registry[("SQLite connection and model registry")]
+    Connections --> Runtime["OpenAI Agents SDK adapter"]
+    Runtime --> Responses["OpenAI Responses-compatible endpoint"]
+    Runtime --> ChatCompletions["OpenAI Chat Completions-compatible endpoint"]
+    Secrets["Process environment credentials"] -. resolved at runtime .-> Connections
+    Canonical --> State[("Canonical SQLite state")]
+    Canonical --> Files["Workspace materializations"]
+```
+
+Configuration has one owner for each kind of value:
+
+| Concern | Authority | Reason |
+| --- | --- | --- |
+| Connection metadata and health | SQLite | Editable, versioned, and auditable |
+| Provider credentials | Process environment | Never returned by the API or stored in exports |
+| Enabled and default models | SQLite | Workspace policy survives restarts |
+| Request, output, and concurrency budgets | Environment | Deployment-level safety limits |
+| Document identity and revisions | SQLite | One canonical write and conflict boundary |
+
 The repository follows a few non-negotiable boundaries:
 
 - SQLite owns identity and revision truth; workspace files are materializations.
@@ -440,7 +480,7 @@ vertical slices.
 - [Publication, trusted preview, and Cloudflare](./docs/operations/PHASE_4_OPERATIONS.md)
 - [PDF import, extraction, annotation, and recovery](./docs/operations/PHASE_5_OPERATIONS.md)
 - [Karakeep connection, import, refresh, and recovery](./docs/operations/PHASE_6_OPERATIONS.md)
-- [OpenRouter, ChatKit, and streaming operations](./docs/operations/PHASE_7_OPERATIONS.md)
+- [Provider connections, ChatKit, and streaming operations](./docs/operations/PHASE_7_OPERATIONS.md)
 
 ## Project status and support
 

@@ -2,7 +2,8 @@
 
 ## Runtime configuration
 
-Workspace chat requires a server-side OpenRouter key:
+Workspace chat uses connection records in SQLite and credentials from the
+backend process environment. OpenRouter is the seeded preset:
 
 ```dotenv
 SANGAM_OPENROUTER_API_KEY=replace-with-openrouter-api-key
@@ -12,18 +13,41 @@ SANGAM_OPENROUTER_HTTP_REFERER=https://sangam.example.com
 SANGAM_CHAT_DEFAULT_MODEL=openai/gpt-5.4-mini
 SANGAM_CHAT_AVAILABLE_MODELS=["openai/gpt-5.4-mini","openai/gpt-5.4-nano","openai/gpt-5.6-terra"]
 SANGAM_CHAT_REASONING_EFFORT=low
+SANGAM_CHAT_MAX_REQUEST_BYTES=1000000
+SANGAM_CHAT_MAX_OUTPUT_TOKENS=4096
+SANGAM_CHAT_MAX_CONCURRENT_RUNS=4
 SANGAM_CHATKIT_DOMAIN_KEY=replace-with-registered-domain-key
 ```
 
-`SANGAM_OPENROUTER_API_KEY` stays in the backend process. The config endpoint
-returns only whether it is present, the provider name, ChatKit domain key, and
-the model allowlist. After changing the allowlist, restart Sangam and confirm
-the composer contains exactly the enabled models.
+`SANGAM_OPENROUTER_API_KEY` stays in the backend process. The OpenRouter preset
+stores `SANGAM_OPENROUTER_API_KEY` as a credential reference, not as a secret
+value. API responses and object representations report only whether the
+credential is available.
 
-The default lower-cost choices are `openai/gpt-5.4-mini` and
-`openai/gpt-5.4-nano`. Keep a model in the allowlist only after confirming that
-OpenRouter reports tool support and accepts it through `/api/v1/responses`.
-Sangam deliberately rejects arbitrary model IDs submitted by the browser.
+Open **Settings > Operations & AI** to manage the connection after first boot.
+SQLite becomes authoritative after an operator edits the preset. The legacy
+`SANGAM_CHAT_DEFAULT_MODEL` and `SANGAM_CHAT_AVAILABLE_MODELS` values seed a new
+database only; changing them later does not replace saved workspace policy.
+
+To add a connection:
+
+1. Put the credential in the backend environment, if the endpoint requires one.
+2. Add its HTTPS base URL, protocol, and credential environment-variable name.
+3. Select **Test connection**.
+4. Discover `/models`, or enter a bounded manual model ID when discovery is not
+   available.
+5. Review compatibility and explicitly override an unknown model only after
+   proving that tool calls work.
+6. Enable the connection, select its models, and save the versioned workspace
+   settings.
+
+Production connection URLs must use HTTPS. Development permits HTTP only for
+loopback hosts. A model reference includes its stable connection ID, so two
+connections may expose the same upstream model ID without colliding.
+
+The runtime reports one of five states: disabled by workspace policy, missing a
+credential, ready, unreachable, or incompatible. History and pending proposal
+review remain available when inference is not ready.
 
 ## ChatKit domain registration
 
@@ -38,13 +62,13 @@ The CSP must continue to restrict `script-src` to Sangam and that exact CDN.
 Do not broaden `frame-src` beyond HTTPS OpenAI hosts and the separately
 configured trusted-preview origin.
 
-## OpenRouter key rotation
+## Provider credential rotation
 
-1. Create a replacement key with an appropriate spend limit in OpenRouter.
-2. Replace `SANGAM_OPENROUTER_API_KEY` in the process secret or `.env` file.
+1. Create a replacement credential with an appropriate spend limit.
+2. Replace the value named by the connection's credential reference.
 3. Restart Sangam and send one low-cost grounded read through the chat rail.
-4. Revoke the old key in OpenRouter.
-5. Review OpenRouter usage and Sangam logs for unexpected failures.
+4. Revoke the old credential at the provider.
+5. Review provider usage and Sangam logs for unexpected failures.
 
 Chat history remains available while inference is unconfigured. Do not paste a
 provider key into the browser, a conversation, a Document, or a support log.
@@ -94,7 +118,7 @@ or proposal history to reappear.
 ## Manual production release gate
 
 Local automation does not own Cloudflare DNS, Access policy, ChatKit domain
-registration, or production OpenRouter credentials. Before declaring Phase 7
+registration, or production provider credentials. Before declaring Phase 7
 deployed, record evidence for:
 
 - Registered production ChatKit origin and domain key.
@@ -103,5 +127,5 @@ deployed, record evidence for:
 - Stop and retry through Access without proxy buffering.
 - A grounded Document citation and PDF page/annotation citation.
 - Proposal review, concurrent conflict, and attributed application.
-- No provider key or selected document content in proxy/application logs.
+- No provider credential or selected document content in proxy/application logs.
 - No direct WAN exposure of port 8000.

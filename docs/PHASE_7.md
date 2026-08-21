@@ -3,19 +3,21 @@
 Phase 7 adds chat as a client of Sangam's existing document server. It does not
 add a second document writer, a scheduler, or a home-grown streaming protocol.
 ChatKit owns the chat protocol and UI, the OpenAI Agents SDK owns the tool loop,
-and OpenRouter supplies the configured Responses-compatible model.
+and a connection-scoped OpenAI-compatible endpoint supplies the selected model.
+OpenRouter is the seeded preset, not a special runtime path.
 
 ## Delivered workflow
 
 A human can now:
 
 - Open per-document chat in the existing right inspector.
-- Choose an enabled OpenRouter model from ChatKit's model picker.
+- Choose an enabled connection and model from ChatKit's model picker.
 - Stream answers, structured workflow traces, errors, and citations.
 - Browse durable history, stop an active response, and retry a response.
 - Ground requests in the current document or editor selection.
 - Search and read authorized Documents and PDF pages with live annotations.
-- Create a Document or publication only through existing authorized services.
+- Confirm a new Document or publication in the browser before the existing
+  authorized service performs the effect.
 - Review a full diff before applying a proposed existing-document update.
 - Receive a stale conflict when the Document changes before proposal approval.
 
@@ -28,7 +30,9 @@ flowchart LR
     Endpoint --> ChatKitPy["ChatKit Python server"]
     ChatKitPy --> Store["Owner-scoped SQLite Store"]
     ChatKitPy --> Runner["OpenAI Agents SDK Runner"]
-    Runner --> Router["OpenRouter Responses API"]
+    Runner --> Provider["Connection-scoped OpenAI-compatible endpoint"]
+    Provider --> Responses["Responses protocol"]
+    Provider --> Completions["Chat Completions protocol"]
     Runner --> Tools["ChatToolset"]
     Tools --> Access["WorkspaceAccessService"]
     Access --> Documents["Canonical DocumentService"]
@@ -50,11 +54,10 @@ canonical document updates while `ChatProposalRepository` concentrates all
 owner-scoped proposal SQL. The chat server therefore does not reach into Store
 internals or issue proposal queries directly.
 
-The Agents SDK uses `OpenAIProvider` with an `AsyncOpenAI` client whose base URL
-is OpenRouter. `use_responses=True` keeps the integration on the Responses API,
-including native function calls and streaming. OpenAI tracing is disabled
-because the configured credential belongs to OpenRouter, not the OpenAI
-platform.
+The Agents SDK uses `OpenAIProvider` with an `AsyncOpenAI` client created for the
+selected provider connection. The connection chooses Responses or Chat
+Completions behavior. OpenAI tracing is disabled because a configured credential
+may belong to a gateway or local service rather than the OpenAI platform.
 
 ## Durable thread and ownership model
 
@@ -164,6 +167,6 @@ model changes, key rotation, diagnostics, and the production release gate.
 ## Phase boundary
 
 Phase 7 does not add autonomous background agents, a general ReAct framework,
-multi-agent coordination, hidden privileged tools, local model hosting, or a
-second write path. It composes maintained OpenAI chat and agent abstractions
-with OpenRouter and Sangam's existing access boundary.
+multi-agent coordination, hidden privileged tools, a model host, or a second
+write path. It composes maintained OpenAI chat and agent abstractions with
+OpenAI-compatible connections and Sangam's existing access boundary.

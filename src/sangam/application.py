@@ -20,6 +20,10 @@ from sangam.karakeep_repository import KarakeepRepository
 from sangam.mutations import MutationCoordinator
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
+from sangam.provider_connections import (
+    ProviderConnectionRepository,
+    ProviderConnectionService,
+)
 from sangam.publication import PreviewTokenService, PublicationService
 from sangam.readiness import ReadinessService
 from sangam.reconciliation import ReconciliationPlanner, ReconciliationService
@@ -46,15 +50,24 @@ class ApplicationServices:
     pdf_research: PdfResearchService
     karakeep: KarakeepService
     chat: SangamChatServer
+    provider_connections: ProviderConnectionService
     readiness: ReadinessService
 
 
-def build_application_services(settings: Settings) -> ApplicationServices:
-    """Construct Sangam's adapters and services in one explicit composition root."""
+def initialize_application_state(settings: Settings) -> Database:
+    """Prepare directories, migrate canonical state, and seed built-in actors."""
     settings.prepare()
     database = Database(settings.database_path)
     database.initialize()
     _bootstrap_actors(database, settings)
+    return database
+
+
+def build_application_services(
+    settings: Settings, *, initialized_database: Database | None = None
+) -> ApplicationServices:
+    """Construct adapters and services after explicit state initialization."""
+    database = initialized_database or initialize_application_state(settings)
     workspace = DiskWorkspaceFilesystem(settings.workspace_root)
     idempotency = IdempotencyStore(database)
     actors = ActorService()
@@ -173,6 +186,15 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         pdf_research=pdf_research,
     )
     chat_config = settings.chat_server_config()
+    provider_connections = ProviderConnectionService(
+        ProviderConnectionRepository(database),
+        deployment_mode=chat_config.deployment_mode,
+        timeout_seconds=chat_config.timeout_seconds,
+        openrouter_api_key=chat_config.openrouter_api_key,
+        openrouter_base_url=chat_config.openrouter_base_url,
+        openrouter_http_referer=chat_config.openrouter_http_referer,
+        openrouter_app_title=chat_config.openrouter_app_title,
+    )
     model_settings_repository = ChatModelSettingsRepository(
         database,
         seed_default_model=chat_config.default_model,
@@ -180,15 +202,14 @@ def build_application_services(settings: Settings) -> ApplicationServices:
     )
     model_catalog = ChatModelCatalog(
         model_settings_repository,
-        api_key=chat_config.api_key,
-        base_url=chat_config.base_url,
-        timeout_seconds=chat_config.timeout_seconds,
+        connections=provider_connections,
     )
     chat = SangamChatServer(
         database=database,
         workspace=workspace_access,
         config=chat_config,
         model_catalog=model_catalog,
+        provider_connections=provider_connections,
     )
     return ApplicationServices(
         documents=documents,
@@ -204,6 +225,7 @@ def build_application_services(settings: Settings) -> ApplicationServices:
         pdf_research=pdf_research,
         karakeep=karakeep,
         chat=chat,
+        provider_connections=provider_connections,
         readiness=readiness,
     )
 
