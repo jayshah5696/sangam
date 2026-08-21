@@ -5,6 +5,10 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 ## [Unreleased]
 
+See the generated notes attached to each GitHub Release.
+
+## [0.6.0] - 2026-08-21
+
 ### Fixed
 
 - Workspace chat no longer disappears silently: the ChatKit script load times out
@@ -90,7 +94,8 @@ All notable changes to Sangam are documented in this file. Releases follow
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.3.0
