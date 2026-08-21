@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useDeferredValue, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { FilePlus2, FileUp, Search } from 'lucide-react'
+import { FilePlus2, FileText, FileUp, Search } from 'lucide-react'
 import { api } from '../api'
 import { useWorkbench } from '../workbench'
 
@@ -12,7 +12,14 @@ function Welcome() {
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
   const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
+  const [searchQuery, setSearchQuery] = useState('')
+  const deferredSearch = useDeferredValue(searchQuery)
   const documents = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  const searchResults = useQuery({
+    queryKey: ['documents', 'welcome-search', deferredSearch],
+    queryFn: () => api.searchDocuments(deferredSearch),
+    enabled: deferredSearch.trim().length > 0,
+  })
   const createDocument = useMutation({
     mutationFn: () =>
       api.createDocument(
@@ -41,6 +48,8 @@ function Welcome() {
   })
   const isEmpty = Boolean(documents.data && documents.data.length === 0)
   const recentDocuments = documents.data?.slice(0, 3) ?? []
+  const trimmedSearch = deferredSearch.trim()
+  const matchingDocuments = trimmedSearch ? (searchResults.data ?? []) : (documents.data ?? [])
   return (
     <section className="welcome">
       <p className="eyebrow">Your workspace</p>
@@ -50,6 +59,58 @@ function Welcome() {
           ? 'Create a Markdown document or import a PDF to begin.'
           : 'Create Markdown documents, group them into folders, organize them with categories and tags, and find them again through full-text search.'}
       </p>
+      <label className="welcome-search">
+        <Search size={16} />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && matchingDocuments[0]) {
+              event.preventDefault()
+              setSearchQuery('')
+              workbench.ensureDocumentOpen(matchingDocuments[0].document_id, matchingDocuments[0].title)
+              void navigate({
+                to: '/documents/$documentId',
+                params: { documentId: matchingDocuments[0].document_id },
+              })
+            }
+            if (event.key === 'Escape') setSearchQuery('')
+          }}
+          placeholder={
+            isEmpty
+              ? 'Nothing to search yet — create a document first'
+              : 'Search documents and press Enter to open the top result…'
+          }
+          aria-label="Quick search documents"
+          disabled={isEmpty}
+        />
+        <span className="welcome-search-hint">
+          <kbd>Enter</kbd> open <kbd>Esc</kbd> clear
+        </span>
+      </label>
+      {trimmedSearch && (
+        <div className="welcome-search-results" role="list" aria-label="Matching documents">
+          {searchResults.isFetching && matchingDocuments.length === 0 && (
+            <p className="small-muted">Searching…</p>
+          )}
+          {!searchResults.isFetching && matchingDocuments.length === 0 && (
+            <p className="small-muted">No documents match “{trimmedSearch}”.</p>
+          )}
+          {matchingDocuments.slice(0, 6).map((document) => (
+            <Link
+              key={document.document_id}
+              to="/documents/$documentId"
+              params={{ documentId: document.document_id }}
+              role="listitem"
+              onClick={() => setSearchQuery('')}
+            >
+              <FileText size={14} />
+              <span>{document.path ?? document.title}</span>
+            </Link>
+          ))}
+        </div>
+      )}
       <div className="welcome-actions">
         <label>
           Format
@@ -84,11 +145,13 @@ function Welcome() {
             }}
           />
         </label>
+      </div>
+      <div className="welcome-shortcuts">
         <span className="desktop-shortcut">
-          <kbd>⌘K</kbd> commands
+          <kbd>⌘K</kbd> commands and files
         </span>
-        <span>
-          <Search size={14} /> Search from the sidebar
+        <span className="desktop-shortcut">
+          <kbd>/</kbd> focus search
         </span>
       </div>
       {recentDocuments.length > 0 && (

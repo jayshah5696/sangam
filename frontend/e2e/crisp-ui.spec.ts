@@ -54,7 +54,7 @@ test('document workbench exposes active, save, and inspector state', async ({ pa
 
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
   await expect(page.locator('.save-state')).toHaveText('Saved')
-  await expect(page.getByRole('radio', { name: 'edit' })).toBeChecked()
+  await expect(page.getByRole('radio', { name: 'preview' })).toBeChecked()
   const inspectorToggle = page.getByRole('button', { name: 'Open document inspector' })
   if (await inspectorToggle.isVisible()) {
     await inspectorToggle.click()
@@ -109,3 +109,31 @@ function formatViolations(violations: Array<{ id: string; help: string; nodes: u
     .map((violation) => `${violation.id}: ${violation.help} (${violation.nodes.length} nodes)`)
     .join('\n')
 }
+
+test('preview is the default editor mode and a chosen mode persists', async ({ page, seededWorkspace }) => {
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
+  await expect(page.getByRole('radio', { name: 'preview' })).toBeChecked()
+
+  await page.getByRole('radio', { name: 'edit' }).click()
+  await expect(page.getByRole('radio', { name: 'edit' })).toBeChecked()
+  await page.reload()
+  await expect(page.getByRole('radio', { name: 'edit' })).toBeChecked()
+})
+
+test('home page searches documents inline and opens the top result', async ({ page, seededWorkspace }) => {
+  await page.goto('/')
+  const quickSearch = page.getByRole('searchbox', { name: 'Quick search documents' })
+  await expect(quickSearch).toBeVisible()
+  await quickSearch.fill(seededWorkspace.documentTitle)
+  await expect(page.getByRole('listitem').first()).toContainText(seededWorkspace.documentTitle)
+  await quickSearch.press('Enter')
+  await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
+})
+
+test('slash focuses workspace search from anywhere', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('body').press('/')
+  const sidebarSearch = page.getByRole('searchbox', { name: 'Search documents', exact: true })
+  await expect(sidebarSearch).toBeVisible()
+  await expect(sidebarSearch).toBeFocused()
+})

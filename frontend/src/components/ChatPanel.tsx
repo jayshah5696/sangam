@@ -46,6 +46,7 @@ export function ChatPanel({
   const { preferences } = useTheme()
   const threadStorageKey = THREAD_STORAGE_KEY
   const [threadId, setThreadId] = useState<string | null>(() => localStorage.getItem(threadStorageKey))
+  const [chatEpoch, setChatEpoch] = useState(0)
   const [pendingPublication, setPendingPublication] = useState<PublishConfirmationRequest | null>(null)
   const [publishError, setPublishError] = useState(false)
   const [publishing, setPublishing] = useState(false)
@@ -124,11 +125,35 @@ export function ChatPanel({
       requestCreateConfirmation,
     }
   })
-  const customFetch = useCallback((input: RequestInfo | URL, init?: RequestInit) => {
-    const headers = new Headers(init?.headers)
-    headers.set('X-Sangam-Document-ID', liveRef.current.documentId)
-    return fetch(input, { ...init, headers })
-  }, [])
+  const handleThreadChange = useCallback(
+    ({ threadId: nextThreadId }: { threadId: string | null }) => {
+      setThreadId(nextThreadId)
+      if (nextThreadId) localStorage.setItem(threadStorageKey, nextThreadId)
+      else localStorage.removeItem(threadStorageKey)
+    },
+    [threadStorageKey],
+  )
+  const handleResponseEnd = useCallback(() => void liveRef.current.refreshProposals(), [])
+  const handleCitationDeeplink = useCallback(
+    ({ name, data }: { name: string; data?: Record<string, unknown> }) => {
+      if (name !== 'document') return
+      const target = citationTargetFromData(data)
+      if (!target) return
+      setOpenedCitation(target)
+      void liveRef.current.navigate({ href: citationHref(target) }).then(() => {
+        announceCitationNavigation(target)
+      })
+    },
+    [],
+  )
+  // A full remount is the only reliable way to recover a wedged ChatKit frame;
+  // clearing the stored thread also protects against server-side resets that
+  // would otherwise leave the frame blank with no visible error.
+  const resetChatSurface = useCallback(() => {
+    localStorage.removeItem(threadStorageKey)
+    setThreadId(null)
+    setChatEpoch((epoch) => epoch + 1)
+  }, [threadStorageKey])
   const models = useMemo(
     () =>
       (configQuery.data?.available_models ?? []).map((model) => ({
@@ -139,63 +164,6 @@ export function ChatPanel({
       })),
     [configQuery.data],
   )
-  const chatkit = useChatKit({
-    api: {
-      url: '/api/v1/chatkit',
-      domainKey: configQuery.data?.domain_key ?? 'local-dev',
-      fetch: customFetch,
-    },
-    frameTitle: 'Workspace chat',
-    initialThread: threadId,
-    theme: preferences.theme === 'midnight' ? 'dark' : 'light',
-    header: { enabled: true, title: { text: 'Workspace chat' } },
-    history: { enabled: true, showDelete: true, showRename: true },
-    startScreen: {
-      greeting: 'Ask about this workspace',
-      prompts: [
-        { label: 'Summarize this document', prompt: 'Summarize the current document with citations.' },
-        { label: 'Review selected text', prompt: 'Review the selected text and suggest improvements.' },
-      ],
-    },
-    composer: {
-      placeholder: configQuery.data?.inference_enabled
-        ? 'Ask about this workspace…'
-        : 'Inference unavailable · history remains readable',
-      models,
-      attachments: { enabled: false },
-    },
-    disclaimer: { text: 'Edits stay as proposals until you review and apply the diff.' },
-    threadItemActions: { retry: true, feedback: false },
-    thread: { autoScroll: true },
-    onClientTool: ({ name, params }) => {
-      if (name === 'get_editor_selection') {
-        return {
-          document_id: liveRef.current.documentId,
-          revision_id: liveRef.current.revisionId,
-          selected_text: liveRef.current.selectedText.slice(0, SELECTION_LIMIT),
-        }
-      }
-      if (name === 'confirm_publish_document') return liveRef.current.requestPublishConfirmation(params)
-      if (name === 'confirm_create_document') return liveRef.current.requestCreateConfirmation(params)
-      return { error: 'Unknown client tool' }
-    },
-    onThreadChange: ({ threadId: nextThreadId }) => {
-      setThreadId(nextThreadId)
-      if (nextThreadId) localStorage.setItem(threadStorageKey, nextThreadId)
-      else localStorage.removeItem(threadStorageKey)
-    },
-    onResponseEnd: () => void liveRef.current.refreshProposals(),
-    onDeeplink: ({ name, data }) => {
-      if (name !== 'document') return
-      const target = citationTargetFromData(data)
-      if (!target) return
-      setOpenedCitation(target)
-      void liveRef.current.navigate({ href: citationHref(target) }).then(() => {
-        announceCitationNavigation(target)
-      })
-    },
-  })
-
   const cancelPublication = () => {
     publishResolver.current?.({ approved: false, status: 'cancelled' })
     publishResolver.current = null
@@ -343,7 +311,21 @@ export function ChatPanel({
               </button>
             </div>
           )}
-          {script.status === 'ready' && <ChatKit control={chatkit.control} className="chatkit-frame" />}
+          {script.status === 'ready' && configQuery.data && (
+            <WorkspaceChatSurface
+              key={chatEpoch}
+              liveRef={liveRef}
+              theme={preferences.theme === 'midnight' ? 'dark' : 'light'}
+              domainKey={configQuery.data.domain_key}
+              inferenceEnabled={configQuery.data.inference_enabled}
+              models={models}
+              initialThreadId={threadId}
+              onThreadChange={handleThreadChange}
+              onResponseEnd={handleResponseEnd}
+              onCitationDeeplink={handleCitationDeeplink}
+              onReset={resetChatSurface}
+            />
+          )}
           {proposalsQuery.isLoading ? (
             <p className="small-muted">Loading edit proposals…</p>
           ) : proposalsQuery.isError ? (
@@ -669,5 +651,126 @@ function ProposalReview({
       )}
       {dismiss.isError && <p className="error-text">The proposal could not be dismissed.</p>}
     </article>
+  )
+}
+
+type ChatFramePhase = 'connecting' | 'ready' | 'error'
+
+const CHAT_FRAME_TIMEOUT_MS = 15_000
+
+type LiveChatContext = {
+  documentId: string
+  revisionId: string
+  selectedText: string
+  refreshProposals: () => void
+  navigate: ReturnType<typeof useNavigate>
+  requestPublishConfirmation: (params: Record<string, unknown>) => Promise<Record<string, unknown>>
+  requestCreateConfirmation: (params: Record<string, unknown>) => Promise<Record<string, unknown>>
+}
+
+function WorkspaceChatSurface({
+  liveRef,
+  theme,
+  domainKey,
+  inferenceEnabled,
+  models,
+  initialThreadId,
+  onThreadChange,
+  onResponseEnd,
+  onCitationDeeplink,
+  onReset,
+}: {
+  liveRef: React.MutableRefObject<LiveChatContext>
+  theme: 'dark' | 'light'
+  domainKey: string
+  inferenceEnabled: boolean
+  models: Array<{ id: string; label: string; description: string; default?: boolean }>
+  initialThreadId: string | null
+  onThreadChange: (thread: { threadId: string | null }) => void
+  onResponseEnd: () => void
+  onCitationDeeplink: (event: { name: string; data?: Record<string, unknown> }) => void
+  onReset: () => void
+}) {
+  const [phase, setPhase] = useState<ChatFramePhase>('connecting')
+  useEffect(() => {
+    // ChatKit can fail silently (blocked CDN subresource, stale thread id after a
+    // server reset). If the frame never reports ready, surface a recoverable
+    // error instead of leaving the panel blank.
+    const timeout = window.setTimeout(
+      () => setPhase((current) => (current === 'connecting' ? 'error' : current)),
+      CHAT_FRAME_TIMEOUT_MS,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [])
+  const customFetch = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      headers.set('X-Sangam-Document-ID', liveRef.current.documentId)
+      return fetch(input, { ...init, headers })
+    },
+    [liveRef],
+  )
+  const chatkit = useChatKit({
+    api: {
+      url: '/api/v1/chatkit',
+      domainKey,
+      fetch: customFetch,
+    },
+    frameTitle: 'Workspace chat',
+    initialThread: initialThreadId ?? undefined,
+    theme,
+    header: { enabled: true, title: { text: 'Workspace chat' } },
+    history: { enabled: true, showDelete: true, showRename: true },
+    startScreen: {
+      greeting: 'Ask about this workspace',
+      prompts: [
+        { label: 'Summarize this document', prompt: 'Summarize the current document with citations.' },
+        { label: 'Review selected text', prompt: 'Review the selected text and suggest improvements.' },
+      ],
+    },
+    composer: {
+      placeholder: inferenceEnabled
+        ? 'Ask about this workspace…'
+        : 'Inference unavailable · history remains readable',
+      models,
+      attachments: { enabled: false },
+    },
+    disclaimer: { text: 'Edits stay as proposals until you review and apply the diff.' },
+    threadItemActions: { retry: true, feedback: false },
+    thread: { autoScroll: true },
+    onReady: () => setPhase('ready'),
+    onError: () => setPhase((current) => (current === 'ready' ? current : 'error')),
+    onClientTool: ({ name, params }) => {
+      if (name === 'get_editor_selection') {
+        return {
+          document_id: liveRef.current.documentId,
+          revision_id: liveRef.current.revisionId,
+          selected_text: liveRef.current.selectedText.slice(0, SELECTION_LIMIT),
+        }
+      }
+      if (name === 'confirm_publish_document') return liveRef.current.requestPublishConfirmation(params)
+      if (name === 'confirm_create_document') return liveRef.current.requestCreateConfirmation(params)
+      return { error: 'Unknown client tool' }
+    },
+    onThreadChange,
+    onResponseEnd,
+    onDeeplink: onCitationDeeplink,
+  })
+  return (
+    <>
+      <ChatKit control={chatkit.control} className="chatkit-frame" />
+      {phase === 'error' && (
+        <div className="chat-unconfigured notice" role="alert">
+          <p>The workspace chat could not finish loading.</p>
+          <p className="small-muted">
+            This usually follows a network interruption or a saved conversation the server no longer has.
+            Reloading starts a fresh conversation.
+          </p>
+          <button className="secondary-action" onClick={onReset}>
+            Reload workspace chat
+          </button>
+        </div>
+      )}
+    </>
   )
 }

@@ -420,6 +420,10 @@ function DocumentToolbar({
   const { updatePreferences } = useTheme()
   const busy =
     saveState !== 'saved' || rename.isPending || move.isPending || duplicate.isPending || remove.isPending
+  const changeMode = (nextMode: EditorMode) => {
+    onMode(nextMode)
+    updatePreferences({ editorMode: nextMode })
+  }
   return (
     <div className="document-toolbar">
       <div className="mode-switch" role="radiogroup" aria-label="Editor view">
@@ -431,7 +435,7 @@ function DocumentToolbar({
             className={`${mode === candidate ? 'active' : ''} ${
               candidate === 'split' ? 'mode-split-button' : ''
             }`.trim()}
-            onClick={() => onMode(candidate)}
+            onClick={() => changeMode(candidate)}
           >
             {candidate}
           </button>

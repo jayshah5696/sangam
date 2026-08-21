@@ -5,7 +5,21 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 ## [Unreleased]
 
-See the generated notes attached to each GitHub Release.
+### Fixed
+
+- Workspace chat no longer disappears silently: the ChatKit script load times out
+  with a retryable error, a frame that never reports ready (for example after a
+  stale saved conversation or a blocked network request) surfaces a visible
+  recovery notice, and reloading the chat clears the stored thread safely.
+- Document tabs now open in preview mode by default. The last mode you pick is
+  remembered per workspace and survives reloads instead of snapping back to edit.
+
+### Added
+
+- Inline search on the home page: type to filter documents live, press Enter to
+  open the top result.
+- Press <kbd>/</kbd> anywhere to jump straight to workspace search in the sidebar;
+  ⌘K/Ctrl+K still opens the command palette for files and actions.
 
 ## [0.5.0] - 2026-08-21
 

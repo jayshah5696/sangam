@@ -4,6 +4,8 @@ export const CHATKIT_SCRIPT_SRC = 'https://cdn.platform.openai.com/deployments/c
 
 export type ChatKitScriptStatus = 'loading' | 'ready' | 'error'
 
+const SCRIPT_LOAD_TIMEOUT_MS = 20_000
+
 export function useChatKitScript(enabled: boolean) {
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState<ChatKitScriptStatus>(
@@ -20,13 +22,25 @@ export function useChatKitScript(enabled: boolean) {
       script.async = true
       window.document.head.append(script)
     }
-    const loaded = () => setStatus('ready')
-    const failed = () => setStatus('error')
+    const loaded = () => {
+      clearTimeout(timeout)
+      setStatus('ready')
+    }
+    const failed = () => {
+      clearTimeout(timeout)
+      setStatus('error')
+    }
+    // A blocked or stalled CDN request must surface as a retryable error
+    // instead of leaving an eternally blank chat panel.
+    const timeout = window.setTimeout(() => {
+      setStatus((current) => (current === 'loading' ? 'error' : current))
+    }, SCRIPT_LOAD_TIMEOUT_MS)
     script.addEventListener('load', loaded)
     script.addEventListener('error', failed)
     return () => {
-      script.removeEventListener('load', loaded)
-      script.removeEventListener('error', failed)
+      clearTimeout(timeout)
+      script?.removeEventListener('load', loaded)
+      script?.removeEventListener('error', failed)
     }
   }, [attempt, enabled])
 
