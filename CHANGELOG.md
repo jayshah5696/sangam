@@ -7,6 +7,19 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.4.0] - 2026-08-20
+
+### Added
+
+- Provider-neutral AI architecture foundation decoupling model configuration and runtime execution from hardcoded OpenRouter assumptions.
+- Sharpened workspace UI system with refined typography, semantic design tokens, border contrast, and standardized control geometry.
+- Reusable `StateMessage` component for unified, accessible empty, error, and informational states.
+- Automated Playwright end-to-end test suite and screenshot visual verification pipeline.
+
+### Changed
+
+- Modernized Command Palette, Appearance settings preview, and workbench split borders for high-density desktop and narrow viewports.
+
 ## [0.3.0] - 2026-08-20
 
 ### Added
@@ -20,6 +33,8 @@ See the generated notes attached to each GitHub Release.
 
 - Streamlined self-hosting documentation and deployment removing separate preview hostname/HMAC token dependencies.
 - Simplified DocumentWorkspace and DocumentInspector removing trust-state gating and redundant preview modals.
+
+## [0.2.0] - 2026-08-16
 
 ### Added
 
@@ -46,7 +61,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.1.0
