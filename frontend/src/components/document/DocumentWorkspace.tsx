@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MoreHorizontal, PanelRightClose, Rows2 } from 'lucide-react'
+import { Columns2, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
 import { api, type Document, type Revision } from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
@@ -15,6 +15,7 @@ import {
   type SaveState,
 } from '../../documentSessions'
 import { internalDocumentMarkdown } from '../../internalLinks'
+import { useTheme } from '../../theme'
 import { useWorkbenchActions } from '../../workbench'
 import { canSplitActiveGroup } from '../../splitPolicy'
 import { ActionDialog } from '../ActionMenu'
@@ -275,8 +276,10 @@ export function DocumentWorkspace({
             Ln {selection.line}, Col {selection.column}
             {selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}
           </span>
-          <kbd>⌘F</kbd>
-          <small>find/replace</small>
+          <span className="desktop-shortcut">
+            <kbd>⌘F</kbd>
+            <small>find/replace</small>
+          </span>
         </div>
       )}
       <div className={`editing-surface mode-${mode}`}>
@@ -414,6 +417,7 @@ function DocumentToolbar({
       navigate({ to: '/documents/$documentId', params: { documentId: created.document_id } }),
   })
   const remove = useMutation({ mutationFn: () => api.deleteDocument(document), onSuccess: onDeleted })
+  const { updatePreferences } = useTheme()
   const busy =
     saveState !== 'saved' || rename.isPending || move.isPending || duplicate.isPending || remove.isPending
   return (
@@ -424,113 +428,118 @@ function DocumentToolbar({
             key={candidate}
             role="radio"
             aria-checked={mode === candidate}
-            className={mode === candidate ? 'active' : ''}
+            className={`${mode === candidate ? 'active' : ''} ${
+              candidate === 'split' ? 'mode-split-button' : ''
+            }`.trim()}
             onClick={() => onMode(candidate)}
           >
             {candidate}
           </button>
         ))}
       </div>
-      <ActionDialog
-        label="Document actions"
-        icon={<MoreHorizontal size={16} />}
-        className="document-actions-trigger"
-      >
-        {(close) => (
-          <div className="document-actions-form">
-            <div className="document-layout-actions">
-              <button
-                type="button"
-                className="secondary-action"
-                disabled={!canSplitActiveGroup('horizontal')}
-                onClick={() => {
-                  onSplit('horizontal')
-                  close()
-                }}
-              >
-                <Columns2 size={13} /> Split right
-              </button>
-              <button
-                type="button"
-                className="secondary-action"
-                disabled={!canSplitActiveGroup('vertical')}
-                onClick={() => {
-                  onSplit('vertical')
-                  close()
-                }}
-              >
-                <Rows2 size={13} /> Split down
-              </button>
-              {canCloseGroup && (
+      <div className="document-toolbar-actions">
+        <ActionDialog
+          label="Document actions"
+          icon={<MoreHorizontal size={16} />}
+          className="document-actions-trigger"
+        >
+          {(close) => (
+            <div className="document-actions-form">
+              <div className="document-layout-actions">
                 <button
                   type="button"
                   className="secondary-action"
+                  disabled={!canSplitActiveGroup('horizontal')}
                   onClick={() => {
-                    onCloseGroup()
+                    onSplit('horizontal')
                     close()
                   }}
                 >
-                  <PanelRightClose size={13} /> Close group
+                  <Columns2 size={13} /> Split right
                 </button>
-              )}
-            </div>
-            <hr />
-            <label>
-              Title
-              <input value={title} onChange={(event) => setTitle(event.target.value)} />
-            </label>
-            <button
-              type="button"
-              disabled={busy || title.trim().length === 0 || title.trim() === document.title}
-              onClick={() => rename.mutate(undefined, { onSuccess: close })}
-            >
-              Rename
-            </button>
-            {document.path && (
-              <>
-                <label>
-                  Move path
-                  <input
-                    value={path}
-                    placeholder="folder/document.md"
-                    onChange={(event) => setPath(event.target.value)}
-                  />
-                </label>
                 <button
                   type="button"
-                  disabled={busy || path.trim() === document.path}
-                  onClick={() => move.mutate(undefined, { onSuccess: close })}
+                  className="secondary-action"
+                  disabled={!canSplitActiveGroup('vertical')}
+                  onClick={() => {
+                    onSplit('vertical')
+                    close()
+                  }}
                 >
-                  Move
+                  <Rows2 size={13} /> Split down
                 </button>
-              </>
-            )}
-            <button
-              type="button"
-              className="secondary-action"
-              disabled={busy}
-              onClick={() => duplicate.mutate(undefined, { onSuccess: close })}
-            >
-              Duplicate
-            </button>
-            <button
-              type="button"
-              className="secondary-action danger"
-              disabled={busy}
-              onClick={() => {
-                if (window.confirm(`Move “${document.title}” to trash?`)) {
-                  remove.mutate(undefined, { onSuccess: close })
-                }
-              }}
-            >
-              Move to trash
-            </button>
-            {(rename.isError || move.isError || duplicate.isError || remove.isError) && (
-              <p className="error-text">The document action could not be completed.</p>
-            )}
-          </div>
-        )}
-      </ActionDialog>
+                {canCloseGroup && (
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() => {
+                      onCloseGroup()
+                      close()
+                    }}
+                  >
+                    <PanelRightClose size={13} /> Close group
+                  </button>
+                )}
+              </div>
+              <hr />
+              <label>
+                Title
+                <input value={title} onChange={(event) => setTitle(event.target.value)} />
+              </label>
+              <label>
+                Workspace path
+                <input value={path} onChange={(event) => setPath(event.target.value)} />
+              </label>
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={busy}
+                onClick={() => {
+                  rename.mutate()
+                  if (path !== (document.path ?? '')) move.mutate()
+                  close()
+                }}
+              >
+                Save details
+              </button>
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={busy}
+                onClick={() => {
+                  duplicate.mutate()
+                  close()
+                }}
+              >
+                Duplicate
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={busy}
+                onClick={() => {
+                  remove.mutate()
+                  close()
+                }}
+              >
+                Move to trash
+              </button>
+              {(rename.isError || move.isError || duplicate.isError || remove.isError) && (
+                <p className="error-text">The document action could not be completed.</p>
+              )}
+            </div>
+          )}
+        </ActionDialog>
+        <button
+          type="button"
+          className="icon-button mobile-inspector-toggle"
+          aria-label="Open document inspector"
+          title="Open document inspector"
+          onClick={() => updatePreferences({ rightVisible: true })}
+        >
+          <PanelRightOpen size={16} />
+        </button>
+      </div>
     </div>
   )
 }

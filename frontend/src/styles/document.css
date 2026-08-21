@@ -423,17 +423,88 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   color: var(--muted);
 }
 
+.mobile-inspector-toggle {
+  display: none;
+}
+
+.document-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.inspector-backdrop {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .theme-grid { grid-template-columns: repeat(2, 1fr); }
-  .document-layout { display: block; }
-  .history-panel { width: 100% !important; min-height: auto; max-height: none; border-left: 0; border-top: 1px solid var(--line); }
+  .document-layout { display: flex; flex-direction: column; }
   .document-layout > .resize-handle { display: none; }
   .folder-setting { grid-template-columns: 1fr 1fr; }
-  .editing-surface.mode-split { grid-template-columns: 1fr; }
-  .mode-split .markdown-preview { border-left: 1px solid var(--line); border-top: 0; }
-  .document-inspector.mode-chat { display: block; overflow: visible; }
-  .chat-panel { min-height: 36rem; overflow: visible; }
-  .chatkit-frame { height: 36rem; }
+  .mode-split-button { display: none !important; }
+  .document-layout-actions { display: none; }
+  .desktop-shortcut { display: none; }
+  .mobile-inspector-toggle { display: inline-flex; }
+
+  .inspector-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgba(8, 12, 10, 0.55);
+    border: 0;
+    padding: 0;
+    margin: 0;
+  }
+
+  .document-inspector {
+    position: fixed;
+    inset: auto 0 0 0;
+    width: 100% !important;
+    max-height: 85vh;
+    min-height: 55vh;
+    height: 80vh;
+    z-index: 40;
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+    box-shadow: 0 -12px 48px var(--shadow);
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .document-inspector .inspector-tab-panel {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .document-inspector.mode-chat {
+    display: flex;
+    overflow: hidden;
+  }
+
+  .chat-panel {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chatkit-frame {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+  }
+
+  .right-rail {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

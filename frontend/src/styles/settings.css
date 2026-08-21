@@ -219,8 +219,9 @@
   .settings-nav { position: static; width: 100%; min-height: 0; height: auto; max-height: none; padding: var(--space-2); border-right: 0; border-bottom: 1px solid var(--line); }
   .settings-nav-title { display: none; }
   .settings-search { max-width: 28rem; }
-  .settings-nav-items { grid-auto-flow: column; grid-auto-columns: minmax(9rem, max-content); overflow-x: auto; padding-bottom: var(--space-1); }
-  .settings-nav-items button { min-height: var(--control-height); grid-template-columns: 16px auto; }
+  .settings-search kbd { display: none; }
+  .settings-nav-items { grid-auto-flow: column; grid-auto-columns: minmax(7.5rem, max-content); overflow-x: auto; padding-bottom: var(--space-1); scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+  .settings-nav-items button { min-height: var(--control-height); grid-template-columns: 16px auto; padding: var(--space-1) var(--space-2); }
   .settings-nav-items button small { display: none; }
   .settings-nav-footnote { display: none; }
   .settings-content { width: calc(100% - 24px); padding-top: var(--space-4); }
@@ -229,9 +230,10 @@
   .setting-row { grid-template-columns: 1fr; align-items: flex-start; }
   .maintenance-row { align-items: flex-start; flex-direction: column; }
   .settings-theme-grid, .compact-folder-setting { grid-template-columns: 1fr; }
+  .theme-wireframe { min-height: 72px; }
   .agent-token-form, .activity-filters, .activity-event { grid-template-columns: 1fr; }
   .agent-token-prefixes, .agent-token-presets > div { grid-template-columns: 1fr; }
-  .capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .capability-grid { grid-template-columns: 1fr; }
   .token-row { align-items: flex-start; flex-direction: column; }
   .connection-fields, .connection-form { grid-template-columns: 1fr; }
   .connection-form .connection-credential-field { grid-column: 1; }

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { Command, FilePlus2, FileUp, Search } from 'lucide-react'
+import { FilePlus2, FileUp, Search } from 'lucide-react'
 import { api } from '../api'
 import { useWorkbench } from '../workbench'
 
@@ -84,8 +84,8 @@ function Welcome() {
             }}
           />
         </label>
-        <span>
-          <Command size={14} /> <kbd>⌘ K</kbd> commands
+        <span className="desktop-shortcut">
+          <kbd>⌘K</kbd> commands
         </span>
         <span>
           <Search size={14} /> Search from the sidebar

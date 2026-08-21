@@ -58,11 +58,12 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 const storageKey = 'sangam.workspace-preferences.v1'
 
 function loadPreferences(): WorkspacePreferences {
+  const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 900
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as Partial<WorkspacePreferences>
-    return { ...defaults, ...stored }
+    return { ...defaults, ...stored, rightVisible: isNarrow ? false : (stored.rightVisible ?? true) }
   } catch {
-    return defaults
+    return { ...defaults, rightVisible: isNarrow ? false : true }
   }
 }
 
