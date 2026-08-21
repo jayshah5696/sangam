@@ -29,9 +29,6 @@ const MarkdownEditor = lazy(() =>
   import('../MarkdownEditor').then((module) => ({ default: module.MarkdownEditor })),
 )
 const HtmlPreview = lazy(() => import('../HtmlPreview').then((module) => ({ default: module.HtmlPreview })))
-const TrustedHtmlPreview = lazy(() =>
-  import('../TrustedHtmlPreview').then((module) => ({ default: module.TrustedHtmlPreview })),
-)
 const PdfResearchWorkspace = lazy(() =>
   import('../PdfResearchWorkspace').then((module) => ({ default: module.PdfResearchWorkspace })),
 )
@@ -310,11 +307,7 @@ export function DocumentWorkspace({
         )}
         {mode !== 'edit' && document.content_type === 'text/html' && (
           <Suspense fallback={<div className="markdown-preview muted">Preparing HTML preview…</div>}>
-            {document.trust_level === 'trusted_interactive' && saveState === 'saved' ? (
-              <TrustedHtmlPreview document={document} revisionId={document.current_revision_id} />
-            ) : (
-              <HtmlPreview content={content} />
-            )}
+            <HtmlPreview content={content} />
           </Suspense>
         )}
       </div>

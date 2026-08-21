@@ -12,8 +12,9 @@ def test_chat_models_are_seeded_from_config_defaults(client: TestClient) -> None
     assert response.status_code == 200
     body = response.json()
     assert body["openrouter_enabled"] is True
-    assert body["default_model"] == "openai/gpt-5.4-mini"
+    assert body["default_model"] == "openai/gpt-5.6-luna"
     assert body["enabled_models"] == [
+        "openai/gpt-5.6-luna",
         "openai/gpt-5.4-mini",
         "openai/gpt-5.4-nano",
         "openai/gpt-5.6-terra",
@@ -59,16 +60,21 @@ def test_update_rejects_default_outside_enabled_set(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_update_rejects_models_absent_from_catalog(client: TestClient) -> None:
+def test_update_allows_custom_model_slugs_and_adds_to_catalog(client: TestClient) -> None:
     response = client.put(
         "/api/v1/chat/models",
         json={
             "openrouter_enabled": True,
-            "default_model": "made-up/model",
-            "enabled_models": ["made-up/model"],
+            "default_model": "custom-provider/custom-model-1",
+            "enabled_models": ["custom-provider/custom-model-1", "openai/gpt-5.6-luna"],
         },
     )
-    assert response.status_code == 422
+    assert response.status_code == 200
+    body = response.json()
+    assert body["default_model"] == "custom-provider/custom-model-1"
+    assert "custom-provider/custom-model-1" in body["enabled_models"]
+    catalog_ids = {model["id"] for model in body["catalog"]}
+    assert "custom-provider/custom-model-1" in catalog_ids
 
 
 def test_turning_openrouter_off_marks_chat_unconfigured(client: TestClient) -> None:

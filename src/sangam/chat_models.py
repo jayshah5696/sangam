@@ -27,12 +27,14 @@ def _provider_of(model_id: str) -> str:
 # OpenRouter catalog is large and volatile, so Sangam ships a curated set and
 # lets the operator pull the live list on demand from the Models settings page.
 CURATED_CATALOG: tuple[CatalogModel, ...] = (
+    CatalogModel("openai/gpt-5.6-luna", "GPT-5.6 Luna", "openai"),
     CatalogModel("openai/gpt-5.4-mini", "GPT-5.4 Mini", "openai"),
     CatalogModel("openai/gpt-5.4-nano", "GPT-5.4 Nano", "openai"),
     CatalogModel("openai/gpt-5.4", "GPT-5.4", "openai"),
     CatalogModel("openai/gpt-5.6-terra", "GPT-5.6 Terra", "openai"),
-    CatalogModel("anthropic/claude-sonnet-4.5", "Claude Sonnet 4.5", "anthropic"),
-    CatalogModel("google/gemini-2.5-flash", "Gemini 2.5 Flash", "google"),
+    CatalogModel("anthropic/claude-sonnet-5", "Claude Sonnet 5", "anthropic"),
+    CatalogModel("google/gemini-3.7-flash", "Gemini 3.7 Flash", "google"),
+    CatalogModel("google/gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite", "google"),
 )
 
 
@@ -91,20 +93,22 @@ class ChatModelSettingsRepository:
         enabled_models: list[str],
     ) -> ModelSettingsState:
         current = self.get()
-        catalog_ids = {model.id for model in current.catalog}
+        catalog: dict[str, CatalogModel] = {model.id: model for model in current.catalog}
         deduped: list[str] = list(dict.fromkeys(enabled_models))
         if not deduped:
             raise ValidationError("Enable at least one model")
-        unknown = [model_id for model_id in deduped if model_id not in catalog_ids]
-        if unknown:
-            raise ValidationError(f"Unknown model in selection: {unknown[0]}")
+        for model_id in deduped:
+            if model_id not in catalog:
+                catalog[model_id] = CatalogModel(
+                    model_id, _pretty_name(model_id), _provider_of(model_id)
+                )
         if default_model not in deduped:
             raise ValidationError("The default model must be one of the enabled models")
         state = ModelSettingsState(
             openrouter_enabled=openrouter_enabled,
             default_model=default_model,
             enabled_models=tuple(deduped),
-            catalog=current.catalog,
+            catalog=tuple(catalog.values()),
             catalog_fetched_at=current.catalog_fetched_at,
         )
         with self.database.transaction() as connection:

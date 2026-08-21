@@ -7,7 +7,19 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
-## [0.2.0] - 2026-08-16
+## [0.3.0] - 2026-08-20
+
+### Added
+
+- Direct interactive HTML & JavaScript preview execution without restrictive DOMPurify stripping or CSP blocks.
+- Dynamic custom model slug support: add any OpenRouter model slug directly from the Models settings UI.
+- Updated curated model catalog with Claude Sonnet 5, Gemini 3.7 Flash, Gemini 3.5 Flash Lite, and set GPT-5.6 Luna as default.
+- Modern React synchronization via `useSyncExternalStore` for browser media queries and event subscriptions.
+
+### Changed
+
+- Streamlined self-hosting documentation and deployment removing separate preview hostname/HMAC token dependencies.
+- Simplified DocumentWorkspace and DocumentInspector removing trust-state gating and redundant preview modals.
 
 ### Added
 
@@ -34,6 +46,7 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.1.0

@@ -81,8 +81,9 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "provider": "openrouter_openai_agents",
         "transport": "chatkit",
         "domain_key": "local-dev",
-        "default_model": "openai/gpt-5.4-mini",
+        "default_model": "openai/gpt-5.6-luna",
         "available_models": [
+            "openai/gpt-5.6-luna",
             "openai/gpt-5.4-mini",
             "openai/gpt-5.4-nano",
             "openai/gpt-5.6-terra",

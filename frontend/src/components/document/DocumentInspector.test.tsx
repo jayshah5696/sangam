@@ -34,7 +34,6 @@ vi.mock('../RevisionMergeView', () => ({ RevisionMergeView: () => null }))
 vi.mock('../HtmlPreview', () => ({ HtmlPreview: () => null }))
 vi.mock('../MarkdownPreview', () => ({ MarkdownPreview: () => null }))
 vi.mock('../OneTimeSecret', () => ({ OneTimeSecret: () => null }))
-vi.mock('../TrustedHtmlPreview', () => ({ TrustedHtmlPreview: () => null }))
 
 const document = {
   document_id: 'document-1',

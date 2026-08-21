@@ -10,7 +10,6 @@ import { HtmlPreview } from '../HtmlPreview'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { activateTabFromKeyboard } from '../tabKeyboard'
-import { TrustedHtmlPreview } from '../TrustedHtmlPreview'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const inspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
@@ -134,11 +133,7 @@ export function DocumentInspector({
               onUpdated={onUpdated}
             />
             {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
-              <PublicationEditor
-                document={document}
-                publication={publicationQuery.data ?? null}
-                onDocumentUpdated={onUpdated}
-              />
+              <PublicationEditor document={document} publication={publicationQuery.data ?? null} />
             )}
           </>
         )}
@@ -233,8 +228,6 @@ export function DocumentInspector({
                 </header>
                 {document.content_type === 'text/markdown' ? (
                   <MarkdownPreview content={previewRevision.content} />
-                ) : document.trust_level === 'trusted_interactive' ? (
-                  <TrustedHtmlPreview document={document} revisionId={previewRevision.revision_id} />
                 ) : (
                   <HtmlPreview content={previewRevision.content} />
                 )}
@@ -351,11 +344,9 @@ function slugify(value: string) {
 function PublicationEditor({
   document,
   publication,
-  onDocumentUpdated,
 }: {
   document: Document
   publication: Publication | null
-  onDocumentUpdated: (document: Document) => void
 }) {
   const queryClient = useQueryClient()
   const [slug, setSlug] = useState(publication?.slug ?? slugify(document.title))
@@ -384,14 +375,6 @@ function PublicationEditor({
       await refresh()
     },
   })
-  const trust = useMutation({
-    mutationFn: () =>
-      api.updateDocumentTrust(
-        document,
-        document.trust_level === 'trusted_interactive' ? 'untrusted' : 'trusted_interactive',
-      ),
-    onSuccess: onDocumentUpdated,
-  })
   const publicationHref = publication?.url ?? `/p/${slug}`
   return (
     <section className="metadata-editor publication-editor">
@@ -404,37 +387,6 @@ function PublicationEditor({
           {publication?.active ? 'Live' : 'Draft'}
         </span>
       </header>
-      {document.content_type === 'text/html' && (
-        <div className="trust-control">
-          <div>
-            <strong>
-              {document.trust_level === 'trusted_interactive' ? 'Trusted interactive HTML' : 'Safe HTML'}
-            </strong>
-            <small>
-              {document.trust_level === 'trusted_interactive'
-                ? 'JavaScript runs only in the isolated preview origin.'
-                : 'Scripts are removed and the preview cannot execute code.'}
-            </small>
-          </div>
-          <button
-            type="button"
-            className="secondary-action"
-            disabled={trust.isPending}
-            onClick={() => {
-              if (
-                document.trust_level === 'trusted_interactive' ||
-                window.confirm('Trust this HTML to run JavaScript in the isolated preview origin?')
-              ) {
-                trust.mutate()
-              }
-            }}
-          >
-            {document.trust_level === 'trusted_interactive'
-              ? 'Return to safe HTML'
-              : 'Trust interactive HTML'}
-          </button>
-        </div>
-      )}
       <label>
         <span>Stable slug</span>
         <input value={slug} onChange={(event) => setSlug(event.target.value)} />
@@ -494,7 +446,7 @@ function PublicationEditor({
           onDismiss={() => setOneTimeToken(null)}
         />
       )}
-      {(save.isError || remove.isError || rotate.isError || trust.isError) && (
+      {(save.isError || remove.isError || rotate.isError) && (
         <p className="error-text">The publication setting could not be saved.</p>
       )}
     </section>
