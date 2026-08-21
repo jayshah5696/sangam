@@ -1,20 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import {
+  ArrowLeft,
   Check,
+  Cpu,
   FolderTree,
   MonitorCog,
   Paintbrush,
   RefreshCw,
   RotateCcw,
+  Search,
   SearchCheck,
+  ShieldCheck,
   Tags,
+  Wrench,
 } from 'lucide-react'
 import { api, type Folder, type Tag } from '../api'
 import { AgentAccessSettings } from '../components/AgentAccessSettings'
 import { ChatModelSettings } from '../components/ChatModelSettings'
-import { activateTabFromKeyboard } from '../components/tabKeyboard'
 import { themes, useTheme } from '../theme'
 import { useWorkbench } from '../workbench'
 
@@ -23,6 +27,87 @@ export const Route = createFileRoute('/settings/appearance')({
     throw redirect({ to: '/settings' })
   },
 })
+
+type SettingsCategory = 'appearance' | 'workbench' | 'organization' | 'models' | 'agents' | 'operations'
+
+const settingsCategories: Array<{
+  id: SettingsCategory
+  label: string
+  description: string
+  icon: typeof Paintbrush
+}> = [
+  { id: 'appearance', label: 'Appearance', description: 'Theme and contrast', icon: Paintbrush },
+  { id: 'workbench', label: 'Workbench', description: 'Panels and editor groups', icon: MonitorCog },
+  { id: 'organization', label: 'Organization', description: 'Tags and folder metadata', icon: FolderTree },
+  { id: 'models', label: 'AI & models', description: 'Connections and model policy', icon: Cpu },
+  { id: 'agents', label: 'Agents & access', description: 'Scoped workspace tokens', icon: ShieldCheck },
+  { id: 'operations', label: 'Operations', description: 'Derived data and recovery', icon: Wrench },
+]
+
+const settingsSearchIndex: Array<{
+  id: string
+  category: SettingsCategory
+  label: string
+  description: string
+  keywords: string
+}> = [
+  {
+    id: 'appearance',
+    category: 'appearance',
+    label: 'Theme',
+    description: 'Color and contrast for this browser',
+    keywords: 'appearance river midnight parchment cobalt',
+  },
+  {
+    id: 'workspace-sidebar',
+    category: 'workbench',
+    label: 'Workspace sidebar',
+    description: 'Show files and search beside the document',
+    keywords: 'left panel rail visible hidden',
+  },
+  {
+    id: 'editor-groups',
+    category: 'workbench',
+    label: 'Editor groups',
+    description: 'Reset the current split arrangement',
+    keywords: 'split layout reset tabs',
+  },
+  {
+    id: 'tag-settings',
+    category: 'organization',
+    label: 'Tags',
+    description: 'Create shared workspace tags',
+    keywords: 'taxonomy labels color',
+  },
+  {
+    id: 'folder-settings',
+    category: 'organization',
+    label: 'Folder metadata',
+    description: 'Set folder categories and tags',
+    keywords: 'files category taxonomy',
+  },
+  {
+    id: 'chat-models',
+    category: 'models',
+    label: 'AI connections and models',
+    description: 'Configure providers and model policy',
+    keywords: 'openrouter openai endpoint credential inference',
+  },
+  {
+    id: 'agent-access',
+    category: 'agents',
+    label: 'Agent access',
+    description: 'Issue scoped, expiring workspace tokens',
+    keywords: 'capability token prefix read write publish revoke',
+  },
+  {
+    id: 'maintenance',
+    category: 'operations',
+    label: 'Search index',
+    description: 'Rebuild full-text search from canonical data',
+    keywords: 'maintenance reindex fts recovery',
+  },
+]
 
 export function WorkspaceSettings() {
   const { preferences, updatePreferences } = useTheme()
@@ -41,93 +126,207 @@ export function WorkspaceSettings() {
   })
   const reindex = useMutation({ mutationFn: api.rebuildSearch })
 
-  const [activeCategory, setActiveCategory] = useState<'workspace' | 'operations'>('workspace')
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>('appearance')
+  const [settingsQuery, setSettingsQuery] = useState('')
+  const [selectedSearchIndex, setSelectedSearchIndex] = useState(0)
+  const [pendingDestination, setPendingDestination] = useState<string | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const normalizedQuery = settingsQuery.trim().toLowerCase()
+  const searchResults = normalizedQuery
+    ? settingsSearchIndex.filter((item) =>
+        `${item.label} ${item.description} ${item.keywords}`.toLowerCase().includes(normalizedQuery),
+      )
+    : []
+  const activeDefinition = settingsCategories.find((item) => item.id === activeCategory)!
+
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      const editable =
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        (event.target instanceof HTMLElement && event.target.isContentEditable)
+      if (event.key !== '/' || editable) return
+      event.preventDefault()
+      searchInputRef.current?.focus()
+    }
+    window.addEventListener('keydown', focusSearch)
+    return () => window.removeEventListener('keydown', focusSearch)
+  }, [])
+
+  useEffect(() => {
+    if (!pendingDestination) return
+    const frame = window.requestAnimationFrame(() => {
+      const destination = document.getElementById(pendingDestination)
+      destination?.focus({ preventScroll: true })
+      destination?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      destination?.classList.add('settings-destination-pulse')
+      window.setTimeout(() => destination?.classList.remove('settings-destination-pulse'), 1200)
+      setPendingDestination(null)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeCategory, pendingDestination])
+
+  const openDestination = (category: SettingsCategory, id?: string) => {
+    setActiveCategory(category)
+    setSettingsQuery('')
+    setPendingDestination(id ?? category)
+  }
 
   return (
-    <div className="settings-control-center simplified-settings">
+    <div className="settings-control-center">
+      <aside className="settings-nav" aria-label="Settings navigation">
+        <Link className="settings-back" to="/">
+          <ArrowLeft size={14} />
+          Back to workspace
+        </Link>
+        <div className="settings-nav-title">
+          <strong>Settings</strong>
+          <span>Workspace and local preferences</span>
+        </div>
+        <label className="settings-search">
+          <Search size={14} />
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={settingsQuery}
+            onChange={(event) => {
+              setSettingsQuery(event.target.value)
+              setSelectedSearchIndex(0)
+            }}
+            onKeyDown={(event) => {
+              if (!searchResults.length) return
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault()
+                const direction = event.key === 'ArrowDown' ? 1 : -1
+                setSelectedSearchIndex(
+                  (current) => (current + direction + searchResults.length) % searchResults.length,
+                )
+              }
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                const result = searchResults[selectedSearchIndex]
+                if (result) openDestination(result.category, result.id)
+              }
+            }}
+            placeholder="Search settings"
+            aria-label="Search settings"
+            aria-controls={normalizedQuery ? 'settings-search-results' : undefined}
+            aria-activedescendant={
+              searchResults[selectedSearchIndex]?.id
+                ? `settings-result-${searchResults[selectedSearchIndex]!.id}`
+                : undefined
+            }
+          />
+          <kbd>/</kbd>
+        </label>
+        {normalizedQuery ? (
+          <div
+            id="settings-search-results"
+            className="settings-search-results"
+            role="listbox"
+            aria-label="Settings search results"
+          >
+            {searchResults.map((item, index) => (
+              <button
+                type="button"
+                role="option"
+                id={`settings-result-${item.id}`}
+                aria-selected={index === selectedSearchIndex}
+                key={item.id}
+                onMouseMove={() => setSelectedSearchIndex(index)}
+                onClick={() => openDestination(item.category, item.id)}
+              >
+                <SearchCheck size={14} />
+                <span>
+                  <strong>{item.label}</strong>
+                  <small>{item.description}</small>
+                </span>
+              </button>
+            ))}
+            {searchResults.length === 0 && <p>No matching settings.</p>}
+          </div>
+        ) : (
+          <nav className="settings-nav-items" aria-label="Settings pages">
+            {settingsCategories.map(({ id, label, description, icon: Icon }) => (
+              <button
+                type="button"
+                key={id}
+                className={activeCategory === id ? 'active' : ''}
+                aria-current={activeCategory === id ? 'page' : undefined}
+                onClick={() => openDestination(id)}
+              >
+                <Icon size={15} />
+                <span>
+                  <strong>{label}</strong>
+                  <small>{description}</small>
+                </span>
+              </button>
+            ))}
+          </nav>
+        )}
+        <p className="settings-nav-footnote">
+          <kbd>⌘K</kbd> opens the workspace switchboard.
+        </p>
+      </aside>
+
       <div className="settings-content">
         <header className="settings-compact-header">
           <div>
-            <p className="eyebrow">Sangam settings</p>
-            <h1>Settings</h1>
+            <p className="settings-breadcrumb">Settings / {activeDefinition.label}</p>
+            <h1>{activeDefinition.label}</h1>
+            <p>{activeDefinition.description}</p>
           </div>
-          <ScopeBadge scope="browser" />
+          <ScopeBadge
+            scope={
+              activeCategory === 'appearance' || activeCategory === 'workbench' ? 'browser' : 'workspace'
+            }
+          />
         </header>
 
-        <div className="settings-category-switch" role="tablist" aria-label="Settings category">
-          <button
-            type="button"
-            role="tab"
-            id="settings-tab-workspace"
-            aria-controls="settings-panel-workspace"
-            aria-selected={activeCategory === 'workspace'}
-            tabIndex={activeCategory === 'workspace' ? 0 : -1}
-            className={activeCategory === 'workspace' ? 'active' : ''}
-            onClick={() => setActiveCategory('workspace')}
-            onKeyDown={activateTabFromKeyboard}
-          >
-            Workspace
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="settings-tab-operations"
-            aria-controls="settings-panel-operations"
-            aria-selected={activeCategory === 'operations'}
-            tabIndex={activeCategory === 'operations' ? 0 : -1}
-            className={activeCategory === 'operations' ? 'active' : ''}
-            onClick={() => setActiveCategory('operations')}
-            onKeyDown={activateTabFromKeyboard}
-          >
-            Operations & AI
-          </button>
-        </div>
-
-        {activeCategory === 'workspace' ? (
-          <div id="settings-panel-workspace" role="tabpanel" aria-labelledby="settings-tab-workspace">
-            <div className="settings-group-header">
-              <h2>Workspace Preferences</h2>
-              <p>Configure interface theme, workbench layout, and shared taxonomy.</p>
-            </div>
-
+        <main className="settings-main-pane" aria-label={`${activeDefinition.label} settings`}>
+          {activeCategory === 'appearance' && (
             <SettingsSection
               id="appearance"
               icon={Paintbrush}
-              title="Appearance"
-              description="Color and contrast for this browser."
+              title="Theme"
+              description="Preview the complete Sangam workbench before changing its colors."
               scope="browser"
             >
               <div className="theme-grid settings-theme-grid">
                 {themes.map((theme) => (
                   <button
+                    type="button"
                     key={theme.id}
                     className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
+                    aria-pressed={preferences.theme === theme.id}
                     onClick={() => updatePreferences({ theme: theme.id })}
                   >
-                    <span className="theme-swatches">
-                      {theme.colors.map((color) => (
-                        <i key={color} style={{ background: color }} />
-                      ))}
-                    </span>
+                    <ThemeWireframe themeId={theme.id} />
                     <strong>
                       {theme.name}
-                      {preferences.theme === theme.id && <Check size={13} />}
+                      {preferences.theme === theme.id && <Check size={14} />}
                     </strong>
                     <small>{theme.description}</small>
                   </button>
                 ))}
               </div>
             </SettingsSection>
+          )}
 
+          {activeCategory === 'workbench' && (
             <SettingsSection
               id="workbench"
               icon={MonitorCog}
-              title="Workbench"
-              description="Resize panels directly by dragging their edges. Editor groups persist in this browser."
+              title="Workbench layout"
+              description="Panel visibility and editor groups are stored in this browser."
               scope="browser"
             >
               <div className="settings-rows">
-                <SettingRow label="Workspace sidebar" detail="Show files and search beside your document">
+                <SettingRow
+                  id="workspace-sidebar"
+                  label="Workspace sidebar"
+                  detail="Show files and search beside the active document"
+                >
                   <label className="compact-switch">
                     <input
                       type="checkbox"
@@ -138,25 +337,28 @@ export function WorkspaceSettings() {
                   </label>
                 </SettingRow>
                 <SettingRow
+                  id="editor-groups"
                   label="Editor groups"
-                  detail="Return to a single editor and clear the current split arrangement"
+                  detail="Return to one editor and clear the current split arrangement"
                 >
-                  <button className="secondary-action" onClick={workbench.resetLayout}>
+                  <button type="button" className="secondary-action" onClick={workbench.resetLayout}>
                     <RotateCcw size={14} />
                     Reset layout
                   </button>
                 </SettingRow>
               </div>
             </SettingsSection>
+          )}
 
+          {activeCategory === 'organization' && (
             <SettingsSection
               id="organization"
               icon={FolderTree}
-              title="Files & organization"
+              title="Files and organization"
               description="Tags, categories, and folder metadata belong to the shared workspace."
               scope="workspace"
             >
-              <div className="settings-subsection">
+              <section className="settings-subsection" id="tag-settings" tabIndex={-1}>
                 <div className="settings-subtitle">
                   <div>
                     <Tags size={15} />
@@ -183,7 +385,9 @@ export function WorkspaceSettings() {
                     value={tagName}
                     onChange={(event) => setTagName(event.target.value)}
                   />
-                  <button disabled={createTag.isPending}>Add tag</button>
+                  <button disabled={createTag.isPending}>
+                    {createTag.isPending ? 'Adding…' : 'Add tag'}
+                  </button>
                 </form>
                 <div className="tag-library">
                   {tags.data?.map((tag) => (
@@ -193,8 +397,8 @@ export function WorkspaceSettings() {
                     </span>
                   ))}
                 </div>
-              </div>
-              <div className="settings-subsection">
+              </section>
+              <section className="settings-subsection" id="folder-settings" tabIndex={-1}>
                 <div className="settings-subtitle">
                   <div>
                     <FolderTree size={15} />
@@ -211,41 +415,30 @@ export function WorkspaceSettings() {
                     />
                   ))}
                   {folders.data?.length === 0 && (
-                    <p className="small-muted">Create a folder from Files to organize it here.</p>
+                    <p className="settings-empty-row">Create a folder from Files to organize it here.</p>
                   )}
                 </div>
-              </div>
+              </section>
             </SettingsSection>
-          </div>
-        ) : (
-          <div id="settings-panel-operations" role="tabpanel" aria-labelledby="settings-tab-operations">
-            <div className="settings-group-header">
-              <h2>AI & Integrations</h2>
-              <p>Manage model selections and API access tokens for external agents.</p>
-            </div>
+          )}
 
-            <AgentAccessSettings />
+          {activeCategory === 'models' && <ChatModelSettings />}
+          {activeCategory === 'agents' && <AgentAccessSettings />}
 
-            <ChatModelSettings />
-
-            <div className="settings-group-header">
-              <h2>Operations & Maintenance</h2>
-              <p>Derived index and recovery utilities.</p>
-            </div>
-
+          {activeCategory === 'operations' && (
             <SettingsSection
               id="maintenance"
               icon={SearchCheck}
-              title="Maintenance"
-              description="Rebuild derived search data from the canonical workspace."
+              title="Search index"
+              description="Rebuild derived full-text data from the canonical workspace."
               scope="workspace"
             >
               <div className="maintenance-row">
                 <div>
                   <SearchCheck size={17} />
                   <span>
-                    <strong>Search index</strong>
-                    <small>Rebuild full-text search from canonical workspace data.</small>
+                    <strong>Full-text search</strong>
+                    <small>The index can be rebuilt without changing documents.</small>
                   </span>
                 </div>
                 <button
@@ -258,21 +451,45 @@ export function WorkspaceSettings() {
                 </button>
               </div>
               {reindex.isSuccess && (
-                <p className="operation-result success">
+                <p className="operation-result success" role="status">
                   <Check size={14} />
                   Indexed {reindex.data} documents.
                 </p>
               )}
               {reindex.isError && (
-                <p className="operation-result error-text">
+                <p className="operation-result error-text" role="alert">
                   Search index could not be rebuilt: {reindex.error.message}
                 </p>
               )}
             </SettingsSection>
-          </div>
-        )}
+          )}
+        </main>
       </div>
     </div>
+  )
+}
+
+function ThemeWireframe({ themeId }: { themeId: string }) {
+  return (
+    <span className={`theme-wireframe theme-wireframe-${themeId}`} aria-hidden="true">
+      <i className="theme-wireframe-sidebar">
+        <b />
+        <b />
+        <b />
+      </i>
+      <i className="theme-wireframe-editor">
+        <b />
+        <b />
+        <b />
+        <b />
+      </i>
+      <i className="theme-wireframe-inspector">
+        <b />
+        <b />
+        <b />
+      </i>
+      <i className="theme-wireframe-focus" />
+    </span>
   )
 }
 
@@ -292,7 +509,7 @@ function SettingsSection({
   children: React.ReactNode
 }) {
   return (
-    <section className="settings-panel" id={id}>
+    <section className="settings-panel" id={id} tabIndex={-1}>
       <header>
         <Icon size={18} />
         <div>
@@ -322,16 +539,18 @@ function ScopeBadge({ scope }: { scope: 'browser' | 'workspace' }) {
 }
 
 function SettingRow({
+  id,
   label,
   detail,
   children,
 }: {
+  id?: string
   label: string
   detail: string
   children: React.ReactNode
 }) {
   return (
-    <div className="setting-row">
+    <div className="setting-row" id={id} tabIndex={id ? -1 : undefined}>
       <div>
         <strong>{label}</strong>
         <small>{detail}</small>

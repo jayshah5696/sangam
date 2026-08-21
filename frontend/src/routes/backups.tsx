@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { api, type BackupSet } from '../api'
+import { StateMessage } from '../components/ui/StateMessage'
 
 export const Route = createFileRoute('/backups')({ component: BackupsPage })
 
@@ -26,18 +27,32 @@ function BackupsPage() {
           {create.isPending ? 'Creating and verifying…' : 'Back up now'}
         </button>
       </header>
+      {backups.isLoading && <StateMessage kind="loading" title="Loading backup inventory" />}
       {backups.data?.length === 0 && (
-        <div className="empty-state">
-          <strong>No backup sets yet.</strong>
-          <p>Create one now or leave Sangam running for the nightly schedule.</p>
-        </div>
+        <StateMessage
+          kind="empty"
+          title="No backup sets yet"
+          description="Create a verified set now or leave Sangam running for the nightly schedule."
+          action={
+            <button className="primary-button" disabled={create.isPending} onClick={() => create.mutate()}>
+              {create.isPending ? 'Creating and verifying…' : 'Back up now'}
+            </button>
+          }
+        />
       )}
       <div className="backup-list">
         {backups.data?.map((backup) => (
           <BackupCard key={backup.backup_id} backup={backup} />
         ))}
       </div>
-      {backups.isError && <p className="error-text">Backup inventory could not be loaded.</p>}
+      {backups.isError && (
+        <StateMessage
+          kind="error"
+          title="Backup inventory could not be loaded"
+          description="No backup status has been inferred from stale data."
+          action={<button onClick={() => void backups.refetch()}>Retry</button>}
+        />
+      )}
     </section>
   )
 }

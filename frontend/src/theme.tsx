@@ -9,7 +9,7 @@ export const themes: Array<{ id: ThemeId; name: string; description: string; col
     id: 'midnight',
     name: 'Midnight',
     description: 'Dark-native near-black workspace',
-    colors: ['#08090a', '#191a1b', '#7170ff'],
+    colors: ['#08090a', '#191a1b', '#5b59dc'],
   },
   {
     id: 'river',
@@ -27,7 +27,7 @@ export const themes: Array<{ id: ThemeId; name: string; description: string; col
     id: 'cobalt',
     name: 'Cobalt',
     description: 'Crisp blue and cool white',
-    colors: ['#102a43', '#edf4fb', '#2f80ed'],
+    colors: ['#102a43', '#edf4fb', '#1769c2'],
   },
 ]
 

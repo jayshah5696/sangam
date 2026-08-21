@@ -46,6 +46,10 @@ test-frontend:
     npm --prefix frontend run lint
     npm --prefix frontend run test
 
+# Exercise desktop and narrow browser interactions against isolated data.
+test-e2e:
+    npm --prefix frontend run test:e2e
+
 # Format Python sources and tests.
 format:
     uv run ruff format .

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useIsFetching, useQuery } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import {
   Activity,
   ArchiveRestore,
+  CheckCircle2,
+  CloudOff,
   FileText,
   Import,
   PanelLeftClose,
@@ -14,6 +16,7 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
+  RefreshCw,
 } from 'lucide-react'
 import { api, type DocumentSummary } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
@@ -39,8 +42,11 @@ function RootLayout() {
   const [mobileSidebarLocationKey, setMobileSidebarLocationKey] = useState<string | null>(null)
   const narrowSidebar = useMediaQuery('(max-width: 1100px)')
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
+  const usesDedicatedNavigation = location.pathname.startsWith('/settings')
   const locationKey = location.state.__TSR_key ?? location.href
-  const sidebarVisible = narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible
+  const sidebarVisible =
+    !usesDedicatedNavigation &&
+    (narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible)
 
   useEffect(() => {
     if (mobileSidebarLocationKey === null || mobileSidebarLocationKey === locationKey) return
@@ -91,7 +97,7 @@ function RootLayout() {
             onChange={(leftWidth) => updatePreferences({ leftWidth })}
           />
         </>
-      ) : (
+      ) : !usesDedicatedNavigation ? (
         <button
           className="sidebar-reveal icon-button"
           aria-label="Show workspace sidebar"
@@ -100,7 +106,7 @@ function RootLayout() {
         >
           <PanelLeftOpen size={17} />
         </button>
-      )}
+      ) : null}
       <div className="workbench-center">
         {layoutRecovery.recovered && (
           <div className="layout-recovery-notice" role="status">
@@ -272,14 +278,53 @@ function SidebarLinks() {
     { to: '/settings' as const, label: 'Settings', icon: Settings },
   ]
   return (
-    <nav className="sidebar-footer-nav" aria-label="Workspace tools">
-      {links.map(({ to, label, icon: Icon }) => (
-        <Link key={to} to={to} activeProps={{ className: 'active' }}>
-          <Icon size={14} />
-          <span>{label}</span>
-        </Link>
-      ))}
-    </nav>
+    <div className="sidebar-footer">
+      <nav className="sidebar-footer-nav" aria-label="Workspace tools">
+        {links.map(({ to, label, icon: Icon }) => (
+          <Link key={to} to={to} activeProps={{ className: 'active' }}>
+            <Icon size={14} />
+            <span>{label}</span>
+          </Link>
+        ))}
+      </nav>
+      <WorkspaceFreshness />
+    </div>
+  )
+}
+
+function WorkspaceFreshness() {
+  const fetching = useIsFetching()
+  const [online, setOnline] = useState(() => navigator.onLine)
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine)
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+    }
+  }, [])
+
+  return (
+    <div className={`workspace-freshness ${online ? '' : 'offline'}`} role="status" aria-live="polite">
+      {!online ? (
+        <>
+          <CloudOff size={13} />
+          <span>Offline</span>
+        </>
+      ) : fetching ? (
+        <>
+          <RefreshCw className="spin" size={13} />
+          <span>Refreshing {fetching}</span>
+        </>
+      ) : (
+        <>
+          <CheckCircle2 size={13} />
+          <span>Current</span>
+        </>
+      )}
+    </div>
   )
 }
 

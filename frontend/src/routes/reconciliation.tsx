@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { api, type ReconciliationConflict } from '../api'
+import { StateMessage } from '../components/ui/StateMessage'
 
 export const Route = createFileRoute('/reconciliation')({ component: ReconciliationPage })
 
@@ -29,13 +30,21 @@ function ReconciliationPage() {
           {scan.isPending ? 'Scanning…' : 'Scan workspace'}
         </button>
       </header>
-      {report.isLoading && <p className="muted">Checking conflicts…</p>}
-      {report.isError && <p className="error-text">Reconciliation status could not be loaded.</p>}
+      {report.isLoading && <StateMessage kind="loading" title="Checking workspace integrity" />}
+      {report.isError && (
+        <StateMessage
+          kind="error"
+          title="Reconciliation status could not be loaded"
+          description="Sangam has not assumed that the workspace is in sync."
+          action={<button onClick={() => void report.refetch()}>Retry</button>}
+        />
+      )}
       {report.data?.conflicts.length === 0 && (
-        <div className="empty-state">
-          <strong>Workspace is in sync.</strong>
-          <p>No unresolved disk changes need a decision.</p>
-        </div>
+        <StateMessage
+          kind="success"
+          title="Workspace is in sync"
+          description="No unresolved disk changes need a decision."
+        />
       )}
       <div className="conflict-list">
         {report.data?.conflicts.map((conflict) => (
@@ -98,9 +107,14 @@ function ConflictCard({
           </>
         )}
       </div>
-      {resolve.isPending && <p className="muted">Applying decision…</p>}
+      {resolve.isPending && <StateMessage compact kind="loading" title="Applying decision" />}
       {resolve.isError && (
-        <p className="error-text">That decision could not be applied. The conflict remains open.</p>
+        <StateMessage
+          compact
+          kind="error"
+          title="Decision could not be applied"
+          description="The conflict remains open."
+        />
       )}
     </article>
   )

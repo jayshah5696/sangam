@@ -50,6 +50,24 @@ button {
   color: var(--text);
   font-size: var(--text-control);
   line-height: var(--leading-ui);
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .56;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+:where(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
 }
 
 .icon-button,
@@ -284,6 +302,100 @@ button {
   overflow-wrap: anywhere;
   color: var(--muted);
   font: var(--text-meta)/var(--leading-ui) var(--font-mono);
+}
+
+/* Shared loading, empty, error, success, and offline anatomy. */
+.ui-state {
+  min-height: 7rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-content: center;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  color: var(--muted);
+}
+
+.ui-state > svg {
+  margin-top: 1px;
+  color: var(--text-subtle);
+}
+
+.ui-state > div:not(.ui-state-action) {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.ui-state strong {
+  color: var(--text);
+  font-size: var(--text-body);
+  line-height: var(--leading-tight);
+}
+
+.ui-state p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-control);
+  line-height: var(--leading-body);
+}
+
+.ui-state-action {
+  align-self: center;
+}
+
+.ui-state-compact {
+  min-height: var(--control-height);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-style: solid;
+  background: transparent;
+}
+
+.ui-state-error {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+  background: color-mix(in srgb, var(--danger-soft) 54%, transparent);
+}
+
+.ui-state-error > svg,
+.ui-state-error strong {
+  color: var(--danger);
+}
+
+.ui-state-success > svg,
+.ui-state-success strong {
+  color: var(--success);
+}
+
+.ui-state-offline {
+  border-color: color-mix(in srgb, var(--warning) 46%, var(--line));
+  background: color-mix(in srgb, var(--warning-soft) 58%, transparent);
+}
+
+.ui-state-offline > svg,
+.ui-state-offline strong {
+  color: var(--warning);
+}
+
+@media (pointer: coarse) {
+  :where(button, a, input, select, summary, [role="button"], [role="option"]) {
+    min-height: var(--control-touch);
+  }
+}
+
+@media (max-width: 650px) {
+  .ui-state {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .ui-state-action {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 /* Explicit, limited exceptions to the UI font. */

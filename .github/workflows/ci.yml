@@ -41,6 +41,10 @@ jobs:
           npm --prefix frontend run build
           npm --prefix frontend run lint
           npm --prefix frontend run test
+      - name: Desktop and narrow browser gates
+        run: |
+          ./frontend/node_modules/.bin/playwright install --with-deps chromium
+          npm --prefix frontend run test:e2e
       - name: Documentation gates
         run: |
           uv run python scripts/verify-docs.py

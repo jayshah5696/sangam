@@ -35,6 +35,7 @@ import { DocumentWorkspace } from '../document/DocumentWorkspace'
 import { DocumentInspector } from '../document/DocumentInspector'
 import { ResizeHandle } from '../ResizeHandle'
 import { activateTabFromKeyboard } from '../tabKeyboard'
+import { StateMessage } from '../ui/StateMessage'
 import { EditorGroupErrorBoundary } from './EditorGroupErrorBoundary'
 
 export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) {
@@ -461,9 +462,25 @@ function DocumentLoader({
     queryKey: ['document', documentId],
     queryFn: () => api.getDocument(documentId),
   })
-  if (documentQuery.isLoading) return <div className="center-message">Opening document…</div>
+  if (documentQuery.isLoading) return <StateMessage kind="loading" title="Opening document" />
   if (documentQuery.isError || !documentQuery.data) {
-    return <div className="center-message error-text">Document could not be opened.</div>
+    return (
+      <StateMessage
+        kind="error"
+        title="Document could not be opened"
+        description="The saved tab may refer to another workspace, or the document may have been removed."
+        action={
+          <div className="state-actions">
+            <button type="button" onClick={() => void documentQuery.refetch()}>
+              Retry
+            </button>
+            <button type="button" className="secondary-action" onClick={onDeleted}>
+              Close stale tab
+            </button>
+          </div>
+        }
+      />
+    )
   }
   return (
     <DocumentWorkspace
