@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && tsc -b",
-    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"playwright.config.ts\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"playwright.config.ts\"",
     "lint": "eslint . && node scripts/check-ui-system.mjs",
-    "test": "vitest run"
+    "test": "vitest run src",
+    "test:e2e": "npm run build && playwright test",
+    "update:screenshots": "npm run build && SANGAM_UPDATE_SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts"
   },
   "dependencies": {
     "@codemirror/commands": "6.10.4",
@@ -33,6 +35,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@eslint/js": "10.0.1",
     "@tanstack/router-plugin": "1.168.20",
     "@testing-library/react": "^16.3.2",
@@ -40,6 +43,7 @@
     "@types/node": "26.1.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "@playwright/test": "^1.55.0",
     "@vitejs/plugin-react": "6.0.3",
     "eslint": "10.7.0",
     "eslint-plugin-react-hooks": "7.1.1",

@@ -5,6 +5,12 @@ activity, menus, and embedded Pierre components. A dark navigation rail and a
 light inspector rail are valid theme roles; they must still share typography,
 spacing, control dimensions, and component anatomy.
 
+The interface should feel quiet, dense, and obvious. Use whitespace to separate
+regions, one-pixel borders to show structure, and color to communicate selection
+or status. Do not wrap every group in a raised card. A card is appropriate only
+when its contents are one distinct task, such as choosing a theme or resolving a
+conflict.
+
 ## Typography
 
 - `--font-ui`: all application chrome, controls, navigation, labels, and menus.
@@ -35,6 +41,65 @@ Both sidebars use the shared `ui-rail` and `ui-rail-header` anatomy. Use
 inspection surfaces. Rail-specific CSS may change layout or color, but must not
 introduce a new type scale, control height, or radius system.
 
+## Interaction states
+
+Every interactive surface must define the states that apply to it. Reuse the
+shared button, field, row, tab, badge, and `StateMessage` anatomy before creating
+a local variant.
+
+- **Rest and hover:** the default state stays visually quiet; hover adds only
+  enough contrast to show that the item is interactive.
+- **Focus:** keyboard focus uses the shared focus ring and is never conveyed by
+  color alone. Destination focus may use a short pulse when reduced motion is
+  not requested.
+- **Active and selected:** use the accent edge, background, or marker defined by
+  the component. Use `aria-current`, `aria-selected`, `aria-pressed`, or the
+  appropriate native state at the same time.
+- **Pending and saving:** keep the current value visible and label the work in
+  progress. Disable only the action that cannot safely be repeated.
+- **Success:** confirm completion near the action. Do not leave a permanent
+  success banner for routine autosaves.
+- **Empty:** say what is absent and offer the most useful next action when one
+  exists.
+- **Error and conflict:** explain what failed, preserve the user's work, and
+  offer retry, close, or resolution controls. Never replace real data with a
+  successful-looking fallback.
+- **Offline and stale:** retain readable local state and mark freshness
+  explicitly. The workspace rail owns global refresh and connectivity status.
+- **Disabled:** use the shared disabled treatment and keep the label readable.
+- **Narrow and touch:** reflow instead of clipping. Coarse-pointer targets must
+  be at least `--control-touch` tall.
+
+Use `StateMessage` for loading, empty, error, success, and offline messages on
+utility routes and recoverable workbench surfaces. Use compact mode inside a
+row or panel; use the standard mode when the state replaces the page content.
+
+## Settings
+
+Settings is a dedicated task surface, not a second copy of the workspace. It
+uses one settings rail with a clear return to the workspace, six stable
+categories, and search across every setting.
+
+- Search results name both the setting and its category.
+- Arrow keys move through results; Enter opens the category and focuses the
+  exact destination row.
+- Each setting row owns a stable destination ID and keyboard focus target.
+- Theme choices preview the real sidebar, editor, inspector, and focus colors;
+  decorative swatches alone are not sufficient.
+- On narrow screens, category navigation becomes a horizontal strip and the
+  content remains free of page-level horizontal scrolling.
+
+## Freshness and recovery
+
+React Query owns server freshness. Queries become stale after 15 seconds and
+refresh when the window regains focus or connectivity. The workspace footer
+shows `Current`, an active refresh count, or `Offline` so background work is not
+invisible.
+
+Persisted browser state may outlive a workspace database. If a saved tab points
+to a missing document, show a specific recovery state with **Retry** and
+**Close stale tab**. Do not strand the editor behind a generic error.
+
 ## Embedded components
 
 Pierre Trees and Diffs receive the same font stacks, sizes, and radii through
@@ -48,6 +113,36 @@ components remain synchronized with native Sangam controls.
 3. Reuse existing rail, tab, field, button, row, badge, or menu behavior.
 4. Add new tokens only when the role is genuinely absent, not to match a single mockup.
 5. Check every theme and both desktop and narrow layouts before merging.
+
+## Verification and screenshots
+
+Run the fast UI gate while working:
+
+```bash
+npm --prefix frontend run format:check
+npm --prefix frontend run lint
+npm --prefix frontend run build
+npm --prefix frontend run test
+```
+
+Before merging an interaction or layout change, run the browser suite. It starts
+an isolated Sangam instance, seeds real API data, checks the primary routes with
+axe, and covers desktop and 390px layouts:
+
+```bash
+npm --prefix frontend run test:e2e
+```
+
+After those checks pass, refresh the verified README assets and inspect all three
+images before committing them:
+
+```bash
+npm --prefix frontend run update:screenshots
+```
+
+This writes `docs/assets/crisp-workspace.png`, `crisp-settings.png`, and
+`crisp-settings-narrow.png`. Do not hand-edit or crop these screenshots; they
+are browser output from an isolated local fixture.
 
 `npm --prefix frontend run lint` enforces the compact type, font-family, radius,
 and defined-custom-property rules so a new component cannot quietly introduce

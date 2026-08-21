@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
   Activity,
   ArchiveRestore,
+  Bookmark,
   Columns2,
+  FileText,
   FilePlus2,
   Files,
   RotateCcw,
@@ -25,6 +27,7 @@ type Command = {
   icon: typeof Files
   run: () => void
   enabled?: boolean
+  group: 'Documents' | 'Actions'
 }
 
 export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onSearch: () => void }) {
@@ -39,6 +42,11 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const activeGroup = findGroup(workbench.root, workbench.activeGroupId)
   const activeDocumentId = activeGroup?.activeTabId
+  const documents = useQuery({
+    queryKey: ['documents'],
+    queryFn: api.listDocuments,
+    enabled: open,
+  })
   const { mutate: createNewDocument } = useMutation({
     mutationFn: () => api.createDocument('Untitled document'),
     onSuccess: async (document) => {
@@ -55,6 +63,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'New document',
         detail: 'Create a new draft',
         icon: FilePlus2,
+        group: 'Actions',
         run: createNewDocument,
       },
       {
@@ -62,6 +71,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Show files',
         detail: 'Open the workspace explorer',
         icon: Files,
+        group: 'Actions',
         run: onFiles,
       },
       {
@@ -69,6 +79,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Search workspace',
         detail: 'Search content and metadata',
         icon: Search,
+        group: 'Actions',
         run: onSearch,
       },
       {
@@ -76,6 +87,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Split editor right',
         detail: 'Create a group beside the active one',
         icon: Columns2,
+        group: 'Actions',
         enabled: Boolean(activeDocumentId) && canSplitActiveGroup('horizontal'),
         run: () => workbench.splitGroup(workbench.activeGroupId, 'horizontal', activeDocumentId ?? undefined),
       },
@@ -84,6 +96,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Split editor down',
         detail: 'Create a group below the active one',
         icon: Rows2,
+        group: 'Actions',
         enabled: Boolean(activeDocumentId) && canSplitActiveGroup('vertical'),
         run: () => workbench.splitGroup(workbench.activeGroupId, 'vertical', activeDocumentId ?? undefined),
       },
@@ -92,6 +105,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Reset editor layout',
         detail: 'Return to one editor group',
         icon: RotateCcw,
+        group: 'Actions',
         run: workbench.resetLayout,
       },
       {
@@ -99,13 +113,23 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Open agent activity',
         detail: 'Review accepted, denied, and conflicted operations',
         icon: Activity,
+        group: 'Actions',
         run: () => void navigate({ to: '/activity' }),
+      },
+      {
+        id: 'view.karakeep',
+        label: 'Open Karakeep imports',
+        detail: 'Review archived bookmarks and import provenance',
+        icon: Bookmark,
+        group: 'Actions',
+        run: () => void navigate({ to: '/karakeep' }),
       },
       {
         id: 'view.reconciliation',
         label: 'Open reconciliation',
         detail: 'Review workspace integrity',
         icon: ShieldCheck,
+        group: 'Actions',
         run: () => void navigate({ to: '/reconciliation' }),
       },
       {
@@ -113,6 +137,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Open backups',
         detail: 'Create and verify recovery sets',
         icon: ArchiveRestore,
+        group: 'Actions',
         run: () => void navigate({ to: '/backups' }),
       },
       {
@@ -120,6 +145,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Open trash',
         detail: 'Restore deleted documents',
         icon: Trash2,
+        group: 'Actions',
         run: () => void navigate({ to: '/trash' }),
       },
       {
@@ -127,16 +153,37 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         label: 'Open settings',
         detail: 'Configure Sangam',
         icon: Settings,
+        group: 'Actions',
         run: () => void navigate({ to: '/settings' }),
       },
     ],
     [activeDocumentId, createNewDocument, navigate, onFiles, onSearch, workbench],
   )
-  const results = commands.filter(
+  const actionsOnly = query.startsWith('>')
+  const normalizedQuery = (actionsOnly ? query.slice(1) : query).trim().toLowerCase()
+  const documentCommands = (documents.data ?? [])
+    .filter((document) => `${document.title} ${document.path ?? ''}`.toLowerCase().includes(normalizedQuery))
+    .slice(0, 8)
+    .map<Command>((document) => ({
+      id: `document.${document.document_id}`,
+      label: document.title,
+      detail: document.path ?? 'Unmaterialized draft',
+      icon: FileText,
+      group: 'Documents',
+      run: () => {
+        workbench.ensureDocumentOpen(document.document_id, document.title, workbench.activeGroupId)
+        void navigate({
+          to: '/documents/$documentId',
+          params: { documentId: document.document_id },
+        })
+      },
+    }))
+  const actionCommands = commands.filter(
     (command) =>
       command.enabled !== false &&
-      `${command.label} ${command.detail} ${command.id}`.toLowerCase().includes(query.toLowerCase()),
+      `${command.label} ${command.detail} ${command.id}`.toLowerCase().includes(normalizedQuery),
   )
+  const results = actionsOnly ? actionCommands : [...documentCommands, ...actionCommands]
   const effectiveSelectedIndex = Math.min(selectedIndex, Math.max(0, results.length - 1))
   const selectedCommand = results[effectiveSelectedIndex]
 
@@ -225,34 +272,38 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
                 run(selectedCommand)
               }
             }}
-            placeholder="Type a command…"
-            aria-label="Command"
+            placeholder="Search documents or type > for actions"
+            aria-label="Search workspace and actions"
             aria-controls="command-results"
             aria-activedescendant={selectedCommand ? `command-${selectedCommand.id}` : undefined}
           />
         </label>
         <div id="command-results" role="listbox" aria-label="Commands">
           {results.map((command, index) => (
-            <button
-              key={command.id}
-              id={`command-${command.id}`}
-              role="option"
-              aria-selected={index === effectiveSelectedIndex}
-              tabIndex={-1}
-              onMouseMove={() => setSelectedIndex(index)}
-              onClick={() => run(command)}
-            >
-              <command.icon size={16} />
-              <span>
-                <strong>{command.label}</strong>
-                <small>{command.detail}</small>
-              </span>
-            </button>
+            <div className="command-result" key={command.id}>
+              {(index === 0 || results[index - 1]?.group !== command.group) && (
+                <span className="command-group">{command.group}</span>
+              )}
+              <button
+                id={`command-${command.id}`}
+                role="option"
+                aria-selected={index === effectiveSelectedIndex}
+                tabIndex={-1}
+                onMouseMove={() => setSelectedIndex(index)}
+                onClick={() => run(command)}
+              >
+                <command.icon size={16} />
+                <span>
+                  <strong>{command.label}</strong>
+                  <small>{command.detail}</small>
+                </span>
+              </button>
+            </div>
           ))}
           {results.length === 0 && <p>No matching commands.</p>}
         </div>
         <footer>
-          <kbd>↑↓</kbd> select <kbd>↵</kbd> run <kbd>esc</kbd> close
+          <kbd>↑↓</kbd> select <kbd>↵</kbd> open <kbd>&gt;</kbd> actions <kbd>esc</kbd> close
         </footer>
       </section>
     </dialog>

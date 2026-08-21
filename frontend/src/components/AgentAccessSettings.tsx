@@ -179,7 +179,7 @@ export function AgentAccessSettings() {
   })
 
   return (
-    <section className="settings-panel" id="agent-access">
+    <section className="settings-panel" id="agent-access" tabIndex={-1}>
       <header>
         <Bot size={18} />
         <div>

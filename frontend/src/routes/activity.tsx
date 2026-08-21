@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Activity, Bot, FileText, ShieldAlert } from 'lucide-react'
 import { api, type OperationEvent } from '../api'
+import { StateMessage } from '../components/ui/StateMessage'
 
 export const Route = createFileRoute('/activity')({ component: AgentActivity })
 
@@ -77,9 +78,24 @@ function AgentActivity() {
             )}
           </article>
         ))}
-        {events.isLoading && <p className="small-muted">Loading activity…</p>}
-        {events.isError && <p className="operation-result error-text">{events.error.message}</p>}
-        {events.data?.length === 0 && <p className="small-muted">No matching activity.</p>}
+        {events.isLoading && <StateMessage compact kind="loading" title="Loading activity" />}
+        {events.isError && (
+          <StateMessage
+            compact
+            kind="error"
+            title="Activity could not be loaded"
+            description={events.error.message}
+            action={<button onClick={() => void events.refetch()}>Retry</button>}
+          />
+        )}
+        {events.data?.length === 0 && (
+          <StateMessage
+            compact
+            kind="empty"
+            title="No matching activity"
+            description="Change the actor or outcome filter to widen the result."
+          />
+        )}
       </section>
     </section>
   )

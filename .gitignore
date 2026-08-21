@@ -36,7 +36,13 @@ frontend/dist/
 frontend/src/routeTree.gen.ts
 frontend/.vite/
 frontend/.eslintcache
+frontend/playwright-report/
+frontend/test-results/
 *.tsbuildinfo
+
+# Browser-test output when Playwright is run from the repository root
+playwright-report/
+test-results/
 
 # Logs and local process state
 *.log

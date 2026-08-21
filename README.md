@@ -23,6 +23,8 @@ agents work with ordinary files through the same small, revision-aware API.
 [Verify the release](#verify-the-release) · [Explore features](#what-sangam-does) ·
 [Develop](#development) · [Read the docs](#documentation)
 
+![Sangam's crisp document workbench with workspace navigation, Markdown editor, and document inspector](./docs/assets/crisp-workspace.png)
+
 ## Why Sangam
 
 Sangam keeps the files you care about ordinary and portable while preserving the
@@ -41,6 +43,9 @@ proposals instead of invisible writes.
 - **Daily document workspace.** Edit Markdown and safe HTML, preview Mermaid,
   search with SQLite FTS5, compare or restore revisions, organize files, recover
   drafts and conflicts, and use keyboard-accessible split editor groups.
+- **Focused interface.** Search documents and actions from one switchboard, find
+  any preference from settings search, see workspace freshness at a glance, and
+  recover stale browser tabs without losing the rest of the layout.
 - **PDF research.** Import immutable PDFs, search extracted page text, annotate
   text or regions, add notes and citation markers, and keep deep links pinned to
   the exact PDF and page.
@@ -226,7 +231,7 @@ SANGAM_OPENROUTER_APP_TITLE=Sangam
 ```
 
 Use the real HTTPS application origin and its registered ChatKit domain key in
-production. Then open **Settings > Operations & AI** to test the preset, discover
+production. Then open **Settings > AI & models** to test the preset, discover
 models, and select the workspace default. The same page can add direct OpenAI,
 local, or gateway endpoints that implement OpenAI Responses or Chat Completions.
 Connection records store only an environment-variable name, never a credential.
@@ -239,6 +244,30 @@ proposals until a human reviews and applies the diff. The
 registration, model policy, streaming proxies, key rotation, and recovery.
 
 ## Screenshots
+
+### Crisp workspace
+
+The main workbench keeps navigation, editing, document state, and inspection in
+one compact frame. The workspace switchboard searches both documents and actions,
+while explicit save and freshness states keep background work visible.
+
+![Sangam document workbench showing the compact workspace rail, active Markdown editor, save state, and document inspector](./docs/assets/crisp-workspace.png)
+
+### Searchable settings
+
+Settings uses one dedicated navigation rail. Search opens the correct category
+and moves keyboard focus to the exact preference. Theme previews show the real
+workspace anatomy instead of abstract color swatches, and the same controls
+reflow without clipping on narrow screens.
+
+![Sangam appearance settings showing the dedicated settings rail and four workspace theme previews](./docs/assets/crisp-settings.png)
+
+<details>
+<summary>Narrow settings layout</summary>
+
+![Sangam appearance settings at a 390 pixel viewport with horizontal category navigation and stacked theme previews](./docs/assets/crisp-settings-narrow.png)
+
+</details>
 
 ### Provider-neutral AI settings
 
@@ -326,12 +355,12 @@ document, revision metadata, and restore or copy actions.
 
 ### Scoped agent access
 
-The **Operations & AI** settings tab issues one-time credentials with explicit
+The **Agents & access** settings category issues one-time credentials with explicit
 capabilities, optional expiry, and workspace path boundaries with progressive
 disclosure for advanced capability customization. Issued tokens can be rotated
 or revoked without erasing their historical attribution.
 
-![Current Sangam Operations and AI settings with agent tokens, progressive capability disclosure, and path controls](./docs/assets/phase-3-agents.png)
+![Sangam Agents and access settings with agent tokens, progressive capability disclosure, and path controls](./docs/assets/phase-3-agents.png)
 
 ### Reviewable agent activity
 
@@ -363,6 +392,7 @@ The main verification recipes are:
 
 ```bash
 just test           # Python and frontend format, build, lint, and tests
+just test-e2e       # desktop and narrow browser interactions and accessibility
 just test-docs      # links, Markdown style, and strict Mermaid parsing
 just check          # source, docs, config, dependencies, and package smoke
 just docker-smoke   # complete application image and restart recovery

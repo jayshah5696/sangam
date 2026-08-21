@@ -158,11 +158,15 @@ export function ChatModelSettings() {
   }
 
   if (models.isLoading || connections.isLoading) {
-    return <div className="settings-panel center-message">Loading AI connections…</div>
+    return (
+      <div className="settings-panel center-message" id="chat-models" tabIndex={-1}>
+        Loading AI connections…
+      </div>
+    )
   }
   if (models.isError || connections.isError || !models.data || !connections.data) {
     return (
-      <section className="settings-panel settings-query-error" role="alert">
+      <section className="settings-panel settings-query-error" id="chat-models" tabIndex={-1} role="alert">
         <strong>AI settings could not be loaded.</strong>
         <button
           className="secondary-action"
@@ -184,7 +188,7 @@ export function ChatModelSettings() {
   const valid = enabled.size > 0 && enabled.has(defaultModel)
 
   return (
-    <section className="settings-panel" id="chat-models">
+    <section className="settings-panel" id="chat-models" tabIndex={-1}>
       <header>
         <Cpu size={18} />
         <div>

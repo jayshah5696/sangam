@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { api, type DocumentSummary } from '../api'
+import { StateMessage } from '../components/ui/StateMessage'
 
 export const Route = createFileRoute('/trash')({ component: TrashPage })
 
@@ -15,10 +16,20 @@ function TrashPage() {
           <p>Deleted documents keep their stable identity and immutable history until restored.</p>
         </div>
       </header>
+      {trash.isLoading && <StateMessage kind="loading" title="Loading deleted documents" />}
+      {trash.isError && (
+        <StateMessage
+          kind="error"
+          title="Trash could not be loaded"
+          action={<button onClick={() => void trash.refetch()}>Retry</button>}
+        />
+      )}
       {trash.data?.length === 0 && (
-        <div className="empty-state">
-          <strong>Trash is empty.</strong>
-        </div>
+        <StateMessage
+          kind="empty"
+          title="Trash is empty"
+          description="Deleted documents will appear here until you restore them."
+        />
       )}
       <div className="trash-list">
         {trash.data?.map((document) => (
