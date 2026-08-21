@@ -208,6 +208,14 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         event.preventDefault()
         openPalette()
       }
+      // "/" jumps straight to workspace search without opening this palette.
+      if (event.key === '/' && !editable) {
+        event.preventDefault()
+        onSearch()
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLInputElement>('.sidebar-search-input input')?.focus()
+        })
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n' && !editable) {
         event.preventDefault()
         createNewDocument()
@@ -215,7 +223,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
     }
     window.addEventListener('keydown', keyboard)
     return () => window.removeEventListener('keydown', keyboard)
-  }, [createNewDocument])
+  }, [createNewDocument, onSearch])
 
   useEffect(() => {
     if (!open) return

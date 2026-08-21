@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import type { EditorMode } from './documentSessions'
 
 export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
 
@@ -38,6 +39,7 @@ type WorkspacePreferences = {
   leftVisible: boolean
   rightVisible: boolean
   rightTab: InspectorTab
+  editorMode: EditorMode
 }
 
 type ThemeContextValue = {
@@ -52,6 +54,7 @@ const defaults: WorkspacePreferences = {
   leftVisible: true,
   rightVisible: true,
   rightTab: 'properties',
+  editorMode: 'preview',
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
@@ -61,7 +64,14 @@ function loadPreferences(): WorkspacePreferences {
   const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 900
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as Partial<WorkspacePreferences>
-    return { ...defaults, ...stored, rightVisible: isNarrow ? false : (stored.rightVisible ?? true) }
+    return {
+      ...defaults,
+      ...stored,
+      rightVisible: isNarrow ? false : (stored.rightVisible ?? true),
+      editorMode: ['edit', 'split', 'preview'].includes(String(stored.editorMode))
+        ? (stored.editorMode as EditorMode)
+        : defaults.editorMode,
+    }
   } catch {
     return { ...defaults, rightVisible: isNarrow ? false : true }
   }

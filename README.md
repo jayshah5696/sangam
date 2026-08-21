@@ -26,7 +26,7 @@ agents work with ordinary files through the same small, revision-aware API.
 [Verify the release](#verify-the-release) · [Explore features](#what-sangam-does) ·
 [Develop](#development) · [Read the docs](#documentation)
 
-![Sangam's crisp document workbench with workspace navigation, Markdown editor, and document inspector](./docs/assets/crisp-workspace.png)
+![Sangam's crisp document workbench with workspace navigation, Markdown preview, and document inspector](./docs/assets/crisp-workspace.png)
 
 ## Why Sangam
 
@@ -45,7 +45,8 @@ proposals instead of invisible writes.
 
 - **Daily document workspace.** Edit Markdown and safe HTML, preview Mermaid,
   search with SQLite FTS5, compare or restore revisions, organize files, recover
-  drafts and conflicts, and use keyboard-accessible split editor groups.
+  drafts and conflicts, and use keyboard-accessible split editor groups. Documents
+  open in preview by default and inline search lives right on the home page.
 - **Focused interface.** Search documents and actions from one switchboard, find
   any preference from settings search, see workspace freshness at a glance, and
   recover stale browser tabs without losing the rest of the layout.
@@ -251,10 +252,12 @@ registration, model policy, streaming proxies, key rotation, and recovery.
 ### Crisp workspace
 
 The main workbench keeps navigation, editing, document state, and inspection in
-one compact frame. The workspace switchboard searches both documents and actions,
-while explicit save and freshness states keep background work visible.
+one compact frame. Documents open in preview mode by default; the mode you last
+picked is remembered per workspace. The workspace switchboard searches both
+documents and actions, while explicit save and freshness states keep background
+work visible.
 
-![Sangam document workbench showing the compact workspace rail, active Markdown editor, save state, and document inspector](./docs/assets/crisp-workspace.png)
+![Sangam document workbench showing the compact workspace rail, rendered Markdown preview, save state, and document inspector](./docs/assets/crisp-workspace.png)
 
 <details>
 <summary>📱 Mobile workspace and bottom-sheet inspector</summary>
@@ -300,6 +303,11 @@ use Sangam tools while existing-document changes remain outside the editor until
 the human reviews them.
 
 ![Phase 7 workspace-grounded chat showing the active launch brief, ChatKit composer with a connection-scoped model, and a pending agent edit proposal](./docs/assets/phase-7-chat-workspace.jpg)
+
+The current crisp UI embeds the same workspace chat in the document inspector,
+with a recovery notice if the chat interface ever fails to load:
+
+![Workspace chat tab active in the document inspector with the ChatKit greeting, prompt suggestions, and connection-scoped model picker](./docs/assets/crisp-chat.png)
 
 ### Human-reviewed chat proposal
 

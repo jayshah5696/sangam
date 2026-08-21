@@ -127,6 +127,15 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     fullPage: false,
   })
 
+  // Workspace chat tab inside the document inspector.
+  await page.getByRole('tab', { name: 'chat', exact: true }).click()
+  await expect(page.locator('.chatkit-frame')).toBeVisible()
+  await page.waitForTimeout(2500)
+  await page.screenshot({
+    path: path.join(repositoryRoot, 'docs/assets/crisp-chat.png'),
+    fullPage: false,
+  })
+
   await page.goto('/settings')
   await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible()
   await page.waitForTimeout(300)

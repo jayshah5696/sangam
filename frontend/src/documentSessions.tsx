@@ -42,6 +42,7 @@ type StoreOptions = {
   isOnline?: () => boolean
   saveDelay?: number
   persistDelay?: number
+  getDefaultMode?: () => EditorMode
 }
 
 const initialSelection: EditorSelection = { line: 1, column: 1, selectedCharacters: 0 }
@@ -71,6 +72,10 @@ export class DocumentSessionStore {
     this.online = options.isOnline?.() ?? true
   }
 
+  setDefaultMode = (getDefaultMode: () => EditorMode) => {
+    this.options.getDefaultMode = getDefaultMode
+  }
+
   registerEditor = (documentId: string, focus: () => void, scrollToLine?: (line: number) => void) => {
     this.editorHandles.set(documentId, { focus, scrollToLine })
     return () => {
@@ -92,7 +97,7 @@ export class DocumentSessionStore {
     const existing = this.sessions.get(documentId)
     if (existing) return existing
     const session: DocumentSession = {
-      mode: 'edit',
+      mode: this.options.getDefaultMode?.() ?? 'edit',
       saveState: 'saved',
       draftPersistenceState: 'idle',
       selection: initialSelection,
@@ -443,9 +448,11 @@ const DocumentSessionsContext = createContext<DocumentSessionStore | null>(null)
 export function DocumentSessionsProvider({
   children,
   storage,
+  defaultMode,
 }: {
   children: ReactNode
   storage?: DraftStorage
+  defaultMode?: () => EditorMode
 }) {
   const queryClient = useQueryClient()
   const [store] = useState(
@@ -463,6 +470,9 @@ export function DocumentSessionsProvider({
       }),
   )
 
+  useEffect(() => {
+    if (defaultMode) store.setDefaultMode(defaultMode)
+  }, [defaultMode, store])
   useEffect(() => {
     const online = () => store.setOnline(true)
     const offline = () => store.setOnline(false)
