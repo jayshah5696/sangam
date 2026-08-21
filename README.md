@@ -1,12 +1,15 @@
 # Sangam
 
-<!-- markdownlint-disable-next-line MD033 -->
-<p align="center"><img src="https://raw.githubusercontent.com/jayshah5696/sangam/main/frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" /></p>
-
-[![Release](https://img.shields.io/github/v/release/jayshah5696/sangam?display_name=tag&sort=semver)](https://github.com/jayshah5696/sangam/releases/latest)
-[![CI](https://github.com/jayshah5696/sangam/actions/workflows/ci.yml/badge.svg)](https://github.com/jayshah5696/sangam/actions/workflows/ci.yml)
-[![Container](https://img.shields.io/badge/GHCR-linux%2Famd64%20%7C%20linux%2Farm64-2496ED?logo=docker&logoColor=white)](https://github.com/jayshah5696/sangam/pkgs/container/sangam)
-[![License](https://img.shields.io/github/license/jayshah5696/sangam)](./LICENSE)
+<!-- markdownlint-disable MD033 -->
+<p align="center">
+  <img src="https://raw.githubusercontent.com/jayshah5696/sangam/main/frontend/public/sangam-mark.svg" alt="Sangam logo" width="112" />
+  <br />
+  <a href="https://github.com/jayshah5696/sangam/releases/latest"><img src="https://img.shields.io/github/v/release/jayshah5696/sangam?display_name=tag&sort=semver" alt="Release" /></a>
+  <a href="https://github.com/jayshah5696/sangam/actions/workflows/ci.yml"><img src="https://github.com/jayshah5696/sangam/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/jayshah5696/sangam/pkgs/container/sangam"><img src="https://img.shields.io/badge/GHCR-linux%2Famd64%20%7C%20linux%2Farm64-2496ED?logo=docker&logoColor=white" alt="Container" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/jayshah5696/sangam" alt="License" /></a>
+</p>
+<!-- markdownlint-enable MD033 -->
 
 A single-user, self-hosted document workspace where a human and identified AI
 agents work with ordinary files through the same small, revision-aware API.
