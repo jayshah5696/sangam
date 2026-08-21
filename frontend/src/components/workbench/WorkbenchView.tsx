@@ -266,6 +266,12 @@ function GroupInspector({ documentId }: { documentId: string }) {
   }
   return (
     <>
+      <button
+        type="button"
+        className="inspector-backdrop"
+        aria-label="Close document inspector"
+        onClick={() => updatePreferences({ rightVisible: false })}
+      />
       <ResizeHandle
         side="right"
         value={preferences.rightWidth}

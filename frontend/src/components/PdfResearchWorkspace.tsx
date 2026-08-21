@@ -32,20 +32,52 @@ export function PdfResearchWorkspace({ document }: { document: Document }) {
     return () => window.removeEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
   }, [document.document_id])
 
+  const [mobileView, setMobileView] = useState<'reader' | 'research'>('reader')
+
   return (
-    <div className="pdf-research-workspace">
+    <div className={`pdf-research-workspace pdf-view-${mobileView}`}>
+      <div className="pdf-mobile-tab-switch" role="tablist" aria-label="PDF workspace views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobileView === 'reader'}
+          className={mobileView === 'reader' ? 'active' : ''}
+          onClick={() => setMobileView('reader')}
+        >
+          Reader
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobileView === 'research'}
+          className={mobileView === 'research' ? 'active' : ''}
+          onClick={() => setMobileView('research')}
+        >
+          Research notes ({annotations.length})
+        </button>
+      </div>
       <PdfViewer
         document={document}
         pageNumber={pageNumber}
         setPageNumber={setPageNumber}
         annotations={annotations.filter((annotation) => annotation.page_number === pageNumber)}
-        onSelectAnnotation={setSelectedAnnotationId}
+        onSelectAnnotation={(id) => {
+          setSelectedAnnotationId(id)
+          if (typeof window !== 'undefined' && window.innerWidth <= 760) {
+            setMobileView('research')
+          }
+        }}
         setDraft={setDraft}
       />
       <PdfResearchRail
         document={document}
         pageNumber={pageNumber}
-        setPageNumber={setPageNumber}
+        setPageNumber={(targetPage) => {
+          setPageNumber(targetPage)
+          if (typeof window !== 'undefined' && window.innerWidth <= 760) {
+            setMobileView('reader')
+          }
+        }}
         annotations={annotations}
         annotationQuery={annotationQuery}
         setAnnotationQuery={setAnnotationQuery}

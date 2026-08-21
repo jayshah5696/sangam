@@ -387,6 +387,12 @@ textarea::placeholder {
   }
 }
 
+@media (max-width: 768px), (pointer: coarse) {
+  :where(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]), select, textarea) {
+    font-size: var(--text-input-mobile);
+  }
+}
+
 @media (max-width: 650px) {
   .ui-state {
     grid-template-columns: auto minmax(0, 1fr);

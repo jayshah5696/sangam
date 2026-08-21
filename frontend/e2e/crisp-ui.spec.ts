@@ -55,7 +55,14 @@ test('document workbench exposes active, save, and inspector state', async ({ pa
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
   await expect(page.locator('.save-state')).toHaveText('Saved')
   await expect(page.getByRole('radio', { name: 'edit' })).toBeChecked()
+  const inspectorToggle = page.getByRole('button', { name: 'Open document inspector' })
+  if (await inspectorToggle.isVisible()) {
+    await inspectorToggle.click()
+  }
   await expect(page.getByRole('tab', { name: 'properties' })).toHaveAttribute('aria-selected', 'true')
+  if (await inspectorToggle.isVisible()) {
+    await page.getByRole('button', { name: 'Collapse document inspector' }).click()
+  }
 
   await page.getByRole('radio', { name: 'preview' }).click()
   await expect(page.getByRole('radio', { name: 'preview' })).toBeChecked()

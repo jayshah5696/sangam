@@ -40,7 +40,10 @@ export function PdfViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
-  const [scale, setScale] = useState(1.2)
+  const [scale, setScale] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth <= 760 ? 0.6 : 1.2,
+  )
+  const [userScale, setUserScale] = useState(false)
   const [isSelectingArea, setIsSelectingArea] = useState(false)
   const [areaStart, setAreaStart] = useState<Point | null>(null)
   const [areaPreview, setAreaPreview] = useState<PdfRect | null>(null)
@@ -71,7 +74,16 @@ export function PdfViewer({
     let textLayer: TextLayer | null = null
     void pdf.getPage(pageNumber).then(async (page) => {
       if (!active || !canvasRef.current || !textLayerRef.current || !pageHostRef.current) return
-      const viewport = page.getViewport({ scale })
+      let effectiveScale = scale
+      if (!userScale && typeof window !== 'undefined' && window.innerWidth <= 760) {
+        const unscaledViewport = page.getViewport({ scale: 1 })
+        const availableWidth = window.innerWidth - 32
+        effectiveScale = Math.max(
+          0.4,
+          Math.min(1.2, Math.round((availableWidth / unscaledViewport.width) * 100) / 100),
+        )
+      }
+      const viewport = page.getViewport({ scale: effectiveScale })
       const canvas = canvasRef.current
       const host = pageHostRef.current
       const textHost = textLayerRef.current
@@ -101,7 +113,7 @@ export function PdfViewer({
       active = false
       textLayer?.cancel()
     }
-  }, [pageNumber, pdf, scale])
+  }, [pageNumber, pdf, scale, userScale])
 
   const selectText = () => {
     if (isSelectingArea || areaStart) return
@@ -198,8 +210,11 @@ export function PdfViewer({
             <button
               className="icon-button"
               aria-label="Zoom out"
-              disabled={scale <= 0.6}
-              onClick={() => setScale((value) => Math.max(0.6, value - 0.2))}
+              disabled={scale <= 0.4}
+              onClick={() => {
+                setUserScale(true)
+                setScale((value) => Math.max(0.4, Number((value - 0.2).toFixed(1))))
+              }}
             >
               <ZoomOut size={15} />
             </button>
@@ -208,7 +223,10 @@ export function PdfViewer({
               className="icon-button"
               aria-label="Zoom in"
               disabled={scale >= 2.4}
-              onClick={() => setScale((value) => Math.min(2.4, value + 0.2))}
+              onClick={() => {
+                setUserScale(true)
+                setScale((value) => Math.min(2.4, Number((value + 0.2).toFixed(1))))
+              }}
             >
               <ZoomIn size={15} />
             </button>
