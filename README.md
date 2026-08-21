@@ -301,6 +301,11 @@ the human reviews them.
 
 ![Phase 7 workspace-grounded chat showing the active launch brief, ChatKit composer with a connection-scoped model, and a pending agent edit proposal](./docs/assets/phase-7-chat-workspace.jpg)
 
+The current crisp UI embeds the same workspace chat in the document inspector,
+with a recovery notice if the chat interface ever fails to load:
+
+![Workspace chat tab active in the document inspector with the ChatKit greeting, prompt suggestions, and connection-scoped model picker](./docs/assets/crisp-chat.png)
+
 ### Human-reviewed chat proposal
 
 An agent-proposed document update is pinned to the revision it reviewed. Sangam
