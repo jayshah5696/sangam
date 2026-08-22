@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { api } from '../api'
 import { AgentAccessSettings } from './AgentAccessSettings'
 
 vi.mock('@tanstack/react-router', () => ({
@@ -13,12 +14,17 @@ vi.mock('../api', () => ({
   api: {
     listAgentTokens: vi.fn().mockResolvedValue([]),
     issueAgentToken: vi.fn(),
+    updateAgentToken: vi.fn(),
     rotateAgentToken: vi.fn(),
     revokeAgentToken: vi.fn(),
   },
 }))
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.mocked(api.listAgentTokens).mockResolvedValue([])
+  vi.clearAllMocks()
+})
 
 function renderSettings() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -40,6 +46,47 @@ describe('AgentAccessSettings', () => {
     expect(screen.getByText('read: /agents/**')).not.toBeNull()
     expect(screen.getByText('search: /agents/**')).not.toBeNull()
     expect((screen.getByLabelText(/Expiration/) as HTMLInputElement).value).not.toBe('')
+  })
+
+  it('edits active token authority without exposing or rotating the secret', async () => {
+    vi.mocked(api.listAgentTokens).mockResolvedValue([
+      {
+        token_id: 'agt_123',
+        actor_id: 'agent:researcher',
+        actor_display_name: 'Researcher',
+        label: 'Research workspace',
+        scopes: [{ capability: 'read', path_prefix: 'agents' }],
+        version: 3,
+        created_at: '2026-08-20T12:00:00Z',
+        expires_at: null,
+        revoked_at: null,
+        last_used_at: null,
+        rotated_from_token_id: null,
+      },
+    ])
+    vi.mocked(api.updateAgentToken).mockResolvedValue({} as never)
+    renderSettings()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    const dialog = document.querySelector<HTMLDialogElement>('[aria-label="Edit Research workspace"]')
+    expect(dialog).not.toBeNull()
+    fireEvent.change(dialog!.querySelector<HTMLInputElement>('input[required]')!, {
+      target: { value: 'Incident reviewer' },
+    })
+    fireEvent.click(dialog!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[1]!)
+    fireEvent.submit(dialog!.querySelector('form')!)
+
+    await waitFor(() =>
+      expect(api.updateAgentToken).toHaveBeenCalledWith('agt_123', {
+        expected_version: 3,
+        label: 'Incident reviewer',
+        scopes: [
+          { capability: 'read', path_prefix: 'agents' },
+          { capability: 'search', path_prefix: null },
+        ],
+        expires_at: null,
+      }),
+    )
   })
 
   it('explains and focuses high-impact confirmation before issuing', async () => {

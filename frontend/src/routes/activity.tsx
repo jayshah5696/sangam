@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Activity, Bot, FileText, ShieldAlert } from 'lucide-react'
+import { Activity, Bot, CalendarDays, FileText, ShieldAlert } from 'lucide-react'
+import { activityRange, type ActivityRangePreset } from '../activityFilters'
 import { api, type OperationEvent } from '../api'
 import { StateMessage } from '../components/ui/StateMessage'
 
@@ -10,9 +11,23 @@ export const Route = createFileRoute('/activity')({ component: AgentActivity })
 function AgentActivity() {
   const [actorId, setActorId] = useState('')
   const [outcome, setOutcome] = useState<OperationEvent['outcome'] | ''>('')
+  const [rangePreset, setRangePreset] = useState<ActivityRangePreset>('all')
+  const [since, setSince] = useState('')
+  const [until, setUntil] = useState('')
+  const range = useMemo(
+    () => activityRange(rangePreset, new Date(), { since, until }),
+    [rangePreset, since, until],
+  )
+  const invalidRange = Boolean(range.since && range.until && range.since > range.until)
   const events = useQuery({
-    queryKey: ['activity', actorId, outcome],
-    queryFn: () => api.listActivity(actorId || undefined, outcome || undefined),
+    queryKey: ['activity', actorId, outcome, rangePreset, range.since, range.until],
+    queryFn: () =>
+      api.listActivity({
+        actorId: actorId || undefined,
+        outcome: outcome || undefined,
+        ...range,
+      }),
+    enabled: !invalidRange,
   })
 
   return (
@@ -47,10 +62,41 @@ function AgentActivity() {
             <option value="failed">Failed</option>
           </select>
         </label>
+        <label>
+          <span>Date range</span>
+          <select
+            aria-label="Activity date range"
+            value={rangePreset}
+            onChange={(event) => setRangePreset(event.target.value as ActivityRangePreset)}
+          >
+            <option value="all">All time</option>
+            <option value="today">Today</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        {rangePreset === 'custom' && (
+          <div className="activity-custom-range">
+            <label>
+              <span>Since</span>
+              <input type="datetime-local" value={since} onChange={(event) => setSince(event.target.value)} />
+            </label>
+            <label>
+              <span>Until</span>
+              <input type="datetime-local" value={until} onChange={(event) => setUntil(event.target.value)} />
+            </label>
+          </div>
+        )}
       </div>
+      {invalidRange && (
+        <div className="activity-range-error" role="alert">
+          <CalendarDays size={16} /> Start must not be after end.
+        </div>
+      )}
       <section className="activity-list" aria-live="polite">
         {events.data?.map((event) => (
-          <article key={event.operation_id} className={`activity-event ${event.outcome}`}>
+          <article key={event.event_id} className={`activity-event ${event.outcome}`}>
             <span className="activity-outcome">
               {event.outcome === 'denied' || event.outcome === 'conflict' ? (
                 <ShieldAlert size={16} />
@@ -88,12 +134,12 @@ function AgentActivity() {
             action={<button onClick={() => void events.refetch()}>Retry</button>}
           />
         )}
-        {events.data?.length === 0 && (
+        {!invalidRange && events.data?.length === 0 && (
           <StateMessage
             compact
             kind="empty"
             title="No matching activity"
-            description="Change the actor or outcome filter to widen the result."
+            description="Change the actor, outcome, or date range to widen the result."
           />
         )}
       </section>

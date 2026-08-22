@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import re
 import secrets
@@ -19,6 +20,7 @@ from sangam.capabilities import Capability
 from sangam.db import Database, utc_now
 from sangam.errors import (
     AuthenticationError,
+    ConflictError,
     CredentialConflictError,
     NotFoundError,
     ValidationError,
@@ -286,6 +288,93 @@ class IdentityService:
             rotated_from_token_id=token_id,
         )
 
+    def update_token(
+        self,
+        token_id: str,
+        *,
+        expected_version: int,
+        label: str,
+        scopes: list[TokenScope],
+        expires_at: str | None,
+        actor_id: str,
+    ) -> AgentToken:
+        normalized_label = " ".join(label.strip().split())
+        if not normalized_label:
+            raise ValidationError("Token label is required")
+        grants = self._normalize_scopes(scopes)
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                """
+                SELECT t.*, a.display_name AS actor_display_name
+                FROM actor_tokens t JOIN actors a ON a.actor_id = t.actor_id
+                WHERE t.token_id = ?
+                """,
+                (token_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"Agent token not found: {token_id}")
+            if row["revoked_at"] is not None:
+                raise CredentialConflictError("Revoked agent tokens cannot be edited")
+            now_datetime = datetime.now(UTC)
+            if (
+                row["expires_at"] is not None
+                and self._parse_timestamp(row["expires_at"]) <= now_datetime
+            ):
+                raise CredentialConflictError("Expired agent tokens cannot be edited")
+            normalized_expiry = self._validate_update_expiry(expires_at, now=now_datetime)
+            if row["version"] != expected_version:
+                raise ConflictError(
+                    "Agent token changed since it was loaded",
+                    details={
+                        "current_version": row["version"],
+                        "expected_version": expected_version,
+                    },
+                )
+            before = self._token_from_row(connection, row)
+            next_version = expected_version + 1
+            connection.execute(
+                """
+                UPDATE actor_tokens SET label = ?, expires_at = ?, version = ?
+                WHERE token_id = ?
+                """,
+                (normalized_label, normalized_expiry, next_version, token_id),
+            )
+            connection.execute("DELETE FROM token_scopes WHERE token_id = ?", (token_id,))
+            connection.executemany(
+                "INSERT INTO token_scopes(token_id, capability, path_prefix) VALUES (?, ?, ?)",
+                [(token_id, grant.capability.value, grant.path_prefix or "") for grant in grants],
+            )
+            updated_row = connection.execute(
+                """
+                SELECT t.*, a.display_name AS actor_display_name
+                FROM actor_tokens t JOIN actors a ON a.actor_id = t.actor_id
+                WHERE t.token_id = ?
+                """,
+                (token_id,),
+            ).fetchone()
+            if updated_row is None:
+                raise RuntimeError("Updated token could not be reloaded")
+            updated = self._token_from_row(connection, updated_row)
+            connection.execute(
+                """
+                INSERT INTO actor_token_events(
+                    event_id, token_id, actor_id, operation, version,
+                    before_json, after_json, created_at
+                ) VALUES (?, ?, ?, 'update', ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    token_id,
+                    actor_id,
+                    next_version,
+                    json.dumps(before.model_dump(mode="json"), sort_keys=True),
+                    json.dumps(updated.model_dump(mode="json"), sort_keys=True),
+                    now,
+                ),
+            )
+            return updated
+
     def revoke_token(self, token_id: str) -> AgentToken:
         now = utc_now()
         with self.database.transaction() as connection:
@@ -392,6 +481,13 @@ class IdentityService:
             raise ValidationError("Token expiration must be in the future")
         return parsed.astimezone(UTC).isoformat(timespec="microseconds")
 
+    @classmethod
+    def _validate_update_expiry(cls, expires_at: str | None, *, now: datetime) -> str | None:
+        normalized = cls._validate_expiry(expires_at)
+        if normalized is not None and cls._parse_timestamp(normalized) <= now:
+            raise ValidationError("Token expiration must be in the future")
+        return normalized
+
     @staticmethod
     def _normalize_scopes(scopes: list[TokenScope]) -> tuple[ScopeGrant, ...]:
         grants = {
@@ -428,6 +524,7 @@ class IdentityService:
                 TokenScope(capability=scope["capability"], path_prefix=scope["path_prefix"] or None)
                 for scope in scopes
             ],
+            version=row["version"],
             created_at=row["created_at"],
             expires_at=row["expires_at"],
             revoked_at=row["revoked_at"],

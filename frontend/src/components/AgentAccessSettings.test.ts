@@ -62,6 +62,7 @@ describe('agent access contracts', () => {
       actor_display_name: 'Researcher',
       label: 'Research workspace',
       scopes: [{ capability: 'read' as const, path_prefix: null }],
+      version: 1,
       created_at: '2026-07-15T00:00:00+00:00',
       expires_at: null,
       revoked_at: null,

@@ -64,6 +64,7 @@ from sangam.schemas import (
     RevisionDiff,
     Tag,
     TrustedPreviewGrant,
+    UpdateAgentToken,
     UpdateDocument,
     UpdateDocumentMetadata,
     UpdateDocumentTrust,
@@ -362,6 +363,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return issued
 
+    @app.patch("/api/v1/agent-tokens/{token_id}", response_model=AgentToken)
+    def update_agent_token(
+        token_id: str,
+        body: UpdateAgentToken,
+        principal: Principal = admin_dependency,
+    ) -> AgentToken:
+        updated = identity.update_token(
+            token_id,
+            expected_version=body.expected_version,
+            label=body.label,
+            scopes=body.scopes,
+            expires_at=body.expires_at,
+            actor_id=principal.actor_id,
+        )
+        activity.record(
+            principal=principal,
+            action="update",
+            resource_type="agent_token",
+            resource_id=token_id,
+            outcome="accepted",
+            details={"current_metadata_version": updated.version},
+        )
+        return updated
+
     @app.post("/api/v1/agent-tokens/{token_id}/rotate", response_model=IssuedAgentToken)
     def rotate_agent_token(
         token_id: str,
@@ -399,6 +424,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             default="agent", pattern="^(human|agent|integration|client|system)$"
         ),
         outcome: str | None = Query(default=None, pattern="^(accepted|denied|conflict|failed)$"),
+        since: str | None = Query(default=None, max_length=40),
+        until: str | None = Query(default=None, max_length=40),
         limit: int = Query(default=100, ge=1, le=200),
         offset: int = Query(default=0, ge=0),
         _principal: Principal = admin_dependency,
@@ -407,6 +434,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             actor_id=actor_id,
             actor_kind=actor_kind,
             outcome=outcome,
+            since=since,
+            until=until,
             limit=limit,
             offset=offset,
         )
