@@ -36,6 +36,8 @@ test('HTML JavaScript runs in the isolated workbench preview and can be disabled
   await expect(interactiveFrame.locator('body')).toHaveAttribute('data-storage-blocked', 'true')
 
   await page.goto('/settings')
+  const revealSettings = page.getByRole('button', { name: 'Show settings sidebar' })
+  if (await revealSettings.isVisible()) await revealSettings.click()
   const search = page.getByRole('searchbox', { name: 'Search settings' })
   await search.fill('HTML JavaScript')
   await search.press('Enter')
