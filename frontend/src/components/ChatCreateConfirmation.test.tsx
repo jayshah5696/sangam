@@ -26,6 +26,7 @@ describe('ChatCreateConfirmation', () => {
     )
 
     expect(screen.getByRole('alertdialog').textContent).toContain('No document is created until you approve')
+    expect(screen.getByLabelText('Document content to create').textContent).toBe('# Evidence')
     fireEvent.click(screen.getByRole('button', { name: 'Approve document creation' }))
     expect(onApprove).toHaveBeenCalledOnce()
     expect(onCancel).not.toHaveBeenCalled()

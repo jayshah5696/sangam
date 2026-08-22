@@ -56,11 +56,10 @@ test('document chat hands exact context to the full-page route', async ({
 }, testInfo) => {
   await page.goto(`/documents/${seededWorkspace.documentId}`)
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
-  if (testInfo.project.name === 'chromium-narrow') {
-    await page.getByRole('button', { name: 'Open document inspector' }).click()
-  }
+  const isMobileLayout = testInfo.project.name !== 'chromium-desktop'
+  if (isMobileLayout) await page.getByRole('button', { name: 'Open document inspector' }).click()
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
-  if (testInfo.project.name === 'chromium-desktop') {
+  if (!isMobileLayout) {
     await expect(page.getByText('Document chat', { exact: true })).toBeVisible()
     await expect(page.locator('.inspector-chat-surface .chat-panel-compact')).toBeVisible()
     await page.getByRole('button', { name: 'Open full chat' }).click()
@@ -69,9 +68,16 @@ test('document chat hands exact context to the full-page route', async ({
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
   await expect(page.getByLabel('Active chat context')).toContainText(seededWorkspace.documentTitle)
   await expect(page.getByRole('button', { name: 'Return to document' })).toBeVisible()
-  if (testInfo.project.name === 'chromium-narrow') {
+  if (isMobileLayout) {
     await expect(page.locator('.workspace-chat-page')).toHaveCSS('overflow', 'hidden')
     await expect(page.locator('.workspace-chat-surface')).toHaveCSS('overflow', 'hidden')
+    await expect(page.locator('body')).toHaveJSProperty('scrollWidth', 390)
+    const back = page.getByRole('button', { name: 'Return to document' })
+    await expect(back).toHaveCSS('min-height', '44px')
+    if (testInfo.project.name === 'chromium-touch-mobile') await back.tap()
+    else await back.click()
+    await expect(page).toHaveURL(new RegExp(`/documents/${seededWorkspace.documentId}$`))
+    await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
   }
 })
 

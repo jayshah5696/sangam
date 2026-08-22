@@ -32,9 +32,12 @@ export function ChatCreateConfirmation({
         <strong id="create-confirm-title">Create “{request.title}”?</strong>
         <span>
           The assistant prepared a new Markdown document with {request.content.length.toLocaleString()}{' '}
-          characters.
+          characters. Review the complete source before approval.
         </span>
-        <small>No document is created until you approve this exact content.</small>
+        <pre className="chat-create-preview" aria-label="Document content to create">
+          <code>{request.content}</code>
+        </pre>
+        <small>No document is created until you approve the content shown above.</small>
         {error && <p className="error-text">Creation failed. Retry or cancel.</p>}
       </div>
       <div className="chat-effect-actions">
