@@ -276,4 +276,3 @@ class BackupManager:
     def _apply_retention(self) -> None:
         for backup in self.list()[self.retention_count :]:
             shutil.rmtree(self.backup_root / backup.backup_id)
-

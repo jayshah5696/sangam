@@ -323,7 +323,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "karakeep_configured": karakeep.connection_health().configured,
         }
 
-
     @app.get("/api/v1/readiness")
     def readiness_status(request: Request) -> JSONResponse:
         result = readiness.check(
@@ -516,7 +515,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path=body.path,
             idempotency_key=idempotency_key,
         )
-
 
     @app.post("/api/v1/documents", response_model=Document, status_code=201)
     def create_document(
@@ -1028,7 +1026,6 @@ else fetch('/api/v1/trusted-previews/content', {
     ) -> Response:
         backups.delete(backup_id)
         return Response(status_code=204)
-
 
     frontend_dist = resolved_settings.frontend_dist
     if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():

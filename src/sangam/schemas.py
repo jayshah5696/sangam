@@ -184,7 +184,6 @@ class MoveFolder(MutationRequest):
     path: str
 
 
-
 class UpdateDocument(MutationRequest):
     expected_revision_id: str
     content: str

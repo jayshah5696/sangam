@@ -213,7 +213,6 @@ class DiskWorkspaceFilesystem:
         self._fsync_directory(destination.parent)
         self._fsync_directory(source.parent)
 
-
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]:
         normalized = _canonicalize_relative_path(path, kind="Asset")
         self._require_inside_workspace(normalized, noun="Asset path")

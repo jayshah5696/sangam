@@ -310,5 +310,3 @@ def test_folder_rename_end_to_end(client: TestClient, settings) -> None:
     assert doc_after["path"] == "reports/archive-2027/summary.md"
     assert (settings.workspace_root / "reports" / "archive-2027" / "summary.md").is_file()
     assert not (settings.workspace_root / "reports" / "archive-2026").exists()
-
-

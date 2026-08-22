@@ -350,7 +350,7 @@ class WorkspaceOrganizationService:
                     new_p = normalized_dest
                     new_name = normalized_dest.split("/")[-1]
                 else:
-                    new_p = normalized_dest + old_p[len(source_path):]
+                    new_p = normalized_dest + old_p[len(source_path) :]
                     new_name = new_p.split("/")[-1]
                 connection.execute(
                     "UPDATE folders SET path = ?, name = ?, updated_at = ? WHERE folder_id = ?",
@@ -364,7 +364,7 @@ class WorkspaceOrganizationService:
 
             for d_row in doc_rows:
                 old_doc_path = d_row["path"]
-                new_doc_path = normalized_dest + old_doc_path[len(source_path):]
+                new_doc_path = normalized_dest + old_doc_path[len(source_path) :]
                 connection.execute(
                     "UPDATE documents SET path = ?, updated_at = ? WHERE document_id = ?",
                     (new_doc_path, now_str, d_row["document_id"]),
@@ -391,7 +391,6 @@ class WorkspaceOrganizationService:
             self.workspace.create_folder(normalized_dest)
 
         return result
-
 
     @staticmethod
     def _folder_from_row(connection: sqlite3.Connection, row: sqlite3.Row) -> Folder:

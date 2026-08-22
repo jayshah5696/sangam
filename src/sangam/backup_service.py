@@ -77,4 +77,3 @@ class BackupService:
 
     def create_if_due(self) -> BackupSet | None:
         return self.manager.create_if_due()
-

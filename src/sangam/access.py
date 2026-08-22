@@ -854,7 +854,6 @@ class WorkspaceAccessService:
 
         return self._run(principal, "move", "folder", operation, resource_id=folder_id, path=path)
 
-
     def _document_operation(
         self,
         principal: Principal,

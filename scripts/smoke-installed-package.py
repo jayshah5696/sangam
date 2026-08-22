@@ -33,10 +33,10 @@ def main() -> None:
         assert applied == len(migration_files)
         assert app.openapi()["info"]["version"] == __version__
         with TestClient(app) as client:
-            assert client.get("/api/v1/health").json() == {
-                "status": "ok",
-                "version": __version__,
-            }
+            health_data = client.get("/api/v1/health").json()
+            assert health_data["status"] == "ok"
+            assert health_data["version"] == __version__
+            assert "karakeep_configured" in health_data
         print(
             f"Installed Sangam {__version__}: CLI import, API construction, "
             f"and {applied} packaged migrations passed."

@@ -395,4 +395,3 @@ def test_backup_deletion_via_api(client: TestClient) -> None:
     # Ensure it is no longer listed
     list_after = client.get("/api/v1/backups", headers=headers("list-backups-2")).json()
     assert not any(b["backup_id"] == backup_id for b in list_after)
-
