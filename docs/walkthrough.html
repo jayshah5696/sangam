@@ -321,13 +321,13 @@ h1 {
 <div class="container">
   <header>
     <div class="header-top">
-      <h1>Sangam contract repair verification <span class="badge-live">16 / 16 Issues Resolved</span></h1>
+      <h1>Sangam UI & Architecture Verification <span class="badge-live">16 / 16 Issues Resolved</span></h1>
       <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-muted);">Real Application Screenshots · Live Verified</span>
     </div>
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-val">4 / 4</div>
-        <div class="stat-label">Contract repairs verified</div>
+        <div class="stat-val">16 / 16</div>
+        <div class="stat-label">Verified Issues Fixed</div>
       </div>
       <div class="stat-card">
         <div class="stat-val">80 / 80</div>
@@ -338,26 +338,11 @@ h1 {
         <div class="stat-label">Backend Pytest Suite Passing</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">27 / 27</div>
-        <div class="stat-label">Browser checks passing</div>
+        <div class="stat-val">4 / 4</div>
+        <div class="stat-label">Implementation Phases Completed</div>
       </div>
     </div>
   </header>
-
-  <section style="margin: 28px 0; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface);">
-    <div style="font-family: var(--font-mono); color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .12em;">Current pull request</div>
-    <h2 style="margin: 8px 0 12px;">Broken contracts fixed in issues #85, #86, #87, and #89</h2>
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px;">
-      <div class="info-box info-solution"><div class="info-title">#85 Artifact retrieval</div><div class="info-desc">Authenticated raw and download routes return exact Markdown, HTML, or PDF bytes with correct MIME, cache, and attachment headers.</div></div>
-      <div class="info-box info-solution"><div class="info-title">#86 Rotation feedback</div><div class="info-desc">The replacement secret opens in a focused modal and states that the old token was revoked. Rotation failures stay visible.</div></div>
-      <div class="info-box info-solution"><div class="info-title">#87 Token validation</div><div class="info-desc">Issue token remains actionable. Failed submit explains the missing requirement and focuses its exact field.</div></div>
-      <div class="info-box info-solution"><div class="info-title">#89 Settings URL state</div><div class="info-desc">Category links survive refresh and browser history. Search destinations focus exact settings through a transient URL target.</div></div>
-    </div>
-    <div class="screenshot-container" style="margin-top: 16px;" onclick="openLightbox('crisp-settings.png')">
-      <img src="assets/crisp-settings.png" alt="Agents and access settings showing URL-backed navigation and actionable high-impact token validation">
-      <div class="screenshot-badge">Real app capture · Click to enlarge</div>
-    </div>
-  </section>
 
   <div class="filter-bar">
     <button class="filter-btn active" onclick="filterPhase('all')">All Phases (16)</button> <button class="filter-btn" onclick="filterPhase('Phase 1: Workbench Shell & Navigation')">Phase 1: Workbench Shell & Navigation (5)</button> <button class="filter-btn" onclick="filterPhase('Phase 2: Settings & Preferences Experience')">Phase 2: Settings & Preferences Experience (4)</button> <button class="filter-btn" onclick="filterPhase('Phase 3: Data Integrity & Storage Safety')">Phase 3: Data Integrity & Storage Safety (2)</button> <button class="filter-btn" onclick="filterPhase('Phase 4: Document Inspector & Outline System')">Phase 4: Document Inspector & Outline System (5)</button>
@@ -868,7 +853,7 @@ function filterPhase(phase) {
 }
 
 function openLightbox(imgId) {
-  const img = document.getElementById('img-' + imgId) || document.querySelector(`img[src$="${imgId}"]`);
+  const img = document.getElementById('img-' + imgId);
   if (img) {
     document.getElementById('lightboxImg').src = img.src;
     document.getElementById('lightbox').classList.add('active');
