@@ -274,10 +274,10 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         white-space: nowrap !important;
         text-overflow: ellipsis !important;
       }
-      [data-item-section="content"] > * {
+      [data-item-section="content"]:not(:has([data-item-rename-input])) > * {
         display: none !important;
       }
-      [data-item-section="content"]::after {
+      [data-item-section="content"]:not(:has([data-item-rename-input]))::after {
         content: attr(data-sangam-label);
       }
     `,
