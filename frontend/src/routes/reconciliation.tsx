@@ -42,8 +42,8 @@ function ReconciliationPage() {
       {report.data?.conflicts.length === 0 && (
         <StateMessage
           kind="success"
-          title="Workspace is in sync"
-          description="No unresolved disk changes need a decision."
+          title="No unresolved workspace conflicts"
+          description="Canonical data and materialized files currently need no reconciliation decision."
         />
       )}
       <div className="conflict-list">

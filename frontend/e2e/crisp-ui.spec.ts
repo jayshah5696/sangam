@@ -2,12 +2,56 @@ import AxeBuilder from '@axe-core/playwright'
 
 import { expect, test } from './fixtures'
 
+test('settings replaces the workspace rail while preserving width and returning cleanly', async ({
+  page,
+}) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
+
+  await page.goto('/')
+  const workspaceSidebar = page.getByRole('complementary', { name: 'Workspace sidebar' })
+  await expect(workspaceSidebar).toBeVisible()
+  const workspaceWidth = await workspaceSidebar.evaluate((element) => element.getBoundingClientRect().width)
+
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
+  const settingsSidebar = page.getByRole('complementary', { name: 'Settings sidebar' })
+  await expect(settingsSidebar).toBeVisible()
+  await expect(page.getByRole('complementary', { name: 'Workspace sidebar' })).toHaveCount(0)
+  await expect(settingsSidebar).toHaveCSS('width', `${workspaceWidth}px`)
+  await expect(page.locator('.settings-control-center')).toHaveCSS('display', 'block')
+
+  const resizeHandle = page.getByRole('separator', { name: 'Resize left sidebar' })
+  await resizeHandle.focus()
+  await resizeHandle.press('ArrowRight')
+  await expect(settingsSidebar).toHaveCSS('width', `${workspaceWidth + 10}px`)
+  await page.reload()
+  await expect(page.getByRole('complementary', { name: 'Settings sidebar' })).toHaveCSS(
+    'width',
+    `${workspaceWidth + 10}px`,
+  )
+
+  await page.getByRole('button', { name: 'Back to workspace' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(workspaceSidebar).toBeVisible()
+  await expect(workspaceSidebar).toHaveCSS('width', `${workspaceWidth + 10}px`)
+
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
+  await page.locator('body').press('Escape')
+  await expect(page).toHaveURL(/\/$/)
+
+  await page.goto('/settings')
+  await page.getByRole('button', { name: 'Back to workspace' }).click()
+  await expect(page).toHaveURL(/\/$/)
+})
+
 test('settings search opens and focuses the exact setting', async ({ page }) => {
   await page.goto('/settings')
 
   await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible()
   await expect(page.locator('.theme-card[aria-pressed="true"]')).toHaveCount(1)
 
+  if (page.viewportSize()?.width !== 1440) {
+    await page.getByRole('button', { name: 'Show settings sidebar' }).click()
+  }
   const search = page.getByRole('searchbox', { name: 'Search settings' })
   await search.fill('sidebar')
   await expect(page.getByRole('option', { name: /Workspace sidebar/ })).toHaveAttribute(
@@ -28,6 +72,9 @@ test('settings categories survive reload and support browser history', async ({ 
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Agents & access', exact: true })).toBeVisible()
 
+  if (page.viewportSize()?.width !== 1440) {
+    await page.getByRole('button', { name: 'Show settings sidebar' }).click()
+  }
   await page.getByRole('button', { name: /Operations/ }).click()
   await expect(page).toHaveURL(/category=operations/)
   await page.goBack()
@@ -84,16 +131,10 @@ test('document workbench exposes active, save, and inspector state', async ({ pa
 })
 
 test('primary routes have no detectable WCAG A or AA violations', async ({ page }) => {
-  for (const route of [
-    '/',
-    '/chat',
-    '/publications',
-    '/settings',
-    '/activity',
-    '/reconciliation',
-    '/backups',
-    '/trash',
-  ]) {
+  const routes = test.info().project.name.includes('touch-mobile')
+    ? ['/settings', '/reconciliation']
+    : ['/', '/chat', '/publications', '/settings', '/activity', '/reconciliation', '/backups', '/trash']
+  for (const route of routes) {
     await page.goto(route)
     await expect(page.locator('h1')).toBeVisible()
     const results = await new AxeBuilder({ page })
@@ -101,6 +142,103 @@ test('primary routes have no detectable WCAG A or AA violations', async ({ page 
       .analyze()
     expect(results.violations, `${route}: ${formatViolations(results.violations)}`).toEqual([])
   }
+})
+
+test('settings exposes operational destinations and the compact footer keeps only primary tools', async ({
+  page,
+}) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
+
+  await page.goto('/')
+  const tools = page.getByRole('navigation', { name: 'Workspace tools' })
+  await expect(tools.getByRole('link')).toHaveCount(4)
+  await expect(tools.getByRole('link', { name: 'Workspace chat' })).toBeVisible()
+  await expect(tools.getByRole('link', { name: 'Publications' })).toBeVisible()
+  await expect(tools.getByRole('link', { name: 'Trash' })).toBeVisible()
+  await expect(tools.getByRole('link', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByText('Synced', { exact: true })).toHaveCount(0)
+  await expect(page.locator('.workspace-freshness')).toHaveCount(0)
+
+  await page.goto('/settings?category=agents')
+  await expect(page.getByRole('link', { name: 'Review activity' })).toHaveAttribute('href', '/activity')
+
+  await page.getByRole('button', { name: /Operations/ }).click()
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Operations', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Review conflicts' })).toHaveAttribute(
+    'href',
+    '/reconciliation',
+  )
+  await expect(page.getByRole('link', { name: 'Manage backups' })).toHaveAttribute('href', '/backups')
+})
+
+test('sidebar status distinguishes connectivity, refresh, and integrity conflicts', async ({ page }) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
+
+  await page.route('**/api/v1/reconciliation', async (route) => {
+    await route.fulfill({
+      json: {
+        repaired_document_ids: [],
+        conflicts: [
+          {
+            conflict_id: 'conflict-1',
+            conflict_type: 'unknown_file',
+            document_id: null,
+            path: 'outside.md',
+            candidate_path: null,
+            expected_hash: null,
+            actual_hash: 'abc',
+            status: 'open',
+            created_at: '2026-08-22T00:00:00Z',
+            resolved_at: null,
+          },
+        ],
+      },
+    })
+  })
+  await page.goto('/')
+  await expect(page.getByRole('link', { name: '1 unresolved workspace conflicts' })).toBeVisible()
+
+  await page.unroute('**/api/v1/reconciliation')
+  await page.context().setOffline(true)
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+  await expect(page.getByRole('status')).toContainText('Offline')
+  await page.context().setOffline(false)
+})
+
+test('settings switches between fixed rail and drawer at the 1100px breakpoint', async ({ page }) => {
+  test.skip(test.info().project.name !== 'chromium-desktop', 'desktop Chromium only')
+
+  await page.setViewportSize({ width: 1101, height: 800 })
+  await page.goto('/settings')
+  await expect(page.getByRole('complementary', { name: 'Settings sidebar' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Show settings sidebar' })).toHaveCount(0)
+
+  await page.setViewportSize({ width: 1099, height: 800 })
+  await expect(page.getByRole('complementary', { name: 'Settings sidebar' })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Show settings sidebar' })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
+test('touch-mobile settings uses the workspace drawer and footer navigation closes it', async ({ page }) => {
+  test.skip(!test.info().project.name.includes('touch-mobile'), 'touch-mobile project only')
+
+  await page.goto('/settings')
+  await expect(page.getByRole('button', { name: 'Show settings sidebar' })).toBeVisible()
+  await page.getByRole('button', { name: 'Show settings sidebar' }).click()
+  const sidebar = page.getByRole('dialog', { name: 'Settings sidebar' })
+  await expect(sidebar).toBeVisible()
+  await expect(sidebar.getByRole('button', { name: 'Back to workspace' })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await sidebar.getByRole('button', { name: 'Hide settings sidebar' }).click()
+  await expect(sidebar).toBeHidden()
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Show workspace sidebar' }).click()
+  const workspaceSidebar = page.getByRole('dialog', { name: 'Workspace sidebar' })
+  await workspaceSidebar.getByRole('link', { name: 'Trash' }).click()
+  await expect(page).toHaveURL(/\/trash$/)
+  await expect(workspaceSidebar).toBeHidden()
 })
 
 test('narrow settings and workbench reflow without horizontal clipping', async ({
@@ -111,6 +249,7 @@ test('narrow settings and workbench reflow without horizontal clipping', async (
 
   await page.goto('/settings')
   await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Show settings sidebar' })).toBeVisible()
   await expectNoHorizontalOverflow(page)
 
   await page.goto(`/documents/${seededWorkspace.documentId}`)

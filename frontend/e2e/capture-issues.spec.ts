@@ -145,6 +145,52 @@ test.describe('Issue Verification Real Screenshots', () => {
     await page
       .locator('.pierre-tree-shell')
       .screenshot({ path: path.join(outDir, 'issue-63-folder-rename.png') })
+
+    // Issue #100: Context menu Rename on folder must show visible inline input and update path
+    const folderItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'quantum-computing' })
+    await expect(folderItem).toBeVisible()
+    await folderItem.click({ button: 'right' })
+
+    const folderMenu = page.getByRole('menu', { name: 'Actions for quantum-computing' })
+    await expect(folderMenu).toBeVisible()
+    await folderMenu.getByRole('menuitem', { name: 'Rename' }).click()
+
+    const renameInput = page.locator('.sangam-file-tree').locator('input[data-item-rename-input]')
+    await expect(renameInput).toBeVisible()
+    await expect(renameInput).toBeFocused()
+    await renameInput.fill('advanced-quantum')
+    await renameInput.press('Enter')
+
+    await expect(
+      page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'advanced-quantum' }),
+    ).toBeVisible()
+
+    // Issue #100: F2 rename on file item must show visible inline input and update path
+    const docItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'qubit-fidelity.md' })
+    await expect(docItem).toBeVisible()
+    await docItem.click()
+    await page.keyboard.press('F2')
+
+    await expect(renameInput).toBeVisible()
+    await expect(renameInput).toBeFocused()
+    await renameInput.fill('qubit-analysis.md')
+    await renameInput.press('Enter')
+
+    await expect(
+      page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'qubit-analysis.md' }),
+    ).toBeVisible()
+
+    // Issue #100: Escape cancels rename mode without modifying path
+    const renamedDocItem = page
+      .locator('.sangam-file-tree')
+      .getByRole('treeitem', { name: 'qubit-analysis.md' })
+    await renamedDocItem.click()
+    await page.keyboard.press('F2')
+    await expect(renameInput).toBeVisible()
+    await renameInput.fill('qubit-discarded.md')
+    await renameInput.press('Escape')
+    await expect(renameInput).toBeHidden()
+    await expect(renamedDocItem).toBeVisible()
   })
 
   test('capture issue 64, 66, and 75 (sidebar navigation, search focus, and sync badge)', async ({
@@ -268,16 +314,16 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
       .screenshot({ path: path.join(outDir, 'issue-74-collapsed-rail-triggers.png') })
   })
 
-  test('capture issue 65 and 75 (settings persistent sidebar and version card)', async ({ page }) => {
+  test('capture issue 104 and 75 (route-aware settings sidebar and version card)', async ({ page }) => {
     await page.goto('/settings')
     await page.waitForTimeout(500)
 
-    // Issue #65: Settings keeps the same primary workspace rail and active Settings link.
-    const primarySidebar = page.getByRole('complementary', { name: 'Workspace sidebar' })
-    await expect(primarySidebar).toBeVisible()
-    await expect(primarySidebar.getByRole('link', { name: 'Settings' })).toHaveClass(/active/)
-    await expect(page.getByRole('complementary', { name: 'Settings navigation' })).toBeVisible()
-    await page.screenshot({ path: path.join(outDir, 'issue-65-settings-sidebar.png'), fullPage: false })
+    // Issue #104 supersedes #65: Settings replaces workspace navigation inside the shared rail.
+    const settingsSidebar = page.getByRole('complementary', { name: 'Settings sidebar' })
+    await expect(settingsSidebar).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Workspace sidebar' })).toHaveCount(0)
+    await expect(settingsSidebar.getByRole('navigation', { name: 'Settings pages' })).toBeVisible()
+    await page.screenshot({ path: path.join(outDir, 'issue-104-settings-sidebar.png'), fullPage: false })
 
     // Issue #75: installed version and truthful server status in Operations.
     await page.getByRole('button', { name: /Operations/ }).click()

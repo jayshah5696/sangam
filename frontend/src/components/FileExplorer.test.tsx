@@ -5,6 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DocumentSummary, Folder } from '../api'
 import { FileExplorerPanel } from './FileExplorer'
 
+type MockFileTreeOptions = {
+  unsafeCSS?: string
+  renderRowDecoration?: (context: {
+    item: { kind: 'directory'; name: string; path: string }
+    row: Record<string, never>
+  }) => { text: string; title?: string } | null
+  renaming?: {
+    canRename: (item: { isFolder: boolean; path: string }) => boolean
+    onRename?: (event: { sourcePath: string; destinationPath: string }) => void
+  }
+}
+
 const state = vi.hoisted(() => {
   const item = {
     deselect: vi.fn(),
@@ -17,6 +29,7 @@ const state = vi.hoisted(() => {
     folders: [] as Folder[],
     mutationOptions: [] as Array<{ onSuccess?: (value: DocumentSummary) => Promise<void> }>,
     decorations: [] as Array<{ text: string; title?: string } | null>,
+    useFileTreeOptions: [] as MockFileTreeOptions[],
     item,
     model: {
       getFocusedPath: vi.fn((): string | null => null),
@@ -54,18 +67,16 @@ vi.mock('@pierre/trees/react', () => ({
   FileTree: (props: { onKeyDown?: (e: React.KeyboardEvent) => void }) => (
     <div data-testid="pierre-tree" onKeyDown={props.onKeyDown} />
   ),
-  useFileTree: (options: {
-    renderRowDecoration: (context: {
-      item: { kind: 'directory'; name: string; path: string }
-      row: Record<string, never>
-    }) => { text: string; title?: string } | null
-  }) => {
-    state.decorations.push(
-      options.renderRowDecoration({
-        item: { kind: 'directory', name: 'projects', path: 'projects' },
-        row: {},
-      }),
-    )
+  useFileTree: (options: MockFileTreeOptions) => {
+    state.useFileTreeOptions.push(options)
+    if (options.renderRowDecoration) {
+      state.decorations.push(
+        options.renderRowDecoration({
+          item: { kind: 'directory', name: 'projects', path: 'projects' },
+          row: {},
+        }),
+      )
+    }
     return { model: state.model }
   },
 }))
@@ -144,6 +155,7 @@ beforeEach(() => {
   state.folders = []
   state.mutationOptions = []
   state.decorations = []
+  state.useFileTreeOptions = []
   vi.clearAllMocks()
 })
 
@@ -190,5 +202,33 @@ describe('FileExplorerPanel', () => {
     tree.dispatchEvent(event)
 
     expect(state.model.startRenaming).toHaveBeenCalledWith('projects/note.md')
+  })
+
+  it('configures Pierre unsafeCSS to preserve rename input visibility', () => {
+    render(<FileExplorerPanel onSearch={vi.fn()} />)
+
+    const unsafeCSS = state.useFileTreeOptions[0]?.unsafeCSS as string
+    expect(unsafeCSS).toContain('[data-item-section="content"]:not(:has([data-item-rename-input])) > *')
+    expect(unsafeCSS).toContain('[data-item-section="content"]:not(:has([data-item-rename-input]))::after')
+    expect(unsafeCSS).not.toMatch(
+      /\[data-item-section="content"\]\s*>\s*\*\s*\{\s*display:\s*none\s*!important;\s*\}/,
+    )
+  })
+
+  it('handles rename validation and mutation for documents and folders', () => {
+    state.documents = [
+      { ...document, document_id: 'doc-draft', path: null },
+      { ...document, path: 'projects/note.md' },
+      { ...document, document_id: 'doc-pdf', path: 'projects/paper.pdf', content_type: 'application/pdf' },
+    ]
+    state.folders = [folder]
+
+    render(<FileExplorerPanel onSearch={vi.fn()} />)
+
+    const options = state.useFileTreeOptions[0]
+    expect(options?.renaming?.canRename({ isFolder: true, path: 'projects' })).toBe(true)
+    expect(options?.renaming?.canRename({ isFolder: true, path: 'Drafts' })).toBe(false)
+    expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/note.md' })).toBe(true)
+    expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/paper.pdf' })).toBe(false)
   })
 })

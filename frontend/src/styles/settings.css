@@ -1,24 +1,23 @@
-/* Settings uses routes and search for orientation. Ordinary rows stay flat. */
-.settings-control-center { min-height: 100%; display: grid; grid-template-columns: 232px minmax(0, 1fr); background: var(--app-bg); color: var(--text); }
-.settings-nav { position: sticky; top: 0; min-height: 100%; height: 100vh; overflow: auto; padding: var(--space-3) var(--space-2); border-right: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 62%, var(--app-bg)); }
-.settings-nav-title { min-height: auto; display: grid; gap: 2px; padding: var(--space-2) var(--space-2) var(--space-3); }
-.settings-nav-title strong { font-size: var(--text-body); }
-.settings-nav-title span { color: var(--muted); font-size: var(--text-meta); }
-.settings-search { min-height: var(--control-height); display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); padding: 0 var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--muted); }
+/* Settings swaps the workspace sidebar's contents without replacing its chrome. */
+.settings-control-center { min-height: 100%; background: var(--app-bg); color: var(--text); }
+.settings-sidebar-body { min-height: 0; flex: 1; overflow: auto; padding: var(--space-3) var(--space-2); }
+.settings-search { min-height: var(--control-height); display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); padding: 0 var(--space-2); border: 1px solid color-mix(in srgb, var(--sidebar-text) 20%, transparent); border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-muted); }
 .settings-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.settings-search input { min-width: 0; min-height: 0; flex: 1; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); }
-.settings-search kbd, .settings-nav-footnote kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text-secondary); font-size: var(--text-meta); }
+.settings-search input { min-width: 0; min-height: 0; flex: 1; padding: 0; border: 0; outline: 0; background: transparent; color: var(--sidebar-text); }
+.settings-search input:focus, .settings-search input:focus-visible { outline: 0; box-shadow: none; }
+.settings-search kbd { padding: 1px 4px; border: 1px solid color-mix(in srgb, var(--sidebar-text) 18%, transparent); border-radius: var(--radius-control); background: var(--sidebar); color: var(--sidebar-muted); font-size: var(--text-meta); }
 .settings-nav-items, .settings-search-results { display: grid; gap: 2px; }
-.settings-nav-items button, .settings-search-results button { width: 100%; min-height: 46px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: var(--space-2); padding: var(--space-2); border: 0; background: transparent; color: var(--text-secondary); text-align: left; }
-.settings-nav-items button:hover, .settings-nav-items button:focus-visible, .settings-nav-items button.active, .settings-search-results button:hover, .settings-search-results button:focus-visible, .settings-search-results button[aria-selected="true"] { background: var(--surface); color: var(--text); }
+.settings-nav-items button, .settings-search-results button { width: 100%; min-height: 46px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--sidebar-muted); text-align: left; }
+.settings-nav-items button:hover, .settings-nav-items button:focus-visible, .settings-nav-items button.active, .settings-search-results button:hover, .settings-search-results button:focus-visible, .settings-search-results button[aria-selected="true"] { background: var(--sidebar-raised); color: var(--sidebar-text); }
 .settings-nav-items button.active { box-shadow: inset 2px 0 var(--accent); }
 .settings-nav-items button > span, .settings-search-results button > span { min-width: 0; display: grid; gap: 1px; }
 .settings-nav-items button strong, .settings-search-results button strong { font-size: var(--text-control); font-weight: 600; }
-.settings-nav-items button small, .settings-search-results button small { overflow: hidden; color: var(--muted); font-size: var(--text-meta); text-overflow: ellipsis; white-space: nowrap; }
-.settings-nav-items button svg, .settings-search-results button svg { color: var(--text-subtle); }
-.settings-nav-items button.active svg, .settings-search-results button[aria-selected="true"] svg { color: var(--accent); }
-.settings-search-results > p { margin: var(--space-3) var(--space-2); color: var(--muted); font-size: var(--text-control); }
-.settings-nav-footnote { margin: var(--space-3) var(--space-2); color: var(--muted); font-size: var(--text-meta); line-height: var(--leading-body); }
+.settings-nav-items button small, .settings-search-results button small { overflow: hidden; color: var(--sidebar-muted); font-size: var(--text-meta); text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav-items button svg, .settings-search-results button svg { color: color-mix(in srgb, var(--accent) 75%, var(--sidebar-text)); }
+.settings-search-results > p { margin: var(--space-3) var(--space-2); color: var(--sidebar-muted); font-size: var(--text-control); }
+.settings-sidebar-footer { flex: none; padding: var(--space-2); border-top: 1px solid color-mix(in srgb, var(--sidebar-text) 11%, transparent); }
+.settings-sidebar-footer button { width: 100%; min-height: var(--control-height); display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--sidebar-muted); font-size: var(--text-control); text-align: left; }
+.settings-sidebar-footer button:hover, .settings-sidebar-footer button:focus-visible { background: var(--sidebar-raised); color: var(--sidebar-text); }
 .settings-content { width: min(860px, calc(100% - 48px)); margin: 0 auto; padding: 36px 0 72px; }
 .settings-compact-header { min-height: 86px; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); padding: 0 var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
 .settings-compact-header > div { min-width: 0; }
@@ -229,15 +228,7 @@
 }
 
 @media (max-width: 800px) {
-  .settings-control-center { display: block; }
-  .settings-nav { position: static; width: 100%; min-height: 0; height: auto; max-height: none; padding: var(--space-2); border-right: 0; border-bottom: 1px solid var(--line); }
-  .settings-nav-title { display: none; }
-  .settings-search { max-width: 28rem; }
   .settings-search kbd { display: none; }
-  .settings-nav-items { grid-auto-flow: column; grid-auto-columns: minmax(7.5rem, max-content); overflow-x: auto; padding-bottom: var(--space-1); scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
-  .settings-nav-items button { min-height: var(--control-height); grid-template-columns: 16px auto; padding: var(--space-1) var(--space-2); }
-  .settings-nav-items button small { display: none; }
-  .settings-nav-footnote { display: none; }
   .settings-content { width: calc(100% - 24px); padding-top: var(--space-4); }
   .settings-panel > header { grid-template-columns: 20px minmax(0, 1fr); }
   .settings-panel > header .scope-badge { grid-column: 2; justify-self: start; }

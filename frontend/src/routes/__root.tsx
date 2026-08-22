@@ -1,28 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useIsFetching, useQuery } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import {
-  Activity,
-  ArchiveRestore,
-  CheckCircle2,
   CloudOff,
   FileText,
   Globe2,
-  Import,
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   Settings,
-  ShieldCheck,
+  ShieldAlert,
   Trash2,
   RefreshCw,
 } from 'lucide-react'
 import { api, type DocumentSummary } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
+import { SettingsSidebar } from '../components/SettingsSidebar'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { activateTabFromKeyboard } from '../components/tabKeyboard'
 import { workspaceBasename } from '../workspaceTree'
@@ -44,6 +41,7 @@ function RootLayout() {
   const [mobileSidebarLocationKey, setMobileSidebarLocationKey] = useState<string | null>(null)
   const narrowSidebar = useMediaQuery('(max-width: 1100px)')
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
+  const isSettings = location.pathname.startsWith('/settings')
   const locationKey = location.state.__TSR_key ?? location.href
   const sidebarVisible = narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible
 
@@ -52,6 +50,30 @@ function RootLayout() {
     const frame = window.requestAnimationFrame(() => setMobileSidebarLocationKey(null))
     return () => window.cancelAnimationFrame(frame)
   }, [locationKey, mobileSidebarLocationKey])
+
+  useEffect(() => {
+    if (isSettings || location.pathname.startsWith('/p/')) return
+    sessionStorage.setItem('sangam.settings-return-to', location.href)
+  }, [isSettings, location.href, location.pathname])
+
+  const returnFromSettings = useCallback(() => {
+    const returnTo = sessionStorage.getItem('sangam.settings-return-to')
+    void navigate({ href: returnTo?.startsWith('/') ? returnTo : '/', replace: true })
+  }, [navigate])
+
+  useEffect(() => {
+    if (!isSettings) return
+    const exitSettings = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], [role="listbox"]')) {
+        return
+      }
+      event.preventDefault()
+      returnFromSettings()
+    }
+    window.addEventListener('keydown', exitSettings)
+    return () => window.removeEventListener('keydown', exitSettings)
+  }, [isSettings, returnFromSettings])
 
   if (location.pathname.startsWith('/p/')) return <Outlet />
 
@@ -79,13 +101,19 @@ function RootLayout() {
       {sidebarVisible ? (
         <>
           {narrowSidebar && (
-            <button className="sidebar-backdrop" aria-label="Close workspace sidebar" onClick={hideSidebar} />
+            <button
+              className="sidebar-backdrop"
+              aria-label={isSettings ? 'Close settings sidebar' : 'Close workspace sidebar'}
+              onClick={hideSidebar}
+            />
           )}
           <PrimarySidebar
             mode={sidebarMode}
             modal={narrowSidebar}
             onCollapse={hideSidebar}
             onMode={(next) => void chooseSidebarMode(next)}
+            settings={isSettings}
+            onSettingsBack={returnFromSettings}
             style={{ width: preferences.leftWidth }}
           />
           <ResizeHandle
@@ -99,8 +127,8 @@ function RootLayout() {
       ) : (
         <button
           className="sidebar-reveal icon-button"
-          aria-label="Show workspace sidebar"
-          title="Show workspace sidebar"
+          aria-label={isSettings ? 'Show settings sidebar' : 'Show workspace sidebar'}
+          title={isSettings ? 'Show settings sidebar' : 'Show workspace sidebar'}
           onClick={showSidebar}
         >
           <PanelLeftOpen size={17} />
@@ -138,12 +166,16 @@ function PrimarySidebar({
   modal,
   onCollapse,
   onMode,
+  settings,
+  onSettingsBack,
   style,
 }: {
   mode: SidebarMode
   modal: boolean
   onCollapse: () => void
   onMode: (mode: SidebarMode) => void
+  settings: boolean
+  onSettingsBack: () => void
   style: CSSProperties
 }) {
   const sidebarRef = useRef<HTMLElement>(null)
@@ -162,7 +194,9 @@ function PrimarySidebar({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (settings) return
         event.preventDefault()
+        event.stopPropagation()
         onCollapseRef.current()
         return
       }
@@ -188,14 +222,14 @@ function PrimarySidebar({
       document.removeEventListener('keydown', handleKeyDown)
       previouslyFocused?.focus()
     }
-  }, [modal])
+  }, [modal, settings])
 
   return (
     <aside
       ref={sidebarRef}
       className="primary-sidebar ui-rail ui-rail--inverse"
       style={style}
-      aria-label="Workspace sidebar"
+      aria-label={settings ? 'Settings sidebar' : 'Workspace sidebar'}
       aria-modal={modal || undefined}
       role={modal ? 'dialog' : undefined}
     >
@@ -204,79 +238,79 @@ function PrimarySidebar({
           <img src="/sangam-mark.svg" alt="" />
           <span>
             <strong>Sangam</strong>
-            <small>Documents, plainly.</small>
+            <small>{settings ? 'Settings' : 'Documents, plainly.'}</small>
           </span>
         </Link>
         <button
           className="quiet-icon"
-          aria-label="Hide workspace sidebar"
+          aria-label={settings ? 'Hide settings sidebar' : 'Hide workspace sidebar'}
           title="Hide sidebar"
           onClick={onCollapse}
         >
           <PanelLeftClose size={16} />
         </button>
       </header>
-      <div className="sidebar-mode-switch" role="tablist" aria-label="Workspace navigation">
-        <button
-          role="tab"
-          id="workspace-tab-files"
-          aria-controls="workspace-panel"
-          aria-selected={mode === 'files'}
-          tabIndex={mode === 'files' ? 0 : -1}
-          className={mode === 'files' ? 'active' : ''}
-          onClick={() => onMode('files')}
-          onKeyDown={activateTabFromKeyboard}
-        >
-          <FileText size={14} /> Files
-        </button>
-        <button
-          role="tab"
-          id="workspace-tab-search"
-          aria-controls="workspace-panel"
-          aria-selected={mode === 'search'}
-          tabIndex={mode === 'search' ? 0 : -1}
-          className={mode === 'search' ? 'active' : ''}
-          onClick={() => onMode('search')}
-          onKeyDown={activateTabFromKeyboard}
-        >
-          <Search size={14} /> Search
-        </button>
-      </div>
-      {mode === 'files' && (
-        <div
-          className="sidebar-tab-panel"
-          id="workspace-panel"
-          role="tabpanel"
-          aria-labelledby="workspace-tab-files"
-        >
-          <FileExplorerPanel onSearch={() => onMode('search')} />
-        </div>
+      {settings ? (
+        <SettingsSidebar onBack={onSettingsBack} />
+      ) : (
+        <>
+          <div className="sidebar-mode-switch" role="tablist" aria-label="Workspace navigation">
+            <button
+              role="tab"
+              id="workspace-tab-files"
+              aria-controls="workspace-panel"
+              aria-selected={mode === 'files'}
+              tabIndex={mode === 'files' ? 0 : -1}
+              className={mode === 'files' ? 'active' : ''}
+              onClick={() => onMode('files')}
+              onKeyDown={activateTabFromKeyboard}
+            >
+              <FileText size={14} /> Files
+            </button>
+            <button
+              role="tab"
+              id="workspace-tab-search"
+              aria-controls="workspace-panel"
+              aria-selected={mode === 'search'}
+              tabIndex={mode === 'search' ? 0 : -1}
+              className={mode === 'search' ? 'active' : ''}
+              onClick={() => onMode('search')}
+              onKeyDown={activateTabFromKeyboard}
+            >
+              <Search size={14} /> Search
+            </button>
+          </div>
+          {mode === 'files' && (
+            <div
+              className="sidebar-tab-panel"
+              id="workspace-panel"
+              role="tabpanel"
+              aria-labelledby="workspace-tab-files"
+            >
+              <FileExplorerPanel onSearch={() => onMode('search')} />
+            </div>
+          )}
+          {mode === 'search' && (
+            <div
+              className="sidebar-tab-panel"
+              id="workspace-panel"
+              role="tabpanel"
+              aria-labelledby="workspace-tab-search"
+            >
+              <SearchPanel />
+            </div>
+          )}
+          <SidebarLinks onNavigate={modal ? onCollapse : undefined} />
+        </>
       )}
-      {mode === 'search' && (
-        <div
-          className="sidebar-tab-panel"
-          id="workspace-panel"
-          role="tabpanel"
-          aria-labelledby="workspace-tab-search"
-        >
-          <SearchPanel />
-        </div>
-      )}
-      <SidebarLinks />
     </aside>
   )
 }
 
-function SidebarLinks() {
-  const healthQuery = useQuery({ queryKey: ['health'], queryFn: () => api.health() })
-  const karakeepConfigured = healthQuery.data?.karakeep_configured === true
+function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   const links = [
     { to: '/chat' as const, label: 'Workspace chat', icon: MessageSquareText },
     { to: '/publications' as const, label: 'Publications', icon: Globe2 },
-    { to: '/activity' as const, label: 'Agent activity', icon: Activity },
-    { to: '/reconciliation' as const, label: 'Workspace integrity', icon: ShieldCheck },
-    { to: '/backups' as const, label: 'Backups', icon: ArchiveRestore },
-    ...(karakeepConfigured ? [{ to: '/karakeep' as const, label: 'Karakeep imports', icon: Import }] : []),
     { to: '/trash' as const, label: 'Trash', icon: Trash2 },
     { to: '/settings' as const, label: 'Settings', icon: Settings },
   ]
@@ -284,9 +318,15 @@ function SidebarLinks() {
     <div className="sidebar-footer">
       <nav className="sidebar-footer-nav" aria-label="Workspace tools">
         {links.map(({ to, label, icon: Icon }) => (
-          <Link key={to} to={to} activeProps={{ className: 'active' }}>
-            <Icon size={14} />
-            <span>{label}</span>
+          <Link
+            key={to}
+            to={to}
+            aria-label={label}
+            data-tooltip={label}
+            activeProps={{ className: 'active' }}
+            onClick={onNavigate}
+          >
+            <Icon size={16} />
           </Link>
         ))}
       </nav>
@@ -309,22 +349,46 @@ function WorkspaceFreshness() {
     }
   }, [])
 
+  const conflicts = useQuery({
+    queryKey: ['reconciliation'],
+    queryFn: api.reconciliation,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  })
+  const conflictCount = conflicts.data?.conflicts.length ?? 0
+  if (online && !conflicts.isError && fetching === 0 && conflictCount === 0) return null
+
+  const statusClass = !online
+    ? 'offline'
+    : conflicts.isError
+      ? 'unavailable'
+      : conflictCount
+        ? 'conflict'
+        : ''
+
   return (
-    <div className={`workspace-freshness ${online ? '' : 'offline'}`} role="status" aria-live="polite">
+    <div className={`workspace-freshness ${statusClass}`} role="status" aria-live="polite">
       {!online ? (
         <>
           <CloudOff size={13} />
           <span>Offline</span>
         </>
-      ) : fetching ? (
+      ) : conflicts.isError ? (
+        <button type="button" onClick={() => void conflicts.refetch()}>
+          <CloudOff size={13} />
+          <span>Server unavailable · Retry</span>
+        </button>
+      ) : conflictCount ? (
+        <Link to="/reconciliation" aria-label={`${conflictCount} unresolved workspace conflicts`}>
+          <ShieldAlert size={13} />
+          <span>
+            {conflictCount} unresolved {conflictCount === 1 ? 'conflict' : 'conflicts'}
+          </span>
+        </Link>
+      ) : (
         <>
           <RefreshCw className="spin" size={13} />
           <span>Refreshing {fetching}</span>
-        </>
-      ) : (
-        <>
-          <CheckCircle2 size={13} />
-          <span>Synced</span>
         </>
       )}
     </div>
