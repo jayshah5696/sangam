@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, type Document } from './api'
 import { IndexedDbDraftStorage, type DraftRecord, type DraftStorage } from './browserState/draftStorage'
 import type { EditorSelection, EditorViewState } from './components/MarkdownEditor'
+import type { AnnotationDraft } from './components/pdfResearchTypes'
 
 export type { DraftStorage } from './browserState/draftStorage'
 
@@ -10,6 +11,13 @@ export type EditorMode = 'edit' | 'split' | 'preview'
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'failed' | 'offline'
 export type DraftPersistenceState = 'idle' | 'pending' | 'persisted' | 'failed'
 export type DraftPersistenceOperation = 'read' | 'write' | 'delete'
+
+export type PdfViewState = {
+  pageNumber: number
+  scale: number
+  zoomMode: 'fit-width' | 'custom'
+  scrollTop: number
+}
 
 export type DocumentSession = {
   content?: string
@@ -23,6 +31,10 @@ export type DocumentSession = {
   viewState?: EditorViewState
   compareFrom?: string
   compareTo?: string
+  pdfState?: PdfViewState
+  pdfAnnotationQuery?: string
+  pdfSelectedAnnotationId?: string | null
+  pdfDraft?: AnnotationDraft | null
 }
 
 type SessionRuntime = {

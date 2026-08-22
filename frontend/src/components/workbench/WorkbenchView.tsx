@@ -7,6 +7,7 @@ import {
   ListTree,
   MessageSquare,
   MoreHorizontal,
+  NotebookTabs,
   PanelRightClose,
   Pin,
   PinOff,
@@ -18,6 +19,7 @@ import {
 import { Group as PanelGroup, Panel, Separator } from 'react-resizable-panels'
 import { api, type Document } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
+import { PdfResearchProvider } from '../../pdfResearchState'
 import { useTheme, type InspectorTab } from '../../theme'
 import {
   collectGroups,
@@ -236,8 +238,22 @@ function GroupInspector({ documentId }: { documentId: string }) {
     placeholderData: keepPreviousData,
   })
   const document = documentQuery.data
+  const pdfAnnotationsQuery = useQuery({
+    queryKey: ['annotations', documentId, session.pdfAnnotationQuery ?? ''],
+    queryFn: () => api.listAnnotations(documentId, session.pdfAnnotationQuery ?? ''),
+    enabled: document?.content_type === 'application/pdf',
+  })
   if (!document) return null
   const content = session.content ?? document.content
+  const updatePdfState = (patch: Partial<NonNullable<typeof session.pdfState>>) => {
+    const current = sessions.getSession(documentId).pdfState ?? {
+      pageNumber: 1,
+      scale: 1,
+      zoomMode: 'fit-width' as const,
+      scrollTop: 0,
+    }
+    sessions.updateSession(documentId, { pdfState: { ...current, ...patch } })
+  }
   const selectedText =
     session.viewState && session.selection.selectedCharacters
       ? content.slice(
@@ -267,6 +283,16 @@ function GroupInspector({ documentId }: { documentId: string }) {
         >
           <SlidersHorizontal size={15} />
         </button>
+        {document.content_type === 'application/pdf' && (
+          <button
+            className="icon-button"
+            aria-label="PDF research"
+            title="PDF research"
+            onClick={() => openToTab('research')}
+          >
+            <NotebookTabs size={15} />
+          </button>
+        )}
         <button
           className="icon-button"
           aria-label="Document outline"
@@ -309,16 +335,38 @@ function GroupInspector({ documentId }: { documentId: string }) {
         max={720}
         onChange={(rightWidth) => updatePreferences({ rightWidth })}
       />
-      <DocumentInspector
-        width={preferences.rightWidth}
-        document={document}
-        content={content}
-        selectedText={selectedText}
-        onCollapse={() => updatePreferences({ rightVisible: false })}
-        onUpdated={updateCachedDocument}
-        onFocusEditor={() => sessions.focusEditor(documentId)}
-        onScrollToLine={(line) => sessions.scrollToLine(documentId, line)}
-      />
+      <PdfResearchProvider
+        value={{
+          pageNumber: session.pdfState?.pageNumber ?? 1,
+          setPageNumber: (pageNumber) => updatePdfState({ pageNumber }),
+          scrollToPage: (pageNumber) => {
+            updatePdfState({ pageNumber })
+            globalThis.document
+              .getElementById(`pdf-page-${documentId}-${pageNumber}`)
+              ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          },
+          annotations: pdfAnnotationsQuery.data ?? [],
+          annotationQuery: session.pdfAnnotationQuery ?? '',
+          setAnnotationQuery: (pdfAnnotationQuery) =>
+            sessions.updateSession(documentId, { pdfAnnotationQuery }),
+          selectedAnnotationId: session.pdfSelectedAnnotationId ?? null,
+          setSelectedAnnotationId: (pdfSelectedAnnotationId) =>
+            sessions.updateSession(documentId, { pdfSelectedAnnotationId }),
+          draft: session.pdfDraft ?? null,
+          setDraft: (pdfDraft) => sessions.updateSession(documentId, { pdfDraft }),
+        }}
+      >
+        <DocumentInspector
+          width={preferences.rightWidth}
+          document={document}
+          content={content}
+          selectedText={selectedText}
+          onCollapse={() => updatePreferences({ rightVisible: false })}
+          onUpdated={updateCachedDocument}
+          onFocusEditor={() => sessions.focusEditor(documentId)}
+          onScrollToLine={(line) => sessions.scrollToLine(documentId, line)}
+        />
+      </PdfResearchProvider>
     </>
   )
 }

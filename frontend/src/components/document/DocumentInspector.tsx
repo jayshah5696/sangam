@@ -1,19 +1,22 @@
 import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
-import { PanelRightClose } from 'lucide-react'
+import { useNavigate } from '@tanstack/react-router'
+import { PanelRightClose, Upload } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { extractMarkdownHeadings } from '../../markdownHeadings'
 import { useTheme, type InspectorTab } from '../../theme'
+import { useWorkbench } from '../../workbench'
 import { RevisionMergeView } from '../RevisionMergeView'
+import { PdfResearchRail } from '../PdfResearchRail'
 import { HtmlPreview } from '../HtmlPreview'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { activateTabFromKeyboard } from '../tabKeyboard'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
-const inspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
+const standardInspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
 
 export function DocumentInspector({
   width,
@@ -39,7 +42,11 @@ export function DocumentInspector({
   const sessions = useDocumentSessions()
   const queryClient = useQueryClient()
   const { preferences, updatePreferences } = useTheme()
-  const tab = preferences.rightTab
+  const pdf = document.content_type === 'application/pdf'
+  const inspectorTabs = pdf
+    ? (['properties', 'research', 'outline', 'history', 'chat'] as const)
+    : standardInspectorTabs
+  const tab = pdf || preferences.rightTab !== 'research' ? preferences.rightTab : 'properties'
   const [chatActivated, setChatActivated] = useState(tab === 'chat')
   const setTab = (next: InspectorTab) => {
     if (next === 'chat') setChatActivated(true)
@@ -127,11 +134,13 @@ export function DocumentInspector({
               tags={tagsQuery.data ?? []}
               onUpdated={onUpdated}
             />
+            {pdf && <PdfReplacementControl document={document} />}
             {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
               <PublicationEditor document={document} publication={publicationQuery.data ?? null} />
             )}
           </>
         )}
+        {tab === 'research' && pdf && <PdfResearchRail document={document} />}
         {tab === 'outline' && (
           <section className="outline-panel">
             {document.content_type === 'application/pdf' && (
@@ -259,6 +268,58 @@ export function DocumentInspector({
         )}
       </div>
     </aside>
+  )
+}
+
+function PdfReplacementControl({ document }: { document: Document }) {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const workbench = useWorkbench()
+  const replacement = useMutation({
+    mutationFn: (file: File) => {
+      const parent = document.path?.includes('/')
+        ? document.path.slice(0, document.path.lastIndexOf('/') + 1)
+        : ''
+      const filename = file.name.toLowerCase().endsWith('.pdf') ? file.name : `${file.name}.pdf`
+      return api.importPdf(
+        file,
+        file.name.replace(/\.pdf$/i, '') || `${document.title} replacement`,
+        `${parent}${filename}`,
+        document.document_id,
+      )
+    },
+    onSuccess: async (replacementDocument) => {
+      await queryClient.invalidateQueries({ queryKey: ['documents'] })
+      workbench.ensureDocumentOpen(replacementDocument.document_id, replacementDocument.title)
+      await navigate({
+        to: '/documents/$documentId',
+        params: { documentId: replacementDocument.document_id },
+      })
+    },
+  })
+  return (
+    <section className="metadata-editor pdf-replacement-properties">
+      <div>
+        <p className="eyebrow">Source lifecycle</p>
+        <strong>Replacement PDF</strong>
+        <p className="small-muted">Import a new immutable document linked to this source.</p>
+      </div>
+      <label className="pdf-replacement-button" aria-disabled={replacement.isPending || undefined}>
+        <Upload size={14} />
+        <span>{replacement.isPending ? 'Importing…' : 'Choose PDF'}</span>
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          disabled={replacement.isPending}
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) replacement.mutate(file)
+          }}
+        />
+      </label>
+      {replacement.isSuccess && <p className="operation-result">Replacement imported.</p>}
+      {replacement.isError && <p className="error-text">The replacement could not be imported.</p>}
+    </section>
   )
 }
 

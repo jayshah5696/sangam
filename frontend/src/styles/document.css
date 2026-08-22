@@ -362,6 +362,17 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   clip: rect(0 0 0 0);
 }
 
+.pdf-document-workspace {
+  position: relative;
+}
+
+.pdf-mobile-inspector-toggle {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-5);
+  z-index: 2;
+}
+
 .pdf-document-workspace .editing-surface {
   min-height: 0;
   display: flex;
