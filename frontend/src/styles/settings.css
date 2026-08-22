@@ -160,7 +160,8 @@
 .capability-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
 .capability-grid label { display: flex; align-items: center; gap: 5px; font-size: var(--text-control); }
 .capability-grid label.sensitive { color: var(--danger); font-weight: 700; }
-.agent-capability-warning { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--danger); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--text); }
+.agent-capability-warning, .agent-token-validation { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--danger); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--text); }
+.agent-token-validation { align-items: center; font-size: var(--text-control); }
 .agent-capability-warning > svg { flex: none; color: var(--danger); }
 .agent-capability-warning > div { display: grid; gap: var(--space-1); }
 .agent-capability-warning strong { font-size: var(--text-body); }
@@ -174,6 +175,9 @@
 .agent-scope-preview li { padding: var(--space-1) var(--space-2); border-radius: var(--radius-pill); background: var(--surface-soft); color: var(--text); font-family: var(--font-mono); font-size: var(--text-meta); }
 .agent-token-form > button { justify-self: start; }
 .compact-creator input[type="text"], .compact-creator button, .compact-folder-setting > input, .compact-folder-setting > button { height: var(--control-height); min-height: var(--control-height); padding-block: 0; font-size: var(--text-control); }
+.one-time-secret-dialog { width: min(40rem, calc(100vw - var(--space-5) * 2)); margin: auto; padding: 0; border: 0; background: transparent; color: var(--text); }
+.one-time-secret-dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px); }
+.one-time-secret-dialog .one-time-token { max-height: calc(100vh - var(--space-5) * 2); overflow: auto; box-shadow: var(--shadow-panel); }
 .one-time-token { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-panel); background: var(--surface-soft); }
 .one-time-token > div:first-child { display: flex; align-items: center; gap: 8px; }
 .one-time-token span { display: grid; gap: 2px; }

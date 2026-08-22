@@ -6,6 +6,7 @@ from pathlib import Path
 
 import jwt
 import pytest
+from conftest import issue_agent_token
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
@@ -81,6 +82,54 @@ def test_html_document_uses_the_normal_revision_materialization_and_reindex_spin
     conflict = next(item for item in report["conflicts"] if item["path"] == "imports/outside.html")
     imported = client.post("/api/v1/reconciliation/reindex", json={"path": conflict["path"]}).json()
     assert imported["content_type"] == "text/html"
+
+
+def test_raw_and_download_return_exact_authenticated_html(client: TestClient) -> None:
+    html = "<!doctype html><title>Lesson</title><script>window.lesson = true</script>"
+    document = create_document(
+        client,
+        title="Write-ahead log lesson",
+        content=html,
+        path="agents/wal-learning.html",
+        content_type="text/html",
+        key="raw-html-document",
+    )
+
+    raw = client.get(f"/api/v1/documents/{document['document_id']}/raw")
+    assert raw.status_code == 200
+    assert raw.content == html.encode()
+    assert raw.headers["content-type"] == "text/html; charset=utf-8"
+    assert raw.headers["cache-control"] == "private, no-store"
+
+    downloaded = client.get(f"/api/v1/documents/{document['document_id']}/download")
+    assert downloaded.status_code == 200
+    assert downloaded.content == html.encode()
+    assert downloaded.headers["content-disposition"] == (
+        "attachment; filename*=UTF-8''wal-learning.html"
+    )
+
+
+def test_raw_document_obeys_read_scope(client: TestClient) -> None:
+    private = create_document(
+        client,
+        title="Private",
+        content="private",
+        path="private/note.md",
+        key="raw-private-document",
+    )
+    token = issue_agent_token(
+        client,
+        actor_id="agent:raw-reader",
+        display_name="Raw reader",
+        capabilities=("read",),
+        path_prefix="public",
+    )
+
+    response = client.get(
+        f"/api/v1/documents/{private['document_id']}/raw",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
 
 
 def test_publication_and_trust_share_the_canonical_idempotency_namespace(

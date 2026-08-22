@@ -274,12 +274,13 @@ states keep background work visible.
 ### Searchable settings
 
 Settings keeps the primary workspace sidebar mounted and highlights its Settings
-link. A searchable category rail opens the correct category and moves keyboard
-focus to the exact preference. Theme previews show the real workspace anatomy
-instead of abstract color swatches, and the same controls reflow without clipping
-on narrow screens.
+link. The active category is stored in the URL, so refresh, browser history,
+and shared links preserve the current view. Search opens the correct category
+and moves keyboard focus to the exact preference. Agent token forms explain
+blocked issuance and show rotated one-time secrets in the active viewport. The
+same controls reflow without clipping on narrow screens.
 
-![Sangam appearance settings showing the persistent workspace sidebar, settings category rail, and four workspace theme previews](./docs/assets/crisp-settings.png)
+![Sangam agent access settings showing the persistent workspace sidebar, URL-backed category rail, high-impact capability warning, and actionable token validation](./docs/assets/crisp-settings.png)
 
 <details>
 <summary>📱 Narrow settings layout</summary>
@@ -464,6 +465,20 @@ Remote agent or CLI access requires a one-time token issued from **Agents &
 tokens** and supplied through `SANGAM_TOKEN`. The
 [agent operations guide](./docs/operations/PHASE_3_OPERATIONS.md) documents
 capabilities, path scopes, rotation, revocation, and incident response.
+
+Authenticated clients can retrieve an artifact without the application shell:
+
+```bash
+curl --fail --header "Authorization: Bearer $SANGAM_TOKEN" \
+  "$SANGAM_API_URL/api/v1/documents/$DOCUMENT_ID/raw"
+curl --fail --remote-header-name --remote-name \
+  --header "Authorization: Bearer $SANGAM_TOKEN" \
+  "$SANGAM_API_URL/api/v1/documents/$DOCUMENT_ID/download"
+```
+
+`raw` returns the exact stored Markdown, HTML, or PDF bytes. `download` returns
+the same bytes with an attachment filename derived from the workspace path.
+Interactive HTML preview remains a separate, explicit trust decision.
 
 ## Architecture and trust model
 
