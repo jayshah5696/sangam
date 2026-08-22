@@ -7,6 +7,35 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.7.0] - 2026-08-22
+
+### Added
+
+- **Continuous PDF reader & in-page annotations**:
+  - Continuous vertical scroll view with lazy PDF.js canvas and text-layer rendering near the viewport (`IntersectionObserver`).
+  - Floating selection toolbar with 5 quick highlight colors, note composer, plain text copy, and Markdown citation copy (`sangam://` link).
+  - Margin gutter pins for page notes, comments, bookmarks, and citations with interactive hover and keyboard focus preview cards.
+  - PDF session state persistence: active page, zoom scale, zoom mode, and scroll position are preserved across workbench tab switches.
+  - Sub-pixel normalized digital highlighter overlays with `multiply` (light) and `screen` (dark) blend modes.
+  - Integrated PDF Research Rail directly into the unified Document Inspector as a dedicated `research` tab with container-aware auto-fit scaling (`ResizeObserver`).
+- **Workspace Chat**:
+  - Standalone workspace chat accessible without opening a document via `/chat`, home welcome screen actions, and command palette (`⌘K` $\rightarrow$ "Open workspace chat").
+  - Grounded in whole-workspace context with `X-Sangam-Workspace-Context` header support, model selection, and tool access (`search_workspace`, `read_document`, `read_pdf_page`, `create_document`).
+- **Publications Dashboard**:
+  - Centralized `/publications` overview to audit, filter (by search query, access policy, and status), and manage all published HTML documents across the workspace.
+  - Direct actions for URL copy, live page view, metadata/slug editing, unlisted access token rotation with single-use credential reveal, and unpublishing.
+- **Agent token administration & Activity date filters**:
+  - In-place editing of active agent tokens (`PATCH /api/v1/agent-tokens/{token_id}`) with expected-version optimistic concurrency control, audit trail snapshots in `actor_token_events`, and safety confirmations for high-impact capabilities.
+  - Operational date range filtering on `/activity` review log (presets: All time, Today, Last 7 days, Last 30 days, Custom ISO range) with UTC normalization and indexed queries.
+
+### Fixed
+
+- Fixed middle truncation text corruption in primary sidebar file explorer.
+- Fixed sidebar tree item action and context menu clipping by using floating coordinate positioning.
+- Added close buttons (`X` on tab and group menu) for split editor panes containing single tabs.
+- Added right-click and keyboard (`F2`) renaming support for files and folders.
+- Relocated replacement PDF controls from research rail to Document Inspector Properties.
+
 ## [0.6.0] - 2026-08-21
 
 ### Fixed
@@ -94,7 +123,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.4.0
