@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlsplit
 
 from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, IdempotencyError, NotFoundError, ValidationError
+from sangam.html_javascript import HtmlJavascriptSettingsService
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.schemas import (
     Document,
@@ -123,6 +124,7 @@ class PublicationService:
         workspace: WorkspaceFilesystem,
         max_asset_bytes: int,
         publication_base_url: str,
+        html_javascript: HtmlJavascriptSettingsService,
     ) -> None:
         self.database = database
         self.documents = documents
@@ -131,6 +133,7 @@ class PublicationService:
         self.workspace = workspace
         self.max_asset_bytes = max_asset_bytes
         self.publication_base_url = publication_base_url.rstrip("/")
+        self.html_javascript = html_javascript
 
     def list_publications(self) -> list[Publication]:
         with self.database.connection() as connection:
@@ -480,8 +483,8 @@ class PublicationService:
 
     def issue_trusted_preview(self, *, document_id: str, revision_id: str) -> TrustedPreviewGrant:
         document = self.documents.get_document(document_id)
-        if document.content_type != "text/html" or document.trust_level != "trusted_interactive":
-            raise ValidationError("The document is not trusted for interactive preview")
+        if document.content_type != "text/html" or not self.html_javascript.get().enabled:
+            raise ValidationError("HTML JavaScript is disabled by workspace policy")
         revision = self._revision_content(document_id=document_id, revision_id=revision_id)
         assets = tuple(sorted(self._relative_asset_references(revision["content"])))
         return self.preview_tokens.issue(
@@ -498,6 +501,11 @@ class PublicationService:
             document_id=verified.document_id, revision_id=verified.revision_id
         )["content"]
 
+    def trusted_preview_assets(self, raw_token: str) -> tuple[str, ...]:
+        verified = self.preview_tokens.verify(raw_token)
+        self._trusted_preview_document(verified)
+        return verified.assets
+
     def trusted_preview_asset(self, *, raw_token: str, asset_reference: str) -> PublicationAsset:
         verified = self.preview_tokens.verify(raw_token)
         if asset_reference not in verified.assets:
@@ -509,7 +517,7 @@ class PublicationService:
         document = self.documents.get_document(verified.document_id)
         if (
             document.content_type != "text/html"
-            or document.trust_level != "trusted_interactive"
+            or not self.html_javascript.get().enabled
             or document.trust_version != verified.trust_version
         ):
             raise NotFoundError("Trusted preview grant was not found")
@@ -558,6 +566,17 @@ class PublicationService:
             ).fetchone()
             if revision is None:
                 raise NotFoundError("Publication not found")
+        javascript_enabled = self.html_javascript.get().enabled
+        interactive_preview = None
+        if row["content_type"] == "text/html" and javascript_enabled:
+            document = self.documents.get_document(row["document_id"])
+            assets = tuple(sorted(self._relative_asset_references(revision["content"])))
+            interactive_preview = self.preview_tokens.issue(
+                document_id=row["document_id"],
+                revision_id=resolved_revision,
+                trust_version=document.trust_version,
+                assets=assets,
+            )
         return PublicationContent(
             publication_id=row["publication_id"],
             document_id=row["document_id"],
@@ -567,10 +586,12 @@ class PublicationService:
             content_type=row["content_type"],
             content=revision["content"],
             trust_level=row["trust_level"],
+            javascript_enabled=javascript_enabled,
             is_latest=resolved_revision == row["current_revision_id"],
             asset_base_url=(
                 f"/api/v1/publications/{row['slug']}/asset?revision={resolved_revision}&path="
             ),
+            interactive_preview=interactive_preview,
         )
 
     def get_asset(

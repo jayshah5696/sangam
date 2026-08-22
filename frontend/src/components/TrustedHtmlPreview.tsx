@@ -1,23 +1,49 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, type Document } from '../api'
+import { api, type Document, type TrustedPreviewGrant } from '../api'
+import { StateMessage } from './ui/StateMessage'
 
-export function TrustedHtmlPreview({ document, revisionId }: { document: Document; revisionId: string }) {
+export function TrustedHtmlPreview({
+  document,
+  revisionId,
+  grant: suppliedGrant,
+  title = 'Interactive HTML preview',
+}: {
+  document?: Document
+  revisionId: string
+  grant?: TrustedPreviewGrant
+  title?: string
+}) {
   const grant = useQuery({
-    queryKey: ['trusted-preview', document.document_id, revisionId, document.trust_version],
-    queryFn: () => api.issueTrustedPreview(document, revisionId),
+    queryKey: [
+      'trusted-preview',
+      document?.document_id ?? 'publication',
+      revisionId,
+      document?.trust_version ?? suppliedGrant?.token,
+    ],
+    queryFn: () => api.issueTrustedPreview(document!, revisionId),
+    enabled: !suppliedGrant && Boolean(document),
     staleTime: 30_000,
   })
-  if (grant.isLoading) return <div className="center-message">Preparing isolated preview…</div>
-  if (grant.isError || !grant.data) {
-    return <div className="center-message error-text">Trusted preview could not be opened.</div>
+  const activeGrant = suppliedGrant ?? grant.data
+  if (!suppliedGrant && grant.isLoading) {
+    return <StateMessage kind="loading" title="Preparing isolated HTML preview" />
+  }
+  if (!activeGrant) {
+    return (
+      <StateMessage
+        kind="error"
+        title="Interactive HTML preview could not be opened"
+        description="Check the workspace JavaScript policy and isolated preview host configuration."
+      />
+    )
   }
   return (
     <iframe
       className="html-preview trusted"
-      title="Trusted interactive HTML preview"
+      title={title}
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
-      src={`${grant.data.url}#token=${encodeURIComponent(grant.data.token)}`}
+      src={`${activeGrant.url}#token=${encodeURIComponent(activeGrant.token)}`}
     />
   )
 }

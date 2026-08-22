@@ -95,30 +95,28 @@ An unlisted token is shown once. Store the complete fragment URL, not the raw
 token in a query parameter. Query parameters may appear in request logs and
 referrers; fragments are not sent to the server.
 
-## Trusted HTML review
+## HTML JavaScript policy
 
-Before selecting **Trust interactive HTML**:
+HTML JavaScript is enabled by default for saved previews and publications. A
+human administrator can disable it under **Settings > Workbench > HTML
+JavaScript**. Agents cannot change the setting.
 
-1. Read the complete HTML and every inline script.
-2. Confirm the document needs JavaScript. Static HTML should remain safe.
-3. Keep `SANGAM_TRUSTED_PREVIEW_CONNECT_SRC` empty unless a reviewed document
-   needs a specific network endpoint.
-4. Add the narrowest explicit HTTPS origin, never `*`.
-5. Return the document to safe HTML after the interactive need ends.
-
-Published HTML remains sanitized. Trust affects only the isolated preview
-origin.
+Keep `SANGAM_TRUSTED_PREVIEW_CONNECT_SRC` empty unless reviewed HTML needs a
+specific network endpoint. Add the narrowest explicit HTTPS origin, never `*`.
+The iframe remains opaque and uses `allow-scripts` without `allow-same-origin`.
+Disabling JavaScript switches HTML to the sanitized renderer and invalidates
+outstanding runtime grants.
 
 ## Incident response
 
 For a leaked unlisted link, rotate the publication token. For a document that
 should no longer be reachable, unpublish it; this revokes active unlisted
-tokens in the same transaction. For suspect trusted HTML, return it to safe
-HTML and rotate the preview HMAC secret if an outstanding grant must be
-invalidated immediately.
+tokens in the same transaction. For suspect HTML, disable HTML JavaScript in Settings. Rotate the preview HMAC
+secret as an extra measure if every grant must be invalidated immediately.
 
-After any incident, review publication events, document trust events, document
-revisions, and agent activity in the canonical SQLite backup.
+After any incident, review the HTML JavaScript settings audit event,
+publication events, document revisions, and agent activity in the canonical
+SQLite backup.
 
 ## Manual release gate
 

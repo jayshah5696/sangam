@@ -7,22 +7,24 @@ import { HtmlPreview } from './HtmlPreview'
 afterEach(cleanup)
 
 describe('HtmlPreview', () => {
-  it('renders raw HTML content directly with scripts and styles preserved', () => {
+  it('sanitizes scripts and event handlers in an opaque, script-disabled frame', () => {
     const { container } = render(
       <HtmlPreview
         content={
-          '<style>h1 { color: green; }</style><h1>Interactive HTML</h1>' +
+          '<style>h1 { color: green; }</style><h1>Static HTML</h1>' +
           '<script>window.active = true</script><img src="x" onerror="run()">'
         }
       />,
     )
     const frame = container.querySelector('iframe')
-    expect(frame?.getAttribute('sandbox')).toContain('allow-scripts')
-    expect(frame?.getAttribute('sandbox')).toContain('allow-same-origin')
+    expect(frame?.getAttribute('title')).toBe('Safe HTML preview')
+    expect(frame?.getAttribute('sandbox')).toBe('')
+    expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer')
     const source = frame?.getAttribute('srcdoc') ?? ''
-    expect(source).toContain('Interactive HTML')
+    expect(source).toContain('Static HTML')
     expect(source).toContain('<style>h1 { color: green; }</style>')
-    expect(source).toContain('<script>window.active = true</script>')
-    expect(source).toContain('onerror="run()"')
+    expect(source).toContain("script-src 'none'")
+    expect(source).not.toContain('<script>')
+    expect(source).not.toContain('onerror')
   })
 })

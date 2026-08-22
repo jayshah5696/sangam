@@ -11,11 +11,10 @@ A human can now:
 - Create, materialize, reconcile, edit, search, compare, and restore Markdown
   and HTML documents through the same document service.
 - Edit HTML with CodeMirror HTML syntax support.
-- Preview untrusted HTML after DOMPurify sanitization in a script-disabled,
-  opaque-origin iframe.
-- Mark an HTML document as trusted through an explicit, attributed trust event.
-- Run trusted JavaScript only through the dedicated preview origin, in an
-  iframe with `allow-scripts` and without `allow-same-origin`.
+- Preview HTML with JavaScript enabled by default through the dedicated runtime
+  origin, in an iframe with `allow-scripts` and without `allow-same-origin`.
+- Disable HTML JavaScript for the workspace from Settings. Disabled previews use
+  DOMPurify and a script-disabled, opaque-origin iframe.
 - Publish a document with a stable slug and private, public, or unlisted access.
 - Rotate an unlisted access token, unpublish immediately, and explicitly expose
   individual historical revisions.
@@ -64,19 +63,18 @@ URLs in the browser.
 
 ### Safe HTML
 
-HTML is untrusted by default. DOMPurify preserves embedded presentation CSS
-while removing scripts, event handlers, iframes, objects, embeds, and base
-elements. The result is placed in an iframe with an empty `sandbox` attribute
-and a CSP that sets `default-src 'none'`, `script-src 'none'`, and denies
-external style, image, font, object, and connection sources. Published HTML
-always uses this safe renderer, even when the source document is trusted for
-interactive preview.
+When the workspace setting disables JavaScript, DOMPurify preserves embedded
+presentation CSS while removing scripts, event handlers, iframes, objects,
+embeds, and base elements. The result is placed in an iframe with an empty
+`sandbox` attribute and a CSP that sets `default-src 'none'`, `script-src
+'none'`, and denies external style, image, font, object, and connection sources.
 
-### Trusted interactive HTML
+### Interactive HTML
 
-Trust is a document property with its own monotonically increasing version and
-immutable actor-attributed event history. It is deliberately not inferred from
-path, author, import source, or publication state.
+HTML JavaScript is a workspace policy controlled by the human administrator in
+Settings and enabled by default. The policy applies to saved workbench previews
+and HTML publications. Agent credentials cannot change it. Disabling the policy
+also invalidates outstanding runtime grants.
 
 The application issues an HMAC-signed grant containing the document ID,
 revision ID, current trust version, exact relative asset references, random
@@ -92,9 +90,8 @@ resulting `Origin: null` CORS preflight; every other API route continues to
 reject opaque origins.
 Its CSP denies network access unless an operator explicitly configures allowed
 `connect-src` origins. Relative assets require the same live, scoped preview
-grant. Any trust transition invalidates an already-issued grant at the next
-request, so untrusting and later re-trusting a document cannot revive an old
-credential.
+grant. Disabling the workspace policy invalidates an already-issued grant at the next
+request. Re-enabling it requires a new grant.
 
 ## Publication policy
 
@@ -148,9 +145,10 @@ Automated backend coverage includes:
 - Cloudflare Access JWT signature, issuer, audience, and email validation.
 
 Frontend coverage and build checks include safe HTML sanitization, embedded CSS
-preservation, iframe sandbox attributes, existing Markdown sanitization,
-runtime API schemas, TypeScript production build, lint, formatting, and all
-browser unit tests.
+preservation, real Chromium JavaScript execution, parent and storage isolation,
+desktop and touch-mobile settings behavior, iframe sandbox attributes, existing
+Markdown sanitization, runtime API schemas, TypeScript production build, lint,
+formatting, and all browser unit tests.
 
 Run the complete local verification:
 

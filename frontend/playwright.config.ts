@@ -29,5 +29,10 @@ export default defineConfig({
       name: 'chromium-narrow',
       use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 } },
     },
+    {
+      name: 'chromium-touch-mobile',
+      testMatch: /html-javascript\.spec\.ts/,
+      use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
+    },
   ],
 })
