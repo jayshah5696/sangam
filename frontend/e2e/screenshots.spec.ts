@@ -127,9 +127,9 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     fullPage: false,
   })
 
-  // Document context opens the canonical workspace chat route.
+  // Document chat expands from the inspector into the full conversation route.
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
-  await page.getByRole('button', { name: 'Ask about this document' }).click()
+  await page.getByRole('button', { name: 'Open full chat' }).click()
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
   await expect(page.getByLabel('Active chat context')).toContainText('Product launch review')
   await page.waitForTimeout(500)

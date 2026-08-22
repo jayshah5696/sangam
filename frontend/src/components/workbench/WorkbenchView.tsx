@@ -227,6 +227,7 @@ function EditorGroupView({ group }: { group: GroupNode }) {
 function GroupInspector({ documentId }: { documentId: string }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const isNarrow = useMediaQuery('(max-width: 900px)')
   const { preferences, updatePreferences } = useTheme()
   const { updateDocumentTitle } = useWorkbenchActions()
   const sessions = useDocumentSessions()
@@ -314,7 +315,11 @@ function GroupInspector({ documentId }: { documentId: string }) {
           className="icon-button"
           aria-label="Ask about this document"
           title="Ask about this document"
-          onClick={() =>
+          onClick={() => {
+            if (!isNarrow) {
+              openToTab('chat')
+              return
+            }
             void navigate({
               to: '/chat',
               search: {
@@ -323,7 +328,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
                 returnTo: `/documents/${document.document_id}`,
               },
             })
-          }
+          }}
         >
           <MessageSquare size={15} />
         </button>

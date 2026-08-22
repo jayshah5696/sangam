@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { ArrowRight, MessageSquareText, Upload } from 'lucide-react'
+import { ArrowRight, Maximize2, Upload } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { extractMarkdownHeadings } from '../../markdownHeadings'
 import { useTheme, type InspectorTab } from '../../theme'
+import { useMediaQuery } from '../../useMediaQuery'
 import { useWorkbench } from '../../workbench'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { PdfResearchRail } from '../PdfResearchRail'
@@ -15,7 +16,9 @@ import { HtmlPreview } from '../HtmlPreview'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { activateTabFromKeyboard } from '../tabKeyboard'
+import { StateMessage } from '../ui/StateMessage'
 
+const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
 
 export function DocumentInspector({
@@ -43,12 +46,13 @@ export function DocumentInspector({
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { preferences, updatePreferences } = useTheme()
+  const isNarrow = useMediaQuery('(max-width: 900px)')
   const pdf = document.content_type === 'application/pdf'
   const inspectorTabs = pdf
     ? (['properties', 'research', 'outline', 'history', 'chat'] as const)
     : standardInspectorTabs
-  const tab = pdf || preferences.rightTab !== 'research' ? preferences.rightTab : 'properties'
-  const setTab = (next: InspectorTab) => updatePreferences({ rightTab: next })
+  const preferredTab = pdf || preferences.rightTab !== 'research' ? preferences.rightTab : 'properties'
+  const tab = isNarrow && preferredTab === 'chat' ? 'properties' : preferredTab
   const openChat = () =>
     navigate({
       to: '/chat',
@@ -59,6 +63,17 @@ export function DocumentInspector({
       },
       state: chatNavigationState(selectedText),
     })
+  const [chatActivated, setChatActivated] = useState(!isNarrow && tab === 'chat')
+  const setTab = (next: InspectorTab) => {
+    if (next === 'chat') {
+      if (isNarrow) {
+        void openChat()
+        return
+      }
+      setChatActivated(true)
+    }
+    updatePreferences({ rightTab: next })
+  }
   const historyQuery = useQuery({
     queryKey: ['history', documentId],
     queryFn: () => api.history(documentId),
@@ -100,7 +115,10 @@ export function DocumentInspector({
     sessions.updateSession(documentId, { compareFrom: from, compareTo: to })
   }
   return (
-    <aside className="history-panel document-inspector ui-rail ui-rail--surface" style={{ width }}>
+    <aside
+      className={`history-panel document-inspector ui-rail ui-rail--surface ${tab === 'chat' ? 'mode-chat' : ''}`}
+      style={{ width }}
+    >
       <div className="right-panel-header ui-rail-header">
         <p className="eyebrow">Inspector</p>
         <button
@@ -268,26 +286,36 @@ export function DocumentInspector({
             />
           </>
         )}
-        {tab === 'chat' && (
-          <section className="inspector-chat-launcher">
-            <MessageSquareText size={22} />
-            <div>
-              <p className="eyebrow">Document context</p>
-              <h2>Continue in workspace chat</h2>
-              <p>
-                Open the full conversation with this document revision attached. Your document stays open when
-                you return.
-              </p>
-              <div className="inspector-chat-context">
-                <strong>{document.title}</strong>
-                <code>rev {document.current_revision_id.slice(0, 8)}</code>
-                {selectedText && <span>{selectedText.length.toLocaleString()} selected characters</span>}
+        {chatActivated && (
+          <section className="inspector-chat-surface" hidden={tab !== 'chat'}>
+            <header className="inspector-chat-toolbar">
+              <div>
+                <strong>Document chat</strong>
+                <span>
+                  {selectedText
+                    ? `${selectedText.length.toLocaleString()} selected characters`
+                    : document.title}
+                </span>
               </div>
-            </div>
-            <button type="button" className="primary-button" onClick={() => void openChat()}>
-              {selectedText ? 'Ask about selection' : 'Ask about this document'}
-              <ArrowRight size={14} />
-            </button>
+              <button
+                type="button"
+                className="secondary-action"
+                aria-label="Open full chat"
+                title="Open full chat"
+                onClick={() => void openChat()}
+              >
+                <Maximize2 size={14} />
+                Open full chat
+              </button>
+            </header>
+            <Suspense fallback={<StateMessage kind="loading" title="Preparing document chat" />}>
+              <ChatPanel
+                compact
+                document={document}
+                selectedText={selectedText}
+                onDocumentUpdated={onUpdated}
+              />
+            </Suspense>
           </section>
         )}
       </div>

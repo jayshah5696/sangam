@@ -689,6 +689,10 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
         "content_type": "text/markdown",
     }
     assert client.get("/api/v1/documents").json() == []
+    create_tool = next(
+        tool for tool in client.app.state.services.chat.tools if tool.name == "create_document"
+    )
+    assert "never ask for confirmation in prose" in create_tool.description.lower()
 
 
 def test_chat_store_loads_legacy_payloads_and_rejects_unknown_versions(

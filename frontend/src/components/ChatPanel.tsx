@@ -38,11 +38,13 @@ export function ChatPanel({
   selectedText,
   onDocumentUpdated,
   onClearContext,
+  compact = false,
 }: {
   document?: Document | null
   selectedText?: string
   onDocumentUpdated?: (document: Document, replaceContent?: boolean) => void
   onClearContext?: () => void
+  compact?: boolean
 }) {
   const activeDocument = document ?? null
   const activeSelectedText = selectedText ?? ''
@@ -59,6 +61,7 @@ export function ChatPanel({
   const [pendingCreate, setPendingCreate] = useState<CreateConfirmationRequest | null>(null)
   const [createError, setCreateError] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [createdDocument, setCreatedDocument] = useState<Document | null>(null)
   const [openedCitation, setOpenedCitation] = useState<CitationTarget | null>(null)
   const publishResolver = useRef<((result: Record<string, unknown>) => void) | null>(null)
   const createResolver = useRef<((result: Record<string, unknown>) => void) | null>(null)
@@ -93,6 +96,7 @@ export function ChatPanel({
     createResolver.current?.({ approved: false, status: 'superseded' })
     setPendingCreate(request)
     setCreateError(false)
+    setCreatedDocument(null)
     return new Promise<Record<string, unknown>>((resolve) => {
       createResolver.current = resolve
     })
@@ -227,7 +231,8 @@ export function ChatPanel({
       })
       createResolver.current = null
       setPendingCreate(null)
-      await navigate({ href: `/documents/${result.document_id}` })
+      setCreatedDocument(result)
+      await queryClient.invalidateQueries({ queryKey: ['documents'] })
     } catch {
       setCreateError(true)
     } finally {
@@ -254,12 +259,14 @@ export function ChatPanel({
   }, [activeDocument])
 
   return (
-    <div className="chat-panel">
-      <ChatContextBanner
-        document={activeDocument}
-        selectedText={activeSelectedText}
-        onClear={onClearContext}
-      />
+    <div className={`chat-panel ${compact ? 'chat-panel-compact' : ''}`}>
+      {!compact && (
+        <ChatContextBanner
+          document={activeDocument}
+          selectedText={activeSelectedText}
+          onClear={onClearContext}
+        />
+      )}
       {contextSwitchEvent && (
         <div className="chat-context-switch-event" role="status" aria-live="polite">
           <FileText size={13} />
@@ -301,7 +308,7 @@ export function ChatPanel({
               <span>{configQuery.data.message} History and proposal review remain available.</span>
             </div>
           )}
-          <SelectionChip selectedText={activeSelectedText} />
+          {!compact && <SelectionChip selectedText={activeSelectedText} />}
           {openedCitation && (
             <CitationNavigationStatus
               target={openedCitation}
@@ -326,6 +333,9 @@ export function ChatPanel({
               onApprove={() => void approveCreate()}
               onCancel={cancelCreate}
             />
+          )}
+          {createdDocument && (
+            <CreatedFromChat document={createdDocument} onDismiss={() => setCreatedDocument(null)} />
           )}
           {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
           {script.status === 'loading' && <StateMessage kind="loading" title="Loading chat interface" />}
@@ -353,8 +363,10 @@ export function ChatPanel({
               onThreadChange={handleThreadChange}
               onResponseEnd={handleResponseEnd}
               hasDocument={Boolean(activeDocument)}
+              hasSelection={Boolean(activeSelectedText)}
               onCitationDeeplink={handleCitationDeeplink}
               onReset={resetChatSurface}
+              compact={compact}
             />
           )}
           {proposalsQuery.isLoading ? (
@@ -447,6 +459,27 @@ export function PublishConfirmationCard({
         </button>
       </div>
     </section>
+  )
+}
+
+export function CreatedFromChat({ document, onDismiss }: { document: Document; onDismiss: () => void }) {
+  const navigate = useNavigate()
+  return (
+    <div className="chat-effect-complete" role="status">
+      <span>
+        Created “{document.title}” · <code>{shortId(document.document_id)}</code>
+      </span>
+      <button
+        type="button"
+        className="secondary-action"
+        onClick={() => void navigate({ href: `/documents/${document.document_id}` })}
+      >
+        Open document
+      </button>
+      <button type="button" className="secondary-action" onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
   )
 }
 
@@ -731,8 +764,10 @@ function WorkspaceChatSurface({
   onThreadChange,
   onResponseEnd,
   hasDocument,
+  hasSelection,
   onCitationDeeplink,
   onReset,
+  compact,
 }: {
   liveRef: React.MutableRefObject<LiveChatContext>
   theme: 'dark' | 'light'
@@ -743,8 +778,10 @@ function WorkspaceChatSurface({
   onThreadChange: (thread: { threadId: string | null }) => void
   onResponseEnd: () => void
   hasDocument: boolean
+  hasSelection: boolean
   onCitationDeeplink: (event: { name: string; data?: Record<string, unknown> }) => void
   onReset: () => void
+  compact: boolean
 }) {
   const [phase, setPhase] = useState<ChatFramePhase>('connecting')
   useEffect(() => {
@@ -783,10 +820,10 @@ function WorkspaceChatSurface({
     frameTitle: 'Workspace chat',
     initialThread: initialThreadId ?? undefined,
     theme,
-    header: { enabled: true, title: { text: 'Workspace chat' } },
-    history: { enabled: true, showDelete: true, showRename: true },
+    header: compact ? { enabled: false } : { enabled: true, title: { text: 'Workspace chat' } },
+    history: { enabled: !compact, showDelete: !compact, showRename: !compact },
     startScreen: {
-      greeting: 'Ask about this workspace',
+      greeting: compact ? 'Ask about this document' : 'Ask about this workspace',
       prompts: [
         {
           label: hasDocument ? 'Summarize this document' : 'Find related work',
@@ -795,21 +832,31 @@ function WorkspaceChatSurface({
             : 'Find related documents in this workspace and summarize their connection with citations.',
         },
         {
-          label: hasDocument ? 'Review selected text' : 'Search the workspace',
-          prompt: hasDocument
+          label: hasSelection
+            ? 'Review selected text'
+            : hasDocument
+              ? 'Find related documents'
+              : 'Search the workspace',
+          prompt: hasSelection
             ? 'Review the selected text and suggest improvements.'
-            : 'Search the workspace for the most important recent material and cite the sources.',
+            : hasDocument
+              ? 'Find documents related to the current document and explain the connection with citations.'
+              : 'Search the workspace for the most important recent material and cite the sources.',
         },
       ],
     },
     composer: {
       placeholder: inferenceEnabled
-        ? 'Ask about this workspace…'
+        ? compact
+          ? 'Ask about this document…'
+          : 'Ask about this workspace…'
         : 'Inference unavailable · history remains readable',
       models,
       attachments: { enabled: false },
     },
-    disclaimer: { text: 'Edits stay as proposals until you review and apply the diff.' },
+    disclaimer: compact
+      ? undefined
+      : { text: 'Edits stay as proposals until you review and apply the diff.' },
     threadItemActions: { retry: true, feedback: false },
     thread: { autoScroll: true },
     onReady: () => {

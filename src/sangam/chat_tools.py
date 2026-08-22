@@ -79,14 +79,18 @@ class ChatToolset:
             function_tool(
                 self.create_document,
                 description_override=(
-                    "Create a Markdown document only when the user explicitly requests it."
+                    "When the user explicitly requests a new Markdown document, call this tool "
+                    "immediately with the complete title and content. The tool opens Sangam's "
+                    "browser confirmation UI. Never ask for confirmation in prose before "
+                    "calling it."
                 ),
             ),
             function_tool(
                 self.publish_document,
                 description_override=(
-                    "Request a browser confirmation before publishing a document. "
-                    "This tool never publishes without the user's separate approval."
+                    "When the user explicitly requests publication, call this tool immediately. "
+                    "The tool opens Sangam's browser confirmation UI and never publishes without "
+                    "approval, so never ask for confirmation in prose before calling it."
                 ),
             ),
         ]

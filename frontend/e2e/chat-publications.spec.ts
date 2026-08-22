@@ -60,8 +60,11 @@ test('document chat hands exact context to the full-page route', async ({
     await page.getByRole('button', { name: 'Open document inspector' }).click()
   }
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Continue in workspace chat' })).toBeVisible()
-  await page.getByRole('button', { name: 'Ask about this document' }).click()
+  if (testInfo.project.name === 'chromium-desktop') {
+    await expect(page.getByText('Document chat', { exact: true })).toBeVisible()
+    await expect(page.locator('.inspector-chat-surface .chat-panel-compact')).toBeVisible()
+    await page.getByRole('button', { name: 'Open full chat' }).click()
+  }
   await expect(page).toHaveURL(/\/chat\?document=/)
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
   await expect(page.getByLabel('Active chat context')).toContainText(seededWorkspace.documentTitle)

@@ -26,6 +26,12 @@ vi.mock('../../documentSessions', () => ({
 }))
 
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => state.navigate }))
+vi.mock('../../useMediaQuery', () => ({ useMediaQuery: () => false }))
+vi.mock('../ChatPanel', () => ({
+  ChatPanel: ({ compact }: { compact?: boolean }) => (
+    <div data-testid="document-chat" data-compact={String(compact)} />
+  ),
+}))
 
 vi.mock('../../theme', () => ({
   useTheme: () => ({
@@ -87,7 +93,7 @@ describe('DocumentInspector', () => {
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('inspector-tab-properties')
   })
 
-  it('uses the chat tab as a document-context launcher', () => {
+  it('mounts compact document chat and can expand it to the full route', async () => {
     state.rightTab = 'chat'
     render(
       <DocumentInspector
@@ -101,7 +107,8 @@ describe('DocumentInspector', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask about selection' }))
+    expect((await screen.findByTestId('document-chat')).getAttribute('data-compact')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Open full chat' }))
     expect(state.navigate).toHaveBeenCalledWith({
       to: '/chat',
       search: {
@@ -111,6 +118,6 @@ describe('DocumentInspector', () => {
       },
       state: { sangamChatContext: { selectedText: 'Selected passage' } },
     })
-    expect(document.querySelector('openai-chatkit')).toBeNull()
+    expect(screen.getByText('Document chat')).toBeTruthy()
   })
 })
