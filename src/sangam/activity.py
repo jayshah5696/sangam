@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime
 
 from sangam.db import Database, utc_now
+from sangam.errors import ValidationError
 from sangam.schemas import OperationEvent
 from sangam.security import Principal
 
@@ -71,6 +73,8 @@ class ActivityService:
         actor_id: str | None = None,
         actor_kind: str | None = None,
         outcome: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[OperationEvent]:
@@ -85,6 +89,16 @@ class ActivityService:
         if outcome:
             conditions.append("e.outcome = ?")
             parameters.append(outcome)
+        normalized_since = self._normalize_boundary(since, name="since")
+        normalized_until = self._normalize_boundary(until, name="until")
+        if normalized_since and normalized_until and normalized_since > normalized_until:
+            raise ValidationError("Activity start must not be after its end")
+        if normalized_since:
+            conditions.append("e.created_at >= ?")
+            parameters.append(normalized_since)
+        if normalized_until:
+            conditions.append("e.created_at <= ?")
+            parameters.append(normalized_until)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         parameters.extend((limit, offset))
         with self.database.connection() as connection:
@@ -122,3 +136,15 @@ class ActivityService:
             )
             for row in rows
         ]
+
+    @staticmethod
+    def _normalize_boundary(value: str | None, *, name: str) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValidationError(f"Activity {name} must be an ISO 8601 timestamp") from error
+        if parsed.tzinfo is None:
+            raise ValidationError(f"Activity {name} must include a timezone")
+        return parsed.astimezone(UTC).isoformat(timespec="microseconds")

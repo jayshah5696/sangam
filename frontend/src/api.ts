@@ -207,6 +207,7 @@ export const agentTokenSchema = z.object({
   actor_display_name: z.string(),
   label: z.string(),
   scopes: z.array(tokenScopeSchema),
+  version: z.number().int().positive(),
   created_at: z.string(),
   expires_at: z.string().nullable(),
   revoked_at: z.string().nullable(),
@@ -221,6 +222,7 @@ export const issuedAgentTokenSchema = agentTokenSchema.extend({ token: z.string(
 export type IssuedAgentToken = z.infer<typeof issuedAgentTokenSchema>
 
 export const operationEventSchema = z.object({
+  event_id: z.string(),
   operation_id: z.string(),
   actor_id: z.string(),
   actor_display_name: z.string(),
@@ -622,16 +624,33 @@ export const api = {
       await request('/agent-tokens', { method: 'POST', body: JSON.stringify(input) }),
     )
   },
+  async updateAgentToken(
+    tokenId: string,
+    input: { expected_version: number; label: string; scopes: TokenScope[]; expires_at: string | null },
+  ): Promise<AgentToken> {
+    return agentTokenSchema.parse(
+      await request(`/agent-tokens/${tokenId}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    )
+  },
   async rotateAgentToken(tokenId: string): Promise<IssuedAgentToken> {
     return issuedAgentTokenSchema.parse(await request(`/agent-tokens/${tokenId}/rotate`, { method: 'POST' }))
   },
   async revokeAgentToken(tokenId: string): Promise<AgentToken> {
     return agentTokenSchema.parse(await request(`/agent-tokens/${tokenId}`, { method: 'DELETE' }))
   },
-  async listActivity(actorId?: string, outcome?: OperationEvent['outcome']): Promise<OperationEvent[]> {
+  async listActivity(
+    filters: {
+      actorId?: string
+      outcome?: OperationEvent['outcome']
+      since?: string
+      until?: string
+    } = {},
+  ): Promise<OperationEvent[]> {
     const params = new URLSearchParams({ limit: '100' })
-    if (actorId) params.set('actor_id', actorId)
-    if (outcome) params.set('outcome', outcome)
+    if (filters.actorId) params.set('actor_id', filters.actorId)
+    if (filters.outcome) params.set('outcome', filters.outcome)
+    if (filters.since) params.set('since', filters.since)
+    if (filters.until) params.set('until', filters.until)
     return z.array(operationEventSchema).parse(await request(`/activity?${params.toString()}`))
   },
   async listDocuments(): Promise<DocumentSummary[]> {
