@@ -74,6 +74,13 @@ const settingsSearchIndex: Array<{
     keywords: 'split layout reset tabs',
   },
   {
+    id: 'html-javascript',
+    category: 'workbench',
+    label: 'HTML JavaScript',
+    description: 'Run saved HTML scripts in the isolated runtime',
+    keywords: 'html javascript scripts interactive preview sandbox',
+  },
+  {
     id: 'tag-settings',
     category: 'organization',
     label: 'Tags',
@@ -126,6 +133,18 @@ export function WorkspaceSettings() {
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.health() })
+  const htmlJavascript = useQuery({
+    queryKey: ['html-javascript-settings'],
+    queryFn: api.getHtmlJavascriptSettings,
+  })
+  const updateHtmlJavascript = useMutation({
+    mutationFn: (enabled: boolean) => api.updateHtmlJavascriptSettings(htmlJavascript.data!, enabled),
+    onSuccess: (next) => {
+      queryClient.setQueryData(['html-javascript-settings'], next)
+      void queryClient.invalidateQueries({ queryKey: ['trusted-preview'] })
+      void queryClient.invalidateQueries({ queryKey: ['publication-content'] })
+    },
+  })
   const [tagName, setTagName] = useState('')
   const [tagColor, setTagColor] = useState('#327a62')
   const createTag = useMutation({
@@ -289,11 +308,7 @@ export function WorkspaceSettings() {
             <h1>{activeDefinition.label}</h1>
             <p>{activeDefinition.description}</p>
           </div>
-          <ScopeBadge
-            scope={
-              activeCategory === 'appearance' || activeCategory === 'workbench' ? 'browser' : 'workspace'
-            }
-          />
+          <ScopeBadge scope={activeCategory === 'appearance' ? 'browser' : 'workspace'} />
         </header>
 
         <main className="settings-main-pane" aria-label={`${activeDefinition.label} settings`}>
@@ -329,8 +344,8 @@ export function WorkspaceSettings() {
             <SettingsSection
               id="workbench"
               icon={MonitorCog}
-              title="Workbench layout"
-              description="Panel visibility and editor groups are stored in this browser."
+              title="Workbench controls"
+              description="Configure local layout and the workspace HTML execution policy."
             >
               <div className="settings-rows">
                 <SettingRow
@@ -356,6 +371,22 @@ export function WorkspaceSettings() {
                     <RotateCcw size={14} />
                     Reset layout
                   </button>
+                </SettingRow>
+                <SettingRow
+                  id="html-javascript"
+                  label="HTML JavaScript"
+                  detail="Run saved HTML scripts in Sangam's isolated runtime"
+                >
+                  <label className="compact-switch">
+                    <input
+                      type="checkbox"
+                      aria-label="Enable HTML JavaScript"
+                      checked={htmlJavascript.data?.enabled ?? false}
+                      disabled={!htmlJavascript.data || updateHtmlJavascript.isPending}
+                      onChange={(event) => updateHtmlJavascript.mutate(event.target.checked)}
+                    />
+                    <span>{htmlJavascript.data?.enabled ? 'Enabled' : 'Disabled'}</span>
+                  </label>
                 </SettingRow>
               </div>
             </SettingsSection>

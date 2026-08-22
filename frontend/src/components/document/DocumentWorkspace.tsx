@@ -30,6 +30,9 @@ const MarkdownEditor = lazy(() =>
   import('../MarkdownEditor').then((module) => ({ default: module.MarkdownEditor })),
 )
 const HtmlPreview = lazy(() => import('../HtmlPreview').then((module) => ({ default: module.HtmlPreview })))
+const TrustedHtmlPreview = lazy(() =>
+  import('../TrustedHtmlPreview').then((module) => ({ default: module.TrustedHtmlPreview })),
+)
 const PdfResearchWorkspace = lazy(() =>
   import('../PdfResearchWorkspace').then((module) => ({ default: module.PdfResearchWorkspace })),
 )
@@ -59,6 +62,11 @@ export function DocumentWorkspace({
   const mode = session.mode
   const selection = session.selection
   const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  const htmlJavascript = useQuery({
+    queryKey: ['html-javascript-settings'],
+    queryFn: api.getHtmlJavascriptSettings,
+    enabled: document.content_type === 'text/html',
+  })
   const [materializePath, setMaterializePath] = useState(
     document.content_type === 'text/html' ? 'projects/interactive.html' : 'projects/first-document.md',
   )
@@ -319,7 +327,11 @@ export function DocumentWorkspace({
         )}
         {mode !== 'edit' && document.content_type === 'text/html' && (
           <Suspense fallback={<div className="markdown-preview muted">Preparing HTML preview…</div>}>
-            <HtmlPreview content={content} />
+            {htmlJavascript.data?.enabled && saveState === 'saved' ? (
+              <TrustedHtmlPreview document={document} revisionId={document.current_revision_id} />
+            ) : (
+              <HtmlPreview content={content} />
+            )}
           </Suspense>
         )}
       </div>

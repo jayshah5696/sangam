@@ -63,8 +63,9 @@
 .setting-row strong { font-size: var(--text-body); }
 .setting-row small { color: var(--muted); font-size: var(--text-meta); line-height: 1.4; }
 .setting-value { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--text-meta); white-space: nowrap; }
-.compact-switch { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: var(--text-control); white-space: nowrap; }
-.compact-switch input { accent-color: var(--accent); }
+.compact-switch { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-control); white-space: nowrap; cursor: pointer; }
+.compact-switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.compact-switch:has(input:disabled) { cursor: wait; opacity: .7; }
 .secondary-action { min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); padding: 0 9px; font-size: var(--text-control); white-space: nowrap; }
 .secondary-action:hover { border-color: var(--accent); }
 .settings-subsection { padding: var(--space-3); border-radius: var(--radius-control); }

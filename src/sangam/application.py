@@ -12,6 +12,7 @@ from sangam.chat import SangamChatServer
 from sangam.chat_models import ChatModelCatalog, ChatModelSettingsRepository
 from sangam.config import Settings
 from sangam.db import Database, utc_now
+from sangam.html_javascript import HtmlJavascriptSettingsService
 from sangam.idempotency import IdempotencyStore
 from sangam.karakeep import KarakeepService
 from sangam.karakeep_extraction import KarakeepExtractor
@@ -47,6 +48,7 @@ class ApplicationServices:
     activity: ActivityService
     authorization: AuthorizationPolicy
     publications: PublicationService
+    html_javascript: HtmlJavascriptSettingsService
     pdf_research: PdfResearchService
     karakeep: KarakeepService
     chat: SangamChatServer
@@ -139,6 +141,7 @@ def build_application_services(
     )
     activity = ActivityService(database)
     authorization = AuthorizationPolicy()
+    html_javascript = HtmlJavascriptSettingsService(database)
     publications = PublicationService(
         database=database,
         documents=documents,
@@ -151,6 +154,7 @@ def build_application_services(
         workspace=workspace,
         max_asset_bytes=settings.max_publication_asset_bytes,
         publication_base_url=settings.publication_base_url,
+        html_javascript=html_javascript,
     )
     pdf_research = PdfResearchService(
         database=database,
@@ -223,6 +227,7 @@ def build_application_services(
         activity=activity,
         authorization=authorization,
         publications=publications,
+        html_javascript=html_javascript,
         pdf_research=pdf_research,
         karakeep=karakeep,
         chat=chat,

@@ -347,6 +347,18 @@ class UpdateDocumentTrust(MutationRequest):
     trust_level: Literal["untrusted", "trusted_interactive"]
 
 
+class HtmlJavascriptSettings(BaseModel):
+    enabled: bool
+    version: int = Field(ge=1)
+    updated_by: str
+    updated_at: str
+
+
+class UpdateHtmlJavascriptSettings(BaseModel):
+    expected_version: int = Field(ge=1)
+    enabled: bool
+
+
 class Publication(BaseModel):
     publication_id: str
     document_id: str
@@ -391,6 +403,12 @@ class ExposePublicationRevision(MutationRequest):
     revision_id: str
 
 
+class TrustedPreviewGrant(BaseModel):
+    url: str
+    token: str
+    expires_at: str
+
+
 class PublicationContent(BaseModel):
     publication_id: str
     document_id: str
@@ -400,14 +418,10 @@ class PublicationContent(BaseModel):
     content_type: Literal["text/markdown", "text/html"]
     content: str
     trust_level: Literal["untrusted", "trusted_interactive"]
+    javascript_enabled: bool
     is_latest: bool
     asset_base_url: str
-
-
-class TrustedPreviewGrant(BaseModel):
-    url: str
-    token: str
-    expires_at: str
+    interactive_preview: TrustedPreviewGrant | None = None
 
 
 class PdfRect(BaseModel):

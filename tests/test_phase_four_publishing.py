@@ -438,14 +438,6 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
         content_type="text/html",
         key="preview-source",
     )
-    trusted = client.patch(
-        f"/api/v1/documents/{document['document_id']}/trust",
-        headers=mutation_headers("trust-html"),
-        json={"expected_trust_version": 0, "trust_level": "trusted_interactive"},
-    )
-    assert trusted.status_code == 200
-    assert trusted.json()["trust_version"] == 1
-
     grant = client.post(
         f"/api/v1/documents/{document['document_id']}/trusted-preview",
         params={"revision_id": document["current_revision_id"]},
@@ -495,12 +487,11 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
         == 404
     )
 
-    untrusted = client.patch(
-        f"/api/v1/documents/{document['document_id']}/trust",
-        headers=mutation_headers("untrust-html"),
-        json={"expected_trust_version": 1, "trust_level": "untrusted"},
+    disabled = client.put(
+        "/api/v1/settings/html-javascript",
+        json={"expected_version": 1, "enabled": False},
     )
-    assert untrusted.status_code == 200
+    assert disabled.status_code == 200
     assert (
         client.get(
             "/api/v1/trusted-previews/content",
@@ -508,42 +499,6 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
         ).status_code
         == 404
     )
-
-    retrusted = client.patch(
-        f"/api/v1/documents/{document['document_id']}/trust",
-        headers=mutation_headers("retrust-html"),
-        json={"expected_trust_version": 2, "trust_level": "trusted_interactive"},
-    )
-    assert retrusted.status_code == 200
-    assert retrusted.json()["trust_version"] == 3
-    assert (
-        client.get(
-            "/api/v1/trusted-previews/content",
-            headers={"Authorization": f"Sangam-Preview {grant['token']}"},
-        ).status_code
-        == 404
-    )
-    replacement_grant = client.post(
-        f"/api/v1/documents/{document['document_id']}/trusted-preview",
-        params={"revision_id": document["current_revision_id"]},
-    ).json()
-    assert (
-        client.get(
-            "/api/v1/trusted-previews/content",
-            headers={"Authorization": f"Sangam-Preview {replacement_grant['token']}"},
-        ).status_code
-        == 200
-    )
-
-    with client.app.state.services.documents.database.connection() as connection:
-        trust_events = connection.execute(
-            "SELECT previous_level, next_level FROM document_trust_events ORDER BY created_at"
-        ).fetchall()
-    assert [tuple(event) for event in trust_events] == [
-        ("untrusted", "trusted_interactive"),
-        ("trusted_interactive", "untrusted"),
-        ("untrusted", "trusted_interactive"),
-    ]
 
 
 def test_trusted_preview_cors_is_limited_to_opaque_preview_requests(client: TestClient) -> None:
