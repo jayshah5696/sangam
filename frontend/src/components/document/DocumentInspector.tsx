@@ -14,6 +14,15 @@ import { activateTabFromKeyboard } from '../tabKeyboard'
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const inspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
 
+export function cleanHeadingText(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
+    .replace(/[*_~`]/g, '')
+    .trim()
+}
+
 export function DocumentInspector({
   width,
   document,
@@ -77,7 +86,10 @@ export function DocumentInspector({
     .split('\n')
     .map((line, index) => {
       const match = /^(#{1,6})\s+(.+)/.exec(line)
-      return match ? { level: match[1]!.length, text: match[2]!, line: index + 1 } : null
+      if (!match) return null
+      const rawText = match[2]!.trim()
+      const cleaned = cleanHeadingText(rawText)
+      return { level: match[1]!.length, text: cleaned || rawText, line: index + 1 }
     })
     .filter((heading): heading is { level: number; text: string; line: number } => Boolean(heading))
   const fromRevision = history.find((revision) => revision.revision_id === compareFrom)

@@ -268,3 +268,47 @@ def test_create_or_organize_folder_records_prior_tags_and_ignores_exact_retry(
             (created["folder_id"],),
         ).fetchone()[0]
     assert event_count == 2
+
+
+def test_folder_rename_end_to_end(client: TestClient, settings) -> None:
+    folder_res = client.post(
+        "/api/v1/folders",
+        json={"path": "reports/archive-2026"},
+        headers=headers("folder-create-rename"),
+    )
+    assert folder_res.status_code == 201
+    folder = folder_res.json()
+
+    doc_res = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Annual Summary",
+            "content": "Summary content.",
+            "path": "reports/archive-2026/summary.md",
+        },
+        headers=headers("doc-in-folder-rename"),
+    )
+    assert doc_res.status_code == 201
+    doc = doc_res.json()
+
+    # Move/rename folder
+    rename_res = client.post(
+        f"/api/v1/folders/{folder['folder_id']}/move",
+        json={"path": "reports/archive-2027"},
+        headers=headers("folder-rename-action"),
+    )
+    assert rename_res.status_code == 200
+    renamed_folder = rename_res.json()
+    assert renamed_folder["path"] == "reports/archive-2027"
+
+    # Verify document updated in API and on disk
+    doc_id = doc["document_id"]
+    doc_after = client.get(
+        f"/api/v1/documents/{doc_id}",
+        headers=headers("get-doc-after-rename"),
+    ).json()
+    assert doc_after["path"] == "reports/archive-2027/summary.md"
+    assert (settings.workspace_root / "reports" / "archive-2027" / "summary.md").is_file()
+    assert not (settings.workspace_root / "reports" / "archive-2026").exists()
+
+

@@ -76,37 +76,46 @@ function RootLayout() {
   }
 
   return (
-    <div className={`workbench-shell ${sidebarVisible ? '' : 'sidebar-collapsed'}`}>
-      {sidebarVisible ? (
-        <>
-          {narrowSidebar && (
-            <button className="sidebar-backdrop" aria-label="Close workspace sidebar" onClick={hideSidebar} />
-          )}
-          <PrimarySidebar
-            mode={sidebarMode}
-            modal={narrowSidebar}
-            onCollapse={hideSidebar}
-            onMode={(next) => void chooseSidebarMode(next)}
-            style={{ width: preferences.leftWidth }}
-          />
-          <ResizeHandle
-            side="left"
-            value={preferences.leftWidth}
-            min={220}
-            max={460}
-            onChange={(leftWidth) => updatePreferences({ leftWidth })}
-          />
-        </>
-      ) : !usesDedicatedNavigation ? (
-        <button
-          className="sidebar-reveal icon-button"
-          aria-label="Show workspace sidebar"
-          title="Show workspace sidebar"
-          onClick={showSidebar}
-        >
-          <PanelLeftOpen size={17} />
-        </button>
-      ) : null}
+    <div
+      className={`workbench-shell ${
+        usesDedicatedNavigation ? 'settings-shell' : sidebarVisible ? '' : 'sidebar-collapsed'
+      }`}
+    >
+      {!usesDedicatedNavigation &&
+        (sidebarVisible ? (
+          <>
+            {narrowSidebar && (
+              <button
+                className="sidebar-backdrop"
+                aria-label="Close workspace sidebar"
+                onClick={hideSidebar}
+              />
+            )}
+            <PrimarySidebar
+              mode={sidebarMode}
+              modal={narrowSidebar}
+              onCollapse={hideSidebar}
+              onMode={(next) => void chooseSidebarMode(next)}
+              style={{ width: preferences.leftWidth }}
+            />
+            <ResizeHandle
+              side="left"
+              value={preferences.leftWidth}
+              min={220}
+              max={460}
+              onChange={(leftWidth) => updatePreferences({ leftWidth })}
+            />
+          </>
+        ) : (
+          <button
+            className="sidebar-reveal icon-button"
+            aria-label="Show workspace sidebar"
+            title="Show workspace sidebar"
+            onClick={showSidebar}
+          >
+            <PanelLeftOpen size={17} />
+          </button>
+        ))}
       <div className="workbench-center">
         {layoutRecovery.recovered && (
           <div className="layout-recovery-notice" role="status">
@@ -269,11 +278,13 @@ function PrimarySidebar({
 }
 
 function SidebarLinks() {
+  const healthQuery = useQuery({ queryKey: ['health'], queryFn: () => api.health() })
+  const karakeepConfigured = healthQuery.data?.karakeep_configured === true
   const links = [
     { to: '/activity' as const, label: 'Agent activity', icon: Activity },
     { to: '/reconciliation' as const, label: 'Workspace integrity', icon: ShieldCheck },
     { to: '/backups' as const, label: 'Backups', icon: ArchiveRestore },
-    { to: '/karakeep' as const, label: 'Karakeep imports', icon: Import },
+    ...(karakeepConfigured ? [{ to: '/karakeep' as const, label: 'Karakeep imports', icon: Import }] : []),
     { to: '/trash' as const, label: 'Trash', icon: Trash2 },
     { to: '/settings' as const, label: 'Settings', icon: Settings },
   ]
@@ -321,7 +332,7 @@ function WorkspaceFreshness() {
       ) : (
         <>
           <CheckCircle2 size={13} />
-          <span>Current</span>
+          <span>Synced</span>
         </>
       )}
     </div>

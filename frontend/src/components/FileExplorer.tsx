@@ -12,9 +12,9 @@ import type {
 } from '@pierre/trees'
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react'
 import { Copy, FilePlus2, FolderPlus, PanelRightOpen, Pencil, Search, Trash2 } from 'lucide-react'
-import { api, type DocumentSummary } from '../api'
+import { api, type DocumentSummary, type Folder } from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
-import { findGroup, useWorkbench } from '../workbench'
+import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
   buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
@@ -42,6 +42,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const workbenchActions = useWorkbenchActions()
   const activeDocumentId = findGroup(workbench.root, workbench.activeGroupId)?.activeTabId
   const documents = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
@@ -107,10 +108,24 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     onSuccess: async (document) => {
       pendingFocusDocumentIdRef.current = document.document_id
       setError(null)
+      workbenchActions.updateDocumentTitle(document.document_id, document.title)
       await refresh()
     },
     onError: async (cause) => {
       setError(cause instanceof Error ? cause.message : 'The document could not be renamed.')
+      await refresh()
+    },
+  })
+
+  const renameFolder = useMutation({
+    mutationFn: ({ folder, destinationPath }: { folder: Folder; destinationPath: string }) =>
+      api.renameFolder(folder, destinationPath),
+    onSuccess: async () => {
+      setError(null)
+      await refresh()
+    },
+    onError: async (cause) => {
+      setError(cause instanceof Error ? cause.message : 'The folder could not be renamed.')
       await refresh()
     },
   })
@@ -188,10 +203,20 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       if (document?.path) move.mutate({ document, folderPath: target.directoryPath ?? '' })
     },
     canRename: ({ isFolder, path }) =>
-      !isFolder && adapterRef.current.documentByTreePath.get(path)?.content_type !== 'application/pdf',
+      isFolder
+        ? path !== adapterRef.current.draftsRootPath
+        : adapterRef.current.documentByTreePath.get(path)?.content_type !== 'application/pdf',
     onRename: ({ sourcePath, destinationPath }) => {
       const document = adapterRef.current.documentByTreePath.get(sourcePath)
-      if (document) rename.mutate({ document, destinationPath })
+      if (document) {
+        rename.mutate({ document, destinationPath })
+        return
+      }
+      const folder = adapterRef.current.folderByTreePath.get(sourcePath)
+      if (folder) {
+        renameFolder.mutate({ folder, destinationPath })
+        return
+      }
     },
     renderRowDecoration: ({ item }) => {
       const folder = adapterRef.current.folderByTreePath.get(item.path)
@@ -220,7 +245,78 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     paths: adapter.paths,
     density: 'compact',
     icons: 'minimal',
-    initialExpansion: 'closed',
+    flattenEmptyDirectories: false,
+    unsafeCSS: `
+      [data-item-section="decoration"] {
+        flex: 0 0 auto !important;
+      }
+      [data-item-section="decoration"]:empty {
+        display: none !important;
+      }
+      [data-item-section="content"] {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+      }
+      [data-truncate-group-container="middle"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        width: 100% !important;
+        min-width: 0 !important;
+      }
+      [data-truncate-group-container="middle"] > div {
+        min-width: 0 !important;
+      }
+      [data-truncate-group-container="middle"] > div[data-truncate-segment-priority="1"] {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+      }
+      [data-truncate-group-container="middle"] > div[data-truncate-segment-priority="2"] {
+        flex: 0 0 auto !important;
+        min-width: 0 !important;
+      }
+      [data-truncate-container] {
+        display: flex !important;
+        min-width: 0 !important;
+        height: var(--trees-row-height) !important;
+        align-items: center !important;
+        overflow: hidden !important;
+        margin: 0 !important;
+      }
+      [data-truncate-grid] {
+        display: flex !important;
+        min-width: 0 !important;
+        align-items: center !important;
+      }
+      [data-truncate-content="visible"] {
+        direction: ltr !important;
+        white-space: nowrap !important;
+      }
+      [data-truncate-content="visible"] > span {
+        direction: ltr !important;
+        unicode-bidi: normal !important;
+      }
+      [data-truncate-marker] {
+        display: inline-flex !important;
+        opacity: 0.7 !important;
+        position: static !important;
+        align-items: center !important;
+        color: inherit !important;
+      }
+      [data-truncate-content="overflow"],
+      [data-truncate-marker-cell],
+      [data-truncate-fill] {
+        display: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+      }
+    `,
+    initialExpansion: 'open',
     initialExpandedPaths: loadExpanded(),
     initialSelectedPaths: activeDocumentId
       ? [adapter.treePathByDocumentId.get(activeDocumentId)].filter((path): path is string => Boolean(path))
@@ -303,6 +399,14 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     : ''
 
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'F2') {
+      const path = model.getFocusedPath()
+      if (path) {
+        event.preventDefault()
+        model.startRenaming(path)
+      }
+      return
+    }
     if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.altKey) return
     const path = model.getFocusedPath()
     const document = path ? adapterRef.current.documentByTreePath.get(path) : undefined
@@ -440,6 +544,9 @@ function ExplorerContextMenu({
         </button>
         <button type="button" role="menuitem" onClick={() => run(() => onCreate('folder', folder.path))}>
           <FolderPlus size={12} /> New folder
+        </button>
+        <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
+          <Pencil size={12} /> Rename
         </button>
       </div>
     )

@@ -290,6 +290,109 @@ class WorkspaceOrganizationService:
                 raise RuntimeError("Updated folder could not be reloaded")
             return self._folder_from_row(connection, updated)
 
+    def rename_folder(
+        self,
+        *,
+        folder_id: str,
+        destination_path: str,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Folder:
+        normalized_dest = self.normalize_folder_path(destination_path)
+        fingerprint = request_hash({"folder_id": folder_id, "destination_path": normalized_dest})
+        with self.database.transaction() as connection:
+            self.actors.require_known(connection, actor_id)
+            duplicate = self.idempotency.mutation_record(
+                connection,
+                actor_id=actor_id,
+                key=idempotency_key,
+                operation="rename_folder",
+                request_hash=fingerprint,
+            )
+            if duplicate:
+                row = connection.execute(
+                    "SELECT * FROM folders WHERE folder_id = ?", (duplicate.resource_id,)
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("Idempotent folder result could not be reloaded")
+                return self._folder_from_row(connection, row)
+
+            folder_row = connection.execute(
+                "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
+            ).fetchone()
+            if folder_row is None:
+                raise NotFoundError(f"Folder not found: {folder_id}")
+
+            source_path = folder_row["path"]
+            if source_path == normalized_dest:
+                return self._folder_from_row(connection, folder_row)
+
+            dest_existing = connection.execute(
+                "SELECT 1 FROM folders WHERE path = ?", (normalized_dest,)
+            ).fetchone()
+            if dest_existing:
+                raise ConflictError(f"Destination folder already exists: {normalized_dest}")
+
+            parent_dest = PurePosixPath(normalized_dest).parent
+            if parent_dest != PurePosixPath("."):
+                self.ensure_folder_path_hierarchy(connection, parent_dest.as_posix())
+
+            all_folders = connection.execute(
+                "SELECT folder_id, path, name FROM folders "
+                "WHERE path = ? OR path LIKE ? ORDER BY length(path)",
+                (source_path, f"{source_path}/%"),
+            ).fetchall()
+
+            now_str = utc_now()
+            for f_row in all_folders:
+                old_p = f_row["path"]
+                if old_p == source_path:
+                    new_p = normalized_dest
+                    new_name = normalized_dest.split("/")[-1]
+                else:
+                    new_p = normalized_dest + old_p[len(source_path):]
+                    new_name = new_p.split("/")[-1]
+                connection.execute(
+                    "UPDATE folders SET path = ?, name = ?, updated_at = ? WHERE folder_id = ?",
+                    (new_p, new_name, now_str, f_row["folder_id"]),
+                )
+
+            doc_rows = connection.execute(
+                "SELECT document_id, path FROM documents WHERE path LIKE ?",
+                (f"{source_path}/%",),
+            ).fetchall()
+
+            for d_row in doc_rows:
+                old_doc_path = d_row["path"]
+                new_doc_path = normalized_dest + old_doc_path[len(source_path):]
+                connection.execute(
+                    "UPDATE documents SET path = ?, updated_at = ? WHERE document_id = ?",
+                    (new_doc_path, now_str, d_row["document_id"]),
+                )
+
+            self.idempotency.record_mutation(
+                connection,
+                actor_id=actor_id,
+                key=idempotency_key,
+                operation="rename_folder",
+                request_hash=fingerprint,
+                resource_type="folder",
+                resource_id=folder_id,
+            )
+
+            updated_row = connection.execute(
+                "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
+            ).fetchone()
+            result = self._folder_from_row(connection, updated_row)
+
+        try:
+            self.workspace.rename_folder(source_path, normalized_dest)
+        except NotFoundError:
+            self.workspace.create_folder(normalized_dest)
+
+        return result
+
+
     @staticmethod
     def _folder_from_row(connection: sqlite3.Connection, row: sqlite3.Row) -> Folder:
         tag_rows = connection.execute(

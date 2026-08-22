@@ -180,6 +180,11 @@ class UpdateFolderMetadata(MutationRequest):
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
+class MoveFolder(MutationRequest):
+    path: str
+
+
+
 class UpdateDocument(MutationRequest):
     expected_revision_id: str
     content: str

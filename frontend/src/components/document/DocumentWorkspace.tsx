@@ -74,12 +74,19 @@ export function DocumentWorkspace({
     () => updateDocumentTitle(documentId, document.title),
     [document.title, documentId, updateDocumentTitle],
   )
+  const workspaceRef = useRef<HTMLElement>(null)
   useEffect(
     () =>
       sessions.registerEditor(
         documentId,
         () => editorRef.current?.focus(),
-        (line) => editorRef.current?.scrollToLine(line),
+        (line) => {
+          editorRef.current?.scrollToLine(line)
+          const target = workspaceRef.current?.querySelector(`[data-line="${line}"]`)
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        },
       ),
     [documentId, sessions],
   )
@@ -153,6 +160,7 @@ export function DocumentWorkspace({
 
   return (
     <section
+      ref={workspaceRef}
       className={`document-workspace ${
         document.content_type === 'text/html' && mode !== 'edit' ? 'html-preview-workspace' : ''
       } ${document.content_type === 'application/pdf' ? 'pdf-document-workspace' : ''}`}

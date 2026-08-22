@@ -1,0 +1,260 @@
+import { randomUUID } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { expect, test } from './fixtures'
+
+const repositoryRoot = path.resolve(import.meta.dirname, '../..')
+const outDir = path.join(repositoryRoot, 'docs/assets/walkthrough')
+if (!fs.existsSync(outDir)) {
+  fs.mkdirSync(outDir, { recursive: true })
+}
+
+test.describe('Issue Verification Real Screenshots', () => {
+  test.beforeEach(async ({ page }) => {
+    test.skip(page.viewportSize()?.width !== 1440, 'Desktop only')
+  })
+
+  test('capture issue 60 and 61 (file tree and context menu)', async ({ page, request }) => {
+    await request.post('/api/v1/folders', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { path: 'projects' },
+    })
+    await request.post('/api/v1/folders', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { path: 'projects/distributed-systems' },
+    })
+    await request.post('/api/v1/folders', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { path: 'projects/distributed-systems/consensus-protocols' },
+    })
+    const doc = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Raft & Paxos Comparative Analysis',
+        content: '# Raft & Paxos Comparative Analysis\n\nHigh throughput consensus benchmarks.',
+        path: 'projects/distributed-systems/consensus-protocols/raft-and-paxos-comparative-study-2026.md',
+      },
+    })
+    await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Distributed Storage Specifications',
+        content: '# Storage Specifications\n\nACID persistence and replication.',
+        path: 'projects/high-throughput-storage-engine-design-specifications.md',
+      },
+    })
+    const docData = (await doc.json()) as { document_id: string }
+
+    await page.goto(`/documents/${docData.document_id}`)
+    await expect(page.locator('.document-header h1')).toHaveText('Raft & Paxos Comparative Analysis')
+    await page.waitForTimeout(600)
+
+    // Ensure Files mode is active
+    await page.locator('#workspace-tab-files').click()
+    await page.waitForTimeout(400)
+
+    // Issue #60: File Tree MiddleTruncate Clean Single-Line Truncation
+    await page.locator('.primary-sidebar').screenshot({ path: path.join(outDir, 'issue-60-file-tree.png') })
+
+    // Issue #61: Context menu
+    await page.locator('.sangam-file-tree').click({ position: { x: 80, y: 30 }, button: 'right' })
+    await page.waitForTimeout(400)
+    await page
+      .locator('.primary-sidebar')
+      .screenshot({ path: path.join(outDir, 'issue-61-context-menu.png') })
+    await page.keyboard.press('Escape')
+  })
+
+  test('capture issue 62 and 70 (split pane close and 40px tab trigger)', async ({ page, request }) => {
+    const doc = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Cluster Performance Metrics',
+        content: '# Cluster Performance Metrics\n\nThroughput metrics across 10 nodes.',
+      },
+    })
+    const docData = (await doc.json()) as { document_id: string }
+
+    await page.goto(`/documents/${docData.document_id}`)
+    await expect(page.locator('.document-header h1')).toHaveText('Cluster Performance Metrics')
+    await page.waitForTimeout(400)
+
+    // Open Document actions menu and click Split right
+    await page.getByRole('button', { name: 'Document actions' }).click()
+    await page.waitForTimeout(300)
+    await page.getByRole('button', { name: /Split right/ }).click()
+    await page.waitForTimeout(600)
+
+    // Issue #62: Split panes with close tab and close split controls
+    await page
+      .locator('.workbench-center')
+      .screenshot({ path: path.join(outDir, 'issue-62-split-pane-close.png') })
+
+    // Issue #70: 40px Tab actions trigger aligned with rail
+    await page
+      .locator('.editor-tabbar')
+      .first()
+      .screenshot({ path: path.join(outDir, 'issue-70-tab-actions-align.png') })
+  })
+
+  test('capture issue 63 and 67 (folder renaming and organization)', async ({ page, request }) => {
+    await request.post('/api/v1/folders', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { path: 'research/quantum-computing' },
+    })
+    await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Qubit Coherence Study',
+        content: '# Qubit Coherence Study\n\nQuantum state fidelity under cryogenic conditions.',
+        path: 'research/quantum-computing/qubit-fidelity.md',
+      },
+    })
+
+    await page.goto('/')
+    await page.waitForTimeout(500)
+    await page
+      .locator('.primary-sidebar')
+      .screenshot({ path: path.join(outDir, 'issue-67-folder-organization.png') })
+    await page
+      .locator('.pierre-tree-shell')
+      .screenshot({ path: path.join(outDir, 'issue-63-folder-rename.png') })
+  })
+
+  test('capture issue 64, 66, and 75 (sidebar navigation, search focus, and sync badge)', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.waitForTimeout(400)
+
+    // Issue #64 & #75 footer (Karakeep hidden)
+    await page.locator('.sidebar-footer').screenshot({ path: path.join(outDir, 'issue-64-sidebar-nav.png') })
+
+    // Issue #66: Search single focus ring
+    await page.locator('#workspace-tab-search').click()
+    await page.waitForTimeout(300)
+    const searchInput = page.locator('.sidebar-search-input input')
+    await searchInput.focus()
+    await page.waitForTimeout(300)
+    await page.locator('.search-panel').screenshot({ path: path.join(outDir, 'issue-66-search-focus.png') })
+  })
+
+  test('capture issue 69 (welcome screen format dropdown)', async ({ page }) => {
+    await page.goto('/')
+    await page.waitForTimeout(400)
+    await page.locator('.welcome').screenshot({ path: path.join(outDir, 'issue-69-welcome-format.png') })
+  })
+
+  test('capture issue 71, 72, 73, and 74 (outline formatting, jump, bounded workspace, collapsed rail)', async ({
+    page,
+    request,
+  }) => {
+    const doc = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Sangam System Architecture',
+        content: `# [Sangam Architecture Guide](https://sangam.dev/docs)
+
+Sangam is a local-first workspace engineered for durability and high-performance editing.
+
+## <span id="storage-engine">Storage Engine & SQLite Consistency</span>
+
+SQLite snapshot journaling with write-ahead logging ensures total ACID durability across all concurrent agent and human edits.
+
+### Transaction Boundary Verification
+
+Every mutation is strictly isolated and validated with cryptographic SHA-256 checksums.
+
+## [Distributed Synchronization Protocol](https://sangam.dev/sync)
+
+Peer-to-peer reconciliation and deterministic merge resolution over local network.
+
+### Performance Benchmarks & Latency
+
+Throughput exceeds 10,000 document index operations per second on NVMe storage.
+
+## <a href="#governance">Security & Token Governance</a>
+
+Cryptographically signed capability tokens with fine-grained path prefixes.`,
+        path: 'architecture/overview.md',
+      },
+    })
+    const docData = (await doc.json()) as { document_id: string }
+
+    await page.goto(`/documents/${docData.document_id}`)
+    await expect(page.locator('.document-header h1')).toHaveText('Sangam System Architecture')
+    await page.waitForTimeout(400)
+
+    // Open inspector if collapsed
+    const openInspectorBtn = page.getByRole('button', { name: 'Open document inspector' })
+    if (await openInspectorBtn.isVisible()) {
+      await openInspectorBtn.click()
+      await page.waitForTimeout(400)
+    }
+
+    // Switch to Outline tab
+    await page.getByRole('tab', { name: 'outline' }).click()
+    await page.waitForTimeout(400)
+
+    // Issue #71: Clean outline
+    await page
+      .locator('.document-inspector')
+      .screenshot({ path: path.join(outDir, 'issue-71-clean-outline.png') })
+
+    // Switch to Preview mode
+    await page.getByRole('radio', { name: 'preview' }).click()
+    await page.waitForTimeout(400)
+
+    // Click outline item to scroll
+    const targetHeading = page.getByRole('button', { name: 'Distributed Synchronization Protocol' })
+    if (await targetHeading.isVisible()) {
+      await targetHeading.click()
+      await page.waitForTimeout(400)
+    }
+
+    // Issue #72: Outline jump in preview
+    await page
+      .locator('.document-workspace')
+      .screenshot({ path: path.join(outDir, 'issue-72-outline-preview.png') })
+
+    // Issue #73: Bounded workspace
+    await page
+      .locator('.workbench-main')
+      .screenshot({ path: path.join(outDir, 'issue-73-bounded-workspace.png') })
+
+    // Issue #74: Direct triggers on collapsed rail
+    const collapseBtn = page.getByRole('button', { name: 'Collapse document inspector' })
+    if (await collapseBtn.isVisible()) {
+      await collapseBtn.click()
+      await page.waitForTimeout(400)
+    }
+    await page
+      .locator('.right-rail')
+      .screenshot({ path: path.join(outDir, 'issue-74-collapsed-rail-triggers.png') })
+  })
+
+  test('capture issue 65 and 75 (settings persistent sidebar and version card)', async ({ page }) => {
+    await page.goto('/settings')
+    await page.waitForTimeout(500)
+
+    // Issue #65: Settings screen with mounted primary sidebar
+    await page.screenshot({ path: path.join(outDir, 'issue-65-settings-sidebar.png'), fullPage: false })
+
+    // Issue #75: Version card in Operations
+    await page.getByRole('button', { name: /Operations/ }).click()
+    await page.waitForTimeout(500)
+    await page
+      .locator('.settings-content')
+      .screenshot({ path: path.join(outDir, 'issue-75-version-card.png') })
+  })
+
+  test('capture issue 68 (backup management and deletion UI)', async ({ page, request }) => {
+    await request.post('/api/v1/backups', {
+      headers: { 'Idempotency-Key': randomUUID() },
+    })
+
+    await page.goto('/backups')
+    await page.waitForTimeout(600)
+    await page.locator('.utility-page').screenshot({ path: path.join(outDir, 'issue-68-backup-delete.png') })
+  })
+})

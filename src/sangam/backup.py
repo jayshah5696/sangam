@@ -262,6 +262,12 @@ class BackupManager:
         with tarfile.open(backup_dir / "workspace.tar.gz", "r:gz") as archive:
             archive.extractall(workspace_root, filter="data")
 
+    def delete(self, backup_id: str) -> None:
+        backup_dir = self._backup_dir(backup_id)
+        if not backup_dir.is_dir():
+            raise NotFoundError(f"Backup not found: {backup_id}")
+        shutil.rmtree(backup_dir)
+
     def _backup_dir(self, backup_id: str) -> Path:
         if not _BACKUP_ID.fullmatch(backup_id):
             raise NotFoundError(f"Backup not found: {backup_id}")
@@ -270,3 +276,4 @@ class BackupManager:
     def _apply_retention(self) -> None:
         for backup in self.list()[self.retention_count :]:
             shutil.rmtree(self.backup_root / backup.backup_id)
+

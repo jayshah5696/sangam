@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
+import { Trash2 } from 'lucide-react'
 import { api, type BackupSet } from '../api'
 import { StateMessage } from '../components/ui/StateMessage'
 
@@ -59,8 +61,13 @@ function BackupsPage() {
 
 function BackupCard({ backup }: { backup: BackupSet }) {
   const queryClient = useQueryClient()
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const verify = useMutation({
     mutationFn: () => api.verifyBackup(backup.backup_id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backups'] }),
+  })
+  const remove = useMutation({
+    mutationFn: () => api.deleteBackup(backup.backup_id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backups'] }),
   })
   return (
@@ -72,9 +79,25 @@ function BackupCard({ backup }: { backup: BackupSet }) {
           </span>
           <h2>{new Date(backup.created_at).toLocaleString()}</h2>
         </div>
-        <button disabled={verify.isPending} onClick={() => verify.mutate()}>
-          {verify.isPending ? 'Verifying…' : 'Verify again'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button disabled={verify.isPending} onClick={() => verify.mutate()}>
+            {verify.isPending ? 'Verifying…' : 'Verify again'}
+          </button>
+          {!confirmDelete ? (
+            <button
+              className="danger-button secondary-action"
+              onClick={() => setConfirmDelete(true)}
+              title="Delete this backup set"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            >
+              <Trash2 size={13} /> Delete
+            </button>
+          ) : (
+            <button className="danger-button" disabled={remove.isPending} onClick={() => remove.mutate()}>
+              {remove.isPending ? 'Deleting…' : 'Confirm delete'}
+            </button>
+          )}
+        </div>
       </div>
       <p>
         {backup.document_count} documents · {backup.revision_count} revisions

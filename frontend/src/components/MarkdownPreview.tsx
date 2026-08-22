@@ -26,6 +26,18 @@ markdown.renderer.rules.link_open = (tokens, index, options, environment, self) 
     : self.renderToken(tokens, index, options)
 }
 
+const defaultHeadingOpen =
+  markdown.renderer.rules.heading_open ??
+  ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options))
+
+markdown.renderer.rules.heading_open = (tokens, index, options, environment, self) => {
+  const token = tokens[index]!
+  if (token.map) {
+    token.attrSet('data-line', String(token.map[0] + 1))
+  }
+  return defaultHeadingOpen(tokens, index, options, environment, self)
+}
+
 const defaultValidateLink = markdown.validateLink.bind(markdown)
 markdown.validateLink = (url) => internalDocumentHref(url) !== null || defaultValidateLink(url)
 
@@ -40,7 +52,7 @@ export function MarkdownPreview({ content, resolveAsset }: MarkdownPreviewProps)
     () =>
       DOMPurify.sanitize(markdown.render(content), {
         USE_PROFILES: { html: true },
-        ADD_ATTR: ['target'],
+        ADD_ATTR: ['target', 'data-line'],
       }),
     [content],
   )

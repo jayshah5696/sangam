@@ -687,6 +687,14 @@ export const api = {
       }),
     )
   },
+  async renameFolder(folder: Folder, path: string): Promise<Folder> {
+    return folderSchema.parse(
+      await request(`/folders/${folder.folder_id}/move`, {
+        method: 'POST',
+        body: JSON.stringify({ path }),
+      }),
+    )
+  },
   async getDocument(documentId: string): Promise<Document> {
     return documentSchema.parse(await request(`/documents/${documentId}`))
   },
@@ -1012,5 +1020,11 @@ export const api = {
   },
   async verifyBackup(backupId: string): Promise<z.infer<typeof backupVerificationSchema>> {
     return backupVerificationSchema.parse(await request(`/backups/${backupId}/verify`, { method: 'POST' }))
+  },
+  async deleteBackup(backupId: string): Promise<void> {
+    await request(`/backups/${backupId}`, { method: 'DELETE' })
+  },
+  async health(): Promise<{ status: string; version: string; karakeep_configured?: boolean }> {
+    return (await request('/health')) as { status: string; version: string; karakeep_configured?: boolean }
   },
 }
