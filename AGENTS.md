@@ -8,5 +8,8 @@
 - Use `StateMessage` for shared loading, empty, error, success, and offline states.
 - Settings search must focus the exact destination row; keep destination IDs stable.
 - Editor and preview surfaces must fill available space and own overflow where appropriate.
-- Validate UI changes at desktop and narrow viewports with an actual browser.
+- For user-visible browser changes or browser defect reviews, use the project
+  `browser-verification` skill before calling the work verified. It defines the
+  desktop, narrow-desktop, true touch-mobile, affected-breakpoint, and visual
+  evidence gates.
 - Run formatting, UI lint, build, unit tests, and `test:e2e` before updating verified screenshots.
