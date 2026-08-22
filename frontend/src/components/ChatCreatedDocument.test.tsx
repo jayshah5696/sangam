@@ -12,7 +12,7 @@ vi.mock('@tanstack/react-router', () => ({ useNavigate: () => state.navigate }))
 vi.mock('../theme', () => ({ useTheme: () => ({ preferences: { theme: 'river' } }) }))
 vi.mock('./RevisionMergeView', () => ({ RevisionMergeView: () => null }))
 
-import { CreatedFromChat } from './ChatPanel'
+import { CompletionRow, CreatedFromChat } from './ChatPanel'
 
 afterEach(cleanup)
 
@@ -31,10 +31,32 @@ describe('CreatedFromChat', () => {
       </QueryClientProvider>,
     )
 
-    expect(screen.getByText(/Created “Created note”/)).toBeTruthy()
+    expect(screen.getByText('Document created')).toBeTruthy()
+    expect(screen.getByText(/“Created note”/)).toBeTruthy()
     expect(screen.getByText(/doc-crea…5678/)).toBeTruthy()
     expect(state.navigate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Open document' }))
     expect(state.navigate).toHaveBeenCalledWith({ href: '/documents/doc-created-12345678' })
+  })
+
+  it('uses the same grouped controls for publication results', () => {
+    const onDismiss = vi.fn()
+    render(
+      <CompletionRow
+        label="Publication created"
+        detail="public"
+        openLabel="Open publication"
+        href="/p/example"
+        onDismiss={onDismiss}
+      />,
+    )
+
+    const actions = screen.getByRole('status').querySelector('.chat-effect-complete-actions')
+    expect(actions?.children).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Open publication' }).getAttribute('class')).toContain(
+      'secondary-action',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(onDismiss).toHaveBeenCalledOnce()
   })
 })

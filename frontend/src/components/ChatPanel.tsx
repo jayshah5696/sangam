@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { ChatKit, useChatKit } from '@openai/chatkit-react'
-import { FileText, X } from 'lucide-react'
+import { ExternalLink, FileText, X } from 'lucide-react'
 import { api, type ChatProposal, type Document, type IssuedPublication, type Publication } from '../api'
 import {
   announceCitationNavigation,
@@ -465,21 +465,17 @@ export function PublishConfirmationCard({
 export function CreatedFromChat({ document, onDismiss }: { document: Document; onDismiss: () => void }) {
   const navigate = useNavigate()
   return (
-    <div className="chat-effect-complete" role="status">
-      <span>
-        Created “{document.title}” · <code>{shortId(document.document_id)}</code>
-      </span>
-      <button
-        type="button"
-        className="secondary-action"
-        onClick={() => void navigate({ href: `/documents/${document.document_id}` })}
-      >
-        Open document
-      </button>
-      <button type="button" className="secondary-action" onClick={onDismiss}>
-        Dismiss
-      </button>
-    </div>
+    <CompletionRow
+      label="Document created"
+      detail={
+        <>
+          “{document.title}” · <code>{shortId(document.document_id)}</code>
+        </>
+      }
+      openLabel="Open document"
+      onOpen={() => void navigate({ href: `/documents/${document.document_id}` })}
+      onDismiss={onDismiss}
+    />
   )
 }
 
@@ -499,14 +495,53 @@ function PublishedFromChat({ result, onDismiss }: { result: IssuedPublication; o
     )
   }
   return (
+    <CompletionRow
+      label="Publication created"
+      detail={result.access_policy}
+      openLabel="Open publication"
+      href={href}
+      onDismiss={onDismiss}
+    />
+  )
+}
+
+export function CompletionRow({
+  label,
+  detail,
+  openLabel,
+  href,
+  onOpen,
+  onDismiss,
+}: {
+  label: string
+  detail?: React.ReactNode
+  openLabel: string
+  href?: string
+  onOpen?: () => void
+  onDismiss: () => void
+}) {
+  const openControl = href ? (
+    <a className="secondary-action" href={href} target="_blank" rel="noreferrer">
+      <ExternalLink size={14} />
+      {openLabel}
+    </a>
+  ) : (
+    <button type="button" className="secondary-action" onClick={onOpen}>
+      {openLabel}
+    </button>
+  )
+  return (
     <div className="chat-effect-complete" role="status">
-      <span>Publication approved and created.</span>
-      <a href={href} target="_blank" rel="noreferrer">
-        Open publication
-      </a>
-      <button type="button" className="secondary-action" onClick={onDismiss}>
-        Dismiss
-      </button>
+      <div className="chat-effect-complete-copy">
+        <strong>{label}</strong>
+        {detail && <span>{detail}</span>}
+      </div>
+      <div className="chat-effect-complete-actions">
+        {openControl}
+        <button type="button" className="secondary-action" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
     </div>
   )
 }
