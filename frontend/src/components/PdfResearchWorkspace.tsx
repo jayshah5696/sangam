@@ -1,91 +1,88 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type Document } from '../api'
 import { CITATION_NAVIGATION_EVENT, type CitationTarget } from '../citationNavigation'
-import { PdfResearchRail } from './PdfResearchRail'
+import { useDocumentSession, useDocumentSessions, type PdfViewState } from '../documentSessions'
 import { PdfViewer } from './PdfViewer'
-import type { AnnotationDraft } from './pdfResearchTypes'
+
+const defaultPdfState: PdfViewState = {
+  pageNumber: 1,
+  scale: 1,
+  zoomMode: 'fit-width',
+  scrollTop: 0,
+}
 
 export function PdfResearchWorkspace({ document }: { document: Document }) {
+  const sessions = useDocumentSessions()
+  const session = useDocumentSession(document.document_id)
   const initialSearch = useMemo(() => new URLSearchParams(window.location.search), [])
-  const [pageNumber, setPageNumber] = useState(() => {
-    const requested = Number(initialSearch.get('page'))
-    return Number.isInteger(requested) && requested > 0 ? requested : 1
-  })
-  const [annotationQuery, setAnnotationQuery] = useState('')
-  const [draft, setDraft] = useState<AnnotationDraft | null>(null)
-  const [selectedAnnotationId, setSelectedAnnotationId] = useState(initialSearch.get('annotation'))
+  const requestedPage = Number(initialSearch.get('page'))
+  const pdfState = useMemo(
+    () =>
+      session.pdfState ?? {
+        ...defaultPdfState,
+        pageNumber:
+          Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : defaultPdfState.pageNumber,
+      },
+    [requestedPage, session.pdfState],
+  )
+  const annotationQuery = session.pdfAnnotationQuery ?? ''
   const annotationsQuery = useQuery({
     queryKey: ['annotations', document.document_id, annotationQuery],
     queryFn: () => api.listAnnotations(document.document_id, annotationQuery),
   })
-  const annotations = annotationsQuery.data ?? []
+  const annotations = useMemo(() => annotationsQuery.data ?? [], [annotationsQuery.data])
+
+  const updatePdfState = useCallback(
+    (patch: Partial<PdfViewState>) => {
+      const current = sessions.getSession(document.document_id).pdfState ?? defaultPdfState
+      sessions.updateSession(document.document_id, { pdfState: { ...current, ...patch } })
+    },
+    [document.document_id, sessions],
+  )
+  const setPageNumber = useCallback((next: number) => updatePdfState({ pageNumber: next }), [updatePdfState])
+  const scrollToPage = useCallback(
+    (next: number) => {
+      setPageNumber(next)
+      documentPage(document.document_id, next)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    },
+    [document.document_id, setPageNumber],
+  )
 
   useEffect(() => {
     const receiveCitation = (event: Event) => {
       const target = (event as CustomEvent<CitationTarget>).detail
       if (target.documentId !== document.document_id) return
-      if (target.pageNumber) setPageNumber(target.pageNumber)
-      if (target.annotationId) setSelectedAnnotationId(target.annotationId)
+      if (target.pageNumber) scrollToPage(target.pageNumber)
+      if (target.annotationId) {
+        sessions.updateSession(document.document_id, { pdfSelectedAnnotationId: target.annotationId })
+      }
     }
     window.addEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
     return () => window.removeEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
-  }, [document.document_id])
-
-  const [mobileView, setMobileView] = useState<'reader' | 'research'>('reader')
+  }, [document.document_id, scrollToPage, sessions])
 
   return (
-    <div className={`pdf-research-workspace pdf-view-${mobileView}`}>
-      <div className="pdf-mobile-tab-switch" role="tablist" aria-label="PDF workspace views">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mobileView === 'reader'}
-          className={mobileView === 'reader' ? 'active' : ''}
-          onClick={() => setMobileView('reader')}
-        >
-          Reader
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mobileView === 'research'}
-          className={mobileView === 'research' ? 'active' : ''}
-          onClick={() => setMobileView('research')}
-        >
-          Research notes ({annotations.length})
-        </button>
-      </div>
+    <div className="pdf-research-workspace">
       <PdfViewer
         document={document}
-        pageNumber={pageNumber}
+        pdfState={pdfState}
         setPageNumber={setPageNumber}
-        annotations={annotations.filter((annotation) => annotation.page_number === pageNumber)}
-        onSelectAnnotation={(id) => {
-          setSelectedAnnotationId(id)
-          if (typeof window !== 'undefined' && window.innerWidth <= 760) {
-            setMobileView('research')
-          }
-        }}
-        setDraft={setDraft}
-      />
-      <PdfResearchRail
-        document={document}
-        pageNumber={pageNumber}
-        setPageNumber={(targetPage) => {
-          setPageNumber(targetPage)
-          if (typeof window !== 'undefined' && window.innerWidth <= 760) {
-            setMobileView('reader')
-          }
-        }}
+        updatePdfState={updatePdfState}
         annotations={annotations}
-        annotationQuery={annotationQuery}
-        setAnnotationQuery={setAnnotationQuery}
-        selectedAnnotationId={selectedAnnotationId}
-        setSelectedAnnotationId={setSelectedAnnotationId}
-        draft={draft}
-        setDraft={setDraft}
+        onSelectAnnotation={(id) =>
+          sessions.updateSession(document.document_id, { pdfSelectedAnnotationId: id })
+        }
+        setDraft={(updater) => {
+          const currentDraft = sessions.getSession(document.document_id).pdfDraft ?? null
+          const nextDraft = typeof updater === 'function' ? updater(currentDraft) : updater
+          sessions.updateSession(document.document_id, { pdfDraft: nextDraft })
+        }}
       />
     </div>
   )
+}
+
+function documentPage(documentId: string, pageNumber: number) {
+  return globalThis.document.getElementById(`pdf-page-${documentId}-${pageNumber}`)
 }

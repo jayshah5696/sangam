@@ -3,7 +3,7 @@ import type { EditorMode } from './documentSessions'
 
 export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
 
-export type InspectorTab = 'properties' | 'outline' | 'history' | 'chat'
+export type InspectorTab = 'properties' | 'research' | 'outline' | 'history' | 'chat'
 
 export const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
   {

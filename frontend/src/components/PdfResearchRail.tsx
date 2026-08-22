@@ -1,77 +1,37 @@
-import { useState, type Dispatch, type SetStateAction } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
-import { Copy, Highlighter, Search, Upload } from 'lucide-react'
+import { Bookmark, Copy, Highlighter, MessageSquare, Quote, Search, StickyNote } from 'lucide-react'
 import { api, type Annotation, type Document } from '../api'
-import { useWorkbench } from '../workbench'
+import { usePdfResearch } from '../pdfResearchState'
 import { annotationTypeLabel, type AnnotationDraft } from './pdfResearchTypes'
 
-type PdfResearchRailProps = {
-  document: Document
-  pageNumber: number
-  setPageNumber: Dispatch<SetStateAction<number>>
-  annotations: Annotation[]
-  annotationQuery: string
-  setAnnotationQuery: Dispatch<SetStateAction<string>>
-  selectedAnnotationId: string | null
-  setSelectedAnnotationId: Dispatch<SetStateAction<string | null>>
-  draft: AnnotationDraft | null
-  setDraft: Dispatch<SetStateAction<AnnotationDraft | null>>
-}
-
-export function PdfResearchRail({
-  document,
-  pageNumber,
-  setPageNumber,
-  annotations,
-  annotationQuery,
-  setAnnotationQuery,
-  selectedAnnotationId,
-  setSelectedAnnotationId,
-  draft,
-  setDraft,
-}: PdfResearchRailProps) {
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const workbench = useWorkbench()
+export function PdfResearchRail({ document }: { document: Document }) {
+  const research = usePdfResearch()
   const [query, setQuery] = useState('')
-  const search = useMutation({
-    mutationFn: (value: string) => api.searchPdf(document.document_id, value),
-  })
-  const importReplacement = useMutation({
-    mutationFn: (file: File) => {
-      const parent = document.path?.includes('/')
-        ? document.path.slice(0, document.path.lastIndexOf('/') + 1)
-        : ''
-      const filename = file.name.toLowerCase().endsWith('.pdf') ? file.name : `${file.name}.pdf`
-      return api.importPdf(
-        file,
-        file.name.replace(/\.pdf$/i, '') || `${document.title} replacement`,
-        `${parent}${filename}`,
-        document.document_id,
-      )
-    },
-    onSuccess: async (replacement) => {
-      await queryClient.invalidateQueries({ queryKey: ['documents'] })
-      workbench.ensureDocumentOpen(replacement.document_id, replacement.title)
-      await navigate({
-        to: '/documents/$documentId',
-        params: { documentId: replacement.document_id },
-      })
-    },
-  })
-  const selectedAnnotation = annotations.find(
-    (annotation) => annotation.annotation_id === selectedAnnotationId,
+  const search = useMutation({ mutationFn: (value: string) => api.searchPdf(document.document_id, value) })
+  if (!research) return null
+  const selectedAnnotation = research.annotations.find(
+    (annotation) => annotation.annotation_id === research.selectedAnnotationId,
   )
+  const actions: Array<{
+    type: Annotation['annotation_type']
+    label: string
+    icon: typeof StickyNote
+  }> = [
+    { type: 'page_note', label: 'Page note', icon: StickyNote },
+    { type: 'bookmark', label: 'Bookmark', icon: Bookmark },
+    { type: 'citation_marker', label: 'Citation', icon: Quote },
+    { type: 'comment', label: 'Comment', icon: MessageSquare },
+  ]
 
   return (
-    <aside className="pdf-research-rail ui-rail ui-rail--surface">
-      <div className="ui-rail-header">
+    <section className="pdf-research-rail" aria-label="PDF research">
+      <div className="pdf-research-summary">
         <div>
           <p className="eyebrow">Research</p>
-          <strong>Page {pageNumber}</strong>
+          <strong>Page {research.pageNumber}</strong>
         </div>
-        <span className="scope-badge">{annotations.length} notes</span>
+        <span className="scope-badge">{research.annotations.length} notes</span>
       </div>
       <form
         className="pdf-search"
@@ -96,7 +56,7 @@ export function PdfResearchRail({
       {search.data && (
         <div className="pdf-search-results">
           {search.data.map((result) => (
-            <button key={result.page_number} onClick={() => setPageNumber(result.page_number)}>
+            <button key={result.page_number} onClick={() => research.scrollToPage(result.page_number)}>
               <strong>Page {result.page_number}</strong>
               <span>{result.snippet}</span>
             </button>
@@ -104,55 +64,43 @@ export function PdfResearchRail({
           {search.data.length === 0 && <p className="small-muted">No matching pages.</p>}
         </div>
       )}
-      <div className="pdf-annotation-actions">
-        <button onClick={() => setDraft(emptyDraft('page_note'))}>Add page note</button>
-        <button onClick={() => setDraft(emptyDraft('bookmark'))}>Bookmark</button>
-        <button onClick={() => setDraft(emptyDraft('citation_marker'))}>Citation</button>
-        <button onClick={() => setDraft(emptyDraft('comment'))}>Comment</button>
+      <div className="pdf-annotation-actions" role="toolbar" aria-label="Add PDF annotation">
+        {actions.map(({ type, label, icon: Icon }) => (
+          <button
+            className="icon-button"
+            key={type}
+            aria-label={label}
+            title={label}
+            onClick={() => research.setDraft(emptyDraft(type))}
+          >
+            <Icon size={15} />
+          </button>
+        ))}
       </div>
-      <div className="pdf-replacement-control">
-        <div className="pdf-replacement-copy">
-          <strong>Replacement PDF</strong>
-          <small>Imports a new immutable document.</small>
-        </div>
-        <label className="pdf-replacement-button" aria-disabled={importReplacement.isPending || undefined}>
-          <Upload size={14} />
-          <span>{importReplacement.isPending ? 'Importing…' : 'Choose PDF'}</span>
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            disabled={importReplacement.isPending}
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) importReplacement.mutate(file)
-            }}
-          />
-        </label>
-      </div>
-      {draft && (
+      {research.draft && (
         <AnnotationComposer
           documentId={document.document_id}
-          pageNumber={pageNumber}
-          draft={draft}
-          onClose={() => setDraft(null)}
+          pageNumber={research.pageNumber}
+          draft={research.draft}
+          onClose={() => research.setDraft(null)}
         />
       )}
       <label className="annotation-filter">
         <span>Filter annotations</span>
         <input
-          value={annotationQuery}
+          value={research.annotationQuery}
           placeholder="Notes, selected text, tags"
-          onChange={(event) => setAnnotationQuery(event.target.value)}
+          onChange={(event) => research.setAnnotationQuery(event.target.value)}
         />
       </label>
       <div className="pdf-annotation-list">
-        {annotations.map((annotation) => (
+        {research.annotations.map((annotation) => (
           <button
-            className={selectedAnnotationId === annotation.annotation_id ? 'active' : ''}
+            className={research.selectedAnnotationId === annotation.annotation_id ? 'active' : ''}
             key={annotation.annotation_id}
             onClick={() => {
-              setPageNumber(annotation.page_number)
-              setSelectedAnnotationId(annotation.annotation_id)
+              research.scrollToPage(annotation.page_number)
+              research.setSelectedAnnotationId(annotation.annotation_id)
             }}
           >
             <span>
@@ -168,10 +116,22 @@ export function PdfResearchRail({
         <AnnotationDetail
           key={selectedAnnotation.annotation_id}
           annotation={selectedAnnotation}
-          onClose={() => setSelectedAnnotationId(null)}
+          onClose={() => research.setSelectedAnnotationId(null)}
         />
       )}
-    </aside>
+    </section>
+  )
+}
+
+function ExpandableQuote({ children }: { children: string }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className={`annotation-quote ${expanded ? 'expanded' : ''}`}>
+      <blockquote>{children}</blockquote>
+      <button type="button" className="annotation-quote-toggle" onClick={() => setExpanded((open) => !open)}>
+        {expanded ? 'Show less' : 'Show more'}
+      </button>
+    </div>
   )
 }
 
@@ -223,7 +183,7 @@ function AnnotationComposer({
           ×
         </button>
       </header>
-      {draft.selectedText && <blockquote>{draft.selectedText}</blockquote>}
+      {draft.selectedText && <ExpandableQuote>{draft.selectedText}</ExpandableQuote>}
       <label>
         <span>Note</span>
         <textarea value={note} onChange={(event) => setNote(event.target.value)} />
@@ -291,7 +251,7 @@ function AnnotationDetail({ annotation, onClose }: { annotation: Annotation; onC
           ×
         </button>
       </header>
-      {annotation.selected_text && <blockquote>{annotation.selected_text}</blockquote>}
+      {annotation.selected_text && <ExpandableQuote>{annotation.selected_text}</ExpandableQuote>}
       <label>
         <span>Note</span>
         <textarea value={note} onChange={(event) => setNote(event.target.value)} />

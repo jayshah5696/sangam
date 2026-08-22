@@ -174,6 +174,7 @@ export function DocumentWorkspace({
           {document.content_type === 'application/pdf' ? 'Immutable source' : saveLabel(saveState)}
         </span>
       </header>
+      {document.content_type === 'application/pdf' && <MobileInspectorToggle />}
       {document.content_type !== 'application/pdf' && (
         <DocumentToolbar
           document={document}
@@ -386,6 +387,21 @@ function CitedRevisionEvidence({
 function shortRevision(value?: string) {
   if (!value) return 'unknown revision'
   return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
+}
+
+function MobileInspectorToggle() {
+  const { updatePreferences } = useTheme()
+  return (
+    <button
+      type="button"
+      className="icon-button mobile-inspector-toggle pdf-mobile-inspector-toggle"
+      aria-label="Open document inspector"
+      title="Open document inspector"
+      onClick={() => updatePreferences({ rightVisible: true, rightTab: 'research' })}
+    >
+      <PanelRightOpen size={16} />
+    </button>
+  )
 }
 
 function DocumentToolbar({

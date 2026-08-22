@@ -8,20 +8,30 @@ import {
   type SetStateAction,
 } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Copy, Map, ZoomIn, ZoomOut } from 'lucide-react'
-import { getDocument, GlobalWorkerOptions, TextLayer, type PDFDocumentProxy } from 'pdfjs-dist'
+import { ChevronLeft, ChevronRight, Copy, Map as MapIcon, Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
+import {
+  getDocument,
+  GlobalWorkerOptions,
+  TextLayer,
+  type PDFDocumentProxy,
+  type PDFPageProxy,
+} from 'pdfjs-dist'
 import workerSource from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { api, type Annotation, type Document, type PdfRect } from '../api'
+import type { PdfViewState } from '../documentSessions'
+import { normalizePdfRect } from '../pdfGeometry'
 import { annotationTypeLabel, type AnnotationDraft } from './pdfResearchTypes'
 
 GlobalWorkerOptions.workerSrc = workerSource
 
 type Point = { x: number; y: number }
+type PageSize = { width: number; height: number }
 
 type PdfViewerProps = {
   document: Document
-  pageNumber: number
-  setPageNumber: Dispatch<SetStateAction<number>>
+  pdfState: PdfViewState
+  setPageNumber: (pageNumber: number) => void
+  updatePdfState: (patch: Partial<PdfViewState>) => void
   annotations: Annotation[]
   onSelectAnnotation: (annotationId: string) => void
   setDraft: Dispatch<SetStateAction<AnnotationDraft | null>>
@@ -29,24 +39,21 @@ type PdfViewerProps = {
 
 export function PdfViewer({
   document,
-  pageNumber,
+  pdfState,
   setPageNumber,
+  updatePdfState,
   annotations,
   onSelectAnnotation,
   setDraft,
 }: PdfViewerProps) {
   const queryClient = useQueryClient()
-  const pageHostRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const textLayerRef = useRef<HTMLDivElement>(null)
+  const pageNumber = pdfState.pageNumber
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const initialStateRef = useRef(pdfState)
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
-  const [scale, setScale] = useState(() =>
-    typeof window !== 'undefined' && window.innerWidth <= 760 ? 0.6 : 1.2,
-  )
-  const [userScale, setUserScale] = useState(false)
+  const [pageSize, setPageSize] = useState<PageSize>({ width: 612, height: 792 })
+  const [availableWidth, setAvailableWidth] = useState(0)
   const [isSelectingArea, setIsSelectingArea] = useState(false)
-  const [areaStart, setAreaStart] = useState<Point | null>(null)
-  const [areaPreview, setAreaPreview] = useState<PdfRect | null>(null)
   const retryExtraction = useMutation({
     mutationFn: () => api.retryPdfExtraction(document.document_id),
     onSuccess: async () => {
@@ -57,117 +64,60 @@ export function PdfViewer({
   useEffect(() => {
     const task = getDocument({ url: api.pdfContentUrl(document.document_id) })
     let active = true
-    void task.promise.then((loaded) => {
+    void task.promise.then(async (loaded) => {
       if (!active) return
+      const firstPage = await loaded.getPage(1)
+      if (!active) return
+      const viewport = firstPage.getViewport({ scale: 1 })
+      setPageSize({ width: viewport.width, height: viewport.height })
       setPdf(loaded)
-      setPageNumber((current) => Math.min(Math.max(current, 1), loaded.numPages))
+      const initialState = initialStateRef.current
+      const boundedPage = Math.min(Math.max(initialState.pageNumber, 1), loaded.numPages)
+      if (boundedPage !== initialState.pageNumber) setPageNumber(boundedPage)
+      requestAnimationFrame(() => {
+        const host = scrollRef.current
+        if (!host) return
+        if (initialState.scrollTop > 0) host.scrollTop = initialState.scrollTop
+        else if (boundedPage > 1) pageElement(document.document_id, boundedPage)?.scrollIntoView()
+      })
     })
     return () => {
       active = false
       void task.destroy()
     }
-  }, [document.document_id, setPageNumber])
+    // Loading owns the PDF.js worker and must only follow document identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [document.document_id])
 
   useEffect(() => {
-    if (!pdf || !canvasRef.current || !textLayerRef.current || !pageHostRef.current) return
-    let active = true
-    let textLayer: TextLayer | null = null
-    void pdf.getPage(pageNumber).then(async (page) => {
-      if (!active || !canvasRef.current || !textLayerRef.current || !pageHostRef.current) return
-      let effectiveScale = scale
-      if (!userScale && typeof window !== 'undefined' && window.innerWidth <= 760) {
-        const unscaledViewport = page.getViewport({ scale: 1 })
-        const availableWidth = window.innerWidth - 32
-        effectiveScale = Math.max(
-          0.4,
-          Math.min(1.2, Math.round((availableWidth / unscaledViewport.width) * 100) / 100),
-        )
-      }
-      const viewport = page.getViewport({ scale: effectiveScale })
-      const canvas = canvasRef.current
-      const host = pageHostRef.current
-      const textHost = textLayerRef.current
-      const outputScale = window.devicePixelRatio || 1
-      canvas.width = Math.floor(viewport.width * outputScale)
-      canvas.height = Math.floor(viewport.height * outputScale)
-      canvas.style.width = `${viewport.width}px`
-      canvas.style.height = `${viewport.height}px`
-      host.style.width = `${viewport.width}px`
-      host.style.height = `${viewport.height}px`
-      textHost.replaceChildren()
-      textLayer = new TextLayer({
-        textContentSource: await page.getTextContent(),
-        container: textHost,
-        viewport,
-      })
-      await Promise.all([
-        page.render({
-          canvas,
-          viewport,
-          transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
-        }).promise,
-        textLayer.render(),
-      ])
+    const host = scrollRef.current
+    if (!host) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setAvailableWidth(entry.contentRect.width)
     })
-    return () => {
-      active = false
-      textLayer?.cancel()
+    observer.observe(host)
+    return () => observer.disconnect()
+  }, [])
+
+  const fitScale = Math.max(0.4, Math.min(2.4, (availableWidth - 32) / pageSize.width))
+  const effectiveScale = pdfState.zoomMode === 'fit-width' && availableWidth ? fitScale : pdfState.scale
+
+  const scrollToPage = (next: number) => {
+    const bounded = Math.min(Math.max(next, 1), pdf?.numPages ?? 1)
+    const host = scrollRef.current
+    const target = pageElement(document.document_id, bounded)
+    if (host && target) {
+      target.scrollIntoView({ block: 'start' })
+      setPageNumber(bounded)
+    } else {
+      setPageNumber(bounded)
     }
-  }, [pageNumber, pdf, scale, userScale])
-
-  const selectText = () => {
-    if (isSelectingArea || areaStart) return
-    const host = pageHostRef.current
-    const selection = window.getSelection()
-    if (!host || !selection || selection.isCollapsed || !selection.toString().trim()) return
-    const range = selection.getRangeAt(0)
-    if (!host.contains(range.commonAncestorContainer)) return
-    const hostBounds = host.getBoundingClientRect()
-    const geometry = Array.from(range.getClientRects())
-      .filter((rect) => rect.width > 0 && rect.height > 0)
-      .map((rect) => normalizeRect(rect, hostBounds))
-    if (geometry.length === 0) return
-    setDraft({
-      annotationType: 'text_highlight',
-      selectedText: selection.toString().trim(),
-      geometry,
-    })
   }
-
-  const beginArea = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isSelectingArea || !pageHostRef.current) return
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const startPoint = pointInHost(event, pageHostRef.current)
-    setAreaStart(startPoint)
-    setAreaPreview(rectFromPoints(startPoint, startPoint))
+  const chooseScale = (nextScale: number) => {
+    updatePdfState({ scale: nextScale, zoomMode: 'custom' })
   }
-
-  const updateArea = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isSelectingArea || !areaStart || !pageHostRef.current) return
-    setAreaPreview(rectFromPoints(areaStart, pointInHost(event, pageHostRef.current)))
-  }
-
-  const finishArea = () => {
-    if (areaPreview && areaPreview.width > 0.005 && areaPreview.height > 0.005) {
-      setDraft({ annotationType: 'area_highlight', selectedText: null, geometry: [areaPreview] })
-    }
-    setAreaStart(null)
-    setAreaPreview(null)
-    setIsSelectingArea(false)
-  }
-
-  const cancelAreaSelection = () => {
-    setAreaStart(null)
-    setAreaPreview(null)
-    setIsSelectingArea(false)
-  }
-
-  const startAreaSelection = () => {
-    setIsSelectingArea(true)
-    setAreaStart(null)
-    setAreaPreview(null)
-    setDraft(null)
-    window.getSelection()?.removeAllRanges()
+  const fitWidth = () => {
+    updatePdfState({ scale: effectiveScale, zoomMode: 'fit-width' })
   }
 
   return (
@@ -179,7 +129,7 @@ export function PdfViewer({
               className="icon-button"
               aria-label="Previous PDF page"
               disabled={pageNumber <= 1}
-              onClick={() => setPageNumber((page) => page - 1)}
+              onClick={() => scrollToPage(pageNumber - 1)}
             >
               <ChevronLeft size={15} />
             </button>
@@ -187,12 +137,18 @@ export function PdfViewer({
               Page
               <input
                 inputMode="numeric"
-                value={pageNumber}
-                onChange={(event) => {
-                  const next = Number(event.target.value)
-                  if (pdf && Number.isInteger(next) && next >= 1 && next <= pdf.numPages) {
-                    setPageNumber(next)
-                  }
+                aria-label="PDF page number"
+                key={pageNumber}
+                defaultValue={pageNumber}
+                onBlur={(event) => {
+                  const next = Number(event.currentTarget.value)
+                  if (pdf && Number.isInteger(next) && next >= 1 && next <= pdf.numPages) scrollToPage(next)
+                  else event.currentTarget.value = String(pageNumber)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  const next = Number(event.currentTarget.value)
+                  if (pdf && Number.isInteger(next) && next >= 1 && next <= pdf.numPages) scrollToPage(next)
                 }}
               />
               <span>of {pdf?.numPages ?? document.pdf_page_count ?? '…'}</span>
@@ -201,7 +157,7 @@ export function PdfViewer({
               className="icon-button"
               aria-label="Next PDF page"
               disabled={!pdf || pageNumber >= pdf.numPages}
-              onClick={() => setPageNumber((page) => page + 1)}
+              onClick={() => scrollToPage(pageNumber + 1)}
             >
               <ChevronRight size={15} />
             </button>
@@ -210,25 +166,28 @@ export function PdfViewer({
             <button
               className="icon-button"
               aria-label="Zoom out"
-              disabled={scale <= 0.4}
-              onClick={() => {
-                setUserScale(true)
-                setScale((value) => Math.max(0.4, Number((value - 0.2).toFixed(1))))
-              }}
+              disabled={effectiveScale <= 0.4}
+              onClick={() => chooseScale(Math.max(0.4, Number((effectiveScale - 0.2).toFixed(1))))}
             >
               <ZoomOut size={15} />
             </button>
-            <span>{Math.round(scale * 100)}%</span>
+            <output aria-label="PDF zoom">{Math.round(effectiveScale * 100)}%</output>
             <button
               className="icon-button"
               aria-label="Zoom in"
-              disabled={scale >= 2.4}
-              onClick={() => {
-                setUserScale(true)
-                setScale((value) => Math.min(2.4, Number((value + 0.2).toFixed(1))))
-              }}
+              disabled={effectiveScale >= 2.4}
+              onClick={() => chooseScale(Math.min(2.4, Number((effectiveScale + 0.2).toFixed(1))))}
             >
               <ZoomIn size={15} />
+            </button>
+            <button
+              className={pdfState.zoomMode === 'fit-width' ? 'active' : ''}
+              type="button"
+              aria-label="Fit PDF to width"
+              title="Fit to width"
+              onClick={fitWidth}
+            >
+              <Maximize2 size={14} /> <span className="pdf-action-text">Fit width</span>
             </button>
           </div>
         </div>
@@ -237,16 +196,14 @@ export function PdfViewer({
             className={isSelectingArea ? 'active' : ''}
             type="button"
             aria-label={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
-            title={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
-            onClick={isSelectingArea ? cancelAreaSelection : startAreaSelection}
+            onClick={() => setIsSelectingArea((current) => !current)}
           >
-            <Map size={14} />{' '}
+            <MapIcon size={14} />
             <span className="pdf-action-text">{isSelectingArea ? 'Cancel area' : 'Area highlight'}</span>
           </button>
           <button
             type="button"
             aria-label="Copy page link"
-            title="Copy page link"
             onClick={() =>
               void navigator.clipboard.writeText(
                 `[${document.title}, p. ${pageNumber}](sangam://document/${document.document_id}?page=${pageNumber})`,
@@ -276,53 +233,222 @@ export function PdfViewer({
           )}
         </div>
       )}
-      <div className="pdf-page-scroll">
-        <div
-          className={`pdf-page ${isSelectingArea ? 'is-selecting-area' : ''}`}
-          ref={pageHostRef}
-          onMouseUp={selectText}
-          onPointerDown={beginArea}
-          onPointerMove={updateArea}
-          onPointerUp={finishArea}
-        >
-          <canvas ref={canvasRef} />
-          <div className="textLayer" ref={textLayerRef} />
-          <div className="pdf-annotation-layer">
-            {annotations.flatMap((annotation) =>
-              annotation.geometry.map((rect, index) => (
-                <button
-                  className={`pdf-annotation-mark ${annotation.annotation_type}`}
-                  key={`${annotation.annotation_id}:${index}`}
-                  aria-label={`Open ${annotationTypeLabel(annotation.annotation_type)} annotation`}
-                  style={
-                    {
-                      left: `${rect.x * 100}%`,
-                      top: `${rect.y * 100}%`,
-                      width: `${rect.width * 100}%`,
-                      height: `${rect.height * 100}%`,
-                      '--annotation-color': annotation.color,
-                    } as CSSProperties
-                  }
-                  onClick={() => onSelectAnnotation(annotation.annotation_id)}
-                />
-              )),
-            )}
-            {areaPreview && (
-              <i
-                className="pdf-area-preview"
-                style={{
-                  left: `${areaPreview.x * 100}%`,
-                  top: `${areaPreview.y * 100}%`,
-                  width: `${areaPreview.width * 100}%`,
-                  height: `${areaPreview.height * 100}%`,
-                }}
+      <div
+        className="pdf-page-scroll"
+        ref={scrollRef}
+        onScroll={(event) => {
+          const host = event.currentTarget
+          const position = host.scrollTop + host.offsetTop + host.clientHeight * 0.35
+          const visible = Array.from(host.querySelectorAll<HTMLElement>('[data-pdf-page]'))
+            .filter((element) => element.offsetTop <= position)
+            .at(-1)
+          const nextPage = Number(visible?.dataset.pdfPage ?? 1)
+          updatePdfState({ scrollTop: host.scrollTop, pageNumber: nextPage })
+        }}
+      >
+        {pdf &&
+          Array.from({ length: pdf.numPages }, (_, index) => {
+            const number = index + 1
+            return (
+              <PdfPage
+                key={`${number}:${effectiveScale}`}
+                pdf={pdf}
+                documentId={document.document_id}
+                pageNumber={number}
+                scale={effectiveScale}
+                pageSize={pageSize}
+                annotations={annotations.filter((annotation) => annotation.page_number === number)}
+                active={Math.abs(number - pageNumber) <= 1}
+                isSelectingArea={isSelectingArea && number === pageNumber}
+                onSelectAnnotation={onSelectAnnotation}
+                setDraft={setDraft}
+                finishArea={() => setIsSelectingArea(false)}
               />
-            )}
-          </div>
-        </div>
+            )
+          })}
       </div>
     </section>
   )
+}
+
+function PdfPage({
+  pdf,
+  documentId,
+  pageNumber,
+  scale,
+  pageSize,
+  annotations,
+  active,
+  isSelectingArea,
+  onSelectAnnotation,
+  setDraft,
+  finishArea,
+}: {
+  pdf: PDFDocumentProxy
+  documentId: string
+  pageNumber: number
+  scale: number
+  pageSize: PageSize
+  annotations: Annotation[]
+  active: boolean
+  isSelectingArea: boolean
+  onSelectAnnotation: (annotationId: string) => void
+  setDraft: Dispatch<SetStateAction<AnnotationDraft | null>>
+  finishArea: () => void
+}) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const textLayerRef = useRef<HTMLDivElement>(null)
+  const [nearViewport, setNearViewport] = useState(active)
+  const [areaStart, setAreaStart] = useState<Point | null>(null)
+  const [areaPreview, setAreaPreview] = useState<PdfRect | null>(null)
+  const width = pageSize.width * scale
+  const height = pageSize.height * scale
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const scrollHost = host.closest('.pdf-page-scroll')
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) setNearViewport(true)
+      },
+      { root: scrollHost, rootMargin: '100% 0px' },
+    )
+    observer.observe(host)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!nearViewport || !canvasRef.current || !textLayerRef.current) return
+    let activeRender = true
+    let page: PDFPageProxy | null = null
+    let textLayer: TextLayer | null = null
+    let renderTask: ReturnType<PDFPageProxy['render']> | null = null
+    void pdf.getPage(pageNumber).then(async (loadedPage) => {
+      page = loadedPage
+      if (!activeRender || !canvasRef.current || !textLayerRef.current) return
+      const viewport = loadedPage.getViewport({ scale })
+      const canvas = canvasRef.current
+      const textHost = textLayerRef.current
+      const outputScale = window.devicePixelRatio || 1
+      canvas.width = Math.floor(viewport.width * outputScale)
+      canvas.height = Math.floor(viewport.height * outputScale)
+      canvas.style.width = `${viewport.width}px`
+      canvas.style.height = `${viewport.height}px`
+      textHost.replaceChildren()
+      textLayer = new TextLayer({
+        textContentSource: await loadedPage.getTextContent(),
+        container: textHost,
+        viewport,
+      })
+      renderTask = loadedPage.render({
+        canvas,
+        viewport,
+        transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
+      })
+      try {
+        await Promise.all([renderTask.promise, textLayer.render()])
+      } catch (error) {
+        if (activeRender) throw error
+      }
+    })
+    return () => {
+      activeRender = false
+      renderTask?.cancel()
+      textLayer?.cancel()
+      page?.cleanup()
+    }
+  }, [nearViewport, pageNumber, pdf, scale])
+
+  const selectText = () => {
+    if (isSelectingArea || areaStart) return
+    const host = hostRef.current
+    const selection = window.getSelection()
+    if (!host || !selection || selection.isCollapsed || !selection.toString().trim()) return
+    const range = selection.getRangeAt(0)
+    if (!host.contains(range.commonAncestorContainer)) return
+    const hostBounds = host.getBoundingClientRect()
+    const geometry = Array.from(range.getClientRects())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => normalizePdfRect(rect, hostBounds))
+    if (geometry.length === 0) return
+    setDraft({ annotationType: 'text_highlight', selectedText: selection.toString().trim(), geometry })
+  }
+  const beginArea = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isSelectingArea || !hostRef.current) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const start = pointInHost(event, hostRef.current)
+    setAreaStart(start)
+    setAreaPreview(rectFromPoints(start, start))
+  }
+  const updateArea = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isSelectingArea || !areaStart || !hostRef.current) return
+    setAreaPreview(rectFromPoints(areaStart, pointInHost(event, hostRef.current)))
+  }
+  const finishAreaSelection = () => {
+    if (areaPreview && areaPreview.width > 0.005 && areaPreview.height > 0.005) {
+      setDraft({ annotationType: 'area_highlight', selectedText: null, geometry: [areaPreview] })
+    }
+    setAreaStart(null)
+    setAreaPreview(null)
+    finishArea()
+  }
+
+  return (
+    <article
+      id={`pdf-page-${documentId}-${pageNumber}`}
+      className={`pdf-page ${isSelectingArea ? 'is-selecting-area' : ''}`}
+      data-pdf-page={pageNumber}
+      ref={hostRef}
+      style={{ width, height }}
+      aria-label={`PDF page ${pageNumber}`}
+      onMouseUp={selectText}
+      onPointerDown={beginArea}
+      onPointerMove={updateArea}
+      onPointerUp={finishAreaSelection}
+    >
+      {nearViewport && <canvas ref={canvasRef} />}
+      {nearViewport && <div className="textLayer" ref={textLayerRef} />}
+      <div className="pdf-annotation-layer">
+        {annotations.flatMap((annotation) =>
+          annotation.geometry.map((rect, index) => (
+            <button
+              className={`pdf-annotation-mark ${annotation.annotation_type}`}
+              key={`${annotation.annotation_id}:${index}`}
+              aria-label={`Open ${annotationTypeLabel(annotation.annotation_type)} annotation`}
+              style={
+                {
+                  left: `${rect.x * 100}%`,
+                  top: `${rect.y * 100}%`,
+                  width: `${rect.width * 100}%`,
+                  height: `${rect.height * 100}%`,
+                  '--annotation-color': annotation.color,
+                } as CSSProperties
+              }
+              onClick={() => onSelectAnnotation(annotation.annotation_id)}
+            />
+          )),
+        )}
+        {areaPreview && (
+          <i
+            className="pdf-area-preview"
+            style={{
+              left: `${areaPreview.x * 100}%`,
+              top: `${areaPreview.y * 100}%`,
+              width: `${areaPreview.width * 100}%`,
+              height: `${areaPreview.height * 100}%`,
+            }}
+          />
+        )}
+      </div>
+      <span className="pdf-page-label">{pageNumber}</span>
+    </article>
+  )
+}
+
+function pageElement(documentId: string, pageNumber: number) {
+  return window.document.getElementById(`pdf-page-${documentId}-${pageNumber}`)
 }
 
 function pointInHost(event: ReactPointerEvent<HTMLElement>, host: HTMLElement): Point {
@@ -339,14 +465,5 @@ function rectFromPoints(start: Point, end: Point): PdfRect {
     y: Math.min(start.y, end.y),
     width: Math.abs(end.x - start.x),
     height: Math.abs(end.y - start.y),
-  }
-}
-
-function normalizeRect(rect: DOMRect, host: DOMRect): PdfRect {
-  return {
-    x: Math.max(0, (rect.left - host.left) / host.width),
-    y: Math.max(0, (rect.top - host.top) / host.height),
-    width: Math.min(1, rect.width / host.width),
-    height: Math.min(1, rect.height / host.height),
   }
 }
