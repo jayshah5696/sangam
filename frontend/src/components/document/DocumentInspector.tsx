@@ -1,9 +1,10 @@
-import { lazy, Suspense, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { PanelRightClose, Upload } from 'lucide-react'
+import { ArrowRight, MessageSquareText, Upload } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
+import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { extractMarkdownHeadings } from '../../markdownHeadings'
 import { useTheme, type InspectorTab } from '../../theme'
@@ -15,7 +16,6 @@ import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { activateTabFromKeyboard } from '../tabKeyboard'
 
-const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
 
 export function DocumentInspector({
@@ -41,17 +41,24 @@ export function DocumentInspector({
   const session = useDocumentSession(documentId)
   const sessions = useDocumentSessions()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { preferences, updatePreferences } = useTheme()
   const pdf = document.content_type === 'application/pdf'
   const inspectorTabs = pdf
     ? (['properties', 'research', 'outline', 'history', 'chat'] as const)
     : standardInspectorTabs
   const tab = pdf || preferences.rightTab !== 'research' ? preferences.rightTab : 'properties'
-  const [chatActivated, setChatActivated] = useState(tab === 'chat')
-  const setTab = (next: InspectorTab) => {
-    if (next === 'chat') setChatActivated(true)
-    updatePreferences({ rightTab: next })
-  }
+  const setTab = (next: InspectorTab) => updatePreferences({ rightTab: next })
+  const openChat = () =>
+    navigate({
+      to: '/chat',
+      search: {
+        document: document.document_id,
+        revision: document.current_revision_id,
+        returnTo: `/documents/${document.document_id}`,
+      },
+      state: chatNavigationState(selectedText),
+    })
   const historyQuery = useQuery({
     queryKey: ['history', documentId],
     queryFn: () => api.history(documentId),
@@ -88,10 +95,7 @@ export function DocumentInspector({
     sessions.updateSession(documentId, { compareFrom: from, compareTo: to })
   }
   return (
-    <aside
-      className={`history-panel document-inspector ui-rail ui-rail--surface ${tab === 'chat' ? 'mode-chat' : ''}`}
-      style={{ width }}
-    >
+    <aside className="history-panel document-inspector ui-rail ui-rail--surface" style={{ width }}>
       <div className="right-panel-header ui-rail-header">
         <p className="eyebrow">Inspector</p>
         <button
@@ -100,7 +104,7 @@ export function DocumentInspector({
           title="Collapse document inspector"
           onClick={onCollapse}
         >
-          <PanelRightClose size={16} />
+          <ArrowRight size={16} />
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
@@ -258,13 +262,27 @@ export function DocumentInspector({
             />
           </>
         )}
-        {/* Lazy-load ChatKit after first use, then keep its composer and stream mounted. */}
-        {chatActivated && (
-          <div className="chat-panel-host" hidden={tab !== 'chat'}>
-            <Suspense fallback={<div className="center-message">Preparing workspace chat…</div>}>
-              <ChatPanel document={document} selectedText={selectedText} onDocumentUpdated={onUpdated} />
-            </Suspense>
-          </div>
+        {tab === 'chat' && (
+          <section className="inspector-chat-launcher">
+            <MessageSquareText size={22} />
+            <div>
+              <p className="eyebrow">Document context</p>
+              <h2>Continue in workspace chat</h2>
+              <p>
+                Open the full conversation with this document revision attached. Your document stays open when
+                you return.
+              </p>
+              <div className="inspector-chat-context">
+                <strong>{document.title}</strong>
+                <code>rev {document.current_revision_id.slice(0, 8)}</code>
+                {selectedText && <span>{selectedText.length.toLocaleString()} selected characters</span>}
+              </div>
+            </div>
+            <button type="button" className="primary-button" onClick={() => void openChat()}>
+              {selectedText ? 'Ask about selection' : 'Ask about this document'}
+              <ArrowRight size={14} />
+            </button>
+          </section>
         )}
       </div>
     </aside>

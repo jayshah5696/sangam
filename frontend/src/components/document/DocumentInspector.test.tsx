@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Document } from '../../api'
 import { DocumentInspector } from './DocumentInspector'
 
 const state = vi.hoisted(() => ({
   queries: [] as Array<{ queryKey: unknown[]; enabled?: boolean }>,
+  rightTab: 'properties',
+  navigate: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-query', () => ({
@@ -23,9 +25,11 @@ vi.mock('../../documentSessions', () => ({
   useDocumentSessions: () => ({ updateSession: vi.fn() }),
 }))
 
+vi.mock('@tanstack/react-router', () => ({ useNavigate: () => state.navigate }))
+
 vi.mock('../../theme', () => ({
   useTheme: () => ({
-    preferences: { rightTab: 'properties' },
+    preferences: { rightTab: state.rightTab },
     updatePreferences: vi.fn(),
   }),
 }))
@@ -35,7 +39,7 @@ vi.mock('../HtmlPreview', () => ({ HtmlPreview: () => null }))
 vi.mock('../MarkdownPreview', () => ({ MarkdownPreview: () => null }))
 vi.mock('../OneTimeSecret', () => ({ OneTimeSecret: () => null }))
 
-const document = {
+const testDocument = {
   document_id: 'document-1',
   title: 'Document',
   content_type: 'text/markdown',
@@ -51,6 +55,8 @@ const document = {
 
 beforeEach(() => {
   state.queries = []
+  state.rightTab = 'properties'
+  state.navigate.mockReset()
 })
 
 afterEach(cleanup)
@@ -60,8 +66,8 @@ describe('DocumentInspector', () => {
     render(
       <DocumentInspector
         width={320}
-        document={document}
-        content={document.content}
+        document={testDocument}
+        content={testDocument.content}
         selectedText=""
         onCollapse={vi.fn()}
         onUpdated={vi.fn()}
@@ -79,5 +85,32 @@ describe('DocumentInspector', () => {
     expect(history.getAttribute('tabindex')).toBe('-1')
     expect(properties.getAttribute('aria-controls')).toBe('inspector-panel')
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('inspector-tab-properties')
+  })
+
+  it('uses the chat tab as a document-context launcher', () => {
+    state.rightTab = 'chat'
+    render(
+      <DocumentInspector
+        width={320}
+        document={testDocument}
+        content={testDocument.content}
+        selectedText="Selected passage"
+        onCollapse={vi.fn()}
+        onUpdated={vi.fn()}
+        onFocusEditor={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about selection' }))
+    expect(state.navigate).toHaveBeenCalledWith({
+      to: '/chat',
+      search: {
+        document: 'document-1',
+        revision: 'revision-1',
+        returnTo: '/documents/document-1',
+      },
+      state: { sangamChatContext: { selectedText: 'Selected passage' } },
+    })
+    expect(document.querySelector('openai-chatkit')).toBeNull()
   })
 })

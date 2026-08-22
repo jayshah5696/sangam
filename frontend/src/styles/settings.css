@@ -97,6 +97,8 @@
 @keyframes settings-destination-pulse { 0%, 45% { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); } 100% { background: transparent; box-shadow: none; } }
 @keyframes settings-spin { to { transform: rotate(360deg); } }
 .chat-model-settings { display: grid; gap: 12px; }
+.chat-transport-setting code { margin-top: var(--space-1); color: var(--muted); font-size: var(--text-meta); overflow-wrap: anywhere; }
+.chat-transport-setting .connection-status { justify-self: end; }
 .settings-query-error { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); }
 .connection-list { display: grid; gap: var(--space-3); }
 .connection-card { display: grid; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-soft); }

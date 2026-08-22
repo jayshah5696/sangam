@@ -28,18 +28,48 @@ async function createPublication(request: import('@playwright/test').APIRequestC
   return (await publication.json()) as { publication_id: string; document_id: string }
 }
 
-test('workspace chat opens without a document and sends no document header', async ({ page }) => {
+test('workspace chat opens without a document and reports transport setup truthfully', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('link', { name: 'Ask workspace' }).click()
   await expect(page).toHaveURL(/\/chat$/)
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
-  await expect(page.getByLabel('Active chat context')).toContainText('Whole workspace')
-  await expect(page.getByLabel('Active chat context')).toContainText('No document pinned')
+  const runtime = await page.request.get('/api/v1/chat/config')
+  expect(runtime.ok(), await runtime.text()).toBeTruthy()
+  const config = (await runtime.json()) as { transport_status: 'ready' | 'misconfigured' }
+  if (config.transport_status === 'misconfigured') {
+    await expect(page.getByRole('alert')).toContainText('ChatKit browser transport needs setup')
+    await expect(page.locator('openai-chatkit')).toHaveCount(0)
+  } else {
+    await expect(page.getByLabel('Active chat context')).toContainText('Whole workspace')
+    await expect(page.getByLabel('Active chat context')).toContainText('No document pinned')
+  }
   const proposals = await page.request.get('/api/v1/chat/proposals')
   expect(proposals.ok(), await proposals.text()).toBeTruthy()
 
   const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
   if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, 'workspace-chat.png') })
+})
+
+test('document chat hands exact context to the full-page route', async ({
+  page,
+  seededWorkspace,
+}, testInfo) => {
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
+  await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
+  if (testInfo.project.name === 'chromium-narrow') {
+    await page.getByRole('button', { name: 'Open document inspector' }).click()
+  }
+  await page.getByRole('tab', { name: 'chat', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Continue in workspace chat' })).toBeVisible()
+  await page.getByRole('button', { name: 'Ask about this document' }).click()
+  await expect(page).toHaveURL(/\/chat\?document=/)
+  await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
+  await expect(page.getByLabel('Active chat context')).toContainText(seededWorkspace.documentTitle)
+  await expect(page.getByRole('button', { name: 'Return to document' })).toBeVisible()
+  if (testInfo.project.name === 'chromium-narrow') {
+    await expect(page.locator('.workspace-chat-page')).toHaveCSS('overflow', 'hidden')
+    await expect(page.locator('.workspace-chat-surface')).toHaveCSS('overflow', 'hidden')
+  }
 })
 
 test('publication dashboard filters and manages workspace publications', async ({ page, request }) => {

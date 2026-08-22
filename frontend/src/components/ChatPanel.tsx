@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { ChatKit, useChatKit } from '@openai/chatkit-react'
-import { FileText } from 'lucide-react'
+import { FileText, X } from 'lucide-react'
 import { api, type ChatProposal, type Document, type IssuedPublication, type Publication } from '../api'
 import {
   announceCitationNavigation,
@@ -12,6 +12,7 @@ import {
 } from '../citationNavigation'
 import { useTheme } from '../theme'
 import { OneTimeSecret } from './OneTimeSecret'
+import { StateMessage } from './ui/StateMessage'
 import { RevisionMergeView } from './RevisionMergeView'
 import {
   ChatCreateConfirmation,
@@ -36,10 +37,12 @@ export function ChatPanel({
   document,
   selectedText,
   onDocumentUpdated,
+  onClearContext,
 }: {
   document?: Document | null
   selectedText?: string
   onDocumentUpdated?: (document: Document, replaceContent?: boolean) => void
+  onClearContext?: () => void
 }) {
   const activeDocument = document ?? null
   const activeSelectedText = selectedText ?? ''
@@ -252,7 +255,11 @@ export function ChatPanel({
 
   return (
     <div className="chat-panel">
-      <ChatContextBanner document={activeDocument} selectedText={activeSelectedText} />
+      <ChatContextBanner
+        document={activeDocument}
+        selectedText={activeSelectedText}
+        onClear={onClearContext}
+      />
       {contextSwitchEvent && (
         <div className="chat-context-switch-event" role="status" aria-live="polite">
           <FileText size={13} />
@@ -263,14 +270,29 @@ export function ChatPanel({
         </div>
       )}
       {configQuery.isLoading ? (
-        <div className="center-message">Preparing workspace chat…</div>
+        <StateMessage kind="loading" title="Preparing workspace chat" />
       ) : configQuery.isError || !configQuery.data ? (
-        <div className="chat-unconfigured notice" role="alert">
-          <p>Chat configuration could not be loaded.</p>
-          <button className="secondary-action" onClick={() => void configQuery.refetch()}>
-            Retry
-          </button>
-        </div>
+        <StateMessage
+          kind="error"
+          title="Chat configuration could not be loaded"
+          description="Check the Sangam server, then retry."
+          action={
+            <button className="secondary-action" onClick={() => void configQuery.refetch()}>
+              Retry
+            </button>
+          }
+        />
+      ) : configQuery.data.transport_status !== 'ready' ? (
+        <StateMessage
+          kind="error"
+          title="ChatKit browser transport needs setup"
+          description={configQuery.data.transport_message}
+          action={
+            <button className="secondary-action" onClick={() => void configQuery.refetch()}>
+              Check again
+            </button>
+          }
+        />
       ) : (
         <>
           {!configQuery.data.inference_enabled && (
@@ -306,14 +328,18 @@ export function ChatPanel({
             />
           )}
           {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
-          {script.status === 'loading' && <div className="center-message">Loading chat interface…</div>}
+          {script.status === 'loading' && <StateMessage kind="loading" title="Loading chat interface" />}
           {script.status === 'error' && (
-            <div className="chat-unconfigured notice" role="alert">
-              <p>The ChatKit interface could not be loaded.</p>
-              <button className="secondary-action" onClick={script.retry}>
-                Retry ChatKit
-              </button>
-            </div>
+            <StateMessage
+              kind="error"
+              title="The ChatKit interface could not be loaded"
+              description="The browser could not load ChatKit's script. Check the connection, then retry."
+              action={
+                <button className="secondary-action" onClick={script.retry}>
+                  Retry ChatKit
+                </button>
+              }
+            />
           )}
           {script.status === 'ready' && configQuery.data && (
             <WorkspaceChatSurface
@@ -332,7 +358,7 @@ export function ChatPanel({
             />
           )}
           {proposalsQuery.isLoading ? (
-            <p className="small-muted">Loading edit proposals…</p>
+            activeDocument && <StateMessage compact kind="loading" title="Loading edit proposals" />
           ) : proposalsQuery.isError ? (
             <div className="chat-proposals-error" role="alert">
               <span>Proposals could not be loaded.</span>
@@ -495,9 +521,11 @@ function shortId(value: string) {
 export function ChatContextBanner({
   document,
   selectedText,
+  onClear,
 }: {
   document: Document | null
   selectedText: string
+  onClear?: () => void
 }) {
   return (
     <div className="chat-context-banner" aria-label="Active chat context">
@@ -508,6 +536,11 @@ export function ChatContextBanner({
           {selectedText.length > 0 && <span> · {selectedText.length.toLocaleString()} chars selected</span>}
         </span>
       </div>
+      {document && onClear && (
+        <button type="button" className="icon-button" aria-label="Remove document context" onClick={onClear}>
+          <X size={14} />
+        </button>
+      )}
     </div>
   )
 }
@@ -551,9 +584,7 @@ function ProposalReviewList({
   const reviewable = proposals.filter(
     (proposal) => proposal.status === 'pending' || proposal.status === 'stale',
   )
-  if (reviewable.length === 0) {
-    return <p className="chat-proposals-empty small-muted">No pending edits to review.</p>
-  }
+  if (reviewable.length === 0) return null
   return (
     <section className="chat-proposals" aria-label="Chat edit proposals">
       <p className="eyebrow">Review proposed edits</p>
@@ -684,6 +715,12 @@ type LiveChatContext = {
   requestCreateConfirmation: (params: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
+export function hasMountedChatInterface(host: HTMLElement) {
+  const root = host.shadowRoot
+  if (!root) return false
+  return Boolean(root.querySelector('iframe, .ck-wrapper, [contenteditable="true"], textarea'))
+}
+
 function WorkspaceChatSurface({
   liveRef,
   theme,
@@ -725,9 +762,12 @@ function WorkspaceChatSurface({
       const headers = new Headers(init?.headers)
       if (liveRef.current.documentId) {
         headers.set('X-Sangam-Document-ID', liveRef.current.documentId)
+        if (liveRef.current.revisionId) headers.set('X-Sangam-Revision-ID', liveRef.current.revisionId)
+        else headers.delete('X-Sangam-Revision-ID')
         headers.delete('X-Sangam-Workspace-Context')
       } else {
         headers.delete('X-Sangam-Document-ID')
+        headers.delete('X-Sangam-Revision-ID')
         headers.set('X-Sangam-Workspace-Context', '1')
       }
       return fetch(input, { ...init, headers })
@@ -772,8 +812,11 @@ function WorkspaceChatSurface({
     disclaimer: { text: 'Edits stay as proposals until you review and apply the diff.' },
     threadItemActions: { retry: true, feedback: false },
     thread: { autoScroll: true },
-    onReady: () => setPhase('ready'),
-    onError: () => setPhase((current) => (current === 'ready' ? current : 'error')),
+    onReady: () => {
+      // `chatkit.ready` only means the host initialized. Domain verification and
+      // iframe mounting happen afterward, so keep waiting for usable UI.
+    },
+    onError: () => setPhase('error'),
     onClientTool: ({ name, params }) => {
       if (name === 'get_editor_selection') {
         return {
@@ -790,21 +833,57 @@ function WorkspaceChatSurface({
     onResponseEnd,
     onDeeplink: onCitationDeeplink,
   })
+  const chatkitHostRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    let stopped = false
+    let observedRoot: ShadowRoot | null = null
+    const observer = new MutationObserver(() => check())
+    const check = () => {
+      const host = chatkitHostRef.current
+      if (!host || stopped) return
+      if (host.shadowRoot && host.shadowRoot !== observedRoot) {
+        observer.disconnect()
+        observedRoot = host.shadowRoot
+        observer.observe(observedRoot, { childList: true, subtree: true })
+      }
+      if (hasMountedChatInterface(host)) setPhase('ready')
+    }
+    check()
+    const interval = window.setInterval(check, 250)
+    return () => {
+      stopped = true
+      observer.disconnect()
+      window.clearInterval(interval)
+    }
+  }, [])
   return (
-    <>
-      <ChatKit control={chatkit.control} className="chatkit-frame" />
-      {phase === 'error' && (
-        <div className="chat-unconfigured notice" role="alert">
-          <p>The workspace chat could not finish loading.</p>
-          <p className="small-muted">
-            This usually follows a network interruption or a saved conversation the server no longer has.
-            Reloading starts a fresh conversation.
-          </p>
-          <button className="secondary-action" onClick={onReset}>
-            Reload workspace chat
-          </button>
+    <div className={`chatkit-shell phase-${phase}`}>
+      <ChatKit
+        ref={(host) => {
+          chatkitHostRef.current = host
+        }}
+        control={chatkit.control}
+        className="chatkit-frame"
+      />
+      {phase === 'connecting' && (
+        <div className="chatkit-state-overlay">
+          <StateMessage kind="loading" title="Connecting to workspace chat" />
         </div>
       )}
-    </>
+      {phase === 'error' && (
+        <div className="chatkit-state-overlay">
+          <StateMessage
+            kind="error"
+            title="Workspace chat could not finish loading"
+            description="ChatKit did not mount a composer. Check domain registration and the browser connection, then retry."
+            action={
+              <button className="secondary-action" onClick={onReset}>
+                Retry workspace chat
+              </button>
+            }
+          />
+        </div>
+      )}
+    </div>
   )
 }

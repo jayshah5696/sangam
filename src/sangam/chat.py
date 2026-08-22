@@ -104,7 +104,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         self.item_converter = SangamThreadItemConverter()
         self._run_semaphore = asyncio.Semaphore(config.max_concurrent_runs)
 
-    def runtime_config(self) -> ChatRuntimeConfig:
+    def runtime_config(self, *, request_is_loopback: bool = True) -> ChatRuntimeConfig:
         state = self.model_catalog.state()
         model = self.model_catalog.get_model(state.default_model)
         connection = self.provider_connections.get(model.connection_id)
@@ -128,11 +128,27 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             for item in schema.catalog
             if item.id in state.enabled_models and item.compatibility != "unsupported"
         ]
+        domain_key = self.config.domain_key.strip()
+        local_development_key = domain_key == "local-dev"
+        transport_ready = bool(domain_key) and (not local_development_key or request_is_loopback)
+        transport_message = (
+            "ChatKit browser transport is ready."
+            if transport_ready
+            else (
+                "Register this application origin with ChatKit and set "
+                "SANGAM_CHATKIT_DOMAIN_KEY on the server. The OpenRouter credential only enables "
+                "model inference."
+            )
+        )
+        inference_enabled = status == "ready" and state.workspace_enabled
         return ChatRuntimeConfig(
             status=status,
-            inference_enabled=status == "ready" and state.workspace_enabled,
+            inference_enabled=inference_enabled,
             message=message,
-            domain_key=self.config.domain_key,
+            transport_status="ready" if transport_ready else "misconfigured",
+            transport_message=transport_message,
+            chat_enabled=inference_enabled and transport_ready,
+            domain_key=domain_key,
             default_model=state.default_model,
             available_models=available,
             reasoning_effort=self.config.reasoning_effort,
@@ -180,9 +196,18 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         if snapshot is None:
             revision_id = None
             if document_id:
-                revision_id = self.workspace.get_document(
-                    context.principal, document_id
-                ).current_revision_id
+                document = self.workspace.get_document(context.principal, document_id)
+                revision_id = context.requested_revision_id or document.current_revision_id
+                if revision_id != document.current_revision_id:
+                    valid_revision_ids = {
+                        revision.revision_id
+                        for revision in self.workspace.history(context.principal, document_id)
+                    }
+                    if revision_id not in valid_revision_ids:
+                        raise CustomStreamError(
+                            "The attached document revision no longer exists. "
+                            "Return to the document and attach its current revision."
+                        )
             snapshot = {
                 "document_id": document_id,
                 "revision_id": revision_id,

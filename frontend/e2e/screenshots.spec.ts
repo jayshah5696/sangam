@@ -127,10 +127,12 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     fullPage: false,
   })
 
-  // Workspace chat tab inside the document inspector.
+  // Document context opens the canonical workspace chat route.
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
-  await expect(page.locator('.chatkit-frame')).toBeVisible()
-  await page.waitForTimeout(2500)
+  await page.getByRole('button', { name: 'Ask about this document' }).click()
+  await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
+  await expect(page.getByLabel('Active chat context')).toContainText('Product launch review')
+  await page.waitForTimeout(500)
   await page.screenshot({
     path: path.join(repositoryRoot, 'docs/assets/crisp-chat.png'),
     fullPage: false,

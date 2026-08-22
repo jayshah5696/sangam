@@ -176,6 +176,6 @@ describe('WorkbenchView - Issue #62 & #74', () => {
     expect(screen.getByLabelText('Document properties')).toBeDefined()
     expect(screen.getByLabelText('Document outline')).toBeDefined()
     expect(screen.getByLabelText('Revision history')).toBeDefined()
-    expect(screen.getByLabelText('Workspace chat')).toBeDefined()
+    expect(screen.getByLabelText('Ask about this document')).toBeDefined()
   })
 })

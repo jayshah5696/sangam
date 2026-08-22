@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from urllib.parse import urlsplit
 
 from chatkit.server import NonStreamingResult, StreamingResult
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
@@ -36,8 +37,12 @@ def create_chat_router(
     admin_dependency = Depends(require_administrator)
 
     @router.get("/chat/config", response_model=ChatRuntimeConfig)
-    def runtime_config(_principal: Principal = principal_dependency) -> ChatRuntimeConfig:
-        return chat.runtime_config()
+    def runtime_config(
+        request: Request,
+        origin: str | None = Header(default=None),
+        _principal: Principal = principal_dependency,
+    ) -> ChatRuntimeConfig:
+        return chat.runtime_config(request_is_loopback=_request_is_loopback(request, origin))
 
     @router.get("/chat/models", response_model=ChatModelSettings)
     def get_models(_principal: Principal = principal_dependency) -> ChatModelSettings:
@@ -132,6 +137,7 @@ def create_chat_router(
     async def chatkit_endpoint(
         request: Request,
         document_id: str | None = Header(default=None, alias="X-Sangam-Document-ID"),
+        revision_id: str | None = Header(default=None, alias="X-Sangam-Revision-ID"),
         workspace_context: str | None = Header(default=None, alias="X-Sangam-Workspace-Context"),
         principal: Principal = principal_dependency,
     ) -> Response:
@@ -151,6 +157,7 @@ def create_chat_router(
             context=ChatRequestContext(
                 principal=principal,
                 document_id=document_id,
+                requested_revision_id=revision_id,
                 workspace_context=workspace_context == "1",
             ),
         )
@@ -198,6 +205,17 @@ def create_chat_router(
         return chat.proposals.dismiss(principal, proposal_id, body.reason)
 
     return router
+
+
+def _request_is_loopback(request: Request, origin: str | None) -> bool:
+    # Browsers send Origin for this same-origin API request. Prefer it so a
+    # reverse proxy cannot make a public browser look like localhost.
+    candidate = origin or str(request.base_url)
+    try:
+        hostname = (urlsplit(candidate).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    return hostname in {"localhost", "127.0.0.1", "::1"}
 
 
 def _connection_schema(value) -> ProviderConnection:
