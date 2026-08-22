@@ -65,6 +65,11 @@ export function DocumentInspector({
     enabled: tab === 'history',
   })
   const tagsQuery = useQuery({ queryKey: ['tags'], queryFn: api.listTags, enabled: tab === 'properties' })
+  const htmlJavascript = useQuery({
+    queryKey: ['html-javascript-settings'],
+    queryFn: api.getHtmlJavascriptSettings,
+    enabled: document.content_type === 'text/html',
+  })
   const publicationQuery = useQuery({
     queryKey: ['publication', documentId],
     queryFn: () => api.getDocumentPublication(documentId),
@@ -136,6 +141,7 @@ export function DocumentInspector({
               key={document.metadata_version}
               document={document}
               tags={tagsQuery.data ?? []}
+              htmlJavascriptEnabled={htmlJavascript.data?.enabled}
               onUpdated={onUpdated}
             />
             {pdf && <PdfReplacementControl document={document} />}
@@ -530,10 +536,12 @@ function PublicationEditor({
 function MetadataEditor({
   document,
   tags,
+  htmlJavascriptEnabled,
   onUpdated,
 }: {
   document: Document
   tags: Tag[]
+  htmlJavascriptEnabled?: boolean
   onUpdated: (document: Document) => void
 }) {
   const [category, setCategory] = useState(document.category ?? '')
@@ -553,7 +561,7 @@ function MetadataEditor({
               {document.content_type === 'application/pdf'
                 ? 'PDF Document'
                 : document.content_type === 'text/html'
-                  ? document.trust_level === 'trusted_interactive'
+                  ? htmlJavascriptEnabled
                     ? 'Interactive HTML'
                     : 'Safe HTML'
                   : 'Markdown'}
