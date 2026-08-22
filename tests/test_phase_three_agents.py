@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -108,6 +109,108 @@ def test_token_secret_is_one_time_hashed_revocable_and_rotatable(
     repeated_rotation = client.post(f"/api/v1/agent-tokens/{replacement['token_id']}/rotate")
     assert repeated_rotation.status_code == 409
     assert repeated_rotation.json()["error"]["code"] == "credential_conflict"
+
+
+def test_token_update_changes_authority_without_rotating_secret_and_records_history(
+    client: TestClient,
+) -> None:
+    issued = issue_token(client, scopes=[{"capability": "read", "path_prefix": "agents"}])
+    token_id = issued["token_id"]
+    raw_token = issued["token"]
+    expires_at = (datetime.now(UTC) + timedelta(days=2)).isoformat()
+
+    updated = client.patch(
+        f"/api/v1/agent-tokens/{token_id}",
+        json={
+            "expected_version": issued["version"],
+            "label": "Incident reviewer",
+            "scopes": [
+                {"capability": "read", "path_prefix": "projects"},
+                {"capability": "search", "path_prefix": "projects"},
+            ],
+            "expires_at": expires_at,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    payload = updated.json()
+    assert payload["version"] == 2
+    assert payload["label"] == "Incident reviewer"
+    assert payload["scopes"] == [
+        {"capability": "read", "path_prefix": "projects"},
+        {"capability": "search", "path_prefix": "projects"},
+    ]
+    assert client.get("/api/v1/documents", headers=bearer(raw_token)).status_code == 200
+
+    stale = client.patch(
+        f"/api/v1/agent-tokens/{token_id}",
+        json={
+            "expected_version": issued["version"],
+            "label": "Stale edit",
+            "scopes": [{"capability": "read", "path_prefix": None}],
+            "expires_at": None,
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["details"] == {"current_version": 2, "expected_version": 1}
+
+    services = client.app.state.services
+    with services.identity.database.connection() as connection:
+        history = connection.execute(
+            "SELECT * FROM actor_token_events WHERE token_id = ?", (token_id,)
+        ).fetchall()
+    assert len(history) == 1
+    assert history[0]["version"] == 2
+    assert json.loads(history[0]["before_json"])["label"] == "Phase 3 test"
+    assert json.loads(history[0]["after_json"])["label"] == "Incident reviewer"
+
+    activity = client.get("/api/v1/activity", params={"actor_kind": "human"}).json()
+    event = next(event for event in activity if event["resource_id"] == token_id)
+    assert event["action"] == "update"
+    assert event["details"] == {"current_metadata_version": 2}
+
+    client.delete(f"/api/v1/agent-tokens/{token_id}")
+    revoked_edit = client.patch(
+        f"/api/v1/agent-tokens/{token_id}",
+        json={
+            "expected_version": 2,
+            "label": "No longer active",
+            "scopes": [{"capability": "read", "path_prefix": None}],
+            "expires_at": None,
+        },
+    )
+    assert revoked_edit.status_code == 409
+    assert revoked_edit.json()["error"]["code"] == "credential_conflict"
+
+
+def test_activity_date_range_filters_inclusive_utc_boundaries(client: TestClient) -> None:
+    issue_token(client)
+    rows = client.get("/api/v1/activity", params={"actor_kind": "human"}).json()
+    issue_event = next(event for event in rows if event["action"] == "issue")
+    created_at = datetime.fromisoformat(issue_event["created_at"])
+
+    included = client.get(
+        "/api/v1/activity",
+        params={
+            "actor_kind": "human",
+            "since": (created_at - timedelta(seconds=1)).isoformat(),
+            "until": (created_at + timedelta(seconds=1)).isoformat(),
+        },
+    )
+    assert included.status_code == 200
+    assert [event["event_id"] for event in included.json()] == [issue_event["event_id"]]
+
+    excluded = client.get(
+        "/api/v1/activity",
+        params={"actor_kind": "human", "since": (created_at + timedelta(seconds=1)).isoformat()},
+    )
+    assert excluded.status_code == 200
+    assert excluded.json() == []
+    invalid = client.get(
+        "/api/v1/activity",
+        params={"since": "2026-01-03T00:00:00Z", "until": "2026-01-02T00:00:00Z"},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["message"] == "Activity start must not be after its end"
 
 
 def test_token_listing_bulk_loads_scopes_and_agent_names_are_immutable(

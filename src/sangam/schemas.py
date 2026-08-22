@@ -296,6 +296,7 @@ class AgentToken(BaseModel):
     actor_display_name: str
     label: str
     scopes: list[TokenScope]
+    version: int
     created_at: str
     expires_at: str | None
     revoked_at: str | None
@@ -310,6 +311,13 @@ class IssuedAgentToken(AgentToken):
 class CreateAgentToken(MutationRequest):
     actor_id: str = Field(pattern=r"^agent:[a-z0-9][a-z0-9._-]{1,63}$")
     display_name: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=120)
+    scopes: list[TokenScope] = Field(min_length=1, max_length=50)
+    expires_at: str | None = None
+
+
+class UpdateAgentToken(BaseModel):
+    expected_version: int = Field(ge=1)
     label: str = Field(min_length=1, max_length=120)
     scopes: list[TokenScope] = Field(min_length=1, max_length=50)
     expires_at: str | None = None

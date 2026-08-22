@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { AlertTriangle, Bot, KeyRound, RefreshCw, ShieldOff } from 'lucide-react'
-import { api, type IssuedAgentToken, type TokenScope } from '../api'
+import { AlertTriangle, Bot, KeyRound, Pencil, RefreshCw, ShieldOff, X } from 'lucide-react'
+import { api, type AgentToken, type IssuedAgentToken, type TokenScope } from '../api'
 import { OneTimeSecret } from './OneTimeSecret'
 
 type Capability = TokenScope['capability']
@@ -114,6 +114,19 @@ function formatEffectiveScope(scope: TokenScope): string {
   return `${scope.capability}: ${scope.path_prefix ? `/${scope.path_prefix}/**` : '/** (workspace-wide)'}`
 }
 
+function localExpirationValue(value: string | null): string {
+  if (!value) return ''
+  const expiresAt = new Date(value)
+  return new Date(expiresAt.getTime() - expiresAt.getTimezoneOffset() * 60 * 1000).toISOString().slice(0, 16)
+}
+
+function prefixesFromScopes(scopes: TokenScope[]): ScopePrefixes {
+  const prefix = (capability: Capability) =>
+    scopes.find((scope) => scope.capability === capability)?.path_prefix ?? ''
+  const write = scopes.find((scope) => mutationCapabilities.has(scope.capability))?.path_prefix ?? ''
+  return { read: prefix('read'), search: prefix('search'), write }
+}
+
 export function AgentAccessSettings() {
   const queryClient = useQueryClient()
   const tokens = useQuery({ queryKey: ['agent-tokens'], queryFn: api.listAgentTokens })
@@ -129,6 +142,7 @@ export function AgentAccessSettings() {
   const [sensitiveConfirmed, setSensitiveConfirmed] = useState(false)
   const [issued, setIssued] = useState<IssuedAgentToken | null>(null)
   const [validationAttempted, setValidationAttempted] = useState(false)
+  const [editing, setEditing] = useState<AgentToken | null>(null)
   const secretDialogRef = useRef<HTMLDialogElement>(null)
   const writePrefixRef = useRef<HTMLInputElement>(null)
   const sensitiveConfirmationRef = useRef<HTMLInputElement>(null)
@@ -197,6 +211,23 @@ export function AgentAccessSettings() {
     },
   })
 
+  const update = useMutation({
+    mutationFn: (input: {
+      tokenId: string
+      expected_version: number
+      label: string
+      scopes: TokenScope[]
+      expires_at: string | null
+    }) => {
+      const { tokenId, ...body } = input
+      return api.updateAgentToken(tokenId, body)
+    },
+    onSuccess: async () => {
+      setEditing(null)
+      await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
+    },
+  })
+
   const revoke = useMutation({
     mutationFn: api.revokeAgentToken,
     onSuccess: async () => {
@@ -241,6 +272,17 @@ export function AgentAccessSettings() {
             />
           )}
         </dialog>
+
+        {editing && (
+          <AgentTokenEditor
+            key={`${editing.token_id}:${editing.version}`}
+            token={editing}
+            pending={update.isPending}
+            error={update.isError ? update.error.message : null}
+            onClose={() => setEditing(null)}
+            onSave={(input) => update.mutate({ tokenId: editing.token_id, ...input })}
+          />
+        )}
 
         <form
           className="agent-token-form"
@@ -471,6 +513,9 @@ export function AgentAccessSettings() {
               </div>
               {!token.revoked_at && (
                 <div className="token-actions">
+                  <button className="secondary-action" onClick={() => setEditing(token)}>
+                    <Pencil size={14} /> Edit
+                  </button>
                   <button
                     className="secondary-action"
                     disabled={rotate.isPending}
@@ -493,5 +538,174 @@ export function AgentAccessSettings() {
         </div>
       </div>
     </section>
+  )
+}
+
+function AgentTokenEditor({
+  token,
+  pending,
+  error,
+  onClose,
+  onSave,
+}: {
+  token: AgentToken
+  pending: boolean
+  error: string | null
+  onClose: () => void
+  onSave: (input: {
+    expected_version: number
+    label: string
+    scopes: TokenScope[]
+    expires_at: string | null
+  }) => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const [label, setLabel] = useState(token.label)
+  const [expiresAt, setExpiresAt] = useState(() => localExpirationValue(token.expires_at))
+  const [selected, setSelected] = useState<Set<Capability>>(
+    () => new Set(token.scopes.map((scope) => scope.capability)),
+  )
+  const [prefixes, setPrefixes] = useState<ScopePrefixes>(() => prefixesFromScopes(token.scopes))
+  const [sensitiveConfirmed, setSensitiveConfirmed] = useState(false)
+  const scopes = buildTokenScopes(selected, prefixes)
+  const selectedSensitiveCapabilities = sensitiveCapabilities(selected)
+  const hasMutations = [...selected].some((capability) => mutationCapabilities.has(capability))
+  const writePrefixMissing = hasMutations && normalizePrefixInput(prefixes.write) === null
+  const sensitiveConfirmationMissing = selectedSensitiveCapabilities.length > 0 && !sensitiveConfirmed
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (dialog && typeof dialog.showModal === 'function') dialog.showModal()
+  }, [])
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="agent-token-edit-dialog"
+      aria-label={`Edit ${token.label}`}
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+      onClose={onClose}
+    >
+      <header>
+        <div>
+          <h3>Edit token authority</h3>
+          <p>{token.actor_display_name} · Existing secret stays valid after saving.</p>
+        </div>
+        <button className="icon-button" aria-label="Close token editor" onClick={onClose}>
+          <X size={16} />
+        </button>
+      </header>
+      <form
+        className="agent-token-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!label.trim() || selected.size === 0 || writePrefixMissing || sensitiveConfirmationMissing)
+            return
+          onSave({
+            expected_version: token.version,
+            label,
+            scopes,
+            expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+          })
+        }}
+      >
+        <label>
+          <span>Token label</span>
+          <input required value={label} onChange={(event) => setLabel(event.target.value)} />
+        </label>
+        <label>
+          <span>Expiration</span>
+          <input
+            type="datetime-local"
+            value={expiresAt}
+            onChange={(event) => setExpiresAt(event.target.value)}
+          />
+        </label>
+        <div className="agent-token-prefixes">
+          <label>
+            <span>Read path prefix</span>
+            <input
+              value={prefixes.read}
+              onChange={(event) => setPrefixes((current) => ({ ...current, read: event.target.value }))}
+            />
+          </label>
+          <label>
+            <span>Search path prefix</span>
+            <input
+              value={prefixes.search}
+              onChange={(event) => setPrefixes((current) => ({ ...current, search: event.target.value }))}
+            />
+          </label>
+          <label>
+            <span>Write path prefix</span>
+            <input
+              value={prefixes.write}
+              aria-invalid={writePrefixMissing}
+              onChange={(event) => setPrefixes((current) => ({ ...current, write: event.target.value }))}
+            />
+            {writePrefixMissing && <small>A prefix is required for mutation capabilities.</small>}
+          </label>
+        </div>
+        <fieldset>
+          <legend>Capabilities</legend>
+          <div className="capability-grid">
+            {capabilities.map((capability) => (
+              <label
+                key={capability}
+                className={sensitiveCapabilityDescriptions[capability] ? 'sensitive' : undefined}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(capability)}
+                  onChange={() => {
+                    setSelected((current) => {
+                      const next = new Set(current)
+                      if (next.has(capability)) next.delete(capability)
+                      else next.add(capability)
+                      return next
+                    })
+                    setSensitiveConfirmed(false)
+                  }}
+                />
+                {capability}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        {selectedSensitiveCapabilities.length > 0 && (
+          <div className="agent-capability-warning" role="alert">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>Confirm high-impact access</strong>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={sensitiveConfirmed}
+                  onChange={(event) => setSensitiveConfirmed(event.target.checked)}
+                />
+                I intend to save these high-impact capabilities.
+              </label>
+            </div>
+          </div>
+        )}
+        {selected.size === 0 && <p className="error-text">Choose at least one capability.</p>}
+        {error && (
+          <p className="operation-result error-text" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="agent-token-edit-actions">
+          <button disabled={pending || selected.size === 0 || writePrefixMissing}>
+            {pending ? 'Saving…' : 'Save token'}
+          </button>
+          <button type="button" className="secondary-action" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </dialog>
   )
 }

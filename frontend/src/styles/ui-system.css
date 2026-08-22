@@ -166,7 +166,8 @@ textarea::placeholder {
   .editor-tools select,
   .agent-token-form input,
   .activity-filters input,
-  .activity-filters select
+  .activity-filters select,
+  .agent-token-edit-dialog input
 ) {
   min-height: var(--control-height);
   border-radius: var(--radius-control);
