@@ -71,14 +71,15 @@ def build_application_services(
     workspace = DiskWorkspaceFilesystem(settings.workspace_root)
     idempotency = IdempotencyStore(database)
     actors = ActorService()
+    mutations = MutationCoordinator()
     organization = WorkspaceOrganizationService(
         database=database,
         workspace=workspace,
         idempotency=idempotency,
         actors=actors,
+        mutations=mutations,
     )
     search_index = SearchIndex(database)
-    mutations = MutationCoordinator()
     documents = DocumentService(
         database=database,
         workspace=workspace,

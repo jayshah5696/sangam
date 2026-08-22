@@ -51,6 +51,7 @@ from sangam.schemas import (
     Folder,
     IssuedAgentToken,
     IssuedPublication,
+    MoveFolder,
     OperationEvent,
     PathMutation,
     Publication,
@@ -315,8 +316,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/api/v1/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "version": __version__}
+    def health() -> dict[str, object]:
+        return {
+            "status": "ok",
+            "version": __version__,
+            "karakeep_configured": karakeep.configured,
+        }
 
     @app.get("/api/v1/readiness")
     def readiness_status(request: Request) -> JSONResponse:
@@ -494,6 +499,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             expected_metadata_version=body.expected_metadata_version,
             category=body.category,
             tag_ids=body.tag_ids,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/folders/{folder_id}/move", response_model=Folder)
+    def move_folder(
+        folder_id: str,
+        body: MoveFolder,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> Folder:
+        return workspace.move_folder(
+            principal,
+            folder_id=folder_id,
+            path=body.path,
             idempotency_key=idempotency_key,
         )
 
@@ -999,6 +1018,14 @@ else fetch('/api/v1/trusted-previews/content', {
         _principal: Principal = admin_dependency,
     ) -> BackupVerification:
         return backups.verify(backup_id)
+
+    @app.delete("/api/v1/backups/{backup_id}", status_code=204)
+    def delete_backup(
+        backup_id: str,
+        _principal: Principal = admin_dependency,
+    ) -> Response:
+        backups.delete(backup_id)
+        return Response(status_code=204)
 
     frontend_dist = resolved_settings.frontend_dist
     if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():

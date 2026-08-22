@@ -3,19 +3,22 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { useNavigate } from '@tanstack/react-router'
 import {
   Columns2,
+  History,
+  ListTree,
+  MessageSquare,
   MoreHorizontal,
   PanelRightClose,
-  PanelRightOpen,
   Pin,
   PinOff,
   RotateCcw,
   Rows2,
+  SlidersHorizontal,
   X,
 } from 'lucide-react'
 import { Group as PanelGroup, Panel, Separator } from 'react-resizable-panels'
 import { api, type Document } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
-import { useTheme } from '../../theme'
+import { useTheme, type InspectorTab } from '../../theme'
 import {
   collectGroups,
   useWorkbench,
@@ -103,7 +106,7 @@ function EditorGroupView({ group }: { group: GroupNode }) {
   const navigate = useNavigate()
   const workbench = useWorkbench()
   const groups = collectGroups(workbench.root)
-  const showTabStrip = group.tabs.length > 1
+  const showTabStrip = group.tabs.length > 1 || groups.length > 1
   const activeDocumentId = group.activeTabId
   const showInspector = group.id === workbench.activeGroupId && groups.length === 1
   const activeDocumentQuery = useQuery({
@@ -251,15 +254,42 @@ function GroupInspector({ documentId }: { documentId: string }) {
     void queryClient.invalidateQueries({ queryKey: ['folders'] })
   }
   if (!preferences.rightVisible) {
+    const openToTab = (tabName: InspectorTab) => {
+      updatePreferences({ rightVisible: true, rightTab: tabName })
+    }
     return (
-      <aside className="right-rail">
+      <aside className="right-rail" aria-label="Collapsed inspector tools">
         <button
           className="icon-button"
-          aria-label="Open document sidebar"
-          title="Open document inspector"
-          onClick={() => updatePreferences({ rightVisible: true })}
+          aria-label="Document properties"
+          title="Document properties"
+          onClick={() => openToTab('properties')}
         >
-          <PanelRightOpen size={16} />
+          <SlidersHorizontal size={15} />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Document outline"
+          title="Document outline"
+          onClick={() => openToTab('outline')}
+        >
+          <ListTree size={15} />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Revision history"
+          title="Revision history"
+          onClick={() => openToTab('history')}
+        >
+          <History size={15} />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Workspace chat"
+          title="Workspace chat"
+          onClick={() => openToTab('chat')}
+        >
+          <MessageSquare size={15} />
         </button>
       </aside>
     )

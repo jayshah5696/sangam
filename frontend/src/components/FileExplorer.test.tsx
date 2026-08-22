@@ -19,7 +19,7 @@ const state = vi.hoisted(() => {
     decorations: [] as Array<{ text: string; title?: string } | null>,
     item,
     model: {
-      getFocusedPath: vi.fn(() => null),
+      getFocusedPath: vi.fn((): string | null => null),
       getItem: vi.fn(() => item),
       getSelectedPaths: vi.fn((): string[] => []),
       resetPaths: vi.fn(),
@@ -51,7 +51,9 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn(async () => undefined) }))
 
 vi.mock('@pierre/trees/react', () => ({
-  FileTree: () => <div data-testid="pierre-tree" />,
+  FileTree: (props: { onKeyDown?: (e: React.KeyboardEvent) => void }) => (
+    <div data-testid="pierre-tree" onKeyDown={props.onKeyDown} />
+  ),
   useFileTree: (options: {
     renderRowDecoration: (context: {
       item: { kind: 'directory'; name: string; path: string }
@@ -75,6 +77,9 @@ vi.mock('../workbench', () => ({
     ensureDocumentOpen: vi.fn(),
     root: {},
     splitGroup: vi.fn(),
+  }),
+  useWorkbenchActions: () => ({
+    updateDocumentTitle: vi.fn(),
   }),
 }))
 
@@ -173,5 +178,17 @@ describe('FileExplorerPanel', () => {
       focus: false,
       offset: 'nearest',
     })
+  })
+
+  it('triggers startRenaming when F2 is pressed on a focused tree item', () => {
+    state.model.getFocusedPath = vi.fn(() => 'projects/note.md')
+    const { container } = render(<FileExplorerPanel onSearch={vi.fn()} />)
+    const tree = container.querySelector('[data-testid="pierre-tree"]') ?? container.firstElementChild!
+
+    // Simulate F2 keydown
+    const event = new KeyboardEvent('keydown', { key: 'F2', bubbles: true })
+    tree.dispatchEvent(event)
+
+    expect(state.model.startRenaming).toHaveBeenCalledWith('projects/note.md')
   })
 })

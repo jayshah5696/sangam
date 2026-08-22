@@ -466,7 +466,7 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
     headers.set('Idempotency-Key', crypto.randomUUID())
   }
   const response = await fetch(`/api/v1${path}`, { ...init, headers })
-  const payload: unknown = await response.json()
+  const payload: unknown = response.status === 204 ? undefined : await response.json()
   if (!response.ok) {
     const parsed = errorSchema.safeParse(payload)
     if (parsed.success) {
@@ -684,6 +684,14 @@ export const api = {
           category,
           tag_ids: tagIds,
         }),
+      }),
+    )
+  },
+  async renameFolder(folder: Folder, path: string): Promise<Folder> {
+    return folderSchema.parse(
+      await request(`/folders/${folder.folder_id}/move`, {
+        method: 'POST',
+        body: JSON.stringify({ path }),
       }),
     )
   },
@@ -1012,5 +1020,11 @@ export const api = {
   },
   async verifyBackup(backupId: string): Promise<z.infer<typeof backupVerificationSchema>> {
     return backupVerificationSchema.parse(await request(`/backups/${backupId}/verify`, { method: 'POST' }))
+  },
+  async deleteBackup(backupId: string): Promise<void> {
+    await request(`/backups/${backupId}`, { method: 'DELETE' })
+  },
+  async health(): Promise<{ status: string; version: string; karakeep_configured?: boolean }> {
+    return (await request('/health')) as { status: string; version: string; karakeep_configured?: boolean }
   },
 }

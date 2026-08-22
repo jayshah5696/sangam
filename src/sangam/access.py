@@ -835,6 +835,25 @@ class WorkspaceAccessService:
 
         return self._run(principal, "tag", "folder", operation, resource_id=folder_id)
 
+    def move_folder(
+        self,
+        principal: Principal,
+        *,
+        folder_id: str,
+        path: str,
+        idempotency_key: str,
+    ) -> Folder:
+        def operation() -> Folder:
+            self.policy.require_administrator(principal)
+            return self.organization.rename_folder(
+                folder_id=folder_id,
+                destination_path=path,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            )
+
+        return self._run(principal, "move", "folder", operation, resource_id=folder_id, path=path)
+
     def _document_operation(
         self,
         principal: Principal,

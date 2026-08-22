@@ -42,11 +42,8 @@ function RootLayout() {
   const [mobileSidebarLocationKey, setMobileSidebarLocationKey] = useState<string | null>(null)
   const narrowSidebar = useMediaQuery('(max-width: 1100px)')
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
-  const usesDedicatedNavigation = location.pathname.startsWith('/settings')
   const locationKey = location.state.__TSR_key ?? location.href
-  const sidebarVisible =
-    !usesDedicatedNavigation &&
-    (narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible)
+  const sidebarVisible = narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible
 
   useEffect(() => {
     if (mobileSidebarLocationKey === null || mobileSidebarLocationKey === locationKey) return
@@ -97,7 +94,7 @@ function RootLayout() {
             onChange={(leftWidth) => updatePreferences({ leftWidth })}
           />
         </>
-      ) : !usesDedicatedNavigation ? (
+      ) : (
         <button
           className="sidebar-reveal icon-button"
           aria-label="Show workspace sidebar"
@@ -106,7 +103,7 @@ function RootLayout() {
         >
           <PanelLeftOpen size={17} />
         </button>
-      ) : null}
+      )}
       <div className="workbench-center">
         {layoutRecovery.recovered && (
           <div className="layout-recovery-notice" role="status">
@@ -269,11 +266,13 @@ function PrimarySidebar({
 }
 
 function SidebarLinks() {
+  const healthQuery = useQuery({ queryKey: ['health'], queryFn: () => api.health() })
+  const karakeepConfigured = healthQuery.data?.karakeep_configured === true
   const links = [
     { to: '/activity' as const, label: 'Agent activity', icon: Activity },
     { to: '/reconciliation' as const, label: 'Workspace integrity', icon: ShieldCheck },
     { to: '/backups' as const, label: 'Backups', icon: ArchiveRestore },
-    { to: '/karakeep' as const, label: 'Karakeep imports', icon: Import },
+    ...(karakeepConfigured ? [{ to: '/karakeep' as const, label: 'Karakeep imports', icon: Import }] : []),
     { to: '/trash' as const, label: 'Trash', icon: Trash2 },
     { to: '/settings' as const, label: 'Settings', icon: Settings },
   ]
@@ -321,7 +320,7 @@ function WorkspaceFreshness() {
       ) : (
         <>
           <CheckCircle2 size={13} />
-          <span>Current</span>
+          <span>Synced</span>
         </>
       )}
     </div>

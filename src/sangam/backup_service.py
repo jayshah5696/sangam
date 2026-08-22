@@ -72,5 +72,8 @@ class BackupService:
     def verify(self, backup_id: str) -> BackupVerification:
         return self.manager.verify(backup_id)
 
+    def delete(self, backup_id: str) -> None:
+        self.manager.delete(backup_id)
+
     def create_if_due(self) -> BackupSet | None:
         return self.manager.create_if_due()

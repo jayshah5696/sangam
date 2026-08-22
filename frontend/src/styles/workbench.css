@@ -133,7 +133,20 @@
   --trees-border-radius-override: var(--radius-control);
   --trees-item-margin-x-override: 0px;
 }
-.tree-context-menu { width: max-content; min-width: 178px; padding: 5px; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: 0 18px 48px rgba(0,0,0,.24); }
+.tree-context-menu {
+  position: fixed;
+  z-index: 120;
+  width: max-content;
+  min-width: 178px;
+  padding: 5px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(0,0,0,.24);
+}
 .tree-context-menu > button { min-height: var(--control-height); display: flex; align-items: center; gap: 7px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; padding: 0 8px; text-align: left; font-size: var(--text-control); }
 .tree-context-menu > button:hover, .tree-context-menu > button:focus-visible { background: var(--surface-soft); }
 .tree-context-menu > button.danger { color: var(--danger); }
@@ -145,7 +158,8 @@
 .search-panel { gap: 8px; }
 .sidebar-search-input { min-height: var(--control-height); display: flex; align-items: center; gap: 7px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--sidebar-text) 22%, transparent); border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-muted); }
 .sidebar-search-input:focus-within { border-color: var(--accent); outline: 1px solid var(--accent); }
-.sidebar-search-input input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--sidebar-text); font-size: var(--text-control); }
+.sidebar-search-input input { width: 100%; min-width: 0; border: 0; outline: none; background: transparent; color: var(--sidebar-text); font-size: var(--text-control); }
+.sidebar-search-input input:focus, .sidebar-search-input input:focus-visible { outline: none; box-shadow: none; }
 .sidebar-sort { display: flex; align-items: center; justify-content: space-between; color: var(--sidebar-muted); font-size: var(--text-label); }
 .sidebar-sort select { border: 1px solid color-mix(in srgb, var(--sidebar-text) 15%, transparent); border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-text); padding: 4px 6px; font-size: var(--text-control); }
 .search-results { min-height: 0; overflow: auto; }
@@ -205,11 +219,14 @@
 .tab-close { width: 25px; flex: none; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); opacity: 0; }
 .editor-tab:hover .tab-close, .editor-tab.active .tab-close, .tab-close:focus-visible { opacity: 1; }
 .tab-close:hover { color: var(--text); }
-.tab-actions-trigger { width: 35px; height: 36px; flex: none; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted); }
+.tab-actions-trigger { width: 40px; min-height: 37px; height: 100%; display: flex; align-items: center; justify-content: center; flex: none; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted); }
 .tab-actions-trigger:hover, .tab-actions-trigger[aria-expanded="true"] { color: var(--text); background: var(--surface-soft); }
-.tab-document-layout { min-height: 0; height: calc(100% - 37px); }
+.tab-document-layout { min-height: 0; height: calc(100% - 37px); overflow: hidden; display: flex; }
 .tab-document-layout .history-panel { min-height: 0; height: 100%; max-height: none; }
-.tab-document-layout .document-workspace { min-height: 0; overflow: auto; }
+.tab-document-layout .document-workspace { min-height: 0; height: 100%; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.tab-document-layout .editing-surface { min-height: 0; flex: 1; height: 100%; overflow: hidden; }
+.tab-document-layout .editor, .tab-document-layout .editor .cm-editor { min-height: 0; height: 100%; }
+.tab-document-layout .markdown-preview { min-height: 0; height: 100%; overflow-y: auto; }
 .tab-document-layout .html-preview-workspace { overflow: hidden; }
 .html-preview-workspace .editing-surface { min-height: 0; overflow: hidden; }
 .html-preview-workspace .html-preview { height: 100%; min-height: 0; }

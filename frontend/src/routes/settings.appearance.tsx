@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import {
-  ArrowLeft,
   Check,
   Cpu,
   FolderTree,
@@ -107,6 +106,13 @@ const settingsSearchIndex: Array<{
     description: 'Rebuild full-text search from canonical data',
     keywords: 'maintenance reindex fts recovery',
   },
+  {
+    id: 'app-version',
+    category: 'operations',
+    label: 'Server status',
+    description: 'Installed Sangam server version and health',
+    keywords: 'version status health refresh build',
+  },
 ]
 
 export function WorkspaceSettings() {
@@ -115,6 +121,7 @@ export function WorkspaceSettings() {
   const queryClient = useQueryClient()
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
+  const health = useQuery({ queryKey: ['health'], queryFn: () => api.health() })
   const [tagName, setTagName] = useState('')
   const [tagColor, setTagColor] = useState('#327a62')
   const createTag = useMutation({
@@ -174,12 +181,8 @@ export function WorkspaceSettings() {
 
   return (
     <div className="settings-control-center">
-      <aside className="settings-nav" aria-label="Settings navigation">
-        <Link className="settings-back" to="/">
-          <ArrowLeft size={14} />
-          Back to workspace
-        </Link>
-        <div className="settings-nav-title">
+      <aside className="settings-nav ui-rail" aria-label="Settings navigation">
+        <div className="settings-nav-title ui-rail-header">
           <strong>Settings</strong>
           <span>Workspace and local preferences</span>
         </div>
@@ -290,7 +293,6 @@ export function WorkspaceSettings() {
               icon={Paintbrush}
               title="Theme"
               description="Preview the complete Sangam workbench before changing its colors."
-              scope="browser"
             >
               <div className="theme-grid settings-theme-grid">
                 {themes.map((theme) => (
@@ -319,7 +321,6 @@ export function WorkspaceSettings() {
               icon={MonitorCog}
               title="Workbench layout"
               description="Panel visibility and editor groups are stored in this browser."
-              scope="browser"
             >
               <div className="settings-rows">
                 <SettingRow
@@ -356,7 +357,6 @@ export function WorkspaceSettings() {
               icon={FolderTree}
               title="Files and organization"
               description="Tags, categories, and folder metadata belong to the shared workspace."
-              scope="workspace"
             >
               <section className="settings-subsection" id="tag-settings" tabIndex={-1}>
                 <div className="settings-subtitle">
@@ -427,40 +427,78 @@ export function WorkspaceSettings() {
 
           {activeCategory === 'operations' && (
             <SettingsSection
-              id="maintenance"
-              icon={SearchCheck}
-              title="Search index"
-              description="Rebuild derived full-text data from the canonical workspace."
-              scope="workspace"
+              id="operations"
+              icon={Wrench}
+              title="Workspace operations"
+              description="Perform derived data index rebuilding and inspect server status."
             >
-              <div className="maintenance-row">
-                <div>
-                  <SearchCheck size={17} />
-                  <span>
-                    <strong>Full-text search</strong>
-                    <small>The index can be rebuilt without changing documents.</small>
-                  </span>
+              <div className="settings-rows">
+                <div className="maintenance-row" id="maintenance" tabIndex={-1}>
+                  <div>
+                    <SearchCheck size={17} />
+                    <span>
+                      <strong>Full-text search index</strong>
+                      <small>Rebuild search index from canonical workspace documents.</small>
+                    </span>
+                  </div>
+                  <button
+                    className="secondary-action"
+                    disabled={reindex.isPending}
+                    onClick={() => reindex.mutate()}
+                  >
+                    <RefreshCw size={14} className={reindex.isPending ? 'spin' : ''} />
+                    {reindex.isPending ? 'Rebuilding…' : 'Rebuild index'}
+                  </button>
                 </div>
-                <button
-                  className="secondary-action"
-                  disabled={reindex.isPending}
-                  onClick={() => reindex.mutate()}
-                >
-                  <RefreshCw size={14} className={reindex.isPending ? 'spin' : ''} />
-                  {reindex.isPending ? 'Rebuilding…' : 'Rebuild index'}
-                </button>
+                {reindex.isSuccess && (
+                  <p className="operation-result success" role="status">
+                    <Check size={14} />
+                    Indexed {reindex.data} documents.
+                  </p>
+                )}
+                {reindex.isError && (
+                  <p className="operation-result error-text" role="alert">
+                    Search index could not be rebuilt: {reindex.error.message}
+                  </p>
+                )}
+
+                <div className="maintenance-row" id="app-version" tabIndex={-1}>
+                  <div>
+                    <Wrench size={17} />
+                    <span>
+                      <strong>
+                        {health.data ? `Sangam Server v${health.data.version}` : 'Sangam Server'}
+                      </strong>
+                      <small>
+                        {health.data
+                          ? `Self-hosted release · System status: ${health.data.status}`
+                          : health.isError
+                            ? 'Server status is unavailable.'
+                            : 'Loading installed version and server status…'}
+                      </small>
+                    </span>
+                  </div>
+                  <button
+                    className="secondary-action"
+                    disabled={health.isFetching}
+                    onClick={() => void health.refetch()}
+                  >
+                    <RefreshCw size={14} className={health.isFetching ? 'spin' : ''} />
+                    {health.isFetching ? 'Refreshing…' : 'Refresh server status'}
+                  </button>
+                </div>
+                {health.isSuccess && (
+                  <p className="operation-result success" role="status">
+                    <Check size={14} />
+                    Server is healthy. Running Sangam v{health.data.version}.
+                  </p>
+                )}
+                {health.isError && (
+                  <p className="operation-result error-text" role="alert">
+                    Server status could not be refreshed.
+                  </p>
+                )}
               </div>
-              {reindex.isSuccess && (
-                <p className="operation-result success" role="status">
-                  <Check size={14} />
-                  Indexed {reindex.data} documents.
-                </p>
-              )}
-              {reindex.isError && (
-                <p className="operation-result error-text" role="alert">
-                  Search index could not be rebuilt: {reindex.error.message}
-                </p>
-              )}
             </SettingsSection>
           )}
         </main>
@@ -505,7 +543,7 @@ function SettingsSection({
   icon: typeof Paintbrush
   title: string
   description: string
-  scope: 'browser' | 'workspace'
+  scope?: 'browser' | 'workspace'
   children: React.ReactNode
 }) {
   return (
@@ -516,7 +554,7 @@ function SettingsSection({
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
-        <ScopeBadge scope={scope} />
+        {scope && <ScopeBadge scope={scope} />}
       </header>
       <div className="settings-panel-body">{children}</div>
     </section>

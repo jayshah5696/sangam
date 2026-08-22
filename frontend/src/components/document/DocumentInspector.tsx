@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { PanelRightClose } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
+import { extractMarkdownHeadings } from '../../markdownHeadings'
 import { useTheme, type InspectorTab } from '../../theme'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { HtmlPreview } from '../HtmlPreview'
@@ -73,13 +74,7 @@ export function DocumentInspector({
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['publication', documentId] }),
   })
-  const headings = content
-    .split('\n')
-    .map((line, index) => {
-      const match = /^(#{1,6})\s+(.+)/.exec(line)
-      return match ? { level: match[1]!.length, text: match[2]!, line: index + 1 } : null
-    })
-    .filter((heading): heading is { level: number; text: string; line: number } => Boolean(heading))
+  const headings = extractMarkdownHeadings(content)
   const fromRevision = history.find((revision) => revision.revision_id === compareFrom)
   const toRevision = history.find((revision) => revision.revision_id === compareTo)
   const setComparison = (from: string, to: string) => {

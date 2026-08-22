@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import type {
@@ -11,10 +19,11 @@ import type {
   FileTreeRowDecorationContext,
 } from '@pierre/trees'
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react'
+import { createPortal } from 'react-dom'
 import { Copy, FilePlus2, FolderPlus, PanelRightOpen, Pencil, Search, Trash2 } from 'lucide-react'
-import { api, type DocumentSummary } from '../api'
+import { api, type DocumentSummary, type Folder } from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
-import { findGroup, useWorkbench } from '../workbench'
+import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
   buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
@@ -42,6 +51,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const workbenchActions = useWorkbenchActions()
   const activeDocumentId = findGroup(workbench.root, workbench.activeGroupId)?.activeTabId
   const documents = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
@@ -107,10 +117,24 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     onSuccess: async (document) => {
       pendingFocusDocumentIdRef.current = document.document_id
       setError(null)
+      workbenchActions.updateDocumentTitle(document.document_id, document.title)
       await refresh()
     },
     onError: async (cause) => {
       setError(cause instanceof Error ? cause.message : 'The document could not be renamed.')
+      await refresh()
+    },
+  })
+
+  const renameFolder = useMutation({
+    mutationFn: ({ folder, destinationPath }: { folder: Folder; destinationPath: string }) =>
+      api.renameFolder(folder, destinationPath),
+    onSuccess: async () => {
+      setError(null)
+      await refresh()
+    },
+    onError: async (cause) => {
+      setError(cause instanceof Error ? cause.message : 'The folder could not be renamed.')
       await refresh()
     },
   })
@@ -188,10 +212,20 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       if (document?.path) move.mutate({ document, folderPath: target.directoryPath ?? '' })
     },
     canRename: ({ isFolder, path }) =>
-      !isFolder && adapterRef.current.documentByTreePath.get(path)?.content_type !== 'application/pdf',
+      isFolder
+        ? path !== adapterRef.current.draftsRootPath
+        : adapterRef.current.documentByTreePath.get(path)?.content_type !== 'application/pdf',
     onRename: ({ sourcePath, destinationPath }) => {
       const document = adapterRef.current.documentByTreePath.get(sourcePath)
-      if (document) rename.mutate({ document, destinationPath })
+      if (document) {
+        rename.mutate({ document, destinationPath })
+        return
+      }
+      const folder = adapterRef.current.folderByTreePath.get(sourcePath)
+      if (folder) {
+        renameFolder.mutate({ folder, destinationPath })
+        return
+      }
     },
     renderRowDecoration: ({ item }) => {
       const folder = adapterRef.current.folderByTreePath.get(item.path)
@@ -215,19 +249,43 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     callbacksRef.current = callbacks
   })
 
+  const [activeContextMenu, setActiveContextMenu] = useState<{
+    item: ContextMenuItem
+    context: ContextMenuOpenContext
+  } | null>(null)
   const { model } = useFileTree({
     id: 'sangam-workspace-tree',
     paths: adapter.paths,
     density: 'compact',
     icons: 'minimal',
-    initialExpansion: 'closed',
+    flattenEmptyDirectories: false,
+    unsafeCSS: `
+      [data-item-section="decoration"] {
+        flex: 0 0 auto !important;
+      }
+      [data-item-section="decoration"]:empty {
+        display: none !important;
+      }
+      [data-item-section="content"] {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+        white-space: nowrap !important;
+        text-overflow: ellipsis !important;
+      }
+      [data-item-section="content"] > * {
+        display: none !important;
+      }
+      [data-item-section="content"]::after {
+        content: attr(data-sangam-label);
+      }
+    `,
+    initialExpansion: 'open',
     initialExpandedPaths: loadExpanded(),
     initialSelectedPaths: activeDocumentId
       ? [adapter.treePathByDocumentId.get(activeDocumentId)].filter((path): path is string => Boolean(path))
       : [],
-    composition: {
-      contextMenu: { enabled: true, triggerMode: 'both', buttonVisibility: 'when-needed' },
-    },
     dragAndDrop: {
       canDrag: (paths) => callbacksRef.current.canDrag(paths),
       canDrop: (event) => callbacksRef.current.canDrop(event),
@@ -293,6 +351,34 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     [model],
   )
 
+  const openContextMenu = (
+    item: ContextMenuItem,
+    anchorElement: HTMLElement,
+    anchorRect: DOMRect | Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left' | 'width' | 'height' | 'x' | 'y'>,
+  ) => {
+    const close = ({ restoreFocus = true }: { restoreFocus?: boolean } = {}) => {
+      setActiveContextMenu(null)
+      if (restoreFocus) requestAnimationFrame(() => anchorElement.focus())
+    }
+    setActiveContextMenu({
+      item,
+      context: {
+        anchorElement,
+        anchorRect,
+        close,
+        restoreFocus: () => requestAnimationFrame(() => anchorElement.focus()),
+      },
+    })
+  }
+  const itemFromPath = (path: string): ContextMenuItem | null => {
+    const normalizedPath = path.endsWith('/') ? path.slice(0, -1) : path
+    const folder = adapterRef.current.folderByTreePath.get(normalizedPath)
+    if (folder) return { kind: 'directory', name: folder.name, path: normalizedPath }
+    const document = adapterRef.current.documentByTreePath.get(normalizedPath)
+    return document
+      ? { kind: 'file', name: workspaceBasename(document.path ?? document.title), path: normalizedPath }
+      : null
+  }
   const selectedDocument = selectedTreePath ? adapter.documentByTreePath.get(selectedTreePath) : undefined
   const selectedFolderPath = selectedTreePath
     ? adapter.folderByTreePath.has(selectedTreePath)
@@ -303,12 +389,69 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     : ''
 
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
+      const path = model.getFocusedPath()
+      const item = path ? itemFromPath(path) : null
+      const activeElement = event.currentTarget.shadowRoot?.activeElement
+      const anchorElement = activeElement instanceof HTMLElement ? activeElement : null
+      if (item && anchorElement) {
+        event.preventDefault()
+        openContextMenu(item, anchorElement, anchorElement.getBoundingClientRect())
+      }
+      return
+    }
+    if (event.key === 'F2') {
+      const path = model.getFocusedPath()
+      if (path) {
+        event.preventDefault()
+        model.startRenaming(path)
+      }
+      return
+    }
     if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.altKey) return
     const path = model.getFocusedPath()
     const document = path ? adapterRef.current.documentByTreePath.get(path) : undefined
     if (!document) return
     event.preventDefault()
     void openDocument(document)
+  }
+
+  const syncTreeLabelsRef = useRef((host: HTMLElement) => {
+    for (const row of host.shadowRoot?.querySelectorAll<HTMLElement>('[data-type="item"]') ?? []) {
+      const path = row.dataset.itemPath
+      if (!path) continue
+      const item = itemFromPath(path)
+      const content = row.querySelector<HTMLElement>('[data-item-section="content"]')
+      if (item && content) content.dataset.sangamLabel = item.name
+    }
+  })
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const host = document.querySelector<HTMLElement>('.sangam-file-tree')
+      if (host) syncTreeLabelsRef.current(host)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [adapter])
+
+  const handleTreeContextMenu = (event: MouseEvent<HTMLElement>) => {
+    const path = model.getFocusedPath()
+    const item = path ? itemFromPath(path) : null
+    const host = event.currentTarget as HTMLElement
+    const activeElement = host.shadowRoot?.activeElement
+    const anchorElement = activeElement instanceof HTMLElement ? activeElement : null
+    if (!item || !anchorElement) return
+    event.preventDefault()
+    event.stopPropagation()
+    openContextMenu(item, anchorElement, {
+      top: event.clientY,
+      right: event.clientX,
+      bottom: event.clientY,
+      left: event.clientX,
+      width: 0,
+      height: 0,
+      x: event.clientX,
+      y: event.clientY,
+    })
   }
 
   return (
@@ -368,28 +511,32 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       <div className="pierre-tree-shell">
         <PierreFileTree
           aria-label="Files"
+          onContextMenu={handleTreeContextMenu}
           className="sangam-file-tree"
           model={model}
+          onPointerMove={(event) => syncTreeLabelsRef.current(event.currentTarget)}
+          onFocusCapture={(event) => syncTreeLabelsRef.current(event.currentTarget)}
           onKeyDown={handleTreeKeyDown}
           onDoubleClick={() => {
             const path = model.getFocusedPath()
             if (path && adapterRef.current.documentByTreePath.has(path)) model.startRenaming(path)
           }}
-          renderContextMenu={(item, context) => (
-            <ExplorerContextMenu
-              adapter={adapterRef.current}
-              context={context}
-              item={item}
-              onCreate={(kind, parentPath) => setCreateMode({ kind, parentPath })}
-              onDuplicate={(document) => duplicate.mutate(document)}
-              onOpenToSide={(document) => void openDocument(document, true)}
-              onRename={(path) => model.startRenaming(path)}
-              onTrash={(document) => {
-                if (window.confirm(`Move “${document.title}” to trash?`)) remove.mutate(document)
-              }}
-            />
-          )}
         />
+        {activeContextMenu && (
+          <ExplorerContextMenu
+            adapter={adapter}
+            context={activeContextMenu.context}
+            item={activeContextMenu.item}
+            onClose={() => setActiveContextMenu(null)}
+            onCreate={(kind, parentPath) => setCreateMode({ kind, parentPath })}
+            onDuplicate={(document) => duplicate.mutate(document)}
+            onOpenToSide={(document) => void openDocument(document, true)}
+            onRename={(path) => model.startRenaming(path)}
+            onTrash={(document) => {
+              if (window.confirm(`Move “${document.title}” to trash?`)) remove.mutate(document)
+            }}
+          />
+        )}
         {!documents.isLoading && adapter.paths.length === 0 && (
           <div className="explorer-empty">
             <p className="sidebar-message">No documents yet.</p>
@@ -411,6 +558,7 @@ function ExplorerContextMenu({
   adapter,
   context,
   item,
+  onClose,
   onCreate,
   onDuplicate,
   onOpenToSide,
@@ -420,54 +568,115 @@ function ExplorerContextMenu({
   adapter: WorkspaceTreeAdapter
   context: ContextMenuOpenContext
   item: ContextMenuItem
+  onClose: () => void
   onCreate: (kind: 'file' | 'folder', parentPath: string) => void
   onDuplicate: (document: DocumentSummary) => void
   onOpenToSide: (document: DocumentSummary) => void
   onRename: (path: string) => void
   onTrash: (document: DocumentSummary) => void
 }) {
-  const document = adapter.documentByTreePath.get(item.path)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const anchorRect = context.anchorRect ?? context.anchorElement.getBoundingClientRect()
+  const [position, setPosition] = useState({ top: anchorRect.bottom, left: anchorRect.left })
+  const selectedDocument = adapter.documentByTreePath.get(item.path)
   const folder = adapter.folderByTreePath.get(item.path)
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (!menu) return
+    const edge = 8
+    const gap = 4
+    const rect = menu.getBoundingClientRect()
+    const left = Math.min(window.innerWidth - rect.width - edge, Math.max(edge, anchorRect.left))
+    const below = anchorRect.bottom + gap
+    const top =
+      below + rect.height <= window.innerHeight - edge
+        ? below
+        : Math.max(edge, anchorRect.top - rect.height - gap)
+    setPosition({ top, left })
+    menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+  }, [anchorRect.bottom, anchorRect.left, anchorRect.top])
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const menu = menuRef.current
+    if (!menu) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onClose()
+      requestAnimationFrame(() => context.anchorElement.focus())
+      return
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')]
+    if (!items.length) return
+    event.preventDefault()
+    const current = items.indexOf(globalThis.document.activeElement as HTMLElement)
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowDown'
+            ? (current + 1 + items.length) % items.length
+            : (current - 1 + items.length) % items.length
+    items[next]?.focus()
+  }
   const run = (action: () => void, restoreFocus = true) => {
+    onClose()
     context.close({ restoreFocus })
     action()
   }
-  if (folder)
-    return (
-      <div className="tree-context-menu" role="menu" aria-label={`Actions for ${item.name}`}>
-        <button type="button" role="menuitem" onClick={() => run(() => onCreate('file', folder.path))}>
-          <FilePlus2 size={12} /> New file
-        </button>
-        <button type="button" role="menuitem" onClick={() => run(() => onCreate('folder', folder.path))}>
-          <FolderPlus size={12} /> New folder
-        </button>
-      </div>
-    )
-  if (!document) return null
-  return (
-    <div className="tree-context-menu" role="menu" aria-label={`Actions for ${item.name}`}>
-      <button type="button" role="menuitem" onClick={() => run(() => onOpenToSide(document))}>
+  const menuItems = folder ? (
+    <>
+      <button type="button" role="menuitem" onClick={() => run(() => onCreate('file', folder.path))}>
+        <FilePlus2 size={12} /> New file
+      </button>
+      <button type="button" role="menuitem" onClick={() => run(() => onCreate('folder', folder.path))}>
+        <FolderPlus size={12} /> New folder
+      </button>
+      <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
+        <Pencil size={12} /> Rename
+      </button>
+    </>
+  ) : selectedDocument ? (
+    <>
+      <button type="button" role="menuitem" onClick={() => run(() => onOpenToSide(selectedDocument))}>
         <PanelRightOpen size={12} /> Open in split
       </button>
-      {document.content_type !== 'application/pdf' && (
+      {selectedDocument.content_type !== 'application/pdf' && (
         <>
           <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
             <Pencil size={12} /> Rename
           </button>
-          <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(document))}>
+          <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(selectedDocument))}>
             <Copy size={12} /> Duplicate
           </button>
           <button
             className="danger"
             type="button"
             role="menuitem"
-            onClick={() => run(() => onTrash(document))}
+            onClick={() => run(() => onTrash(selectedDocument))}
           >
             <Trash2 size={12} /> Move to trash
           </button>
         </>
       )}
-    </div>
+    </>
+  ) : null
+  if (!menuItems) return null
+  return createPortal(
+    <div
+      ref={menuRef}
+      data-file-tree-context-menu-root="true"
+      className="tree-context-menu"
+      role="menu"
+      aria-label={`Actions for ${item.name}`}
+      style={{ top: position.top, left: position.left }}
+      onKeyDown={handleKeyDown}
+    >
+      {menuItems}
+    </div>,
+    globalThis.document.body,
   )
 }
 

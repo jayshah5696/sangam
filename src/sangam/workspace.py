@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
-from sangam.errors import InvalidPathError
+from sangam.errors import InvalidPathError, NotFoundError
 
 
 def canonicalize_document_path(raw_path: str) -> str:
@@ -78,6 +78,8 @@ class WorkspaceFilesystem(Protocol):
     def title_from_path(self, path: str) -> str: ...
 
     def create_folder(self, path: str) -> None: ...
+
+    def rename_folder(self, source_path: str, destination_path: str) -> None: ...
 
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]: ...
 
@@ -200,6 +202,19 @@ class DiskWorkspaceFilesystem:
 
     def create_folder(self, path: str) -> None:
         self._folder_path(path).mkdir(parents=True, exist_ok=True)
+
+    def rename_folder(self, source_path: str, destination_path: str) -> None:
+        source = self._folder_path(source_path)
+        destination = self._folder_path(destination_path)
+        if not source.is_dir():
+            raise NotFoundError(f"Folder not found on disk: {source_path}")
+        if destination.exists():
+            raise InvalidPathError("Destination folder path already exists")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(destination)
+        self._fsync_directory(destination.parent)
+        if source.parent != destination.parent:
+            self._fsync_directory(source.parent)
 
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]:
         normalized = _canonicalize_relative_path(path, kind="Asset")

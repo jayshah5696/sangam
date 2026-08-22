@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import shutil
 import sqlite3
 import tarfile
 import threading
@@ -374,3 +375,50 @@ def test_backup_barrier_and_pair_verification_cover_pdf_bytes(
         ValidationError, match="Workspace backup does not match the database document head"
     ):
         manager.verify(backup.backup_id)
+
+
+def test_backup_delete_uses_lifecycle_lock_and_syncs_parent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = client.app.state.services.backups.manager
+    backup = manager.create()
+    lock_owned = False
+    synced = False
+    original_rmtree = shutil.rmtree
+
+    def observed_rmtree(path, *args, **kwargs):
+        nonlocal lock_owned
+        lock_owned = manager._create_lock.locked()
+        return original_rmtree(path, *args, **kwargs)
+
+    def observed_sync() -> None:
+        nonlocal synced
+        synced = True
+
+    monkeypatch.setattr(shutil, "rmtree", observed_rmtree)
+    monkeypatch.setattr(manager, "_fsync_backup_root", observed_sync)
+    manager.delete(backup.backup_id)
+
+    assert lock_owned is True
+    assert synced is True
+
+
+def test_backup_deletion_via_api(client: TestClient) -> None:
+    # Create backup first
+    create_res = client.post("/api/v1/backups", headers=headers("create-backup-for-del"))
+    assert create_res.status_code == 201
+    created_backup = create_res.json()
+    backup_id = created_backup["backup_id"]
+
+    # Ensure it is listed
+    list_res = client.get("/api/v1/backups", headers=headers("list-backups-1"))
+    assert list_res.status_code == 200
+    assert any(b["backup_id"] == backup_id for b in list_res.json())
+
+    # Delete backup
+    del_res = client.delete(f"/api/v1/backups/{backup_id}", headers=headers("delete-backup-action"))
+    assert del_res.status_code == 204
+
+    # Ensure it is no longer listed
+    list_after = client.get("/api/v1/backups", headers=headers("list-backups-2")).json()
+    assert not any(b["backup_id"] == backup_id for b in list_after)
