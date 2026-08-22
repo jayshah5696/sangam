@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentAccessSettings } from './AgentAccessSettings'
 
@@ -42,20 +42,23 @@ describe('AgentAccessSettings', () => {
     expect((screen.getByLabelText(/Expiration/) as HTMLInputElement).value).not.toBe('')
   })
 
-  it('blocks issuance until high-impact capabilities are acknowledged', () => {
+  it('explains and focuses high-impact confirmation before issuing', async () => {
     renderSettings()
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'publish' }))
-
     expect(screen.getByRole('alert').textContent).toContain('Publish can expose document content')
-    expect((screen.getByRole('button', { name: 'Issue token' }) as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.click(
-      screen.getByRole('checkbox', {
-        name: 'I understand and intend to grant these high-impact capabilities.',
-      }),
-    )
+    const issue = screen.getByRole('button', { name: 'Issue token' }) as HTMLButtonElement
+    expect(issue.disabled).toBe(false)
+    fireEvent.click(issue)
 
-    expect((screen.getByRole('button', { name: 'Issue token' }) as HTMLButtonElement).disabled).toBe(false)
+    const confirmation = screen.getByRole('checkbox', {
+      name: 'I understand and intend to grant these high-impact capabilities.',
+    })
+    expect(screen.getByText('Confirm the high-impact capabilities before issuing this token.')).not.toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(confirmation))
+
+    fireEvent.click(confirmation)
+    expect(issue.disabled).toBe(false)
   })
 })

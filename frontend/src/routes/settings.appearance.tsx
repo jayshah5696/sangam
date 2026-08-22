@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, getRouteApi, redirect, useNavigate } from '@tanstack/react-router'
 import {
   Check,
   Cpu,
@@ -28,6 +28,8 @@ export const Route = createFileRoute('/settings/appearance')({
 })
 
 type SettingsCategory = 'appearance' | 'workbench' | 'organization' | 'models' | 'agents' | 'operations'
+
+const settingsRoute = getRouteApi('/settings')
 
 const settingsCategories: Array<{
   id: SettingsCategory
@@ -116,6 +118,8 @@ const settingsSearchIndex: Array<{
 ]
 
 export function WorkspaceSettings() {
+  const { category: activeCategory, destination } = settingsRoute.useSearch()
+  const navigate = useNavigate({ from: '/settings' })
   const { preferences, updatePreferences } = useTheme()
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
@@ -133,10 +137,9 @@ export function WorkspaceSettings() {
   })
   const reindex = useMutation({ mutationFn: api.rebuildSearch })
 
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>('appearance')
   const [settingsQuery, setSettingsQuery] = useState('')
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(0)
-  const [pendingDestination, setPendingDestination] = useState<string | null>(null)
+  const [pendingDestination, setPendingDestination] = useState<string | null>(destination ?? null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const normalizedQuery = settingsQuery.trim().toLowerCase()
   const searchResults = normalizedQuery
@@ -161,22 +164,29 @@ export function WorkspaceSettings() {
   }, [])
 
   useEffect(() => {
-    if (!pendingDestination) return
+    const targetId = pendingDestination ?? destination
+    if (!targetId) return
     const frame = window.requestAnimationFrame(() => {
-      const destination = document.getElementById(pendingDestination)
-      destination?.focus({ preventScroll: true })
-      destination?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      destination?.classList.add('settings-destination-pulse')
-      window.setTimeout(() => destination?.classList.remove('settings-destination-pulse'), 1200)
+      const target = document.getElementById(targetId)
+      target?.focus({ preventScroll: true })
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target?.classList.add('settings-destination-pulse')
+      window.setTimeout(() => target?.classList.remove('settings-destination-pulse'), 1200)
       setPendingDestination(null)
+      if (destination) {
+        void navigate({ search: { category: activeCategory }, replace: true })
+      }
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [activeCategory, pendingDestination])
+  }, [activeCategory, destination, navigate, pendingDestination])
 
   const openDestination = (category: SettingsCategory, id?: string) => {
-    setActiveCategory(category)
     setSettingsQuery('')
-    setPendingDestination(id ?? category)
+    const target = id ?? category
+    setPendingDestination(target)
+    void navigate({
+      search: { category, destination: id },
+    })
   }
 
   return (

@@ -46,7 +46,7 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     }
 
     // 4. Mobile Settings
-    await page.goto('/settings')
+    await page.goto('/settings?category=appearance')
     await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible()
     await page.screenshot({
       path: path.join(repositoryRoot, 'docs/assets/crisp-settings-narrow.png'),
@@ -136,9 +136,15 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     fullPage: false,
   })
 
-  await page.goto('/settings')
-  await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible()
-  await page.waitForTimeout(300)
+  await page.goto('/settings?category=agents')
+  await expect(page.getByRole('heading', { name: 'Agents & access', exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/category=agents/)
+  await page.getByText('Custom capabilities and workspace boundaries').click()
+  await page.getByRole('checkbox', { name: 'publish' }).click()
+  await page.getByRole('button', { name: 'Issue token' }).click()
+  await expect(
+    page.getByText('Confirm the high-impact capabilities before issuing this token.'),
+  ).toBeVisible()
   await page.screenshot({
     path: path.join(repositoryRoot, 'docs/assets/crisp-settings.png'),
     fullPage: false,

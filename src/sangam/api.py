@@ -6,7 +6,7 @@ import threading
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -814,6 +814,46 @@ else fetch('/api/v1/trusted-previews/content', {
             content=asset.content,
             media_type=asset.media_type,
             headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    def document_artifact(document_id: str, principal: Principal) -> tuple[Document, bytes]:
+        document = workspace.get_document(principal, document_id)
+        content = (
+            pdf_research.pdf_bytes(document_id)[1]
+            if document.content_type == "application/pdf"
+            else document.content.encode("utf-8")
+        )
+        return document, content
+
+    @app.get("/api/v1/documents/{document_id}/raw")
+    def raw_document(document_id: str, principal: Principal = principal_dependency) -> Response:
+        document, content = document_artifact(document_id, principal)
+        return Response(
+            content=content,
+            media_type=document.content_type,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.get("/api/v1/documents/{document_id}/download")
+    def download_document(
+        document_id: str, principal: Principal = principal_dependency
+    ) -> Response:
+        document, content = document_artifact(document_id, principal)
+        fallback_suffix = {
+            "text/markdown": ".md",
+            "text/html": ".html",
+            "application/pdf": ".pdf",
+        }[document.content_type]
+        filename = (document.path or document.title).rsplit("/", 1)[-1]
+        if "." not in filename:
+            filename += fallback_suffix
+        return Response(
+            content=content,
+            media_type=document.content_type,
+            headers={
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            },
         )
 
     @app.get("/api/v1/documents/{document_id}", response_model=Document)

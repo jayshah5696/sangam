@@ -77,6 +77,14 @@ def test_pdf_import_extraction_range_search_and_immutability(client: TestClient,
     assert full.content == source
     assert full.headers["accept-ranges"] == "bytes"
 
+    raw = client.get(f"/api/v1/documents/{document_id}/raw")
+    assert raw.status_code == 200
+    assert raw.content == source
+    assert raw.headers["content-type"] == "application/pdf"
+    downloaded = client.get(f"/api/v1/documents/{document_id}/download")
+    assert downloaded.content == source
+    assert downloaded.headers["content-disposition"] == ("attachment; filename*=UTF-8''paper.pdf")
+
     partial = client.get(f"/api/v1/pdfs/{document_id}/content", headers={"Range": "bytes=0-7"})
     assert partial.status_code == 206
     assert partial.content == source[:8]

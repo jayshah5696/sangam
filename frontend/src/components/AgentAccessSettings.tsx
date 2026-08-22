@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { AlertTriangle, Bot, KeyRound, RefreshCw, ShieldOff } from 'lucide-react'
@@ -128,12 +128,37 @@ export function AgentAccessSettings() {
   const [activePreset, setActivePreset] = useState<TokenPresetId | null>('read-only')
   const [sensitiveConfirmed, setSensitiveConfirmed] = useState(false)
   const [issued, setIssued] = useState<IssuedAgentToken | null>(null)
+  const [validationAttempted, setValidationAttempted] = useState(false)
+  const secretDialogRef = useRef<HTMLDialogElement>(null)
+  const writePrefixRef = useRef<HTMLInputElement>(null)
+  const sensitiveConfirmationRef = useRef<HTMLInputElement>(null)
 
   const scopes = buildTokenScopes(selected, prefixes)
   const selectedSensitiveCapabilities = sensitiveCapabilities(selected)
   const hasMutations = [...selected].some((capability) => mutationCapabilities.has(capability))
   const writePrefixMissing = hasMutations && normalizePrefixInput(prefixes.write) === null
   const sensitiveConfirmationMissing = selectedSensitiveCapabilities.length > 0 && !sensitiveConfirmed
+  const capabilityMissing = selected.size === 0
+
+  useEffect(() => {
+    const dialog = secretDialogRef.current
+    if (issued && dialog && !dialog.open) dialog.showModal()
+  }, [issued])
+
+  const closeIssuedSecret = () => {
+    secretDialogRef.current?.close()
+    setIssued(null)
+  }
+
+  const focusFirstIssueError = () => {
+    if (capabilityMissing) {
+      document.querySelector<HTMLElement>('.capability-grid input')?.focus()
+    } else if (writePrefixMissing) {
+      writePrefixRef.current?.focus()
+    } else if (sensitiveConfirmationMissing) {
+      sensitiveConfirmationRef.current?.focus()
+    }
+  }
 
   const choosePreset = (presetId: TokenPresetId) => {
     const preset = tokenPresets[presetId]
@@ -158,6 +183,7 @@ export function AgentAccessSettings() {
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       }),
     onSuccess: async (token) => {
+      setValidationAttempted(false)
       setIssued(token)
       await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
     },
@@ -189,32 +215,43 @@ export function AgentAccessSettings() {
         <span className="scope-badge workspace">Shared workspace</span>
       </header>
       <div className="settings-panel-body agent-access-settings">
-        {issued && (
-          <OneTimeSecret
-            title="Copy this token now"
-            description="Sangam stores only its hash. This value will not be shown again."
-            value={issued.token}
-            copyLabel="Copy token"
-            icon={<KeyRound size={18} />}
-            dismissLabel="I saved it"
-            onDismiss={() => setIssued(null)}
-          />
-        )}
+        <dialog
+          ref={secretDialogRef}
+          className="one-time-secret-dialog"
+          aria-label="New agent token secret"
+          onCancel={(event) => {
+            event.preventDefault()
+            closeIssuedSecret()
+          }}
+          onClose={() => setIssued(null)}
+        >
+          {issued && (
+            <OneTimeSecret
+              title={issued.rotated_from_token_id ? 'Token rotated' : 'Copy this token now'}
+              description={
+                issued.rotated_from_token_id
+                  ? 'The previous token is revoked. Sangam stores only this new token’s hash.'
+                  : 'Sangam stores only its hash. This value will not be shown again.'
+              }
+              value={issued.token}
+              copyLabel="Copy token"
+              icon={<KeyRound size={18} />}
+              dismissLabel="I saved it"
+              onDismiss={closeIssuedSecret}
+            />
+          )}
+        </dialog>
 
         <form
           className="agent-token-form"
           onSubmit={(event) => {
             event.preventDefault()
-            if (
-              selected.size > 0 &&
-              !writePrefixMissing &&
-              !sensitiveConfirmationMissing &&
-              actorId &&
-              displayName &&
-              label
-            ) {
-              issue.mutate()
+            setValidationAttempted(true)
+            if (capabilityMissing || writePrefixMissing || sensitiveConfirmationMissing) {
+              requestAnimationFrame(focusFirstIssueError)
+              return
             }
+            if (actorId && displayName && label) issue.mutate()
           }}
         >
           <fieldset className="agent-token-presets">
@@ -289,11 +326,13 @@ export function AgentAccessSettings() {
                 <label>
                   <span>Write path prefix</span>
                   <input
+                    ref={writePrefixRef}
                     value={prefixes.write}
                     aria-invalid={writePrefixMissing}
+                    aria-describedby={writePrefixMissing ? 'write-prefix-error' : undefined}
                     onChange={(event) => updatePrefix('write', event.target.value)}
                   />
-                  <small>
+                  <small id={writePrefixMissing ? 'write-prefix-error' : undefined}>
                     {writePrefixMissing
                       ? 'A prefix is required for mutation capabilities.'
                       : 'Shared by all mutations.'}
@@ -341,6 +380,7 @@ export function AgentAccessSettings() {
                     </ul>
                     <label>
                       <input
+                        ref={sensitiveConfirmationRef}
                         type="checkbox"
                         checked={sensitiveConfirmed}
                         onChange={(event) => setSensitiveConfirmed(event.target.checked)}
@@ -374,15 +414,29 @@ export function AgentAccessSettings() {
             </div>
           </details>
 
-          <button
-            disabled={
-              issue.isPending || selected.size === 0 || writePrefixMissing || sensitiveConfirmationMissing
-            }
-          >
+          {validationAttempted &&
+            (capabilityMissing || writePrefixMissing || sensitiveConfirmationMissing) && (
+              <div className="agent-token-validation" role="alert" tabIndex={-1}>
+                <AlertTriangle size={16} />
+                <span>
+                  {capabilityMissing
+                    ? 'Choose at least one capability.'
+                    : writePrefixMissing
+                      ? 'Enter a write path prefix for mutation capabilities.'
+                      : 'Confirm the high-impact capabilities before issuing this token.'}
+                </span>
+              </div>
+            )}
+          <button disabled={issue.isPending}>
             <KeyRound size={14} /> {issue.isPending ? 'Issuing…' : 'Issue token'}
           </button>
         </form>
         {issue.isError && <p className="operation-result error-text">{issue.error.message}</p>}
+        {rotate.isError && (
+          <p className="operation-result error-text" role="alert">
+            Token rotation failed: {rotate.error.message}
+          </p>
+        )}
 
         <div className="agent-token-list">
           <div className="settings-subtitle">

@@ -20,6 +20,20 @@ test('settings search opens and focuses the exact setting', async ({ page }) => 
   await expect(page.locator('#workspace-sidebar')).toBeFocused()
 })
 
+test('settings categories survive reload and support browser history', async ({ page }) => {
+  await page.goto('/settings?category=agents')
+  await expect(page.getByRole('heading', { name: 'Agents & access', exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/category=agents/)
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Agents & access', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: /Operations/ }).click()
+  await expect(page).toHaveURL(/category=operations/)
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Agents & access', exact: true })).toBeVisible()
+})
+
 test('every workspace theme preserves settings contrast', async ({ page }) => {
   await page.goto('/settings')
 
