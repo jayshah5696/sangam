@@ -77,25 +77,37 @@ row or panel; use the standard mode when the state replaces the page content.
 ## Settings
 
 Settings is a dedicated task surface inside the shared application chrome. The
-primary workspace sidebar remains mounted and highlights Settings; a second,
-content-local settings rail provides six stable categories and search across
-every setting.
+existing workspace sidebar becomes route-aware: Settings replaces Files/Search
+and the tree inside the same inverse rail. The container, persisted width,
+resize handle, shared header, and drawer behavior do not change. Settings never
+adds a second adjacent rail.
 
+- The rail provides six stable categories and search across every setting.
 - Search results name both the setting and its category.
 - Arrow keys move through results; Enter opens the category and focuses the
   exact destination row.
 - Each setting row owns a stable destination ID and keyboard focus target.
+- A full-width Back action and Escape return to the preceding workspace route.
 - Theme choices preview the real sidebar, editor, inspector, and focus colors;
   decorative swatches alone are not sufficient.
-- On narrow screens, category navigation becomes a horizontal strip and the
+- On narrow and touch screens, Settings uses the existing sidebar drawer. The
   content remains free of page-level horizontal scrolling.
+
+The workspace sidebar footer contains four compact primary destinations: Chat,
+Publications, Trash, and Settings. Operational tools belong under Settings:
+Agent activity under Agents & access; Reconciliation, Backups, and configured
+Karakeep imports under Operations. Their direct URLs remain valid and the
+command palette keeps them discoverable.
 
 ## Freshness and recovery
 
 React Query owns server freshness. Queries become stale after 15 seconds and
-refresh when the window regains focus or connectivity. The workspace footer
-shows `Synced`, an active refresh count, or `Offline` so background work is not
-invisible.
+refresh when the window regains focus or connectivity. The workspace footer is
+quiet while healthy and idle. It appears only for exceptional or active states:
+an active refresh count, `Offline`, or unresolved reconciliation conflicts.
+Connectivity and query activity must never be described as workspace sync;
+workspace integrity means unresolved differences between canonical data and
+materialized files.
 
 Persisted browser state may outlive a workspace database. If a saved tab points
 to a missing document, show a specific recovery state with **Retry** and

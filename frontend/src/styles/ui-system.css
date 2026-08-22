@@ -128,6 +128,9 @@ textarea::placeholder {
   .sidebar-inline-form button,
   .sidebar-search-trigger,
   .sidebar-footer-nav a,
+  .settings-sidebar-footer button,
+  .settings-nav-items button,
+  .settings-search-results button,
   .inspector-tabs button,
   .outline-panel button,
   .revision button,
@@ -184,6 +187,9 @@ textarea::placeholder {
   .sidebar-search-input input,
   .sidebar-sort select,
   .sidebar-footer-nav a,
+  .settings-sidebar-footer button,
+  .settings-nav-items button,
+  .settings-search-results button,
   .primary-sidebar .file-link,
   .tree-context-menu > button,
   .action-menu-popover > button,
@@ -196,7 +202,7 @@ textarea::placeholder {
   .revision button,
   .panel-button,
   .secondary-action,
-  .settings-nav a
+  .settings-nav-items button
 ) {
   font-size: var(--text-control);
 }
@@ -227,7 +233,6 @@ textarea::placeholder {
   .outline-panel button small,
   .revision time,
   .revision p,
-  .settings-nav-title span,
   .setting-row small,
   .setting-value,
   .compact-switch,
@@ -244,7 +249,6 @@ textarea::placeholder {
 }
 
 :where(
-  .settings-nav-title strong,
   .settings-panel h2,
   .setting-row strong,
   .settings-subtitle strong,

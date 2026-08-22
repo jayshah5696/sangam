@@ -268,16 +268,16 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
       .screenshot({ path: path.join(outDir, 'issue-74-collapsed-rail-triggers.png') })
   })
 
-  test('capture issue 65 and 75 (settings persistent sidebar and version card)', async ({ page }) => {
+  test('capture issue 104 and 75 (route-aware settings sidebar and version card)', async ({ page }) => {
     await page.goto('/settings')
     await page.waitForTimeout(500)
 
-    // Issue #65: Settings keeps the same primary workspace rail and active Settings link.
-    const primarySidebar = page.getByRole('complementary', { name: 'Workspace sidebar' })
-    await expect(primarySidebar).toBeVisible()
-    await expect(primarySidebar.getByRole('link', { name: 'Settings' })).toHaveClass(/active/)
-    await expect(page.getByRole('complementary', { name: 'Settings navigation' })).toBeVisible()
-    await page.screenshot({ path: path.join(outDir, 'issue-65-settings-sidebar.png'), fullPage: false })
+    // Issue #104 supersedes #65: Settings replaces workspace navigation inside the shared rail.
+    const settingsSidebar = page.getByRole('complementary', { name: 'Settings sidebar' })
+    await expect(settingsSidebar).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Workspace sidebar' })).toHaveCount(0)
+    await expect(settingsSidebar.getByRole('navigation', { name: 'Settings pages' })).toBeVisible()
+    await page.screenshot({ path: path.join(outDir, 'issue-104-settings-sidebar.png'), fullPage: false })
 
     // Issue #75: installed version and truthful server status in Operations.
     await page.getByRole('button', { name: /Operations/ }).click()
