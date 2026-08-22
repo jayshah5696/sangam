@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, type Document } from '../api'
 import { CITATION_NAVIGATION_EVENT, type CitationTarget } from '../citationNavigation'
 import { useDocumentSession, useDocumentSessions, type PdfViewState } from '../documentSessions'
+import { useTheme } from '../theme'
 import { PdfViewer } from './PdfViewer'
 
 const defaultPdfState: PdfViewState = {
@@ -15,6 +16,7 @@ const defaultPdfState: PdfViewState = {
 export function PdfResearchWorkspace({ document }: { document: Document }) {
   const sessions = useDocumentSessions()
   const session = useDocumentSession(document.document_id)
+  const { updatePreferences } = useTheme()
   const initialSearch = useMemo(() => new URLSearchParams(window.location.search), [])
   const requestedPage = Number(initialSearch.get('page'))
   const pdfState = useMemo(
@@ -70,9 +72,11 @@ export function PdfResearchWorkspace({ document }: { document: Document }) {
         setPageNumber={setPageNumber}
         updatePdfState={updatePdfState}
         annotations={annotations}
-        onSelectAnnotation={(id) =>
+        onSelectAnnotation={(id) => {
           sessions.updateSession(document.document_id, { pdfSelectedAnnotationId: id })
-        }
+          updatePreferences({ rightVisible: true, rightTab: 'research' })
+        }}
+        onOpenResearch={() => updatePreferences({ rightVisible: true, rightTab: 'research' })}
         setDraft={(updater) => {
           const currentDraft = sessions.getSession(document.document_id).pdfDraft ?? null
           const nextDraft = typeof updater === 'function' ? updater(currentDraft) : updater

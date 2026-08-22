@@ -201,7 +201,44 @@
 .pdf-area-preview {
   border: 1px solid color-mix(in srgb, var(--annotation-color, var(--accent)) 80%, black);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--annotation-color, var(--accent)) 36%, transparent);
+  background: color-mix(in srgb, var(--annotation-color, var(--accent)) 24%, transparent);
+}
+
+.pdf-area-highlight-chip {
+  position: absolute;
+  top: calc(var(--control-height) * -.38);
+  right: calc(var(--control-height) * -.38);
+  width: calc(var(--control-height) * .76);
+  height: calc(var(--control-height) * .76);
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--annotation-color) 76%, black);
+  border-radius: 50%;
+  background: var(--annotation-color);
+  color: #151515;
+  box-shadow: 0 var(--space-1) var(--space-2) var(--shadow);
+}
+
+.pdf-annotation-gutter {
+  position: absolute;
+  top: var(--space-3);
+  right: calc(var(--control-height) * -.9);
+  z-index: 5;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.pdf-annotation-gutter > button {
+  width: calc(var(--control-height) * .8);
+  height: calc(var(--control-height) * .8);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--annotation-color) 72%, black);
+  border-radius: 50% 50% 50% var(--radius-control);
+  background: var(--annotation-color);
+  color: #151515;
+  box-shadow: 0 var(--space-1) var(--space-2) var(--shadow);
 }
 
 .pdf-page.is-selecting-area .pdf-annotation-layer {
@@ -215,6 +252,146 @@
 
 .pdf-research-rail {
   min-height: 0;
+}
+
+.pdf-selection-toolbar,
+.pdf-annotation-preview {
+  position: fixed;
+  z-index: 30;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, var(--text));
+  border-radius: var(--radius-panel);
+  background: var(--surface-soft);
+  box-shadow: 0 var(--space-3) var(--space-5) var(--shadow);
+}
+
+.pdf-selection-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-height);
+  padding: var(--space-1);
+}
+
+.pdf-selection-toolbar > button {
+  min-height: calc(var(--control-height) - var(--space-2));
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.pdf-selection-toolbar > button:hover,
+.pdf-selection-toolbar > button:focus-visible {
+  background: var(--accent-soft);
+}
+
+.pdf-highlight-colors {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+}
+
+.pdf-highlight-colors > button {
+  width: calc(var(--control-height) * .55);
+  height: calc(var(--control-height) * .55);
+  padding: 0;
+  border: 2px solid color-mix(in srgb, var(--annotation-color) 70%, var(--text));
+  border-radius: 50%;
+  background: var(--annotation-color);
+}
+
+.pdf-selection-divider {
+  align-self: stretch;
+  width: 1px;
+  background: var(--line);
+}
+
+.pdf-annotation-preview {
+  width: min(calc(var(--control-height) * 9), calc(100vw - var(--space-5)));
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.pdf-annotation-preview header,
+.pdf-annotation-preview footer,
+.pdf-annotation-preview footer > div,
+.pdf-annotation-preview-type {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pdf-annotation-preview header {
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.pdf-annotation-preview-type {
+  color: var(--text);
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.pdf-annotation-preview-type > i {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--annotation-color);
+}
+
+.pdf-annotation-preview blockquote {
+  max-height: calc(var(--leading-body) * 3em);
+  margin: 0;
+  padding-left: var(--space-2);
+  overflow: hidden;
+  border-left: var(--space-1) solid var(--annotation-color);
+  color: var(--muted);
+  font-size: var(--text-label);
+}
+
+.pdf-annotation-preview ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pdf-annotation-preview li {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.pdf-annotation-preview footer {
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-direction: column;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.pdf-annotation-preview footer button {
+  min-height: calc(var(--control-height) * .8);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  font-size: var(--text-meta);
+}
+
+.pdf-annotation-preview footer button.danger {
+  color: var(--danger);
 }
 
 .pdf-research-summary {

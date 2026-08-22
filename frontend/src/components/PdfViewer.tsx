@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -8,7 +9,19 @@ import {
   type SetStateAction,
 } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Copy, Map as MapIcon, Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
+import {
+  Bookmark,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Map as MapIcon,
+  Maximize2,
+  MessageSquare,
+  Quote,
+  StickyNote,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react'
 import {
   getDocument,
   GlobalWorkerOptions,
@@ -20,6 +33,8 @@ import workerSource from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { api, type Annotation, type Document, type PdfRect } from '../api'
 import type { PdfViewState } from '../documentSessions'
 import { normalizePdfRect } from '../pdfGeometry'
+import { PdfAnnotationPreview } from './PdfAnnotationPreview'
+import { PdfSelectionToolbar, type PdfTextSelection } from './PdfSelectionToolbar'
 import { annotationTypeLabel, type AnnotationDraft } from './pdfResearchTypes'
 
 GlobalWorkerOptions.workerSrc = workerSource
@@ -34,6 +49,7 @@ type PdfViewerProps = {
   updatePdfState: (patch: Partial<PdfViewState>) => void
   annotations: Annotation[]
   onSelectAnnotation: (annotationId: string) => void
+  onOpenResearch: () => void
   setDraft: Dispatch<SetStateAction<AnnotationDraft | null>>
 }
 
@@ -44,6 +60,7 @@ export function PdfViewer({
   updatePdfState,
   annotations,
   onSelectAnnotation,
+  onOpenResearch,
   setDraft,
 }: PdfViewerProps) {
   const queryClient = useQueryClient()
@@ -54,6 +71,22 @@ export function PdfViewer({
   const [pageSize, setPageSize] = useState<PageSize>({ width: 612, height: 792 })
   const [availableWidth, setAvailableWidth] = useState(0)
   const [isSelectingArea, setIsSelectingArea] = useState(false)
+  const [textSelection, setTextSelection] = useState<PdfTextSelection | null>(null)
+  const createHighlight = useMutation({
+    mutationFn: ({ selection, color }: { selection: PdfTextSelection; color: string }) =>
+      api.createAnnotation(document.document_id, {
+        page_number: selection.pageNumber,
+        annotation_type: 'text_highlight',
+        selected_text: selection.selectedText,
+        geometry: selection.geometry,
+        color,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['annotations', document.document_id] })
+      setTextSelection(null)
+      window.getSelection()?.removeAllRanges()
+    },
+  })
   const retryExtraction = useMutation({
     mutationFn: () => api.retryPdfExtraction(document.document_id),
     onSuccess: async () => {
@@ -119,6 +152,10 @@ export function PdfViewer({
   const fitWidth = () => {
     updatePdfState({ scale: effectiveScale, zoomMode: 'fit-width' })
   }
+  const dismissSelection = useCallback(() => {
+    setTextSelection(null)
+    window.getSelection()?.removeAllRanges()
+  }, [])
 
   return (
     <section className="pdf-reader">
@@ -237,6 +274,7 @@ export function PdfViewer({
         className="pdf-page-scroll"
         ref={scrollRef}
         onScroll={(event) => {
+          setTextSelection(null)
           const host = event.currentTarget
           const position = host.scrollTop + host.offsetTop + host.clientHeight * 0.35
           const visible = Array.from(host.querySelectorAll<HTMLElement>('[data-pdf-page]'))
@@ -261,12 +299,32 @@ export function PdfViewer({
                 active={Math.abs(number - pageNumber) <= 1}
                 isSelectingArea={isSelectingArea && number === pageNumber}
                 onSelectAnnotation={onSelectAnnotation}
+                onTextSelection={setTextSelection}
                 setDraft={setDraft}
                 finishArea={() => setIsSelectingArea(false)}
               />
             )
           })}
       </div>
+      {textSelection && (
+        <PdfSelectionToolbar
+          documentId={document.document_id}
+          documentTitle={document.title}
+          selection={textSelection}
+          pending={createHighlight.isPending}
+          onHighlight={(color) => createHighlight.mutate({ selection: textSelection, color })}
+          onAddNote={() => {
+            setDraft({
+              annotationType: 'comment',
+              selectedText: textSelection.selectedText,
+              geometry: textSelection.geometry,
+            })
+            onOpenResearch()
+            setTextSelection(null)
+          }}
+          onDismiss={dismissSelection}
+        />
+      )}
     </section>
   )
 }
@@ -281,6 +339,7 @@ function PdfPage({
   active,
   isSelectingArea,
   onSelectAnnotation,
+  onTextSelection,
   setDraft,
   finishArea,
 }: {
@@ -293,6 +352,7 @@ function PdfPage({
   active: boolean
   isSelectingArea: boolean
   onSelectAnnotation: (annotationId: string) => void
+  onTextSelection: (selection: PdfTextSelection) => void
   setDraft: Dispatch<SetStateAction<AnnotationDraft | null>>
   finishArea: () => void
 }) {
@@ -300,8 +360,17 @@ function PdfPage({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
   const [nearViewport, setNearViewport] = useState(active)
+  const queryClient = useQueryClient()
   const [areaStart, setAreaStart] = useState<Point | null>(null)
   const [areaPreview, setAreaPreview] = useState<PdfRect | null>(null)
+  const [preview, setPreview] = useState<{ annotation: Annotation; anchor: HTMLElement } | null>(null)
+  const removeAnnotation = useMutation({
+    mutationFn: (annotation: Annotation) => api.deleteAnnotation(annotation),
+    onSuccess: async (annotation) => {
+      setPreview(null)
+      await queryClient.invalidateQueries({ queryKey: ['annotations', annotation.document_id] })
+    },
+  })
   const width = pageSize.width * scale
   const height = pageSize.height * scale
 
@@ -373,7 +442,19 @@ function PdfPage({
       .filter((rect) => rect.width > 0 && rect.height > 0)
       .map((rect) => normalizePdfRect(rect, hostBounds))
     if (geometry.length === 0) return
-    setDraft({ annotationType: 'text_highlight', selectedText: selection.toString().trim(), geometry })
+    const bounds = range.getBoundingClientRect()
+    onTextSelection({
+      pageNumber,
+      selectedText: selection.toString().trim(),
+      geometry,
+      anchor: {
+        left: bounds.left,
+        right: bounds.right,
+        top: bounds.top,
+        bottom: bounds.bottom,
+        width: bounds.width,
+      },
+    })
   }
   const beginArea = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!isSelectingArea || !hostRef.current) return
@@ -426,8 +507,16 @@ function PdfPage({
                   '--annotation-color': annotation.color,
                 } as CSSProperties
               }
+              onMouseEnter={(event) => setPreview({ annotation, anchor: event.currentTarget })}
+              onFocus={(event) => setPreview({ annotation, anchor: event.currentTarget })}
               onClick={() => onSelectAnnotation(annotation.annotation_id)}
-            />
+            >
+              {annotation.annotation_type === 'area_highlight' && index === 0 && (
+                <span className="pdf-area-highlight-chip" aria-hidden="true">
+                  <MapIcon size={11} />
+                </span>
+              )}
+            </button>
           )),
         )}
         {areaPreview && (
@@ -442,9 +531,47 @@ function PdfPage({
           />
         )}
       </div>
+      <div className="pdf-annotation-gutter" aria-label={`Page ${pageNumber} annotation pins`}>
+        {annotations
+          .filter((annotation) => annotation.geometry.length === 0)
+          .map((annotation) => (
+            <button
+              type="button"
+              key={annotation.annotation_id}
+              data-annotation-id={annotation.annotation_id}
+              aria-label={`Open ${annotationTypeLabel(annotation.annotation_type)} annotation`}
+              style={{ '--annotation-color': annotation.color } as CSSProperties}
+              onMouseEnter={(event) => setPreview({ annotation, anchor: event.currentTarget })}
+              onFocus={(event) => setPreview({ annotation, anchor: event.currentTarget })}
+              onClick={() => onSelectAnnotation(annotation.annotation_id)}
+            >
+              <AnnotationPinIcon annotation={annotation} />
+            </button>
+          ))}
+      </div>
       <span className="pdf-page-label">{pageNumber}</span>
+      {preview && (
+        <PdfAnnotationPreview
+          annotation={preview.annotation}
+          anchor={preview.anchor}
+          deleting={removeAnnotation.isPending}
+          onEdit={() => {
+            onSelectAnnotation(preview.annotation.annotation_id)
+            setPreview(null)
+          }}
+          onDelete={() => removeAnnotation.mutate(preview.annotation)}
+          onDismiss={() => setPreview(null)}
+        />
+      )}
     </article>
   )
+}
+
+function AnnotationPinIcon({ annotation }: { annotation: Annotation }) {
+  if (annotation.annotation_type === 'bookmark') return <Bookmark size={14} />
+  if (annotation.annotation_type === 'citation_marker') return <Quote size={14} />
+  if (annotation.annotation_type === 'comment') return <MessageSquare size={14} />
+  return <StickyNote size={14} />
 }
 
 function pageElement(documentId: string, pageNumber: number) {
