@@ -4,12 +4,10 @@ import path from 'node:path'
 
 import { expect, test } from './fixtures'
 
-const repositoryRoot = path.resolve(import.meta.dirname, '../..')
-
 async function importSamplePdf(
   request: import('@playwright/test').APIRequestContext,
   sourcePath = process.env.SANGAM_PDF_EVIDENCE_SOURCE ??
-    path.join(repositoryRoot, 'data/workspace/research/architecture.pdf'),
+    path.join(import.meta.dirname, 'assets/multipage.pdf'),
 ) {
   const source = fs.readFileSync(sourcePath)
   const response = await request.post(
