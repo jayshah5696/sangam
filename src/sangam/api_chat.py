@@ -132,6 +132,7 @@ def create_chat_router(
     async def chatkit_endpoint(
         request: Request,
         document_id: str | None = Header(default=None, alias="X-Sangam-Document-ID"),
+        workspace_context: str | None = Header(default=None, alias="X-Sangam-Workspace-Context"),
         principal: Principal = principal_dependency,
     ) -> Response:
         content_length = request.headers.get("content-length")
@@ -147,7 +148,11 @@ def create_chat_router(
             raise ValidationError("Chat request exceeds the configured size limit")
         result = await chat.process(
             body,
-            context=ChatRequestContext(principal=principal, document_id=document_id),
+            context=ChatRequestContext(
+                principal=principal,
+                document_id=document_id,
+                workspace_context=workspace_context == "1",
+            ),
         )
         if isinstance(result, StreamingResult):
             return StreamingResponse(

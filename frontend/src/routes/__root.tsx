@@ -9,7 +9,9 @@ import {
   CheckCircle2,
   CloudOff,
   FileText,
+  Globe2,
   Import,
+  MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -269,6 +271,8 @@ function SidebarLinks() {
   const healthQuery = useQuery({ queryKey: ['health'], queryFn: () => api.health() })
   const karakeepConfigured = healthQuery.data?.karakeep_configured === true
   const links = [
+    { to: '/chat' as const, label: 'Workspace chat', icon: MessageSquareText },
+    { to: '/publications' as const, label: 'Publications', icon: Globe2 },
     { to: '/activity' as const, label: 'Agent activity', icon: Activity },
     { to: '/reconciliation' as const, label: 'Workspace integrity', icon: ShieldCheck },
     { to: '/backups' as const, label: 'Backups', icon: ArchiveRestore },

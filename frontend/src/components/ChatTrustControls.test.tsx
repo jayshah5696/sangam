@@ -3,7 +3,12 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Document } from '../api'
-import { CitationNavigationStatus, parsePublishConfirmation, PublishConfirmationCard } from './ChatPanel'
+import {
+  ChatContextBanner,
+  CitationNavigationStatus,
+  parsePublishConfirmation,
+  PublishConfirmationCard,
+} from './ChatPanel'
 
 vi.mock('@openai/chatkit-react', () => ({ ChatKit: () => null, useChatKit: () => ({ control: {} }) }))
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => () => Promise.resolve() }))
@@ -52,6 +57,12 @@ describe('chat trust controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onCancel).toHaveBeenCalledOnce()
     expect(onApprove).not.toHaveBeenCalled()
+  })
+
+  it('labels whole-workspace chat when no document is pinned', () => {
+    render(<ChatContextBanner document={null} selectedText="" />)
+    expect(screen.getByText('Whole workspace')).toBeTruthy()
+    expect(screen.getByText('No document pinned')).toBeTruthy()
   })
 
   it('shows when the current head differs from a pinned citation', () => {

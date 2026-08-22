@@ -169,7 +169,11 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             if title:
                 thread.title = title
 
-        document_id = context.document_id or thread.metadata.get("document_id")
+        document_id = (
+            context.document_id
+            if context.document_id is not None or context.workspace_context
+            else thread.metadata.get("document_id")
+        )
         turn_contexts = dict(thread.metadata.get("turn_contexts", {}))
         item_id = input_user_message.id if input_user_message else None
         snapshot = turn_contexts.get(item_id) if item_id else None

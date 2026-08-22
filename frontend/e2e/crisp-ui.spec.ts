@@ -84,7 +84,16 @@ test('document workbench exposes active, save, and inspector state', async ({ pa
 })
 
 test('primary routes have no detectable WCAG A or AA violations', async ({ page }) => {
-  for (const route of ['/', '/settings', '/activity', '/reconciliation', '/backups', '/trash']) {
+  for (const route of [
+    '/',
+    '/chat',
+    '/publications',
+    '/settings',
+    '/activity',
+    '/reconciliation',
+    '/backups',
+    '/trash',
+  ]) {
     await page.goto(route)
     await expect(page.locator('h1')).toBeVisible()
     const results = await new AxeBuilder({ page })

@@ -1,7 +1,7 @@
 import { useDeferredValue, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { FilePlus2, FileText, FileUp, Search } from 'lucide-react'
+import { FilePlus2, FileText, FileUp, MessageSquareText, Search } from 'lucide-react'
 import { api } from '../api'
 import { useWorkbench } from '../workbench'
 
@@ -132,6 +132,9 @@ function Welcome() {
             ? 'Creating…'
             : `Create ${contentType === 'text/html' ? 'HTML' : 'Markdown'}`}
         </button>
+        <Link className="secondary-action welcome-chat-action" to="/chat">
+          <MessageSquareText size={16} /> Ask workspace
+        </Link>
         <label className="pdf-import-control">
           <FileUp size={16} />
           <span>{importPdf.isPending ? 'Importing PDF…' : 'Import PDF'}</span>
