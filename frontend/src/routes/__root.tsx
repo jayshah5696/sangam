@@ -42,11 +42,8 @@ function RootLayout() {
   const [mobileSidebarLocationKey, setMobileSidebarLocationKey] = useState<string | null>(null)
   const narrowSidebar = useMediaQuery('(max-width: 1100px)')
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
-  const usesDedicatedNavigation = location.pathname.startsWith('/settings')
   const locationKey = location.state.__TSR_key ?? location.href
-  const sidebarVisible =
-    !usesDedicatedNavigation &&
-    (narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible)
+  const sidebarVisible = narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible
 
   useEffect(() => {
     if (mobileSidebarLocationKey === null || mobileSidebarLocationKey === locationKey) return
@@ -76,46 +73,37 @@ function RootLayout() {
   }
 
   return (
-    <div
-      className={`workbench-shell ${
-        usesDedicatedNavigation ? 'settings-shell' : sidebarVisible ? '' : 'sidebar-collapsed'
-      }`}
-    >
-      {!usesDedicatedNavigation &&
-        (sidebarVisible ? (
-          <>
-            {narrowSidebar && (
-              <button
-                className="sidebar-backdrop"
-                aria-label="Close workspace sidebar"
-                onClick={hideSidebar}
-              />
-            )}
-            <PrimarySidebar
-              mode={sidebarMode}
-              modal={narrowSidebar}
-              onCollapse={hideSidebar}
-              onMode={(next) => void chooseSidebarMode(next)}
-              style={{ width: preferences.leftWidth }}
-            />
-            <ResizeHandle
-              side="left"
-              value={preferences.leftWidth}
-              min={220}
-              max={460}
-              onChange={(leftWidth) => updatePreferences({ leftWidth })}
-            />
-          </>
-        ) : (
-          <button
-            className="sidebar-reveal icon-button"
-            aria-label="Show workspace sidebar"
-            title="Show workspace sidebar"
-            onClick={showSidebar}
-          >
-            <PanelLeftOpen size={17} />
-          </button>
-        ))}
+    <div className={`workbench-shell ${sidebarVisible ? '' : 'sidebar-collapsed'}`}>
+      {sidebarVisible ? (
+        <>
+          {narrowSidebar && (
+            <button className="sidebar-backdrop" aria-label="Close workspace sidebar" onClick={hideSidebar} />
+          )}
+          <PrimarySidebar
+            mode={sidebarMode}
+            modal={narrowSidebar}
+            onCollapse={hideSidebar}
+            onMode={(next) => void chooseSidebarMode(next)}
+            style={{ width: preferences.leftWidth }}
+          />
+          <ResizeHandle
+            side="left"
+            value={preferences.leftWidth}
+            min={220}
+            max={460}
+            onChange={(leftWidth) => updatePreferences({ leftWidth })}
+          />
+        </>
+      ) : (
+        <button
+          className="sidebar-reveal icon-button"
+          aria-label="Show workspace sidebar"
+          title="Show workspace sidebar"
+          onClick={showSidebar}
+        >
+          <PanelLeftOpen size={17} />
+        </button>
+      )}
       <div className="workbench-center">
         {layoutRecovery.recovered && (
           <div className="layout-recovery-notice" role="status">

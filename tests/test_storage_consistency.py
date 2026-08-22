@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import shutil
 import sqlite3
 import tarfile
 import threading
@@ -374,6 +375,32 @@ def test_backup_barrier_and_pair_verification_cover_pdf_bytes(
         ValidationError, match="Workspace backup does not match the database document head"
     ):
         manager.verify(backup.backup_id)
+
+
+def test_backup_delete_uses_lifecycle_lock_and_syncs_parent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = client.app.state.services.backups.manager
+    backup = manager.create()
+    lock_owned = False
+    synced = False
+    original_rmtree = shutil.rmtree
+
+    def observed_rmtree(path, *args, **kwargs):
+        nonlocal lock_owned
+        lock_owned = manager._create_lock.locked()
+        return original_rmtree(path, *args, **kwargs)
+
+    def observed_sync() -> None:
+        nonlocal synced
+        synced = True
+
+    monkeypatch.setattr(shutil, "rmtree", observed_rmtree)
+    monkeypatch.setattr(manager, "_fsync_backup_root", observed_sync)
+    manager.delete(backup.backup_id)
+
+    assert lock_owned is True
+    assert synced is True
 
 
 def test_backup_deletion_via_api(client: TestClient) -> None:

@@ -53,16 +53,43 @@ test.describe('Issue Verification Real Screenshots', () => {
     await page.locator('#workspace-tab-files').click()
     await page.waitForTimeout(400)
 
-    // Issue #60: File Tree MiddleTruncate Clean Single-Line Truncation
+    // Issue #60: clean single-line truncation with no duplicate text or marker overlays.
+    const longDocument = page.locator('.sangam-file-tree').getByRole('treeitem', {
+      name: 'raft-and-paxos-comparative-study-2026.md',
+    })
+    await expect(longDocument).toBeVisible()
+    const labelLayout = await longDocument.evaluate((row) => ({
+      clientWidth: row.clientWidth,
+      scrollWidth: row.scrollWidth,
+      visibleText: [...row.querySelectorAll<HTMLElement>('[data-truncate-content="visible"]')]
+        .map((node) => node.textContent)
+        .join(''),
+    }))
+    expect(labelLayout.scrollWidth).toBeLessThanOrEqual(labelLayout.clientWidth)
+    expect(labelLayout.visibleText).toBe('raft-and-paxos-comparative-study-2026.md')
     await page.locator('.primary-sidebar').screenshot({ path: path.join(outDir, 'issue-60-file-tree.png') })
 
-    // Issue #61: Context menu
-    await page.locator('.sangam-file-tree').click({ position: { x: 80, y: 30 }, button: 'right' })
-    await page.waitForTimeout(400)
-    await page
-      .locator('.primary-sidebar')
-      .screenshot({ path: path.join(outDir, 'issue-61-context-menu.png') })
+    // Issue #61: context menu is portaled beyond the sidebar clip and dismisses with Escape.
+    await longDocument.click({ button: 'right' })
+    const contextMenu = page.getByRole('menu', {
+      name: 'Actions for raft-and-paxos-comparative-study-2026.md',
+    })
+    await expect(contextMenu).toBeVisible()
+    await expect(contextMenu.getByRole('menuitem')).toHaveText([
+      'Open in split',
+      'Rename',
+      'Duplicate',
+      'Move to trash',
+    ])
+    const sidebarBox = await page.locator('.primary-sidebar').boundingBox()
+    const menuBox = await contextMenu.boundingBox()
+    expect(sidebarBox).not.toBeNull()
+    expect(menuBox).not.toBeNull()
+    expect(menuBox!.x + menuBox!.width).toBeGreaterThan(sidebarBox!.x + sidebarBox!.width)
+    await page.screenshot({ path: path.join(outDir, 'issue-61-context-menu.png') })
     await page.keyboard.press('Escape')
+    await expect(contextMenu).toBeHidden()
+    await expect(longDocument).toBeFocused()
   })
 
   test('capture issue 62 and 70 (split pane close and 40px tab trigger)', async ({ page, request }) => {
@@ -81,9 +108,8 @@ test.describe('Issue Verification Real Screenshots', () => {
 
     // Open Document actions menu and click Split right
     await page.getByRole('button', { name: 'Document actions' }).click()
-    await page.waitForTimeout(300)
     await page.getByRole('button', { name: /Split right/ }).click()
-    await page.waitForTimeout(600)
+    await expect(page.getByRole('tablist', { name: 'Open documents' })).toHaveCount(2)
 
     // Issue #62: Split panes with close tab and close split controls
     await page
@@ -161,9 +187,13 @@ Sangam is a local-first workspace engineered for durability and high-performance
 
 SQLite snapshot journaling with write-ahead logging ensures total ACID durability across all concurrent agent and human edits.
 
-### Transaction Boundary Verification
+### Transaction Boundary Verification[#](#transaction-boundary-verification "Link to this section")
 
 Every mutation is strictly isolated and validated with cryptographic SHA-256 checksums.
+
+\`\`\`markdown
+# This fenced heading must not appear in the outline
+\`\`\`
 
 ## [Distributed Synchronization Protocol](https://sangam.dev/sync)
 
@@ -196,7 +226,12 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await page.getByRole('tab', { name: 'outline' }).click()
     await page.waitForTimeout(400)
 
-    // Issue #71: Clean outline
+    // Issue #71: clean rendered text, self-link removed, fenced heading ignored.
+    await expect(page.getByRole('button', { name: 'Transaction Boundary Verification' })).toBeVisible()
+    await expect(page.getByText(/Link to this section/)).toHaveCount(0)
+    await expect(
+      page.getByRole('button', { name: 'This fenced heading must not appear in the outline' }),
+    ).toHaveCount(0)
     await page
       .locator('.document-inspector')
       .screenshot({ path: path.join(outDir, 'issue-71-clean-outline.png') })
@@ -237,12 +272,19 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await page.goto('/settings')
     await page.waitForTimeout(500)
 
-    // Issue #65: Settings screen with mounted primary sidebar
+    // Issue #65: Settings keeps the same primary workspace rail and active Settings link.
+    const primarySidebar = page.getByRole('complementary', { name: 'Workspace sidebar' })
+    await expect(primarySidebar).toBeVisible()
+    await expect(primarySidebar.getByRole('link', { name: 'Settings' })).toHaveClass(/active/)
+    await expect(page.getByRole('complementary', { name: 'Settings navigation' })).toBeVisible()
     await page.screenshot({ path: path.join(outDir, 'issue-65-settings-sidebar.png'), fullPage: false })
 
-    // Issue #75: Version card in Operations
+    // Issue #75: installed version and truthful server status in Operations.
     await page.getByRole('button', { name: /Operations/ }).click()
-    await page.waitForTimeout(500)
+    await expect(page.getByText(/Sangam Server v/)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Refresh server status' })).toBeVisible()
+    await expect(page.getByText(/Server is healthy/)).toBeVisible()
+    await expect(page.getByText(/Up to date/)).toHaveCount(0)
     await page
       .locator('.settings-content')
       .screenshot({ path: path.join(outDir, 'issue-75-version-card.png') })
@@ -254,7 +296,12 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     })
 
     await page.goto('/backups')
-    await page.waitForTimeout(600)
+    const backupCard = page.locator('.backup-card')
+    await expect(backupCard).toBeVisible()
+    await backupCard.getByRole('button', { name: 'Delete' }).click()
+    await expect(backupCard.getByRole('group', { name: 'Confirm backup deletion' })).toBeVisible()
+    await expect(backupCard.getByRole('button', { name: 'Confirm delete' })).toBeVisible()
+    await expect(backupCard.getByRole('button', { name: 'Cancel' })).toBeVisible()
     await page.locator('.utility-page').screenshot({ path: path.join(outDir, 'issue-68-backup-delete.png') })
   })
 })

@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { PanelRightClose } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
+import { extractMarkdownHeadings } from '../../markdownHeadings'
 import { useTheme, type InspectorTab } from '../../theme'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { HtmlPreview } from '../HtmlPreview'
@@ -13,15 +14,6 @@ import { activateTabFromKeyboard } from '../tabKeyboard'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const inspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
-
-export function cleanHeadingText(raw: string): string {
-  return raw
-    .replace(/<[^>]+>/g, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
-    .replace(/[*_~`]/g, '')
-    .trim()
-}
 
 export function DocumentInspector({
   width,
@@ -82,16 +74,7 @@ export function DocumentInspector({
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['publication', documentId] }),
   })
-  const headings = content
-    .split('\n')
-    .map((line, index) => {
-      const match = /^(#{1,6})\s+(.+)/.exec(line)
-      if (!match) return null
-      const rawText = match[2]!.trim()
-      const cleaned = cleanHeadingText(rawText)
-      return { level: match[1]!.length, text: cleaned || rawText, line: index + 1 }
-    })
-    .filter((heading): heading is { level: number; text: string; line: number } => Boolean(heading))
+  const headings = extractMarkdownHeadings(content)
   const fromRevision = history.find((revision) => revision.revision_id === compareFrom)
   const toRevision = history.find((revision) => revision.revision_id === compareTo)
   const setComparison = (from: string, to: string) => {

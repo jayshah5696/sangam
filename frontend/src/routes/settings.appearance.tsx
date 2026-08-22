@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import {
-  ArrowLeft,
   Check,
   Cpu,
   FolderTree,
@@ -110,9 +109,9 @@ const settingsSearchIndex: Array<{
   {
     id: 'app-version',
     category: 'operations',
-    label: 'Version & Updates',
-    description: 'Self-hosted Sangam server version and status',
-    keywords: 'version update check upgrade release build',
+    label: 'Server status',
+    description: 'Installed Sangam server version and health',
+    keywords: 'version status health refresh build',
   },
 ]
 
@@ -182,12 +181,8 @@ export function WorkspaceSettings() {
 
   return (
     <div className="settings-control-center">
-      <aside className="settings-nav" aria-label="Settings navigation">
-        <Link className="settings-back" to="/">
-          <ArrowLeft size={14} />
-          Back to workspace
-        </Link>
-        <div className="settings-nav-title">
+      <aside className="settings-nav ui-rail" aria-label="Settings navigation">
+        <div className="settings-nav-title ui-rail-header">
           <strong>Settings</strong>
           <span>Workspace and local preferences</span>
         </div>
@@ -471,8 +466,16 @@ export function WorkspaceSettings() {
                   <div>
                     <Wrench size={17} />
                     <span>
-                      <strong>Sangam Server v{health.data?.version ?? '0.1.0'}</strong>
-                      <small>Self-hosted release · System status: {health.data?.status ?? 'ok'}</small>
+                      <strong>
+                        {health.data ? `Sangam Server v${health.data.version}` : 'Sangam Server'}
+                      </strong>
+                      <small>
+                        {health.data
+                          ? `Self-hosted release · System status: ${health.data.status}`
+                          : health.isError
+                            ? 'Server status is unavailable.'
+                            : 'Loading installed version and server status…'}
+                      </small>
                     </span>
                   </div>
                   <button
@@ -481,13 +484,18 @@ export function WorkspaceSettings() {
                     onClick={() => void health.refetch()}
                   >
                     <RefreshCw size={14} className={health.isFetching ? 'spin' : ''} />
-                    {health.isFetching ? 'Checking…' : 'Check for updates'}
+                    {health.isFetching ? 'Refreshing…' : 'Refresh server status'}
                   </button>
                 </div>
                 {health.isSuccess && (
                   <p className="operation-result success" role="status">
                     <Check size={14} />
-                    Up to date. Running Sangam v{health.data.version}.
+                    Server is healthy. Running Sangam v{health.data.version}.
+                  </p>
+                )}
+                {health.isError && (
+                  <p className="operation-result error-text" role="alert">
+                    Server status could not be refreshed.
                   </p>
                 )}
               </div>

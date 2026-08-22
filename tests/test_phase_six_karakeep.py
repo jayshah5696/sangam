@@ -91,6 +91,21 @@ def configure_fake(client: TestClient) -> FakeKarakeep:
     return fake
 
 
+def test_general_health_reports_configuration_without_contacting_karakeep(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = configure_fake(client)
+
+    def fail_if_called() -> None:
+        raise AssertionError("general health must not contact Karakeep")
+
+    monkeypatch.setattr(fake, "health", fail_if_called)
+    health = client.get("/api/v1/health")
+
+    assert health.status_code == 200
+    assert health.json()["karakeep_configured"] is True
+
+
 def test_selective_import_is_attributed_searchable_and_idempotent(client: TestClient) -> None:
     configure_fake(client)
 

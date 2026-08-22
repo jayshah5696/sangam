@@ -263,10 +263,12 @@ class BackupManager:
             archive.extractall(workspace_root, filter="data")
 
     def delete(self, backup_id: str) -> None:
-        backup_dir = self._backup_dir(backup_id)
-        if not backup_dir.is_dir():
-            raise NotFoundError(f"Backup not found: {backup_id}")
-        shutil.rmtree(backup_dir)
+        with self._create_lock:
+            backup_dir = self._backup_dir(backup_id)
+            if not backup_dir.is_dir():
+                raise NotFoundError(f"Backup not found: {backup_id}")
+            shutil.rmtree(backup_dir)
+            self._fsync_backup_root()
 
     def _backup_dir(self, backup_id: str) -> Path:
         if not _BACKUP_ID.fullmatch(backup_id):
@@ -274,5 +276,16 @@ class BackupManager:
         return self.backup_root / backup_id
 
     def _apply_retention(self) -> None:
+        removed = False
         for backup in self.list()[self.retention_count :]:
             shutil.rmtree(self.backup_root / backup.backup_id)
+            removed = True
+        if removed:
+            self._fsync_backup_root()
+
+    def _fsync_backup_root(self) -> None:
+        directory = os.open(self.backup_root, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)

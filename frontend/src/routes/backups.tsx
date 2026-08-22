@@ -70,6 +70,7 @@ function BackupCard({ backup }: { backup: BackupSet }) {
     mutationFn: () => api.deleteBackup(backup.backup_id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backups'] }),
   })
+  const deleting = confirmDelete || remove.isPending || remove.isError
   return (
     <article className="backup-card">
       <div>
@@ -83,19 +84,29 @@ function BackupCard({ backup }: { backup: BackupSet }) {
           <button disabled={verify.isPending} onClick={() => verify.mutate()}>
             {verify.isPending ? 'Verifying…' : 'Verify again'}
           </button>
-          {!confirmDelete ? (
+          {!deleting ? (
             <button
-              className="danger-button secondary-action"
+              className="danger-button secondary-action backup-delete-trigger"
               onClick={() => setConfirmDelete(true)}
               title="Delete this backup set"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
               <Trash2 size={13} /> Delete
             </button>
           ) : (
-            <button className="danger-button" disabled={remove.isPending} onClick={() => remove.mutate()}>
-              {remove.isPending ? 'Deleting…' : 'Confirm delete'}
-            </button>
+            <div className="backup-delete-confirm" role="group" aria-label="Confirm backup deletion">
+              <button className="danger-button" disabled={remove.isPending} onClick={() => remove.mutate()}>
+                {remove.isPending ? 'Deleting…' : remove.isError ? 'Retry delete' : 'Confirm delete'}
+              </button>
+              <button
+                disabled={remove.isPending}
+                onClick={() => {
+                  remove.reset()
+                  setConfirmDelete(false)
+                }}
+              >
+                Cancel
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -117,6 +128,7 @@ function BackupCard({ backup }: { backup: BackupSet }) {
         </p>
       )}
       {verify.isError && <p className="error-text">Verification failed. Do not rely on this backup set.</p>}
+      {remove.isError && <p className="error-text">Backup deletion failed. The set was not removed.</p>}
     </article>
   )
 }

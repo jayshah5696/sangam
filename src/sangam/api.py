@@ -320,7 +320,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "status": "ok",
             "version": __version__,
-            "karakeep_configured": karakeep.connection_health().configured,
+            "karakeep_configured": karakeep.configured,
         }
 
     @app.get("/api/v1/readiness")

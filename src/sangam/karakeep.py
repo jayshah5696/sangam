@@ -41,8 +41,12 @@ class KarakeepService:
     def recover_interrupted_imports(self) -> None:
         self.repository.recover_interrupted_imports()
 
+    @property
+    def configured(self) -> bool:
+        return self.client is not None
+
     def connection_health(self) -> KarakeepConnection:
-        if self.client is None:
+        if not self.configured:
             return KarakeepConnection(
                 configured=False,
                 connected=False,

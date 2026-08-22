@@ -9,6 +9,7 @@ from sangam.actors import ActorService
 from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, NotFoundError, ValidationError
 from sangam.idempotency import IdempotencyStore, request_hash
+from sangam.mutations import MutationCoordinator
 from sangam.schemas import Folder, Tag
 from sangam.workspace import WorkspaceFilesystem
 
@@ -23,11 +24,13 @@ class WorkspaceOrganizationService:
         workspace: WorkspaceFilesystem,
         idempotency: IdempotencyStore,
         actors: ActorService,
+        mutations: MutationCoordinator,
     ) -> None:
         self.database = database
         self.workspace = workspace
         self.idempotency = idempotency
         self.actors = actors
+        self.mutations = mutations
 
     def normalize_folder_path(self, raw_path: str) -> str:
         return self.workspace.normalize_folder_path(raw_path)
@@ -298,99 +301,309 @@ class WorkspaceOrganizationService:
         actor_id: str,
         idempotency_key: str,
     ) -> Folder:
+        """Move a folder as one database/workspace generation.
+
+        The filesystem move happens before the SQLite commit and is rolled back
+        if the transaction fails. The exclusive generation barrier prevents a
+        backup or document mutation from observing either intermediate state.
+        """
         normalized_dest = self.normalize_folder_path(destination_path)
         fingerprint = request_hash({"folder_id": folder_id, "destination_path": normalized_dest})
-        with self.database.transaction() as connection:
-            self.actors.require_known(connection, actor_id)
-            duplicate = self.idempotency.mutation_record(
-                connection,
-                actor_id=actor_id,
-                key=idempotency_key,
-                operation="rename_folder",
-                request_hash=fingerprint,
-            )
-            if duplicate:
-                row = connection.execute(
-                    "SELECT * FROM folders WHERE folder_id = ?", (duplicate.resource_id,)
+        with self.mutations.exclusive():
+            with self.database.connection() as connection:
+                duplicate = self.idempotency.mutation_record(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation="rename_folder",
+                    request_hash=fingerprint,
+                )
+                if duplicate:
+                    row = connection.execute(
+                        "SELECT * FROM folders WHERE folder_id = ?", (duplicate.resource_id,)
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("Idempotent folder result could not be reloaded")
+                    return self._folder_from_row(connection, row)
+
+                folder_row = connection.execute(
+                    "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
                 ).fetchone()
-                if row is None:
-                    raise RuntimeError("Idempotent folder result could not be reloaded")
-                return self._folder_from_row(connection, row)
-
-            folder_row = connection.execute(
-                "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
-            ).fetchone()
-            if folder_row is None:
-                raise NotFoundError(f"Folder not found: {folder_id}")
-
-            source_path = folder_row["path"]
-            if source_path == normalized_dest:
-                return self._folder_from_row(connection, folder_row)
-
-            dest_existing = connection.execute(
-                "SELECT 1 FROM folders WHERE path = ?", (normalized_dest,)
-            ).fetchone()
-            if dest_existing:
-                raise ConflictError(f"Destination folder already exists: {normalized_dest}")
-
-            parent_dest = PurePosixPath(normalized_dest).parent
-            if parent_dest != PurePosixPath("."):
-                self.ensure_folder_path_hierarchy(connection, parent_dest.as_posix())
-
-            all_folders = connection.execute(
-                "SELECT folder_id, path, name FROM folders "
-                "WHERE path = ? OR path LIKE ? ORDER BY length(path)",
-                (source_path, f"{source_path}/%"),
-            ).fetchall()
-
-            now_str = utc_now()
-            for f_row in all_folders:
-                old_p = f_row["path"]
-                if old_p == source_path:
-                    new_p = normalized_dest
-                    new_name = normalized_dest.split("/")[-1]
-                else:
-                    new_p = normalized_dest + old_p[len(source_path) :]
-                    new_name = new_p.split("/")[-1]
-                connection.execute(
-                    "UPDATE folders SET path = ?, name = ?, updated_at = ? WHERE folder_id = ?",
-                    (new_p, new_name, now_str, f_row["folder_id"]),
+                if folder_row is None:
+                    raise NotFoundError(f"Folder not found: {folder_id}")
+                source_path = folder_row["path"]
+                if source_path == normalized_dest:
+                    return self._folder_from_row(connection, folder_row)
+                if normalized_dest.startswith(f"{source_path}/"):
+                    raise ValidationError("A folder cannot be moved inside itself")
+                if connection.execute(
+                    "SELECT 1 FROM folders WHERE path = ?", (normalized_dest,)
+                ).fetchone():
+                    raise ConflictError(f"Destination folder already exists: {normalized_dest}")
+                self._validate_folder_move_targets(
+                    connection, source_path=source_path, destination_path=normalized_dest
                 )
 
-            doc_rows = connection.execute(
-                "SELECT document_id, path FROM documents WHERE path LIKE ?",
-                (f"{source_path}/%",),
-            ).fetchall()
-
-            for d_row in doc_rows:
-                old_doc_path = d_row["path"]
-                new_doc_path = normalized_dest + old_doc_path[len(source_path) :]
-                connection.execute(
-                    "UPDATE documents SET path = ?, updated_at = ? WHERE document_id = ?",
-                    (new_doc_path, now_str, d_row["document_id"]),
-                )
-
-            self.idempotency.record_mutation(
-                connection,
-                actor_id=actor_id,
-                key=idempotency_key,
-                operation="rename_folder",
-                request_hash=fingerprint,
-                resource_type="folder",
-                resource_id=folder_id,
-            )
-
-            updated_row = connection.execute(
-                "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
-            ).fetchone()
-            result = self._folder_from_row(connection, updated_row)
-
-        try:
             self.workspace.rename_folder(source_path, normalized_dest)
-        except NotFoundError:
-            self.workspace.create_folder(normalized_dest)
+            try:
+                with self.database.transaction() as connection:
+                    self.actors.require_known(connection, actor_id)
+                    duplicate = self.idempotency.mutation_record(
+                        connection,
+                        actor_id=actor_id,
+                        key=idempotency_key,
+                        operation="rename_folder",
+                        request_hash=fingerprint,
+                    )
+                    if duplicate:
+                        raise RuntimeError("Folder move was committed concurrently")
+                    result = self._commit_folder_move(
+                        connection,
+                        folder_id=folder_id,
+                        source_path=source_path,
+                        destination_path=normalized_dest,
+                        actor_id=actor_id,
+                        idempotency_key=idempotency_key,
+                        fingerprint=fingerprint,
+                    )
+            except Exception:
+                try:
+                    self.workspace.rename_folder(normalized_dest, source_path)
+                except Exception as rollback_error:
+                    raise RuntimeError(
+                        "Folder move failed and its filesystem rollback also failed"
+                    ) from rollback_error
+                raise
+            return result
 
-        return result
+    @staticmethod
+    def _path_range(path: str) -> tuple[str, str]:
+        """Return the binary SQLite range containing descendants of path."""
+        return f"{path}/", f"{path}0"
+
+    def _validate_folder_move_targets(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        source_path: str,
+        destination_path: str,
+    ) -> None:
+        source_start, source_end = self._path_range(source_path)
+        destination_start, destination_end = self._path_range(destination_path)
+        destination_parent = PurePosixPath(destination_path).parent
+        moving_folder_ids = {
+            row["folder_id"]
+            for row in connection.execute(
+                "SELECT folder_id FROM folders WHERE path = ? OR (path >= ? AND path < ?)",
+                (source_path, source_start, source_end),
+            ).fetchall()
+        }
+        for row in connection.execute(
+            "SELECT folder_id, path FROM folders WHERE path = ? OR (path >= ? AND path < ?)",
+            (destination_path, destination_start, destination_end),
+        ).fetchall():
+            if row["folder_id"] not in moving_folder_ids:
+                raise ConflictError(f"Destination folder tree already exists: {row['path']}")
+        if connection.execute(
+            "SELECT 1 FROM documents WHERE path >= ? AND path < ? LIMIT 1",
+            (destination_start, destination_end),
+        ).fetchone():
+            raise ConflictError("Destination folder contains documents")
+        if destination_parent != PurePosixPath("."):
+            parent_path = destination_parent.as_posix()
+            document_at_parent = connection.execute(
+                "SELECT 1 FROM documents WHERE path = ? LIMIT 1", (parent_path,)
+            ).fetchone()
+            if document_at_parent:
+                raise ConflictError("Destination parent conflicts with a document")
+
+    def _commit_folder_move(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        folder_id: str,
+        source_path: str,
+        destination_path: str,
+        actor_id: str,
+        idempotency_key: str,
+        fingerprint: str,
+    ) -> Folder:
+        source_start, source_end = self._path_range(source_path)
+        folder_rows = connection.execute(
+            "SELECT * FROM folders WHERE path = ? OR (path >= ? AND path < ?) "
+            "ORDER BY length(path)",
+            (source_path, source_start, source_end),
+        ).fetchall()
+        if not folder_rows or folder_rows[0]["folder_id"] != folder_id:
+            raise ConflictError("Folder changed while it was being moved")
+        document_rows = connection.execute(
+            """
+            SELECT d.document_id, d.path, d.current_revision_id,
+                r.content, r.content_hash, r.size_bytes
+            FROM documents d
+            JOIN revisions r ON r.revision_id = d.current_revision_id
+            WHERE d.path >= ? AND d.path < ?
+            """,
+            (source_start, source_end),
+        ).fetchall()
+        parent_dest = PurePosixPath(destination_path).parent
+        if parent_dest != PurePosixPath("."):
+            self.ensure_folder_path_hierarchy(connection, parent_dest.as_posix())
+        now = utc_now()
+        for row in folder_rows:
+            old_path = row["path"]
+            new_path = destination_path + old_path[len(source_path) :]
+            connection.execute(
+                "UPDATE folders SET path = ?, name = ?, updated_at = ? WHERE folder_id = ?",
+                (new_path, PurePosixPath(new_path).name, now, row["folder_id"]),
+            )
+            before = self._folder_event_state(connection, row, path=old_path)
+            after = {
+                **before,
+                "path": new_path,
+                "name": PurePosixPath(new_path).name,
+            }
+            connection.execute(
+                """
+                INSERT INTO metadata_events(
+                    event_id, entity_type, entity_id, actor_id,
+                    operation, before_json, after_json, created_at
+                ) VALUES (?, 'folder', ?, ?, 'move', ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    row["folder_id"],
+                    actor_id,
+                    json.dumps(before),
+                    json.dumps(after),
+                    now,
+                ),
+            )
+        for row in document_rows:
+            new_path = destination_path + row["path"][len(source_path) :]
+            revision_id = str(uuid.uuid4())
+            connection.execute(
+                """
+                INSERT INTO revisions(
+                    revision_id, document_id, parent_revision_id, content,
+                    content_hash, size_bytes, actor_id, operation, summary, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'move', ?, ?)
+                """,
+                (
+                    revision_id,
+                    row["document_id"],
+                    row["current_revision_id"],
+                    row["content"],
+                    row["content_hash"],
+                    row["size_bytes"],
+                    actor_id,
+                    f"Moved with folder {source_path} to {destination_path}",
+                    now,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE documents
+                SET path = ?, current_revision_id = ?, updated_at = ?
+                WHERE document_id = ?
+                """,
+                (new_path, revision_id, now, row["document_id"]),
+            )
+            self._replace_document_search_row(connection, row["document_id"])
+        self.idempotency.record_mutation(
+            connection,
+            actor_id=actor_id,
+            key=idempotency_key,
+            operation="rename_folder",
+            request_hash=fingerprint,
+            resource_type="folder",
+            resource_id=folder_id,
+        )
+        updated = connection.execute(
+            "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
+        ).fetchone()
+        if updated is None:
+            raise RuntimeError("Moved folder could not be reloaded")
+        return self._folder_from_row(connection, updated)
+
+    @staticmethod
+    def _replace_document_search_row(connection: sqlite3.Connection, document_id: str) -> None:
+        """Rebuild one FTS row inside the folder move transaction."""
+        row = connection.execute(
+            """
+            SELECT d.title, d.path, d.category, d.deleted, r.content,
+                COALESCE((
+                    SELECT group_concat(t.name, ' ')
+                    FROM tags t JOIN document_tags dt ON dt.tag_id = t.tag_id
+                    WHERE dt.document_id = d.document_id
+                ), '') AS tags,
+                COALESCE((
+                    SELECT group_concat(DISTINCT rev.actor_id || ' ' || a.display_name)
+                    FROM revisions rev JOIN actors a ON a.actor_id = rev.actor_id
+                    WHERE rev.document_id = d.document_id
+                ), '') AS authors,
+                COALESCE((
+                    SELECT group_concat(rev.summary, ' ')
+                    FROM revisions rev
+                    WHERE rev.document_id = d.document_id
+                ), '') AS summaries,
+                COALESCE((
+                    SELECT group_concat('Page ' || page_number || ' ' || text, ' ')
+                    FROM pdf_pages WHERE document_id = d.document_id
+                ), '') AS pages,
+                COALESCE((
+                    SELECT group_concat(
+                        COALESCE(selected_text, '') || ' ' || COALESCE(note, '') || ' '
+                        || tags_json, ' '
+                    ) FROM annotations
+                    WHERE document_id = d.document_id AND deleted = 0
+                ), '') AS annotations
+            FROM documents d
+            JOIN revisions r ON r.revision_id = d.current_revision_id
+            WHERE d.document_id = ?
+            """,
+            (document_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Moved document could not be reloaded for search indexing")
+        connection.execute("DELETE FROM document_search WHERE document_id = ?", (document_id,))
+        if row["deleted"]:
+            return
+        connection.execute(
+            """
+            INSERT INTO document_search(
+                document_id, title, path, content, tags, category, authors, revision_summaries
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                document_id,
+                row["title"],
+                row["path"] or "",
+                " ".join(
+                    value for value in (row["content"], row["pages"], row["annotations"]) if value
+                ),
+                row["tags"],
+                row["category"] or "",
+                row["authors"],
+                row["summaries"],
+            ),
+        )
+
+    @staticmethod
+    def _folder_event_state(
+        connection: sqlite3.Connection, row: sqlite3.Row, *, path: str
+    ) -> dict[str, object]:
+        tags = connection.execute(
+            "SELECT tag_id FROM folder_tags WHERE folder_id = ? ORDER BY tag_id",
+            (row["folder_id"],),
+        ).fetchall()
+        return {
+            "path": path,
+            "name": PurePosixPath(path).name,
+            "category": row["category"],
+            "tag_ids": [tag["tag_id"] for tag in tags],
+            "metadata_version": row["metadata_version"],
+        }
 
     @staticmethod
     def _folder_from_row(connection: sqlite3.Connection, row: sqlite3.Row) -> Folder:

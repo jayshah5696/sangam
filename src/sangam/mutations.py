@@ -54,8 +54,12 @@ class MutationCoordinator:
                     self._condition.notify_all()
 
     @contextmanager
-    def backup(self) -> Iterator[None]:
-        """Exclude mutations while a database/workspace generation is captured."""
+    def exclusive(self) -> Iterator[None]:
+        """Own the database/workspace generation for a structural operation.
+
+        Backups and multi-document filesystem operations use this barrier so no
+        document mutation can observe or create a half-applied generation.
+        """
         with self._condition:
             self._waiting_backups += 1
             try:
@@ -70,6 +74,12 @@ class MutationCoordinator:
             with self._condition:
                 self._backup_active = False
                 self._condition.notify_all()
+
+    @contextmanager
+    def backup(self) -> Iterator[None]:
+        """Exclude mutations while a database/workspace generation is captured."""
+        with self.exclusive():
+            yield
 
     def _retain_document_lock(self, document_id: str) -> threading.RLock:
         with self._condition:

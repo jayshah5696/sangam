@@ -79,6 +79,8 @@ class WorkspaceFilesystem(Protocol):
 
     def create_folder(self, path: str) -> None: ...
 
+    def rename_folder(self, source_path: str, destination_path: str) -> None: ...
+
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]: ...
 
 
@@ -211,7 +213,8 @@ class DiskWorkspaceFilesystem:
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.rename(destination)
         self._fsync_directory(destination.parent)
-        self._fsync_directory(source.parent)
+        if source.parent != destination.parent:
+            self._fsync_directory(source.parent)
 
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]:
         normalized = _canonicalize_relative_path(path, kind="Asset")

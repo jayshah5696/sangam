@@ -134,9 +134,7 @@
   --trees-item-margin-x-override: 0px;
 }
 .tree-context-menu {
-  position: absolute;
-  right: 0;
-  top: 0;
+  position: fixed;
   z-index: 120;
   width: max-content;
   min-width: 178px;

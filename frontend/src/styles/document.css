@@ -333,6 +333,7 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .conflict-kind.unexpected_hash { background: var(--danger-soft); color: #812e22; }
 .verification.verified { background: var(--accent-soft); color: var(--accent-text); }
 .conflict-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.backup-delete-trigger, .backup-delete-confirm { display: inline-flex; align-items: center; gap: var(--space-1); }
 .backup-card ul { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 6px; }
 .backup-card li { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 8px; background: var(--surface-soft); border-radius: var(--radius-control); font-size: var(--text-meta); }
 .backup-card li small { color: var(--muted); }

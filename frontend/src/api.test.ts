@@ -27,6 +27,18 @@ describe('collectPages', () => {
   })
 })
 
+describe('response handling', () => {
+  it('accepts an empty 204 response from backup deletion', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+
+    await expect(api.deleteBackup('20260822T120000000000Z-deadbeef')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/backups/20260822T120000000000Z-deadbeef',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+})
+
 describe('chat proposal requests', () => {
   it('keeps a stable idempotency key when an apply request is retried', async () => {
     const proposal: ChatProposal = {

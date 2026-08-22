@@ -466,7 +466,7 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
     headers.set('Idempotency-Key', crypto.randomUUID())
   }
   const response = await fetch(`/api/v1${path}`, { ...init, headers })
-  const payload: unknown = await response.json()
+  const payload: unknown = response.status === 204 ? undefined : await response.json()
   if (!response.ok) {
     const parsed = errorSchema.safeParse(payload)
     if (parsed.success) {
