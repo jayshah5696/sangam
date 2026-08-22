@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { api } from '../api'
 import { HtmlPreview } from '../components/HtmlPreview'
 import { MarkdownPreview } from '../components/MarkdownPreview'
+import { TrustedHtmlPreview } from '../components/TrustedHtmlPreview'
 
 export const Route = createFileRoute('/p/$slug')({
   validateSearch: z.object({ revision: z.string().optional() }),
@@ -48,7 +49,15 @@ function PublicationPage() {
         <small>{content.is_latest ? 'Latest revision' : `Revision ${content.revision_id}`}</small>
       </header>
       {isHtml ? (
-        <HtmlPreview content={content.content} resolveAsset={resolveAsset} />
+        content.javascript_enabled && content.interactive_preview ? (
+          <TrustedHtmlPreview
+            revisionId={content.revision_id}
+            grant={content.interactive_preview}
+            title="Interactive HTML publication"
+          />
+        ) : (
+          <HtmlPreview content={content.content} resolveAsset={resolveAsset} />
+        )
       ) : (
         <MarkdownPreview content={content.content} resolveAsset={resolveAsset} />
       )}

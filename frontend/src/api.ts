@@ -261,8 +261,25 @@ export const publicationSchema = z.object({
 
 export type Publication = z.infer<typeof publicationSchema>
 
+export const htmlJavascriptSettingsSchema = z.object({
+  enabled: z.boolean(),
+  version: z.number().int().positive(),
+  updated_by: z.string(),
+  updated_at: z.string(),
+})
+
+export type HtmlJavascriptSettings = z.infer<typeof htmlJavascriptSettingsSchema>
+
 export const issuedPublicationSchema = publicationSchema.extend({ token: z.string().nullable() })
 export type IssuedPublication = z.infer<typeof issuedPublicationSchema>
+
+export const trustedPreviewGrantSchema = z.object({
+  url: z.string(),
+  token: z.string(),
+  expires_at: z.string(),
+})
+
+export type TrustedPreviewGrant = z.infer<typeof trustedPreviewGrantSchema>
 
 export const publicationContentSchema = z.object({
   publication_id: z.string(),
@@ -273,19 +290,13 @@ export const publicationContentSchema = z.object({
   content_type: z.enum(['text/markdown', 'text/html']),
   content: z.string(),
   trust_level: z.enum(['untrusted', 'trusted_interactive']),
+  javascript_enabled: z.boolean(),
   is_latest: z.boolean(),
   asset_base_url: z.string(),
+  interactive_preview: trustedPreviewGrantSchema.nullable(),
 })
 
 export type PublicationContent = z.infer<typeof publicationContentSchema>
-
-export const trustedPreviewGrantSchema = z.object({
-  url: z.string(),
-  token: z.string(),
-  expires_at: z.string(),
-})
-
-export type TrustedPreviewGrant = z.infer<typeof trustedPreviewGrantSchema>
 
 export const pdfRectSchema = z.object({
   x: z.number(),
@@ -808,6 +819,20 @@ export const api = {
   },
   async annotationHistory(annotationId: string): Promise<AnnotationEvent[]> {
     return z.array(annotationEventSchema).parse(await request(`/annotations/${annotationId}/history`))
+  },
+  async getHtmlJavascriptSettings(): Promise<HtmlJavascriptSettings> {
+    return htmlJavascriptSettingsSchema.parse(await request('/settings/html-javascript'))
+  },
+  async updateHtmlJavascriptSettings(
+    settings: HtmlJavascriptSettings,
+    enabled: boolean,
+  ): Promise<HtmlJavascriptSettings> {
+    return htmlJavascriptSettingsSchema.parse(
+      await request('/settings/html-javascript', {
+        method: 'PUT',
+        body: JSON.stringify({ expected_version: settings.version, enabled }),
+      }),
+    )
   },
   async updateDocumentTrust(document: Document, trustLevel: Document['trust_level']): Promise<Document> {
     return documentSchema.parse(

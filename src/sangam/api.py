@@ -49,6 +49,7 @@ from sangam.schemas import (
     ErrorResponse,
     ExposePublicationRevision,
     Folder,
+    HtmlJavascriptSettings,
     IssuedAgentToken,
     IssuedPublication,
     MoveFolder,
@@ -69,6 +70,7 @@ from sangam.schemas import (
     UpdateDocumentMetadata,
     UpdateDocumentTrust,
     UpdateFolderMetadata,
+    UpdateHtmlJavascriptSettings,
     UpdatePublication,
 )
 from sangam.security import Principal, PublicationAccess
@@ -89,6 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     activity = services.activity
     authorization = services.authorization
     publications = services.publications
+    html_javascript = services.html_javascript
     pdf_research = services.pdf_research
     karakeep = services.karakeep
     chat = services.chat
@@ -582,6 +585,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
     )
 
+    @app.get("/api/v1/settings/html-javascript", response_model=HtmlJavascriptSettings)
+    def get_html_javascript_settings(
+        _principal: Principal = admin_dependency,
+    ) -> HtmlJavascriptSettings:
+        return html_javascript.get()
+
+    @app.put("/api/v1/settings/html-javascript", response_model=HtmlJavascriptSettings)
+    def update_html_javascript_settings(
+        body: UpdateHtmlJavascriptSettings,
+        principal: Principal = admin_dependency,
+    ) -> HtmlJavascriptSettings:
+        result = html_javascript.update(
+            expected_version=body.expected_version,
+            enabled=body.enabled,
+            actor_id=principal.actor_id,
+        )
+        activity.record(
+            principal=principal,
+            action="update",
+            resource_type="html_javascript_settings",
+            resource_id="workspace",
+            outcome="accepted",
+        )
+        return result
+
     @app.patch("/api/v1/documents/{document_id}/trust", response_model=Document)
     def update_document_trust(
         document_id: str,
@@ -782,18 +810,40 @@ else fetch('/api/v1/trusted-previews/content', {
       return source && !source.startsWith('/') && !source.startsWith('data:') &&
         !source.startsWith('blob:') && !source.includes('://');
     });
-    await Promise.all(assets.map(async element => {
+    const fetched = await Promise.all(assets.map(async element => {
       const source = element.getAttribute('src');
       const response = await fetch(
         `/api/v1/trusted-previews/asset?path=${encodeURIComponent(source)}`,
         {headers: {Authorization: `Sangam-Preview ${token}`}}
       );
       if (!response.ok) throw new Error();
-      element.setAttribute('src', URL.createObjectURL(await response.blob()));
+      return {
+        element,
+        source,
+        isModule: element.getAttribute('type') === 'module',
+        blob: await response.blob()
+      };
     }));
+    for (const asset of fetched.filter(({element}) => element.tagName !== 'SCRIPT')) {
+      asset.element.setAttribute('src', URL.createObjectURL(asset.blob));
+    }
+    for (const asset of fetched.filter(({element}) => element.tagName === 'SCRIPT')) {
+      asset.element.setAttribute('type', 'application/x-sangam-pending');
+      asset.element.setAttribute('data-sangam-source', asset.source);
+      asset.element.removeAttribute('src');
+    }
     document.open();
     document.write('<!doctype html>' + parsed.documentElement.outerHTML);
     document.close();
+    for (const asset of fetched.filter(({element}) => element.tagName === 'SCRIPT')) {
+      const pending = Array.from(document.querySelectorAll('script[data-sangam-source]'))
+        .find(element => element.dataset.sangamSource === asset.source);
+      if (!pending) continue;
+      const script = document.createElement('script');
+      script.src = URL.createObjectURL(asset.blob);
+      if (asset.isModule) script.type = 'module';
+      pending.replaceWith(script);
+    }
   })
   .catch(() => {
     document.getElementById('status').textContent = 'Preview expired or was revoked.';
@@ -815,8 +865,14 @@ else fetch('/api/v1/trusted-previews/content', {
             raise NotFoundError("Trusted preview grant was not found")
         content = publications.trusted_preview_content(token.strip())
         connect_sources = " ".join(resolved_settings.trusted_preview_connect_src) or "'none'"
+        script_sources = ["'unsafe-inline'"]
+        for asset in publications.trusted_preview_assets(token.strip()):
+            if asset.lower().split("?", 1)[0].endswith((".js", ".mjs")):
+                script_sources.append("blob:")
+                break
         csp = (
-            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            f"default-src 'none'; script-src {' '.join(script_sources)}; "
+            "style-src 'unsafe-inline'; "
             f"connect-src {connect_sources}; img-src data: blob:; media-src 'none'; "
             "font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
         )
