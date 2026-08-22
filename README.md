@@ -166,7 +166,7 @@ also contains the backend/CLI wheel, source archive, and `SHA256SUMS`.
 Inspect and verify the exact application image:
 
 ```bash
-export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:71e4ec194ddc5ccc9969d5bb54564ae3e0b8533026e7e5d5e2dd56bda0868c2c'
+export SANGAM_IMAGE='ghcr.io/jayshah5696/sangam@sha256:43f38d2001072559cb3da8f49d46c9a46a889c535eef79f09528216d979f8c4c'
 
 docker buildx imagetools inspect "$SANGAM_IMAGE"
 
