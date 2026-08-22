@@ -253,9 +253,10 @@ registration, model policy, streaming proxies, key rotation, and recovery.
 
 The main workbench keeps navigation, editing, document state, and inspection in
 one compact frame. Documents open in preview mode by default; the mode you last
-picked is remembered per workspace. The workspace switchboard searches both
-documents and actions, while explicit save and freshness states keep background
-work visible.
+picked is remembered per workspace. The file tree keeps deep names readable,
+and context actions float beyond the sidebar without clipping. The workspace
+switchboard searches documents and actions, while explicit save and `Synced`
+states keep background work visible.
 
 ![Sangam document workbench showing the compact workspace rail, rendered Markdown preview, save state, and document inspector](./docs/assets/crisp-workspace.png)
 
@@ -272,12 +273,13 @@ work visible.
 
 ### Searchable settings
 
-Settings uses one dedicated navigation rail. Search opens the correct category
-and moves keyboard focus to the exact preference. Theme previews show the real
-workspace anatomy instead of abstract color swatches, and the same controls
-reflow without clipping on narrow screens.
+Settings keeps the primary workspace sidebar mounted and highlights its Settings
+link. A searchable category rail opens the correct category and moves keyboard
+focus to the exact preference. Theme previews show the real workspace anatomy
+instead of abstract color swatches, and the same controls reflow without clipping
+on narrow screens.
 
-![Sangam appearance settings showing the dedicated settings rail and four workspace theme previews](./docs/assets/crisp-settings.png)
+![Sangam appearance settings showing the persistent workspace sidebar, settings category rail, and four workspace theme previews](./docs/assets/crisp-settings.png)
 
 <details>
 <summary>📱 Narrow settings layout</summary>
@@ -285,6 +287,15 @@ reflow without clipping on narrow screens.
 ![Sangam appearance settings at a 390 pixel viewport with horizontal category navigation and stacked theme previews](./docs/assets/crisp-settings-narrow.png)
 
 </details>
+
+### Safer workspace operations
+
+Folder rename is one coordinated database/filesystem mutation: descendant paths,
+revision history, audit events, search data, and backup generations remain in
+sync, with rollback on failure. Backups can be deleted from **Backups** through
+an explicit confirm/cancel flow. **Settings > Operations** shows the installed
+server version and refreshes server health without presenting it as an update
+check.
 
 ### Provider-neutral AI settings
 

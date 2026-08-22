@@ -76,9 +76,10 @@ row or panel; use the standard mode when the state replaces the page content.
 
 ## Settings
 
-Settings is a dedicated task surface, not a second copy of the workspace. It
-uses one settings rail with a clear return to the workspace, six stable
-categories, and search across every setting.
+Settings is a dedicated task surface inside the shared application chrome. The
+primary workspace sidebar remains mounted and highlights Settings; a second,
+content-local settings rail provides six stable categories and search across
+every setting.
 
 - Search results name both the setting and its category.
 - Arrow keys move through results; Enter opens the category and focuses the
@@ -93,7 +94,7 @@ categories, and search across every setting.
 
 React Query owns server freshness. Queries become stale after 15 seconds and
 refresh when the window regains focus or connectivity. The workspace footer
-shows `Current`, an active refresh count, or `Offline` so background work is not
+shows `Synced`, an active refresh count, or `Offline` so background work is not
 invisible.
 
 Persisted browser state may outlive a workspace database. If a saved tab points
@@ -140,9 +141,12 @@ images before committing them:
 npm --prefix frontend run update:screenshots
 ```
 
-This writes `docs/assets/crisp-workspace.png`, `crisp-settings.png`, and
-`crisp-settings-narrow.png`. Do not hand-edit or crop these screenshots; they
-are browser output from an isolated local fixture.
+This writes `docs/assets/crisp-workspace.png`, `crisp-chat.png`,
+`crisp-workspace-narrow.png`, `crisp-inspector-narrow.png`,
+`crisp-chat-narrow.png`, `crisp-settings.png`, `crisp-settings-narrow.png`, and,
+when the PDF fixture is available, `phase-5-pdf-research-narrow.png`. Do not
+hand-edit or crop these screenshots; they are browser output from an isolated
+local fixture.
 
 `npm --prefix frontend run lint` enforces the compact type, font-family, radius,
 and defined-custom-property rules so a new component cannot quietly introduce
