@@ -10,6 +10,14 @@ from sangam.api import create_app
 from sangam.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SANGAM_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("SANGAM_KARAKEEP_API_KEY", raising=False)
+    monkeypatch.delenv("KARAKEEP_API_KEY", raising=False)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
