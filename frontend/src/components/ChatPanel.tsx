@@ -37,10 +37,12 @@ export function ChatPanel({
   selectedText,
   onDocumentUpdated,
 }: {
-  document: Document
-  selectedText: string
-  onDocumentUpdated: (document: Document, replaceContent?: boolean) => void
+  document?: Document | null
+  selectedText?: string
+  onDocumentUpdated?: (document: Document, replaceContent?: boolean) => void
 }) {
+  const activeDocument = document ?? null
+  const activeSelectedText = selectedText ?? ''
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { preferences } = useTheme()
@@ -60,16 +62,16 @@ export function ChatPanel({
   const configQuery = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
   const script = useChatKitScript(configQuery.isSuccess)
   const proposalsQuery = useQuery({
-    queryKey: ['chat-proposals', document.document_id, threadId],
-    queryFn: () => api.listChatProposals(document.document_id, threadId ?? undefined),
+    queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
+    queryFn: () => api.listChatProposals(activeDocument?.document_id, threadId ?? undefined),
     enabled: configQuery.isSuccess,
   })
   const refreshProposals = useCallback(
     () =>
       queryClient.invalidateQueries({
-        queryKey: ['chat-proposals', document.document_id, threadId],
+        queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
       }),
-    [document.document_id, queryClient, threadId],
+    [activeDocument?.document_id, queryClient, threadId],
   )
   const requestPublishConfirmation = useCallback((params: Record<string, unknown>) => {
     const request = parsePublishConfirmation(params)
@@ -106,9 +108,9 @@ export function ChatPanel({
   // referentially stable; the live document/selection/refresh are read through a
   // ref instead of being baked into the options on every render.
   const liveRef = useRef({
-    documentId: document.document_id,
-    revisionId: document.current_revision_id,
-    selectedText,
+    documentId: activeDocument?.document_id ?? null,
+    revisionId: activeDocument?.current_revision_id ?? null,
+    selectedText: activeSelectedText,
     refreshProposals,
     navigate,
     requestPublishConfirmation,
@@ -116,9 +118,9 @@ export function ChatPanel({
   })
   useEffect(() => {
     liveRef.current = {
-      documentId: document.document_id,
-      revisionId: document.current_revision_id,
-      selectedText,
+      documentId: activeDocument?.document_id ?? null,
+      revisionId: activeDocument?.current_revision_id ?? null,
+      selectedText: activeSelectedText,
       refreshProposals,
       navigate,
       requestPublishConfirmation,
@@ -230,25 +232,27 @@ export function ChatPanel({
     }
   }
 
-  const lastDocumentIdRef = useRef(document.document_id)
+  const lastDocumentIdRef = useRef(activeDocument?.document_id ?? null)
   const [contextSwitchEvent, setContextSwitchEvent] = useState<{
     documentTitle: string
     revisionId: string
   } | null>(null)
 
   useEffect(() => {
-    if (lastDocumentIdRef.current !== document.document_id) {
-      lastDocumentIdRef.current = document.document_id
-      setContextSwitchEvent({
-        documentTitle: document.title,
-        revisionId: document.current_revision_id,
-      })
+    const nextDocumentId = activeDocument?.document_id ?? null
+    if (lastDocumentIdRef.current !== nextDocumentId) {
+      lastDocumentIdRef.current = nextDocumentId
+      setContextSwitchEvent(
+        activeDocument
+          ? { documentTitle: activeDocument.title, revisionId: activeDocument.current_revision_id }
+          : null,
+      )
     }
-  }, [document.document_id, document.title, document.current_revision_id])
+  }, [activeDocument])
 
   return (
     <div className="chat-panel">
-      <ChatContextBanner document={document} selectedText={selectedText} />
+      <ChatContextBanner document={activeDocument} selectedText={activeSelectedText} />
       {contextSwitchEvent && (
         <div className="chat-context-switch-event" role="status" aria-live="polite">
           <FileText size={13} />
@@ -275,11 +279,11 @@ export function ChatPanel({
               <span>{configQuery.data.message} History and proposal review remain available.</span>
             </div>
           )}
-          <SelectionChip selectedText={selectedText} />
+          <SelectionChip selectedText={activeSelectedText} />
           {openedCitation && (
             <CitationNavigationStatus
               target={openedCitation}
-              currentDocument={document}
+              currentDocument={activeDocument}
               onClose={() => setOpenedCitation(null)}
             />
           )}
@@ -322,6 +326,7 @@ export function ChatPanel({
               initialThreadId={threadId}
               onThreadChange={handleThreadChange}
               onResponseEnd={handleResponseEnd}
+              hasDocument={Boolean(activeDocument)}
               onCitationDeeplink={handleCitationDeeplink}
               onReset={resetChatSurface}
             />
@@ -336,12 +341,15 @@ export function ChatPanel({
               </button>
             </div>
           ) : (
-            <ProposalReviewList
-              proposals={proposalsQuery.data ?? []}
-              document={document}
-              onDocumentUpdated={onDocumentUpdated}
-              onChanged={() => void refreshProposals()}
-            />
+            activeDocument &&
+            onDocumentUpdated && (
+              <ProposalReviewList
+                proposals={proposalsQuery.data ?? []}
+                document={activeDocument}
+                onDocumentUpdated={onDocumentUpdated}
+                onChanged={() => void refreshProposals()}
+              />
+            )
           )}
         </>
       )}
@@ -450,11 +458,13 @@ export function CitationNavigationStatus({
   onClose,
 }: {
   target: CitationTarget
-  currentDocument: Document
+  currentDocument: Document | null
   onClose: () => void
 }) {
-  const atDocument = currentDocument.document_id === target.documentId
-  const stale = atDocument && target.revisionId && target.revisionId !== currentDocument.current_revision_id
+  const atDocument = currentDocument?.document_id === target.documentId
+  const stale = Boolean(
+    atDocument && target.revisionId && target.revisionId !== currentDocument?.current_revision_id,
+  )
   return (
     <aside className={`chat-citation-status ${stale ? 'stale' : ''}`} aria-label="Opened chat citation">
       <div>
@@ -482,13 +492,19 @@ function shortId(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 
-export function ChatContextBanner({ document, selectedText }: { document: Document; selectedText: string }) {
+export function ChatContextBanner({
+  document,
+  selectedText,
+}: {
+  document: Document | null
+  selectedText: string
+}) {
   return (
     <div className="chat-context-banner" aria-label="Active chat context">
       <div className="chat-context-main">
-        <span className="chat-context-title">{document.title}</span>
+        <span className="chat-context-title">{document?.title ?? 'Whole workspace'}</span>
         <span className="chat-context-meta">
-          <code>rev {shortId(document.current_revision_id)}</code>
+          {document ? <code>rev {shortId(document.current_revision_id)}</code> : 'No document pinned'}
           {selectedText.length > 0 && <span> · {selectedText.length.toLocaleString()} chars selected</span>}
         </span>
       </div>
@@ -659,8 +675,8 @@ type ChatFramePhase = 'connecting' | 'ready' | 'error'
 const CHAT_FRAME_TIMEOUT_MS = 15_000
 
 type LiveChatContext = {
-  documentId: string
-  revisionId: string
+  documentId: string | null
+  revisionId: string | null
   selectedText: string
   refreshProposals: () => void
   navigate: ReturnType<typeof useNavigate>
@@ -677,6 +693,7 @@ function WorkspaceChatSurface({
   initialThreadId,
   onThreadChange,
   onResponseEnd,
+  hasDocument,
   onCitationDeeplink,
   onReset,
 }: {
@@ -688,6 +705,7 @@ function WorkspaceChatSurface({
   initialThreadId: string | null
   onThreadChange: (thread: { threadId: string | null }) => void
   onResponseEnd: () => void
+  hasDocument: boolean
   onCitationDeeplink: (event: { name: string; data?: Record<string, unknown> }) => void
   onReset: () => void
 }) {
@@ -705,7 +723,13 @@ function WorkspaceChatSurface({
   const customFetch = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers)
-      headers.set('X-Sangam-Document-ID', liveRef.current.documentId)
+      if (liveRef.current.documentId) {
+        headers.set('X-Sangam-Document-ID', liveRef.current.documentId)
+        headers.delete('X-Sangam-Workspace-Context')
+      } else {
+        headers.delete('X-Sangam-Document-ID')
+        headers.set('X-Sangam-Workspace-Context', '1')
+      }
       return fetch(input, { ...init, headers })
     },
     [liveRef],
@@ -724,8 +748,18 @@ function WorkspaceChatSurface({
     startScreen: {
       greeting: 'Ask about this workspace',
       prompts: [
-        { label: 'Summarize this document', prompt: 'Summarize the current document with citations.' },
-        { label: 'Review selected text', prompt: 'Review the selected text and suggest improvements.' },
+        {
+          label: hasDocument ? 'Summarize this document' : 'Find related work',
+          prompt: hasDocument
+            ? 'Summarize the current document with citations.'
+            : 'Find related documents in this workspace and summarize their connection with citations.',
+        },
+        {
+          label: hasDocument ? 'Review selected text' : 'Search the workspace',
+          prompt: hasDocument
+            ? 'Review the selected text and suggest improvements.'
+            : 'Search the workspace for the most important recent material and cite the sources.',
+        },
       ],
     },
     composer: {

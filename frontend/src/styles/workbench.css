@@ -294,7 +294,7 @@
   .sidebar-collapsed .document-header { padding-left: calc(var(--control-height) + var(--space-3)); }
   .sidebar-collapsed .welcome { padding-left: calc(var(--control-height) + var(--space-4)); }
   .sidebar-collapsed .utility-header { padding-left: calc(var(--control-height) + var(--space-3)); }
-  .sidebar-collapsed .activity-page > header { padding-left: calc(var(--control-height) + var(--space-3)); }
+  .sidebar-collapsed .activity-page > header, .sidebar-collapsed .workspace-chat-page > header, .sidebar-collapsed .publications-dashboard > header { padding-left: calc(var(--control-height) + var(--space-3)); }
   .sidebar-collapsed .reconciliation-header { padding-left: calc(var(--control-height) + var(--space-3)); }
   .sidebar-collapsed .karakeep-header { padding-left: calc(var(--control-height) + var(--space-3)); }
   .sidebar-collapsed .html-publication-page > header { padding-left: calc(var(--control-height) + var(--space-3)); }

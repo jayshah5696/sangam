@@ -212,6 +212,9 @@ def test_publication_latest_revision_and_explicit_exposure_are_non_enumerable(
     assert created.status_code == 201, created.text
     publication = created.json()
     assert publication["active"] is True
+    assert publication["document_path"] == "published/notes.md"
+    listed = client.get("/api/v1/publications").json()
+    assert listed[0]["document_path"] == "published/notes.md"
 
     latest = client.get("/api/v1/publications/notes/content")
     assert latest.status_code == 200

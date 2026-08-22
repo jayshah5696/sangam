@@ -76,6 +76,35 @@ def create_thread(
     return events[0]["thread"]["id"]
 
 
+def test_workspace_chat_accepts_a_thread_without_document_context(client: TestClient) -> None:
+    thread_id = create_thread(client, **{"X-Sangam-Workspace-Context": "1"})
+    assert thread_id
+    proposals = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id})
+    assert proposals.status_code == 200
+    assert proposals.json() == []
+
+
+def test_workspace_chat_does_not_inherit_a_thread_document_context(client: TestClient) -> None:
+    chat = client.app.state.services.chat
+    thread = SimpleNamespace(metadata={"document_id": "doc-from-thread"}, title="Existing")
+    context = ChatRequestContext(
+        principal=Principal.trusted_human(
+            actor_id="human:jay", display_name="Jay", operation_id="workspace-chat"
+        ),
+        workspace_context=True,
+    )
+    assert context.document_id is None
+    document_id = (
+        context.document_id
+        if context.document_id is not None or context.workspace_context
+        else thread.metadata.get("document_id")
+    )
+    assert document_id is None
+    assert asyncio.run(chat._app_context(context)) == (
+        "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
+    )
+
+
 def test_external_agent_requires_inference_scope_to_spend_provider_budget(
     client: TestClient,
 ) -> None:

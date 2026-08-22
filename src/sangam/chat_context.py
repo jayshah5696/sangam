@@ -12,6 +12,7 @@ from sangam.security import Principal
 class ChatRequestContext:
     principal: Principal
     document_id: str | None = None
+    workspace_context: bool = False
     pinned_revision_id: str | None = None
     model_ref: str | None = None
 

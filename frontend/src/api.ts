@@ -246,6 +246,7 @@ export const publicationSchema = z.object({
   publication_id: z.string(),
   document_id: z.string(),
   document_title: z.string(),
+  document_path: z.string().nullable(),
   slug: z.string(),
   access_policy: z.enum(['private', 'public', 'unlisted']),
   version: z.number(),
@@ -551,8 +552,9 @@ export const api = {
       await request(`/chat/connections/${connectionId}/models/refresh`, { method: 'POST' }),
     )
   },
-  async listChatProposals(documentId: string, threadId?: string): Promise<ChatProposal[]> {
-    const params = new URLSearchParams({ document_id: documentId })
+  async listChatProposals(documentId?: string, threadId?: string): Promise<ChatProposal[]> {
+    const params = new URLSearchParams()
+    if (documentId) params.set('document_id', documentId)
     if (threadId) params.set('thread_id', threadId)
     return z.array(chatProposalSchema).parse(await request(`/chat/proposals?${params.toString()}`))
   },
@@ -825,6 +827,9 @@ export const api = {
         method: 'POST',
       }),
     )
+  },
+  async listPublications(): Promise<Publication[]> {
+    return z.array(publicationSchema).parse(await request('/publications'))
   },
   async getDocumentPublication(documentId: string): Promise<Publication | null> {
     return publicationSchema.nullable().parse(await request(`/publications/by-document/${documentId}`))

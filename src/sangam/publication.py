@@ -669,7 +669,7 @@ class PublicationService:
     @staticmethod
     def _publication_query() -> str:
         return """
-            SELECT p.*, d.title AS document_title,
+            SELECT p.*, d.title AS document_title, d.path AS document_path,
                 EXISTS(
                     SELECT 1 FROM publication_tokens t
                     WHERE t.publication_id = p.publication_id AND t.revoked_at IS NULL

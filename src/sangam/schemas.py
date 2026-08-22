@@ -351,6 +351,7 @@ class Publication(BaseModel):
     publication_id: str
     document_id: str
     document_title: str
+    document_path: str | None
     slug: str
     access_policy: Literal["private", "public", "unlisted"]
     version: int
