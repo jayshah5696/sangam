@@ -145,6 +145,52 @@ test.describe('Issue Verification Real Screenshots', () => {
     await page
       .locator('.pierre-tree-shell')
       .screenshot({ path: path.join(outDir, 'issue-63-folder-rename.png') })
+
+    // Issue #100: Context menu Rename on folder must show visible inline input and update path
+    const folderItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'quantum-computing' })
+    await expect(folderItem).toBeVisible()
+    await folderItem.click({ button: 'right' })
+
+    const folderMenu = page.getByRole('menu', { name: 'Actions for quantum-computing' })
+    await expect(folderMenu).toBeVisible()
+    await folderMenu.getByRole('menuitem', { name: 'Rename' }).click()
+
+    const renameInput = page.locator('.sangam-file-tree').locator('input[data-item-rename-input]')
+    await expect(renameInput).toBeVisible()
+    await expect(renameInput).toBeFocused()
+    await renameInput.fill('advanced-quantum')
+    await renameInput.press('Enter')
+
+    await expect(
+      page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'advanced-quantum' }),
+    ).toBeVisible()
+
+    // Issue #100: F2 rename on file item must show visible inline input and update path
+    const docItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'qubit-fidelity.md' })
+    await expect(docItem).toBeVisible()
+    await docItem.click()
+    await page.keyboard.press('F2')
+
+    await expect(renameInput).toBeVisible()
+    await expect(renameInput).toBeFocused()
+    await renameInput.fill('qubit-analysis.md')
+    await renameInput.press('Enter')
+
+    await expect(
+      page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'qubit-analysis.md' }),
+    ).toBeVisible()
+
+    // Issue #100: Escape cancels rename mode without modifying path
+    const renamedDocItem = page
+      .locator('.sangam-file-tree')
+      .getByRole('treeitem', { name: 'qubit-analysis.md' })
+    await renamedDocItem.click()
+    await page.keyboard.press('F2')
+    await expect(renameInput).toBeVisible()
+    await renameInput.fill('qubit-discarded.md')
+    await renameInput.press('Escape')
+    await expect(renameInput).toBeHidden()
+    await expect(renamedDocItem).toBeVisible()
   })
 
   test('capture issue 64, 66, and 75 (sidebar navigation, search focus, and sync badge)', async ({
