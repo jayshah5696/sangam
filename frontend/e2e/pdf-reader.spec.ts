@@ -85,6 +85,116 @@ test('PDF highlights and long quotes use the research inspector hierarchy', asyn
   await expect(page.getByRole('button', { name: 'Show less' })).toBeVisible()
 })
 
+test('PDF selection toolbar creates highlights and annotation pins expose actions', async ({
+  page,
+  request,
+}) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          ;(window as typeof window & { __copiedText?: string }).__copiedText = value
+          return Promise.resolve()
+        },
+      },
+    })
+  })
+  const document = await importSamplePdf(request)
+  await createAnnotation(request, document.document_id, {
+    page_number: 1,
+    annotation_type: 'page_note',
+    note: 'Check this premise',
+    geometry: [],
+    tags: ['review'],
+    color: '#78c6a3',
+  })
+  await page.goto(`/documents/${document.document_id}`)
+  await expect(page.locator('.textLayer').first()).toContainText('Sangam Technical Architecture')
+
+  const text = page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first()
+  await text.evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.closest('.pdf-page')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+  const toolbar = page.getByRole('toolbar', { name: 'Selected PDF text actions' })
+  await expect(toolbar).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Highlight color/ })).toHaveCount(5)
+  await page.getByRole('button', { name: 'Copy Markdown citation' }).click()
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __copiedText?: string }).__copiedText))
+    .toContain('[PDF reader evidence, p. 1]')
+  await page.getByRole('button', { name: 'Highlight color 2' }).click()
+  await expect(page.locator('.pdf-annotation-mark.text_highlight')).toBeVisible()
+
+  await text.evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.closest('.pdf-page')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+  await page.getByRole('button', { name: 'Add note' }).click()
+  await expect(page.getByRole('tab', { name: 'research' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByText('New annotation')).toBeVisible()
+  await page.getByRole('button', { name: 'Close annotation form' }).click()
+
+  const pin = page.getByRole('button', { name: 'Open page note annotation' })
+  await pin.hover()
+  const preview = page.getByLabel('page note annotation preview')
+  await expect(preview).toContainText('Check this premise')
+  await expect(preview).toContainText('review')
+  await preview.getByRole('button', { name: 'Copy annotation link' }).click()
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __copiedText?: string }).__copiedText))
+    .toContain(`annotation=${await pin.getAttribute('data-annotation-id')}`)
+  await expect(preview.getByRole('button', { name: 'Edit annotation' })).toBeVisible()
+
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir) {
+    await page.screenshot({ path: path.join(evidenceDir, 'pdf-in-page-annotations.png') })
+  }
+
+  await preview.getByRole('button', { name: 'Edit annotation' }).click()
+  await expect(page.getByRole('tab', { name: 'research' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: 'Close annotation detail' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Close annotation detail' }).click()
+  await pin.hover()
+  await page.getByLabel('page note annotation preview').getByRole('button', { name: 'Delete' }).click()
+  await expect(pin).toHaveCount(0)
+})
+
+test('PDF selection actions stay inside the narrow viewport', async ({ page, request }) => {
+  test.skip(page.viewportSize()?.width !== 390, 'narrow project only')
+  const document = await importSamplePdf(request)
+  await page.goto(`/documents/${document.document_id}`)
+  const text = page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first()
+  await expect(text).toBeVisible()
+  await text.evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.closest('.pdf-page')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+
+  const toolbar = page.getByRole('toolbar', { name: 'Selected PDF text actions' })
+  await expect(toolbar).toBeVisible()
+  const bounds = await toolbar.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.x).toBeGreaterThanOrEqual(0)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)
+  await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible()
+})
+
 test('narrow PDF reader fits the viewport and opens research in the inspector sheet', async ({
   page,
   request,
