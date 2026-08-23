@@ -7,6 +7,29 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.8.0] - 2026-08-22
+
+### Added
+
+- **First-Class Workspace Chat & Compact Document Chat**:
+  - Full-featured standalone workspace chat on `/chat` with rich markdown formatting, model selector, tool execution status, document creation preview, and touch interactions (#105).
+  - Compact document chat tab inside Document Inspector for inline assistance alongside documents (#105).
+  - Robust ChatKit loading and session readiness with timeout handling and clear retry states.
+- **Isolated HTML JavaScript Runtime**:
+  - Configurable HTML JavaScript execution setting backed by database migration `017_html_javascript_settings.sql` (#103, #107).
+  - Sandboxed iframe runtime support enabling safe, interactive JavaScript rendering in document previews and published pages (#107).
+  - Workspace preferences and Document Inspector settings controls for toggling HTML JavaScript execution.
+- **Unified Settings Navigation**:
+  - Integrated `SettingsSidebar` drawer navigation ensuring fluid, accessible movement between workspace documents and settings across desktop and mobile screens (#104, #108).
+- **Browser Verification Skill**:
+  - Project `.agents/skills/browser-verification` skill defining desktop, narrow-desktop, true touch-mobile, and visual evidence gates (#99).
+
+### Fixed
+
+- **Inline File & Folder Renaming Visibility**:
+  - Scoped Pierre unsafeCSS styling rules with `:not(:has([data-item-rename-input]))` in `FileExplorer` so the inline rename text input remains visible and focused during rename mode (#100, #109).
+  - Prevented static pseudo-element label from obscuring the rename input field during inline renaming.
+
 ## [0.7.0] - 2026-08-22
 
 ### Added
@@ -123,7 +146,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.5.0
