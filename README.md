@@ -236,12 +236,26 @@ SANGAM_CHATKIT_DOMAIN_KEY=local-dev
 ```
 
 The OpenRouter API key powers model inference. The ChatKit domain key separately
-allows ChatKit's browser UI to run on the application origin. For a hosted
-instance, register its exact HTTPS origin and set the returned domain key. Do not
-reuse `local-dev`. Then open **Settings > AI & models** to check both statuses,
-test the preset, discover models, and select the workspace default. The same page can add direct OpenAI,
-local, or gateway endpoints that implement OpenAI Responses or Chat Completions.
-Connection records store only an environment-variable name, never a credential.
+allows ChatKit's browser UI to run on the application origin. For any non-localhost
+instance, add the exact hostname to OpenAI's
+[Domain Allowlist](https://platform.openai.com/settings/organization/security/domain-allowlist),
+copy the generated key into `SANGAM_CHATKIT_DOMAIN_KEY`, and recreate the
+container. Register only the hostname, without `https://`, a port, or a path. For
+Tailscale Serve, this is the exact `*.ts.net` hostname shown by
+`tailscale serve status`. Always open Sangam through that registered HTTPS name.
+Do not reuse `local-dev`.
+
+OpenAI currently charges no separate fee for ChatKit domain registration or the
+ChatKit UI. Inference remains billed by the configured model provider, such as OpenRouter.
+This setup does require an OpenAI Platform account for the allowlist, but Sangam's
+OpenRouter integration does not require an OpenAI API key or OpenAI model credits.
+The domain key is browser configuration, not a secret or model credential.
+
+Then open **Settings > AI & models** to check both statuses, test the preset,
+discover models, and select the workspace default. The same page can add direct
+OpenAI, local, or gateway endpoints that implement OpenAI Responses or Chat
+Completions. Connection records store only an environment-variable name, never a
+credential.
 
 The legacy `SANGAM_CHAT_DEFAULT_MODEL` and `SANGAM_CHAT_AVAILABLE_MODELS` values
 seed a new database. After that first seed, SQLite owns model selection and the
