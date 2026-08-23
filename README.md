@@ -230,13 +230,16 @@ key and the ChatKit domain registration:
 ```dotenv
 SANGAM_OPENROUTER_API_KEY=replace-with-openrouter-api-key
 SANGAM_OPENROUTER_HTTP_REFERER=http://127.0.0.1:8000
-SANGAM_CHATKIT_DOMAIN_KEY=local-dev
 SANGAM_OPENROUTER_APP_TITLE=Sangam
+# Use local-dev only when opening Sangam on localhost.
+SANGAM_CHATKIT_DOMAIN_KEY=local-dev
 ```
 
-Use the real HTTPS application origin and its registered ChatKit domain key in
-production. Then open **Settings > AI & models** to test the preset, discover
-models, and select the workspace default. The same page can add direct OpenAI,
+The OpenRouter API key powers model inference. The ChatKit domain key separately
+allows ChatKit's browser UI to run on the application origin. For a hosted
+instance, register its exact HTTPS origin and set the returned domain key. Do not
+reuse `local-dev`. Then open **Settings > AI & models** to check both statuses,
+test the preset, discover models, and select the workspace default. The same page can add direct OpenAI,
 local, or gateway endpoints that implement OpenAI Responses or Chat Completions.
 Connection records store only an environment-variable name, never a credential.
 

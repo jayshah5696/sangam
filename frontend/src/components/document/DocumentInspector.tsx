@@ -2,11 +2,13 @@ import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { PanelRightClose, Upload } from 'lucide-react'
+import { ArrowRight, Maximize2, Upload } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
+import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { extractMarkdownHeadings } from '../../markdownHeadings'
 import { useTheme, type InspectorTab } from '../../theme'
+import { useMediaQuery } from '../../useMediaQuery'
 import { useWorkbench } from '../../workbench'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { PdfResearchRail } from '../PdfResearchRail'
@@ -14,6 +16,7 @@ import { HtmlPreview } from '../HtmlPreview'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { activateTabFromKeyboard } from '../tabKeyboard'
+import { StateMessage } from '../ui/StateMessage'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
@@ -41,15 +44,34 @@ export function DocumentInspector({
   const session = useDocumentSession(documentId)
   const sessions = useDocumentSessions()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { preferences, updatePreferences } = useTheme()
+  const isNarrow = useMediaQuery('(max-width: 900px)')
   const pdf = document.content_type === 'application/pdf'
   const inspectorTabs = pdf
     ? (['properties', 'research', 'outline', 'history', 'chat'] as const)
     : standardInspectorTabs
-  const tab = pdf || preferences.rightTab !== 'research' ? preferences.rightTab : 'properties'
-  const [chatActivated, setChatActivated] = useState(tab === 'chat')
+  const preferredTab = pdf || preferences.rightTab !== 'research' ? preferences.rightTab : 'properties'
+  const tab = isNarrow && preferredTab === 'chat' ? 'properties' : preferredTab
+  const openChat = () =>
+    navigate({
+      to: '/chat',
+      search: {
+        document: document.document_id,
+        revision: document.current_revision_id,
+        returnTo: `/documents/${document.document_id}`,
+      },
+      state: chatNavigationState(selectedText),
+    })
+  const [chatActivated, setChatActivated] = useState(!isNarrow && tab === 'chat')
   const setTab = (next: InspectorTab) => {
-    if (next === 'chat') setChatActivated(true)
+    if (next === 'chat') {
+      if (isNarrow) {
+        void openChat()
+        return
+      }
+      setChatActivated(true)
+    }
     updatePreferences({ rightTab: next })
   }
   const historyQuery = useQuery({
@@ -105,7 +127,7 @@ export function DocumentInspector({
           title="Collapse document inspector"
           onClick={onCollapse}
         >
-          <PanelRightClose size={16} />
+          <ArrowRight size={16} />
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
@@ -264,13 +286,37 @@ export function DocumentInspector({
             />
           </>
         )}
-        {/* Lazy-load ChatKit after first use, then keep its composer and stream mounted. */}
         {chatActivated && (
-          <div className="chat-panel-host" hidden={tab !== 'chat'}>
-            <Suspense fallback={<div className="center-message">Preparing workspace chat…</div>}>
-              <ChatPanel document={document} selectedText={selectedText} onDocumentUpdated={onUpdated} />
+          <section className="inspector-chat-surface" hidden={tab !== 'chat'}>
+            <header className="inspector-chat-toolbar">
+              <div>
+                <strong>Document chat</strong>
+                <span>
+                  {selectedText
+                    ? `${selectedText.length.toLocaleString()} selected characters`
+                    : document.title}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="secondary-action"
+                aria-label="Open full chat"
+                title="Open full chat"
+                onClick={() => void openChat()}
+              >
+                <Maximize2 size={14} />
+                Open full chat
+              </button>
+            </header>
+            <Suspense fallback={<StateMessage kind="loading" title="Preparing document chat" />}>
+              <ChatPanel
+                compact
+                document={document}
+                selectedText={selectedText}
+                onDocumentUpdated={onUpdated}
+              />
             </Suspense>
-          </div>
+          </section>
         )}
       </div>
     </aside>

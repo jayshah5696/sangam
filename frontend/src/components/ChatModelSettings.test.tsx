@@ -50,6 +50,20 @@ const connection: ProviderConnection = {
   last_error: null,
 }
 
+const runtime = {
+  status: 'ready' as const,
+  inference_enabled: true,
+  message: 'Ready through OpenRouter.',
+  transport: 'chatkit' as const,
+  transport_status: 'misconfigured' as const,
+  transport_message: 'Register this application origin with ChatKit.',
+  chat_enabled: false,
+  domain_key: 'local-dev',
+  default_model: snapshot.default_model,
+  available_models: snapshot.catalog,
+  reasoning_effort: 'low' as const,
+}
+
 const updateChatModels = vi.fn(async (selection: unknown) => {
   void selection
   return snapshot
@@ -59,6 +73,7 @@ vi.mock('../api', () => ({
   api: {
     chatModels: async () => snapshot,
     chatConnections: async () => [connection],
+    chatConfig: async () => runtime,
     updateChatModels: (selection: unknown) => updateChatModels(selection),
     updateChatConnection: async () => connection,
     createChatConnection: async () => connection,
@@ -89,6 +104,9 @@ describe('ChatModelSettings', () => {
     expect(screen.getAllByText('OpenRouter').length).toBeGreaterThan(0)
     expect(screen.getByText('ready')).toBeTruthy()
     expect(screen.getAllByText(/openai responses · verified/i).length).toBeGreaterThan(0)
+    expect(screen.getByText('ChatKit browser transport')).toBeTruthy()
+    expect(screen.getByText('Needs setup')).toBeTruthy()
+    expect(screen.getByText('SANGAM_CHATKIT_DOMAIN_KEY', { exact: false })).toBeTruthy()
   })
 
   it('saves versioned connection-scoped model selection', async () => {

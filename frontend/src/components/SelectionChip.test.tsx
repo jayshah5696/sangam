@@ -11,7 +11,7 @@ vi.mock('@tanstack/react-router', () => ({ useNavigate: () => () => {} }))
 vi.mock('../theme', () => ({ useTheme: () => ({ preferences: { theme: 'river' } }) }))
 vi.mock('./RevisionMergeView', () => ({ RevisionMergeView: () => null }))
 
-import { ChatContextBanner, SelectionChip } from './ChatPanel'
+import { ChatContextBanner, hasMountedChatInterface, SelectionChip } from './ChatPanel'
 import type { Document } from '../api'
 
 afterEach(cleanup)
@@ -56,6 +56,24 @@ describe('ChatContextBanner', () => {
     render(<ChatContextBanner document={mockDocument} selectedText="Selected text snippet" />)
     expect(screen.getByText(/21 chars selected/)).toBeTruthy()
   })
+})
+
+describe('hasMountedChatInterface', () => {
+  it('does not accept an empty ChatKit shadow root as usable', () => {
+    const host = document.createElement('openai-chatkit')
+    const root = host.attachShadow({ mode: 'open' })
+    root.innerHTML = '<style>:host { display: block; }</style>'
+    expect(hasMountedChatInterface(host)).toBe(false)
+  })
+
+  it.each(['<iframe></iframe>', '<div class="ck-wrapper"></div>', '<textarea></textarea>'])(
+    'accepts mounted ChatKit UI: %s',
+    (markup) => {
+      const host = document.createElement('openai-chatkit')
+      host.attachShadow({ mode: 'open' }).innerHTML = markup
+      expect(hasMountedChatInterface(host)).toBe(true)
+    },
+  )
 })
 
 describe('SelectionChip', () => {

@@ -32,6 +32,7 @@ export function ChatModelSettings() {
   const queryClient = useQueryClient()
   const models = useQuery({ queryKey: ['chat-models'], queryFn: api.chatModels })
   const connections = useQuery({ queryKey: ['chat-connections'], queryFn: api.chatConnections })
+  const runtime = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
   const [newConnection, setNewConnection] = useState(emptyConnection)
   const [enabled, setEnabled] = useState<Set<string>>(new Set())
   const [overrides, setOverrides] = useState<Set<string>>(new Set())
@@ -157,20 +158,27 @@ export function ChatModelSettings() {
     })
   }
 
-  if (models.isLoading || connections.isLoading) {
+  if (models.isLoading || connections.isLoading || runtime.isLoading) {
     return (
       <div className="settings-panel center-message" id="chat-models" tabIndex={-1}>
         Loading AI connections…
       </div>
     )
   }
-  if (models.isError || connections.isError || !models.data || !connections.data) {
+  if (
+    models.isError ||
+    connections.isError ||
+    runtime.isError ||
+    !models.data ||
+    !connections.data ||
+    !runtime.data
+  ) {
     return (
       <section className="settings-panel settings-query-error" id="chat-models" tabIndex={-1} role="alert">
         <strong>AI settings could not be loaded.</strong>
         <button
           className="secondary-action"
-          onClick={() => void Promise.all([models.refetch(), connections.refetch()])}
+          onClick={() => void Promise.all([models.refetch(), connections.refetch(), runtime.refetch()])}
         >
           Retry
         </button>
@@ -201,7 +209,9 @@ export function ChatModelSettings() {
         <div className="setting-row">
           <div>
             <strong>Workspace inference</strong>
-            <small>History and proposal review remain available when inference is off.</small>
+            <small>
+              Controls model requests. Provider credentials are separate from the ChatKit browser transport.
+            </small>
           </div>
           <label className="compact-switch">
             <input
@@ -211,6 +221,19 @@ export function ChatModelSettings() {
             />
             <span>{workspaceEnabled ? 'On' : 'Off'}</span>
           </label>
+        </div>
+
+        <div className="setting-row chat-transport-setting">
+          <div>
+            <strong>ChatKit browser transport</strong>
+            <small>{runtime.data.transport_message}</small>
+            {runtime.data.transport_status === 'misconfigured' && (
+              <code>Set SANGAM_CHATKIT_DOMAIN_KEY on the server, then restart Sangam.</code>
+            )}
+          </div>
+          <span className={`connection-status status-${runtime.data.transport_status}`}>
+            {runtime.data.transport_status === 'ready' ? 'Ready' : 'Needs setup'}
+          </span>
         </div>
 
         <div className="connection-list" aria-label="Provider connections">

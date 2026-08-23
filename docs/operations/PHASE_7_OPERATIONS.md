@@ -22,7 +22,8 @@ SANGAM_CHATKIT_DOMAIN_KEY=replace-with-registered-domain-key
 `SANGAM_OPENROUTER_API_KEY` stays in the backend process. The OpenRouter preset
 stores `SANGAM_OPENROUTER_API_KEY` as a credential reference, not as a secret
 value. API responses and object representations report only whether the
-credential is available.
+credential is available. This key powers inference. It does not register the
+browser origin with ChatKit.
 
 Open **Settings > Operations & AI** to manage the connection after first boot.
 SQLite becomes authoritative after an operator edits the preset. The legacy
@@ -45,15 +46,21 @@ Production connection URLs must use HTTPS. Development permits HTTP only for
 loopback hosts. A model reference includes its stable connection ID, so two
 connections may expose the same upstream model ID without colliding.
 
-The runtime reports one of five states: disabled by workspace policy, missing a
-credential, ready, unreachable, or incompatible. History and pending proposal
+The runtime reports provider inference and ChatKit browser transport separately.
+Provider inference has five states: disabled by workspace policy, missing a
+credential, ready, unreachable, or incompatible. ChatKit transport is either
+ready or misconfigured. A provider can be ready while the browser transport is
+misconfigured. The Settings page shows both states. History and pending proposal
 review remain available when inference is not ready.
 
 ## ChatKit domain registration
 
-`local-dev` is only for localhost. Register every production application origin
-in ChatKit, store the returned domain key in `SANGAM_CHATKIT_DOMAIN_KEY`, and
-rebuild/restart the deployment. The application loads ChatKit's bootstrap from
+`local-dev` is only for localhost. Register every hosted application origin in
+ChatKit, store the returned domain key in `SANGAM_CHATKIT_DOMAIN_KEY`, and
+rebuild/restart the deployment. Sangam reports transport as misconfigured and
+will not mount ChatKit when a non-loopback request would receive `local-dev` or
+an empty key. Production mode also rejects that configuration at startup. The
+application loads ChatKit's bootstrap from
 `https://cdn.platform.openai.com/deployments/chatkit/chatkit.js`; the iframe UI
 is hosted by OpenAI even though Sangam owns the backend, store, and inference
 pipeline.
@@ -82,15 +89,28 @@ headers in any reverse proxy.
 
 Through the production application hostname:
 
-1. Sign in through Cloudflare Access and open a Document's Chat tab.
-2. Ask for a grounded summary that requires `read_document`.
-3. Confirm the user item appears immediately.
-4. Confirm workflow progress appears before the final answer.
-5. Stop a second response mid-stream and confirm the partial response remains
+1. Sign in through the configured access layer and open a document.
+2. Select **Chat**, then **Ask about this document** to open the full-page chat route.
+3. Ask for a grounded summary that requires `read_document`.
+4. Confirm the user item appears immediately.
+5. Confirm workflow progress appears before the final answer.
+6. Stop a second response mid-stream and confirm the partial response remains
    visible and retry is offered.
-6. Retry it and confirm only one completed retry appears in durable history.
-7. Inspect the response in browser network tools. It must remain an open SSE
+7. Retry it and confirm only one completed retry appears in durable history.
+8. Inspect the response in browser network tools. It must remain an open SSE
    response with event chunks arriving before completion.
+
+To automate the send-and-receive check against a configured deployment, run:
+
+```bash
+cd frontend
+SANGAM_DEPLOYED_CHAT_ORIGIN=https://sangam.example.test \
+  npx playwright test e2e/chat-deployed-smoke.spec.ts --project=chromium-desktop
+```
+
+The origin must already be reachable from the test machine and registered with
+ChatKit. The command does not embed a deployment address or credential in the
+repository.
 
 If all events arrive at once, check Cloudflare and any origin proxy for response
 buffering, compression, or caching on `/api/v1/chatkit`. Do not add polling or a

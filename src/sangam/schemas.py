@@ -510,6 +510,9 @@ class ChatRuntimeConfig(BaseModel):
     inference_enabled: bool
     message: str
     transport: Literal["chatkit"] = "chatkit"
+    transport_status: Literal["ready", "misconfigured"]
+    transport_message: str
+    chat_enabled: bool
     domain_key: str
     default_model: str
     available_models: list[ChatModelInfo]

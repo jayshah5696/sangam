@@ -105,6 +105,82 @@ def test_workspace_chat_does_not_inherit_a_thread_document_context(client: TestC
     )
 
 
+def test_document_chat_persists_the_requested_pinned_revision(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Pinned context", "content": "Version one", "path": "pinned.md"},
+        headers=headers("pinned-context"),
+    ).json()
+    pinned_revision = document["current_revision_id"]
+
+    install_fake_model(client, ["Pinned answer"])
+    response = chatkit_request(
+        client,
+        {
+            "type": "threads.create",
+            "params": {
+                "input": {
+                    "content": [{"type": "input_text", "text": "Review this document"}],
+                    "attachments": [],
+                    "inference_options": {"model": "openai/gpt-5.4-nano"},
+                }
+            },
+        },
+        **{
+            "X-Sangam-Document-ID": document["document_id"],
+            "X-Sangam-Revision-ID": pinned_revision,
+        },
+    )
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert "error" not in {event["type"] for event in events}
+    thread_id = next(event["thread"]["id"] for event in events if event["type"] == "thread.created")
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="pinned-context-test"
+    )
+    request_context = ChatRequestContext(principal=principal, document_id=document["document_id"])
+    thread = asyncio.run(
+        client.app.state.services.chat.store_adapter.load_thread(thread_id, request_context)
+    )
+
+    turn_contexts = thread.metadata["turn_contexts"]
+    assert len(turn_contexts) == 1
+    assert next(iter(turn_contexts.values()))["revision_id"] == pinned_revision
+
+
+def test_document_chat_rejects_an_unknown_requested_revision(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Missing revision", "content": "Current", "path": "missing-revision.md"},
+        headers=headers("missing-revision"),
+    ).json()
+
+    install_fake_model(client, ["This response must not run"])
+    response = chatkit_request(
+        client,
+        {
+            "type": "threads.create",
+            "params": {
+                "input": {
+                    "content": [{"type": "input_text", "text": "Review this document"}],
+                    "attachments": [],
+                    "inference_options": {"model": "openai/gpt-5.4-nano"},
+                }
+            },
+        },
+        **{
+            "X-Sangam-Document-ID": document["document_id"],
+            "X-Sangam-Revision-ID": "missing-revision-id",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "The attached document revision no longer exists" in response.text
+
+
 def test_external_agent_requires_inference_scope_to_spend_provider_budget(
     client: TestClient,
 ) -> None:
@@ -157,13 +233,15 @@ def test_external_agent_requires_inference_scope_to_spend_provider_budget(
 
 
 def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -> None:
-    response = client.get("/api/v1/chat/config")
+    response = client.get("/api/v1/chat/config", headers={"Origin": "https://sangam.example.test"})
 
     assert response.status_code == 200
     config = response.json()
     assert config["status"] == "missing_credential"
     assert config["inference_enabled"] is False
     assert config["transport"] == "chatkit"
+    assert config["transport_status"] == "misconfigured"
+    assert config["chat_enabled"] is False
     assert config["domain_key"] == "local-dev"
     assert config["default_model"] == "openrouter::openai/gpt-5.6-luna"
     assert {item["id"] for item in config["available_models"]} == {
@@ -174,6 +252,13 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
     }
     assert config["reasoning_effort"] == "low"
     assert "api_key" not in response.text
+
+    local_config = client.get(
+        "/api/v1/chat/config", headers={"Origin": "http://127.0.0.1:8000"}
+    ).json()
+    assert local_config["transport_status"] == "ready"
+    assert local_config["transport_message"] == "ChatKit browser transport is ready."
+
     assert {tool.name for tool in client.app.state.services.chat.tools} == {
         "get_editor_selection",
         "search_workspace",
@@ -604,6 +689,10 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
         "content_type": "text/markdown",
     }
     assert client.get("/api/v1/documents").json() == []
+    create_tool = next(
+        tool for tool in client.app.state.services.chat.tools if tool.name == "create_document"
+    )
+    assert "never ask for confirmation in prose" in create_tool.description.lower()
 
 
 def test_chat_store_loads_legacy_payloads_and_rejects_unknown_versions(
