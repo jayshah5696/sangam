@@ -55,19 +55,53 @@ review remain available when inference is not ready.
 
 ## ChatKit domain registration
 
-`local-dev` is only for localhost. Register every hosted application origin in
-ChatKit, store the returned domain key in `SANGAM_CHATKIT_DOMAIN_KEY`, and
-rebuild/restart the deployment. Sangam reports transport as misconfigured and
-will not mount ChatKit when a non-loopback request would receive `local-dev` or
-an empty key. Production mode also rejects that configuration at startup. The
-application loads ChatKit's bootstrap from
-`https://cdn.platform.openai.com/deployments/chatkit/chatkit.js`; the iframe UI
-is hosted by OpenAI even though Sangam owns the backend, store, and inference
-pipeline.
+`local-dev` works only when the browser opens Sangam on localhost. Every other
+hostname needs a ChatKit domain key, including private Tailscale hostnames.
+OpenAI currently charges no separate fee for registration, but it requires an
+OpenAI Platform account because OpenAI operates the allowlist and hosted ChatKit browser
+component. An OpenAI API key or OpenAI model credits are not required when Sangam
+uses OpenRouter for inference.
 
-The CSP must continue to restrict `script-src` to Sangam and that exact CDN.
-Do not broaden `frame-src` beyond HTTPS OpenAI hosts and the separately
-configured trusted-preview origin.
+Register a deployment:
+
+1. Give Sangam one stable HTTPS hostname. With Tailscale Serve, run
+   `tailscale serve status` and use the exact `*.ts.net` name it reports.
+2. Open OpenAI's
+   [Domain Allowlist](https://platform.openai.com/settings/organization/security/domain-allowlist).
+3. Add only the hostname, such as `sangam.example-tailnet.ts.net`. Do not include
+   `https://`, a port, or a path.
+4. Copy the generated domain key into the deployment environment:
+
+   ```dotenv
+   SANGAM_CHATKIT_DOMAIN_KEY=domain_pk_replace-with-generated-key
+   ```
+
+5. Recreate the container so Compose applies the changed environment:
+
+   ```bash
+   docker compose up -d --force-recreate sangam
+   ```
+
+6. Open Sangam through the registered HTTPS hostname and select **Check again**.
+   Allowlist changes may take a few minutes to become effective.
+
+The domain key is public browser configuration, not an authentication secret.
+It proves that the page hostname is on the allowlist. Keep the OpenRouter API key
+server-side as usual. Sangam reports transport as misconfigured and will not
+mount ChatKit when a non-loopback request would receive `local-dev` or an empty
+key. Production mode also rejects that configuration at startup.
+
+This deployment is self-hosted at the application layer: Sangam owns the backend,
+thread store, authentication, tools, and inference connection. The browser UI is
+still an OpenAI dependency. Sangam downloads ChatKit's bootstrap from
+`https://cdn.platform.openai.com/deployments/chatkit/chatkit.js`, renders an
+OpenAI-hosted iframe, and the iframe contacts `https://api.openai.com` to verify
+the domain key. Chat availability therefore depends on those OpenAI services even
+when model inference runs through OpenRouter.
+
+The CSP must continue to restrict `script-src` to Sangam and that exact CDN. Do
+not broaden `frame-src` beyond HTTPS OpenAI hosts and the separately configured
+trusted-preview origin.
 
 ## Provider credential rotation
 
