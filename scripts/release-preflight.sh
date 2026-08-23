@@ -28,4 +28,4 @@ just check
 just docker-smoke
 ./scripts/validate-compose.sh
 
-echo "Automated release preflight passed for v$VERSION. Complete docs/operations/RELEASE_CHECKLIST.md before tagging."
+echo "Automated release preflight passed for v$VERSION. Complete docs/operations/release-checklist.md before tagging."
