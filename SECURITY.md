@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-Sangam is pre-1.0 software. Security fixes are provided for the latest `0.1.x`
+Sangam is pre-1.0 software. Security fixes are provided for the latest `0.8.x`
 release only. Operators should deploy immutable image digests and upgrade after
 reviewing the release notes and completing the backup procedure.
 
 | Version | Supported |
 | --- | --- |
-| Latest `0.1.x` | Yes |
+| Latest `0.8.x` | Yes |
 | Older releases and source snapshots | No |
 
 ## Report a vulnerability
@@ -28,4 +28,4 @@ prefer to remain anonymous.
 The development Compose file is for loopback-only evaluation. Internet-facing
 deployments must use the production configuration, an authenticated reverse proxy,
 an isolated trusted-preview origin, off-host encrypted backups, and the verification
-steps in `docs/operations/RELEASE_CHECKLIST.md`.
+steps in `docs/operations/release-checklist.md`.

@@ -21,13 +21,13 @@ def llms_txt(base_url: str) -> str:
         - [Sangam agent skill]({base}/skills/sangam/SKILL.md): Installable instructions for safe search, read, create, update, conflict recovery, PDF research, and publishing workflows.
         - [OpenAPI 3.1 contract]({base}/api/v1/openapi.json): Machine-readable HTTP operations, schemas, bearer authentication, and errors.
         - [Interactive API reference]({base}/api/v1/docs): Browser-based API documentation.
-        - [Agent token operations guide](https://github.com/jayshah5696/sangam/blob/main/docs/operations/PHASE_3_OPERATIONS.md): Token issuance, path scopes, rotation, revocation, and incident response.
+        - [Agent access operations guide](https://github.com/jayshah5696/sangam/blob/main/docs/operations/agent-access.md): Token issuance, path scopes, rotation, revocation, and incident response.
 
         ## Core workflows
 
-        - [Agent collaboration model](https://github.com/jayshah5696/sangam/blob/main/docs/PHASE_3.md): Authorization, revision conflicts, idempotency, and reviewable activity.
-        - [PDF research](https://github.com/jayshah5696/sangam/blob/main/docs/PHASE_5.md): Immutable PDF imports, extracted page text, search, and annotations.
-        - [Publishing](https://github.com/jayshah5696/sangam/blob/main/docs/PHASE_4.md): Stable publications and access policies.
+        - [Architecture and trust model](https://github.com/jayshah5696/sangam/blob/main/docs/architecture.md): Authorization, revision conflicts, idempotency, and reviewable activity.
+        - [Configuration reference](https://github.com/jayshah5696/sangam/blob/main/docs/configuration.md): Environment variables, storage layout, and runtime limits.
+        - [Deployment guide](https://github.com/jayshah5696/sangam/blob/main/docs/operations/deploy.md): Local evaluation, Docker deployment, and Cloudflare Access.
         - [CLI reference](https://github.com/jayshah5696/sangam#development): Use the Sangam CLI with SANGAM_API_URL and SANGAM_TOKEN.
 
         ## Service checks
