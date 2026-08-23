@@ -11,10 +11,12 @@ from urllib.parse import quote, urlsplit
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from sangam import __version__
+from sangam.agent_docs import agent_skill, llms_txt
 from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
@@ -76,6 +78,11 @@ from sangam.schemas import (
 from sangam.security import Principal, PublicationAccess
 
 logger = logging.getLogger(__name__)
+
+
+def _camel_case(value: str) -> str:
+    first, *rest = value.split("_")
+    return first + "".join(part.capitalize() for part in rest)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -144,6 +151,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Sangam API",
         version=__version__,
+        description=(
+            "Revision-aware document workspace API for humans and scoped agents. "
+            "Read a document immediately before changing it, send its current revision as "
+            "expected_revision_id, and give every intended mutation an Idempotency-Key."
+        ),
         openapi_url="/api/v1/openapi.json",
         docs_url="/api/v1/docs",
         lifespan=lifespan,
@@ -156,6 +168,174 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     app.state.services = services
+
+    def openapi_schema() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        components = schema.setdefault("components", {})
+        components.setdefault("securitySchemes", {})["AgentBearer"] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "Sangam agent token",
+            "description": (
+                "A scoped token issued once by the workspace owner. Send it only in the "
+                "Authorization header. Tokens can restrict capabilities, paths, and lifetime."
+            ),
+        }
+        public_operations = {
+            ("/api/v1/health", "get"),
+            ("/api/v1/readiness", "get"),
+            ("/api/v1/publications/{slug}/content", "get"),
+        }
+        operation_descriptions = {
+            ("/api/v1/documents", "get"): (
+                "List visible current documents when no search query is available. Results are "
+                "bounded by limit and offset and exclude full content."
+            ),
+            ("/api/v1/search", "get"): (
+                "Search visible document titles, paths, content, tags, and categories. Prefer this "
+                "to listing or reading the whole workspace."
+            ),
+            ("/api/v1/documents", "post"): (
+                "Create a Markdown or HTML document. A path-scoped token must provide a "
+                "destination inside its allowed prefix. Requires a fresh Idempotency-Key for "
+                "the intended create."
+            ),
+            ("/api/v1/documents/{document_id}", "get"): (
+                "Read current document metadata and content by stable ID. Use current_revision_id "
+                "from this response as expected_revision_id for a subsequent content mutation."
+            ),
+            ("/api/v1/documents/{document_id}", "patch"): (
+                "Replace a document's complete content against an expected current revision. "
+                "Requires Idempotency-Key. A 409 revision_conflict means reread, merge, and retry "
+                "with the new current revision and a new key."
+            ),
+            ("/api/v1/documents/{document_id}/raw", "get"): (
+                "Return exact stored Markdown, HTML, or PDF bytes without the application shell. "
+                "Prefer this route when content should be saved to disk instead of model context."
+            ),
+            ("/api/v1/documents/{document_id}/history", "get"): (
+                "List immutable revisions newest first. Use before restoring content or explaining "
+                "how a document changed."
+            ),
+            ("/api/v1/documents/{document_id}/diff", "get"): (
+                "Compare two immutable revisions and return a unified diff with addition and "
+                "deletion counts."
+            ),
+            ("/api/v1/documents/{document_id}/move", "post"): (
+                "Move a materialized document against its expected revision. Requires authority "
+                "over both current and destination paths plus an Idempotency-Key."
+            ),
+            ("/api/v1/documents/{document_id}/metadata", "patch"): (
+                "Replace category and complete tag assignments against expected_metadata_version. "
+                "Requires an Idempotency-Key."
+            ),
+            ("/api/v1/documents/{document_id}/restore", "post"): (
+                "Restore an immutable snapshot as a new current revision. This changes workspace "
+                "content and requires explicit user intent, restore authority, and Idempotency-Key."
+            ),
+            ("/api/v1/documents/{document_id}", "delete"): (
+                "Move a document to trash against its expected current revision. This is a "
+                "high-impact mutation requiring explicit user intent and an Idempotency-Key."
+            ),
+            ("/api/v1/pdfs/{document_id}/pages", "get"): (
+                "Read extracted PDF text by page without changing the immutable PDF source bytes."
+            ),
+            ("/api/v1/pdfs/{document_id}/search", "get"): (
+                "Search extracted PDF page text and return page-aware snippets."
+            ),
+            ("/api/v1/publications", "post"): (
+                "Publish a document at a stable slug with private, public, or unlisted access. "
+                "This can expose content outside the workspace and requires explicit user intent."
+            ),
+        }
+        error_examples = {
+            "401": {
+                "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                        "error": {
+                            "code": "authentication_required",
+                            "message": "The bearer token is invalid",
+                            "details": {},
+                        }
+                    },
+                }
+            },
+            "403": {
+                "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                        "error": {
+                            "code": "authorization_denied",
+                            "message": "The principal is not authorized for this operation",
+                            "details": {"capability": "update", "path": "projects/plan.md"},
+                        }
+                    },
+                }
+            },
+            "409": {
+                "revisionConflict": {
+                    "summary": "Document changed since the caller read it",
+                    "value": {
+                        "error": {
+                            "code": "revision_conflict",
+                            "message": "The document changed since it was read",
+                            "details": {
+                                "document_id": "doc_example",
+                                "expected_revision_id": "rev_old",
+                                "current_revision_id": "rev_current",
+                            },
+                        }
+                    },
+                }
+            },
+        }
+        used_operation_ids: set[str] = set()
+        for path, path_item in schema["paths"].items():
+            for method, operation in path_item.items():
+                if method not in {"get", "post", "put", "patch", "delete"}:
+                    continue
+                function_name = operation["operationId"].split("_api_v1_", 1)[0]
+                operation_id = _camel_case(function_name)
+                if operation_id in used_operation_ids:
+                    resource = next(
+                        part
+                        for part in path.removeprefix("/api/v1/").split("/")
+                        if part and not part.startswith("{")
+                    )
+                    operation_id = _camel_case(f"{resource}_{function_name}")
+                operation["operationId"] = operation_id
+                used_operation_ids.add(operation_id)
+                if description := operation_descriptions.get((path, method)):
+                    operation["description"] = description
+                if (path, method) not in public_operations:
+                    operation["security"] = [{"AgentBearer": []}]
+                documented_errors = {"401", "403"}
+                if (path, method) == ("/api/v1/documents/{document_id}", "patch"):
+                    documented_errors.add("409")
+                for status in documented_errors:
+                    response = operation.get("responses", {}).get(status)
+                    if response is not None:
+                        response.setdefault("content", {}).setdefault("application/json", {})[
+                            "examples"
+                        ] = error_examples[status]
+                for parameter in operation.get("parameters", []):
+                    if parameter.get("in") == "header" and parameter.get("name") == "Authorization":
+                        parameter["description"] = (
+                            "Use `Bearer <token>` for scoped agent access. In trusted browser "
+                            "deployments, the reverse proxy may authenticate a human instead."
+                        )
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi_schema
 
     @app.middleware("http")
     async def operation_context(request: Request, call_next):
@@ -317,6 +497,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     },
                 }
             },
+        )
+
+    @app.get("/llms.txt", response_class=PlainTextResponse, include_in_schema=False)
+    def agent_index(request: Request) -> PlainTextResponse:
+        return PlainTextResponse(
+            llms_txt(str(request.base_url)),
+            media_type="text/plain; charset=utf-8",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+
+    @app.get(
+        "/skills/sangam/SKILL.md",
+        response_class=PlainTextResponse,
+        include_in_schema=False,
+    )
+    def sangam_agent_skill(request: Request) -> PlainTextResponse:
+        return PlainTextResponse(
+            agent_skill(str(request.base_url)),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Cache-Control": "public, max-age=300"},
         )
 
     @app.get("/api/v1/health")

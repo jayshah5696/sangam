@@ -30,6 +30,26 @@ describe('OneTimeSecret', () => {
     expect(screen.getByRole('button', { name: 'Copied' })).not.toBeNull()
   })
 
+  it('copies separate setup instructions without including the secret', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+
+    render(
+      <OneTimeSecret
+        title="Copy this token now"
+        value="secret-token"
+        copyLabel="Copy token"
+        secondaryCopy={{ label: 'Copy agent setup', value: 'export SANGAM_API_URL=https://example.test' }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy agent setup' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('export SANGAM_API_URL=https://example.test'))
+    expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining('secret-token'))
+    expect(screen.getByRole('button', { name: 'Setup copied' })).not.toBeNull()
+  })
+
   it('keeps the value visible and reports clipboard failures', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,

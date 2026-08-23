@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { agentTokenSchema, issuedAgentTokenSchema } from '../api'
 import {
+  agentSetupInstructions,
   buildTokenScopes,
   defaultExpirationValue,
   defaultTokenLifetimeHours,
@@ -9,6 +10,15 @@ import {
 } from './AgentAccessSettings'
 
 describe('agent access contracts', () => {
+  it('builds setup instructions that discover the skill and OpenAPI without embedding a token', () => {
+    const instructions = agentSetupInstructions('https://sangam.example.com')
+
+    expect(instructions).toContain("export SANGAM_API_URL='https://sangam.example.com'")
+    expect(instructions).toContain('$SANGAM_API_URL/skills/sangam/SKILL.md')
+    expect(instructions).toContain('$SANGAM_API_URL/api/v1/openapi.json')
+    expect(instructions).not.toContain('sgm_agt_')
+  })
+
   it('keeps read, search, and mutation prefixes independently scoped', () => {
     expect(
       buildTokenScopes(new Set(['read', 'search', 'create', 'update']), {

@@ -44,6 +44,18 @@ test('activity date presets and custom boundaries filter the review log', async 
   }
 })
 
+test('issued token offers separate secret and agent setup handoffs', async ({ page }) => {
+  await page.goto('/settings?category=agents')
+  await page.getByLabel('Actor ID').fill(`agent:onboarding-${randomUUID().slice(0, 8)}`)
+  await page.getByRole('button', { name: 'Issue token' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'New agent token secret' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Copy token' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Copy agent setup' })).toBeVisible()
+  await expect(dialog).toContainText('This value will not be shown again')
+})
+
 test('active agent token metadata and scopes can be edited in place', async ({ page, request }) => {
   await issueToken(request)
   await page.goto('/settings?category=agents')
