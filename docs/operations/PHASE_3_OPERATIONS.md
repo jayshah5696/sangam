@@ -48,7 +48,23 @@ Use Settings → Operations & AI → Agents & tokens. Recommended first scope:
 - No delete capability until the integration has proved it needs one.
 
 Copy the token immediately and store it in the external agent's secret store.
-Sangam cannot display it again.
+Sangam cannot display it again. Use **Copy agent setup** for separate instructions
+that contain the instance URL and discovery endpoints but never the token itself.
+Give those instructions to the agent and inject the token through its secret
+manager.
+
+Every instance publishes public, credential-free discovery resources:
+
+```text
+/llms.txt
+/skills/sangam/SKILL.md
+/api/v1/openapi.json
+/api/v1/docs
+```
+
+`llms.txt` is a small index, `SKILL.md` explains safe workflows, and OpenAPI is
+the machine-readable HTTP contract. These resources grant no authority. The
+bearer token remains the only agent identity and capability boundary.
 
 The last-used timestamp is deliberately approximate within five minutes. This
 avoids taking a SQLite write lock for every read-only agent request while still

@@ -71,6 +71,17 @@ export const tokenPresets: Record<
 
 export const defaultTokenLifetimeHours = 24
 
+export function agentSetupInstructions(origin = window.location.origin): string {
+  return [
+    '# Store the one-time token in your agent secret manager as SANGAM_TOKEN.',
+    `export SANGAM_API_URL='${origin}'`,
+    `curl --fail "$SANGAM_API_URL/skills/sangam/SKILL.md"`,
+    `curl --fail "$SANGAM_API_URL/api/v1/openapi.json"`,
+    '',
+    'Follow the Sangam skill. Send SANGAM_TOKEN only as an Authorization: Bearer header.',
+  ].join('\n')
+}
+
 function normalizePrefixInput(value: string): string | null {
   const normalized = value
     .trim()
@@ -266,6 +277,10 @@ export function AgentAccessSettings() {
               }
               value={issued.token}
               copyLabel="Copy token"
+              secondaryCopy={{
+                label: 'Copy agent setup',
+                value: agentSetupInstructions(),
+              }}
               icon={<KeyRound size={18} />}
               dismissLabel="I saved it"
               onDismiss={closeIssuedSecret}

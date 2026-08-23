@@ -6,6 +6,7 @@ export function OneTimeSecret({
   description,
   value,
   copyLabel,
+  secondaryCopy,
   compact = false,
   icon,
   dismissLabel,
@@ -15,17 +16,18 @@ export function OneTimeSecret({
   description?: string
   value: string
   copyLabel: string
+  secondaryCopy?: { label: string; value: string }
   compact?: boolean
   icon?: ReactNode
   dismissLabel?: string
   onDismiss?: () => void
 }) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [copyState, setCopyState] = useState<'idle' | 'secret' | 'secondary' | 'failed'>('idle')
 
-  const copy = async () => {
+  const copy = async (copyValue: string, success: 'secret' | 'secondary') => {
     try {
-      await navigator.clipboard.writeText(value)
-      setCopyState('copied')
+      await navigator.clipboard.writeText(copyValue)
+      setCopyState(success)
     } catch {
       setCopyState('failed')
     }
@@ -42,10 +44,20 @@ export function OneTimeSecret({
       </div>
       <code>{value}</code>
       <div className="token-actions">
-        <button className="secondary-action" type="button" onClick={() => void copy()}>
-          {copyState === 'copied' ? <Check size={14} /> : <Copy size={14} />}
-          {copyState === 'copied' ? 'Copied' : copyLabel}
+        <button className="secondary-action" type="button" onClick={() => void copy(value, 'secret')}>
+          {copyState === 'secret' ? <Check size={14} /> : <Copy size={14} />}
+          {copyState === 'secret' ? 'Copied' : copyLabel}
         </button>
+        {secondaryCopy && (
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={() => void copy(secondaryCopy.value, 'secondary')}
+          >
+            {copyState === 'secondary' ? <Check size={14} /> : <Copy size={14} />}
+            {copyState === 'secondary' ? 'Setup copied' : secondaryCopy.label}
+          </button>
+        )}
         {onDismiss && (
           <button className="secondary-action" type="button" onClick={onDismiss}>
             <Check size={14} /> {dismissLabel ?? 'Done'}

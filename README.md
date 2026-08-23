@@ -465,8 +465,15 @@ uv run sangam list
 ```
 
 Remote agent or CLI access requires a one-time token issued from **Agents &
-tokens** and supplied through `SANGAM_TOKEN`. The
-[agent operations guide](./docs/operations/PHASE_3_OPERATIONS.md) documents
+tokens** and supplied through `SANGAM_TOKEN`. After issuance, **Copy agent
+setup** provides secret-free instructions that point the agent at the hosted
+skill and API contract. Every running Sangam instance exposes:
+
+- `/llms.txt` as a small discovery index;
+- `/skills/sangam/SKILL.md` as portable workflow and safety instructions; and
+- `/api/v1/openapi.json` as the authenticated OpenAPI 3.1 contract.
+
+The [agent operations guide](./docs/operations/PHASE_3_OPERATIONS.md) documents
 capabilities, path scopes, rotation, revocation, and incident response.
 
 Authenticated clients can retrieve an artifact without the application shell:
@@ -517,7 +524,7 @@ The repository follows a few non-negotiable boundaries:
 - All human, CLI, integration, agent, and chat writes use the same application
   service and optimistic-revision path.
 - Agent identity comes from scoped bearer credentials, never a caller-selected
-  actor header.
+  actor header. Public discovery files explain the interface but grant no access.
 - Existing-document AI edits remain proposals until a human applies them.
 - Safe publication, trusted interactive preview, and the authenticated application
   are separate trust zones.
