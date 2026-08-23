@@ -7,6 +7,19 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.8.1] - 2026-08-22
+
+### Added
+
+- **Zero-Configuration Agent Discovery & Onboarding**:
+  - Direct agent discovery endpoints: `GET /llms.txt`, `GET /llms-full.txt`, `GET /agent.json`, and `GET /skills/sangam/SKILL.md` exposing complete instance capabilities, conventions, and tool definitions without requiring secrets (#114).
+  - Integrated skill guide download and setup instructions directly inside the Agent Access settings interface (#114).
+  - Enhanced one-time secret view dialog for newly generated bearer tokens (#114).
+- **Consolidated Documentation & Demo Media**:
+  - Streamlined operational guides covering deployment, configuration, backups, agent access, and integrations (#115).
+  - Added new visual demo assets and automated demo recording scripts (#115).
+  - Added ChatKit domain registration and allowlisting deployment guide (#113).
+
 ## [0.8.0] - 2026-08-22
 
 ### Added
@@ -146,7 +159,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.1
 [0.8.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.6.0
