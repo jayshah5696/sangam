@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-Sangam is pre-1.0 software. Security fixes are provided for the latest `0.8.x`
+Sangam is pre-1.0 software. Security fixes are provided for the latest `0.9.x`
 release only. Operators should deploy immutable image digests and upgrade after
 reviewing the release notes and completing the backup procedure.
 
 | Version | Supported |
 | --- | --- |
-| Latest `0.8.x` | Yes |
+| Latest `0.9.x` | Yes |
 | Older releases and source snapshots | No |
 
 ## Report a vulnerability

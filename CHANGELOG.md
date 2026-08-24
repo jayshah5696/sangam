@@ -7,6 +7,25 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.9.0] - 2026-08-23
+
+### Added
+
+- **Durable Chat Capability Lifecycle & Side Effects Architecture**:
+  - Full capability registry and tool execution planner backed by database migration `018_chat_capabilities_and_effects.sql` (#121).
+  - Explicit mutation lifecycle (staged, applied, rejected, rolled back) ensuring AI-driven edits require human review and can be safely audited (#121).
+  - Citation evidence tracking linking workspace context and PDF page citations directly to chat turns and proposed edits (#121).
+  - Comprehensive lifecycle validation suite and adversarial conversation evaluation fixtures (#121).
+- **Streamlined Chat UI & Compact Document Controls**:
+  - Unified compact chat controls, model selectors, and tool status cards across standalone `/chat` and Document Inspector tabs (#121).
+  - Preserved active conversation context across workbench tab navigation and document switching (#121).
+- **Design System & Semantic Token Consistency**:
+  - Semantic icon role audit aligning Lucide icon tokens across file tree, settings sidebar, PDF viewer, secrets modal, and workbench controls (#121).
+  - Automated UI token compliance checks enforcing visual hierarchy (#121).
+- **Chat Capabilities Architecture Documentation**:
+  - Published `docs/CHAT_CAPABILITIES.md` detailing capability contracts, turn state machines, and side-effect boundaries (#121).
+  - Added interactive visual lifecycle flow diagrams and documentation media assets (#121).
+
 ## [0.8.1] - 2026-08-22
 
 ### Added
@@ -159,7 +178,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.0
 [0.8.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.1
 [0.8.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.7.0

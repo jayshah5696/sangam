@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from typing import cast
 
 from agents import Agent, ModelSettings, RunConfig, Runner
 from chatkit.agents import AgentContext, ThreadItemConverter, stream_agent_response
@@ -19,7 +20,7 @@ from openai.types.shared.reasoning import Reasoning
 
 from sangam.access import WorkspaceAccessService
 from sangam.capabilities import Capability
-from sangam.chat_capabilities import ChatCapabilityRegistry
+from sangam.chat_capabilities import ChatCapabilityRegistry, ChatEntryPoint
 from sangam.chat_context import AgentRunContext, ChatRequestContext
 from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
@@ -211,12 +212,13 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             currently_allowed = self.capabilities.resolve(
                 principal=context.principal,
                 policy=self.workspace.policy,
-                entry_point=turn_record.entry_point,
+                entry_point=cast(ChatEntryPoint, turn_record.entry_point),
                 document=document,
                 model_supports_tools=selected_model.supports_tools,
             )
             pinned = {
-                (str(item["id"]), int(item["version"])) for item in turn_record.capability_manifest
+                (str(item["id"]), int(str(item["version"])))
+                for item in turn_record.capability_manifest
             }
             resolved_capabilities = tuple(
                 capability
@@ -256,7 +258,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             resolved_capabilities = self.capabilities.resolve(
                 principal=context.principal,
                 policy=self.workspace.policy,
-                entry_point=turn_record.entry_point,
+                entry_point=cast(ChatEntryPoint, turn_record.entry_point),
                 document=document,
                 model_supports_tools=selected_model.supports_tools,
             )
