@@ -64,11 +64,11 @@ function PublicationsDashboard() {
           <h1>Publications</h1>
           <p>See every workspace publication, its reach, and the credential state behind unlisted links.</p>
         </div>
-        <Globe2 size={28} />
+        <Globe2 size="var(--icon-page)" />
       </header>
       <div className="publication-filters">
         <label>
-          <Search size={14} />
+          <Search size="var(--icon-control)" />
           <input
             type="search"
             aria-label="Search publications"
@@ -113,7 +113,7 @@ function PublicationsDashboard() {
             <div className="publication-card-main">
               <div>
                 <Link to="/documents/$documentId" params={{ documentId: publication.document_id }}>
-                  <FileText size={15} /> {publication.document_title}
+                  <FileText size="var(--icon-inline)" /> {publication.document_title}
                 </Link>
                 <code>{publication.document_path ?? `/p/${publication.slug}`}</code>
               </div>
@@ -126,7 +126,8 @@ function PublicationsDashboard() {
                 </span>
                 {publication.access_policy === 'unlisted' && (
                   <span className="scope-badge">
-                    <KeyRound size={12} /> {publication.has_active_token ? 'Token active' : 'No token'}
+                    <KeyRound size="var(--icon-inline)" />{' '}
+                    {publication.has_active_token ? 'Token active' : 'No token'}
                   </span>
                 )}
               </div>
@@ -134,16 +135,16 @@ function PublicationsDashboard() {
             </div>
             <div className="publication-card-actions">
               <a className="secondary-action" href={publication.url} target="_blank" rel="noreferrer">
-                <ExternalLink size={14} /> Open
+                <ExternalLink size="var(--icon-inline)" /> Open
               </a>
               <button
                 className="secondary-action"
                 onClick={() => void navigator.clipboard.writeText(publication.url)}
               >
-                <Copy size={14} /> Copy URL
+                <Copy size="var(--icon-inline)" /> Copy URL
               </button>
               <button className="secondary-action" onClick={() => setEditing(publication)}>
-                <Pencil size={14} /> Edit
+                <Pencil size="var(--icon-inline)" /> Edit
               </button>
               {publication.active && publication.access_policy === 'unlisted' && (
                 <button
@@ -151,7 +152,7 @@ function PublicationsDashboard() {
                   disabled={rotate.isPending}
                   onClick={() => rotate.mutate(publication.publication_id)}
                 >
-                  <RefreshCw size={14} /> Rotate link
+                  <RefreshCw size="var(--icon-inline)" /> Rotate link
                 </button>
               )}
               {publication.active && (
@@ -235,7 +236,7 @@ function PublicationEditor({
           <p>{publication.document_title}</p>
         </div>
         <button className="icon-button" aria-label="Close publication editor" onClick={onClose}>
-          <X size={16} />
+          <X size="var(--icon-control)" />
         </button>
       </header>
       <form

@@ -204,14 +204,14 @@ describe('FileExplorerPanel', () => {
     expect(state.model.startRenaming).toHaveBeenCalledWith('projects/note.md')
   })
 
-  it('configures Pierre unsafeCSS to preserve rename input visibility', () => {
+  it('keeps Pierre native labels visible instead of caching labels in pseudo-elements', () => {
     render(<FileExplorerPanel onSearch={vi.fn()} />)
 
     const unsafeCSS = state.useFileTreeOptions[0]?.unsafeCSS as string
-    expect(unsafeCSS).toContain('[data-item-section="content"]:not(:has([data-item-rename-input])) > *')
-    expect(unsafeCSS).toContain('[data-item-section="content"]:not(:has([data-item-rename-input]))::after')
+    expect(unsafeCSS).not.toContain('data-sangam-label')
+    expect(unsafeCSS).not.toContain('content: attr(')
     expect(unsafeCSS).not.toMatch(
-      /\[data-item-section="content"\]\s*>\s*\*\s*\{\s*display:\s*none\s*!important;\s*\}/,
+      /\[data-item-section="content"\][^{]*>\s*\*\s*\{[^}]*display:\s*none\s*!important;/,
     )
   })
 

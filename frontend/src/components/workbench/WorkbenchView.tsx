@@ -283,7 +283,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
           title="Document properties"
           onClick={() => openToTab('properties')}
         >
-          <SlidersHorizontal size={15} />
+          <SlidersHorizontal size="var(--icon-control)" />
         </button>
         {document.content_type === 'application/pdf' && (
           <button
@@ -292,7 +292,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
             title="PDF research"
             onClick={() => openToTab('research')}
           >
-            <NotebookTabs size={15} />
+            <NotebookTabs size="var(--icon-control)" />
           </button>
         )}
         <button
@@ -301,7 +301,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
           title="Document outline"
           onClick={() => openToTab('outline')}
         >
-          <ListTree size={15} />
+          <ListTree size="var(--icon-control)" />
         </button>
         <button
           className="icon-button"
@@ -309,7 +309,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
           title="Revision history"
           onClick={() => openToTab('history')}
         >
-          <History size={15} />
+          <History size="var(--icon-control)" />
         </button>
         <button
           className="icon-button"
@@ -330,7 +330,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
             })
           }}
         >
-          <MessageSquare size={15} />
+          <MessageSquare size="var(--icon-control)" />
         </button>
       </aside>
     )
@@ -430,7 +430,7 @@ function TabStrip({
       </div>
       <ActionMenu
         label="Editor group actions"
-        icon={<MoreHorizontal size={16} />}
+        icon={<MoreHorizontal size="var(--icon-control)" />}
         className="tab-actions-trigger"
       >
         {(close) => (
@@ -442,7 +442,7 @@ function TabStrip({
                 close()
               }}
             >
-              {activeTab?.pinned ? <PinOff size={13} /> : <Pin size={13} />}{' '}
+              {activeTab?.pinned ? <PinOff size="var(--icon-inline)" /> : <Pin size="var(--icon-inline)" />}{' '}
               {activeTab?.pinned ? 'Unpin tab' : 'Pin tab'}
             </ActionMenuItem>
             <ActionMenuItem
@@ -461,7 +461,7 @@ function TabStrip({
                 close()
               }}
             >
-              <RotateCcw size={13} /> Reopen closed tab
+              <RotateCcw size="var(--icon-inline)" /> Reopen closed tab
             </ActionMenuItem>
             <hr />
             <ActionMenuItem
@@ -471,7 +471,7 @@ function TabStrip({
                 close()
               }}
             >
-              <Columns2 size={13} /> Split right
+              <Columns2 size="var(--icon-inline)" /> Split right
             </ActionMenuItem>
             <ActionMenuItem
               disabled={!canSplitActiveGroup('vertical')}
@@ -480,7 +480,7 @@ function TabStrip({
                 close()
               }}
             >
-              <Rows2 size={13} /> Split down
+              <Rows2 size="var(--icon-inline)" /> Split down
             </ActionMenuItem>
             {canCloseGroup && (
               <ActionMenuItem
@@ -489,7 +489,7 @@ function TabStrip({
                   close()
                 }}
               >
-                <PanelRightClose size={13} /> Close editor group
+                <PanelRightClose size="var(--icon-inline)" /> Close editor group
               </ActionMenuItem>
             )}
           </>
@@ -526,7 +526,7 @@ function DocumentTab({
         onClick={() => onActivate(tab.documentId)}
         onKeyDown={activateTabFromKeyboard}
       >
-        {tab.pinned && <Pin size={10} />}
+        {tab.pinned && <Pin size="var(--icon-detail)" />}
         <span>{tab.title}</span>
         {dirty && <i aria-label="Unsaved changes" />}
       </button>
@@ -537,7 +537,7 @@ function DocumentTab({
           title="Close"
           onClick={() => onClose(tab.documentId)}
         >
-          <X size={12} />
+          <X size="var(--icon-control)" />
         </button>
       )}
     </div>

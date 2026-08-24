@@ -249,7 +249,7 @@ export function AgentAccessSettings() {
   return (
     <section className="settings-panel" id="agent-access" tabIndex={-1}>
       <header>
-        <Bot size={18} />
+        <Bot size="var(--icon-section)" />
         <div>
           <h2>Agents & tokens</h2>
           <p>Issue revocable credentials with explicit capabilities and workspace boundaries.</p>
@@ -281,7 +281,7 @@ export function AgentAccessSettings() {
                 label: 'Copy agent setup',
                 value: agentSetupInstructions(),
               }}
-              icon={<KeyRound size={18} />}
+              icon={<KeyRound size="var(--icon-section)" />}
               dismissLabel="I saved it"
               onDismiss={closeIssuedSecret}
             />
@@ -427,7 +427,7 @@ export function AgentAccessSettings() {
 
               {selectedSensitiveCapabilities.length > 0 && (
                 <div className="agent-capability-warning" role="alert">
-                  <AlertTriangle size={18} />
+                  <AlertTriangle size="var(--icon-section)" />
                   <div>
                     <strong>High-impact access selected</strong>
                     <ul>
@@ -474,7 +474,7 @@ export function AgentAccessSettings() {
           {validationAttempted &&
             (capabilityMissing || writePrefixMissing || sensitiveConfirmationMissing) && (
               <div className="agent-token-validation" role="alert" tabIndex={-1}>
-                <AlertTriangle size={16} />
+                <AlertTriangle size="var(--icon-control)" />
                 <span>
                   {capabilityMissing
                     ? 'Choose at least one capability.'
@@ -485,7 +485,7 @@ export function AgentAccessSettings() {
               </div>
             )}
           <button disabled={issue.isPending}>
-            <KeyRound size={14} /> {issue.isPending ? 'Issuing…' : 'Issue token'}
+            <KeyRound size="var(--icon-inline)" /> {issue.isPending ? 'Issuing…' : 'Issue token'}
           </button>
         </form>
         {issue.isError && <p className="operation-result error-text">{issue.error.message}</p>}
@@ -498,7 +498,7 @@ export function AgentAccessSettings() {
         <div className="agent-token-list">
           <div className="settings-subtitle">
             <div>
-              <KeyRound size={15} />
+              <KeyRound size="var(--icon-control)" />
               <strong>Issued tokens</strong>
             </div>
             <Link to="/activity">Review agent activity</Link>
@@ -529,21 +529,21 @@ export function AgentAccessSettings() {
               {!token.revoked_at && (
                 <div className="token-actions">
                   <button className="secondary-action" onClick={() => setEditing(token)}>
-                    <Pencil size={14} /> Edit
+                    <Pencil size="var(--icon-inline)" /> Edit
                   </button>
                   <button
                     className="secondary-action"
                     disabled={rotate.isPending}
                     onClick={() => rotate.mutate(token.token_id)}
                   >
-                    <RefreshCw size={14} /> Rotate
+                    <RefreshCw size="var(--icon-inline)" /> Rotate
                   </button>
                   <button
                     className="secondary-action danger"
                     disabled={revoke.isPending}
                     onClick={() => revoke.mutate(token.token_id)}
                   >
-                    <ShieldOff size={14} /> Revoke
+                    <ShieldOff size="var(--icon-inline)" /> Revoke
                   </button>
                 </div>
               )}
@@ -610,7 +610,7 @@ function AgentTokenEditor({
           <p>{token.actor_display_name} · Existing secret stays valid after saving.</p>
         </div>
         <button className="icon-button" aria-label="Close token editor" onClick={onClose}>
-          <X size={16} />
+          <X size="var(--icon-control)" />
         </button>
       </header>
       <form
@@ -692,7 +692,7 @@ function AgentTokenEditor({
         </fieldset>
         {selectedSensitiveCapabilities.length > 0 && (
           <div className="agent-capability-warning" role="alert">
-            <AlertTriangle size={18} />
+            <AlertTriangle size="var(--icon-section)" />
             <div>
               <strong>Confirm high-impact access</strong>
               <label>

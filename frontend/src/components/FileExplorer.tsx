@@ -274,12 +274,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         white-space: nowrap !important;
         text-overflow: ellipsis !important;
       }
-      [data-item-section="content"]:not(:has([data-item-rename-input])) > * {
-        display: none !important;
-      }
-      [data-item-section="content"]:not(:has([data-item-rename-input]))::after {
-        content: attr(data-sangam-label);
-      }
     `,
     initialExpansion: 'open',
     initialExpandedPaths: loadExpanded(),
@@ -416,23 +410,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     void openDocument(document)
   }
 
-  const syncTreeLabelsRef = useRef((host: HTMLElement) => {
-    for (const row of host.shadowRoot?.querySelectorAll<HTMLElement>('[data-type="item"]') ?? []) {
-      const path = row.dataset.itemPath
-      if (!path) continue
-      const item = itemFromPath(path)
-      const content = row.querySelector<HTMLElement>('[data-item-section="content"]')
-      if (item && content) content.dataset.sangamLabel = item.name
-    }
-  })
-  useLayoutEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      const host = document.querySelector<HTMLElement>('.sangam-file-tree')
-      if (host) syncTreeLabelsRef.current(host)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [adapter])
-
   const handleTreeContextMenu = (event: MouseEvent<HTMLElement>) => {
     const path = model.getFocusedPath()
     const item = path ? itemFromPath(path) : null
@@ -458,14 +435,14 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     <div className="sidebar-content file-explorer-panel">
       <div className="sidebar-actions">
         <button onClick={() => setCreateMode({ kind: 'file', parentPath: selectedFolderPath })}>
-          <FilePlus2 size={14} /> New file
+          <FilePlus2 size="var(--icon-inline)" /> New file
         </button>
         <button
           aria-label="New folder"
           title="New folder"
           onClick={() => setCreateMode({ kind: 'folder', parentPath: selectedFolderPath })}
         >
-          <FolderPlus size={15} />
+          <FolderPlus size="var(--icon-control)" />
         </button>
       </div>
       {createMode && (
@@ -491,7 +468,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         </form>
       )}
       <button className="sidebar-search-trigger" onClick={onSearch}>
-        <Search size={14} />
+        <Search size="var(--icon-control)" />
         <span>Search workspace</span>
       </button>
       <div className="sidebar-section-title">
@@ -514,8 +491,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           onContextMenu={handleTreeContextMenu}
           className="sangam-file-tree"
           model={model}
-          onPointerMove={(event) => syncTreeLabelsRef.current(event.currentTarget)}
-          onFocusCapture={(event) => syncTreeLabelsRef.current(event.currentTarget)}
           onKeyDown={handleTreeKeyDown}
           onDoubleClick={() => {
             const path = model.getFocusedPath()
@@ -545,7 +520,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
               className="secondary-action explorer-empty-action"
               onClick={() => setCreateMode({ kind: 'file', parentPath: '' })}
             >
-              <FilePlus2 size={13} /> New document
+              <FilePlus2 size="var(--icon-inline)" /> New document
             </button>
           </div>
         )}
@@ -629,27 +604,27 @@ function ExplorerContextMenu({
   const menuItems = folder ? (
     <>
       <button type="button" role="menuitem" onClick={() => run(() => onCreate('file', folder.path))}>
-        <FilePlus2 size={12} /> New file
+        <FilePlus2 size="var(--icon-inline)" /> New file
       </button>
       <button type="button" role="menuitem" onClick={() => run(() => onCreate('folder', folder.path))}>
-        <FolderPlus size={12} /> New folder
+        <FolderPlus size="var(--icon-inline)" /> New folder
       </button>
       <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
-        <Pencil size={12} /> Rename
+        <Pencil size="var(--icon-inline)" /> Rename
       </button>
     </>
   ) : selectedDocument ? (
     <>
       <button type="button" role="menuitem" onClick={() => run(() => onOpenToSide(selectedDocument))}>
-        <PanelRightOpen size={12} /> Open in split
+        <PanelRightOpen size="var(--icon-inline)" /> Open in split
       </button>
       {selectedDocument.content_type !== 'application/pdf' && (
         <>
           <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
-            <Pencil size={12} /> Rename
+            <Pencil size="var(--icon-inline)" /> Rename
           </button>
           <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(selectedDocument))}>
-            <Copy size={12} /> Duplicate
+            <Copy size="var(--icon-inline)" /> Duplicate
           </button>
           <button
             className="danger"
@@ -657,7 +632,7 @@ function ExplorerContextMenu({
             role="menuitem"
             onClick={() => run(() => onTrash(selectedDocument))}
           >
-            <Trash2 size={12} /> Move to trash
+            <Trash2 size="var(--icon-inline)" /> Move to trash
           </button>
         </>
       )}

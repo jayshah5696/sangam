@@ -411,7 +411,7 @@ function MobileInspectorToggle() {
       title="Open document inspector"
       onClick={() => updatePreferences({ rightVisible: true, rightTab: 'research' })}
     >
-      <PanelRightOpen size={16} />
+      <PanelRightOpen size="var(--icon-control)" />
     </button>
   )
 }
@@ -480,7 +480,7 @@ function DocumentToolbar({
       <div className="document-toolbar-actions">
         <ActionDialog
           label="Document actions"
-          icon={<MoreHorizontal size={16} />}
+          icon={<MoreHorizontal size="var(--icon-control)" />}
           className="document-actions-trigger"
         >
           {(close) => (
@@ -495,7 +495,7 @@ function DocumentToolbar({
                     close()
                   }}
                 >
-                  <Columns2 size={13} /> Split right
+                  <Columns2 size="var(--icon-inline)" /> Split right
                 </button>
                 <button
                   type="button"
@@ -506,7 +506,7 @@ function DocumentToolbar({
                     close()
                   }}
                 >
-                  <Rows2 size={13} /> Split down
+                  <Rows2 size="var(--icon-inline)" /> Split down
                 </button>
                 {canCloseGroup && (
                   <button
@@ -517,7 +517,7 @@ function DocumentToolbar({
                       close()
                     }}
                   >
-                    <PanelRightClose size={13} /> Close group
+                    <PanelRightClose size="var(--icon-inline)" /> Close group
                   </button>
                 )}
               </div>
@@ -577,7 +577,7 @@ function DocumentToolbar({
           title="Open document inspector"
           onClick={() => updatePreferences({ rightVisible: true })}
         >
-          <PanelRightOpen size={16} />
+          <PanelRightOpen size="var(--icon-control)" />
         </button>
       </div>
     </div>

@@ -86,17 +86,17 @@ export function PdfAnnotationPreview({
         </span>
         <div>
           <button type="button" aria-label="Edit annotation" onClick={onEdit}>
-            <Pencil size={13} /> Edit
+            <Pencil size="var(--icon-inline)" /> Edit
           </button>
           <button
             type="button"
             aria-label="Copy annotation link"
             onClick={() => void navigator.clipboard.writeText(annotationLink(annotation))}
           >
-            <Copy size={13} /> Copy link
+            <Copy size="var(--icon-inline)" /> Copy link
           </button>
           <button type="button" className="danger" disabled={deleting} onClick={onDelete}>
-            <Trash2 size={13} /> {deleting ? 'Deleting…' : 'Delete'}
+            <Trash2 size="var(--icon-inline)" /> {deleting ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </footer>

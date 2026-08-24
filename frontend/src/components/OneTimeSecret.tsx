@@ -45,7 +45,7 @@ export function OneTimeSecret({
       <code>{value}</code>
       <div className="token-actions">
         <button className="secondary-action" type="button" onClick={() => void copy(value, 'secret')}>
-          {copyState === 'secret' ? <Check size={14} /> : <Copy size={14} />}
+          {copyState === 'secret' ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
           {copyState === 'secret' ? 'Copied' : copyLabel}
         </button>
         {secondaryCopy && (
@@ -54,13 +54,17 @@ export function OneTimeSecret({
             type="button"
             onClick={() => void copy(secondaryCopy.value, 'secondary')}
           >
-            {copyState === 'secondary' ? <Check size={14} /> : <Copy size={14} />}
+            {copyState === 'secondary' ? (
+              <Check size="var(--icon-inline)" />
+            ) : (
+              <Copy size="var(--icon-inline)" />
+            )}
             {copyState === 'secondary' ? 'Setup copied' : secondaryCopy.label}
           </button>
         )}
         {onDismiss && (
           <button className="secondary-action" type="button" onClick={onDismiss}>
-            <Check size={14} /> {dismissLabel ?? 'Done'}
+            <Check size="var(--icon-inline)" /> {dismissLabel ?? 'Done'}
           </button>
         )}
         {copyState === 'failed' && (

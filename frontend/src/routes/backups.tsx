@@ -90,7 +90,7 @@ function BackupCard({ backup }: { backup: BackupSet }) {
               onClick={() => setConfirmDelete(true)}
               title="Delete this backup set"
             >
-              <Trash2 size={13} /> Delete
+              <Trash2 size="var(--icon-inline)" /> Delete
             </button>
           ) : (
             <div className="backup-delete-confirm" role="group" aria-label="Confirm backup deletion">

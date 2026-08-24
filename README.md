@@ -88,6 +88,7 @@ integrations.
 | [docs/operations/agent-access.md](docs/operations/agent-access.md) | Scoped tokens, discovery, incident response |
 | [docs/operations/integrations.md](docs/operations/integrations.md) | Karakeep bridge, ChatKit domain allowlist, chat runtime |
 | [docs/UI_SYSTEM.md](docs/UI_SYSTEM.md) | Visual grammar for UI contributions |
+| [docs/CHAT_CAPABILITIES.md](docs/CHAT_CAPABILITIES.md) | Chat capability, turn context, effect, and evidence contract |
 | [.agents/skills/sangam-agent-guide/SKILL.md](.agents/skills/sangam-agent-guide/SKILL.md) | Skill for AI agents operating a deployed Sangam |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 

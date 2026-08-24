@@ -28,6 +28,28 @@ async function createPublication(request: import('@playwright/test').APIRequestC
   return (await publication.json()) as { publication_id: string; document_id: string }
 }
 
+async function createChatThread(request: import('@playwright/test').APIRequestContext) {
+  const response = await request.post('/api/v1/chatkit', {
+    data: {
+      type: 'threads.create',
+      params: {
+        input: {
+          content: [{ type: 'input_text', text: 'Inspector history thread' }],
+          attachments: [],
+          inference_options: { model: 'openai/gpt-5.4-nano' },
+        },
+      },
+    },
+    headers: { 'X-Sangam-Workspace-Context': '1' },
+  })
+  expect(response.ok(), await response.text()).toBeTruthy()
+  const events = (await response.text())
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => JSON.parse(line.slice(6)) as { type: string; thread?: { id: string } })
+  return events.find((event) => event.type === 'thread.created')!.thread!.id
+}
+
 test('workspace chat opens without a document and reports transport setup truthfully', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('link', { name: 'Ask workspace' }).click()
@@ -78,6 +100,145 @@ test('document chat hands exact context to the full-page route', async ({
     else await back.click()
     await expect(page).toHaveURL(new RegExp(`/documents/${seededWorkspace.documentId}$`))
     await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
+  }
+})
+
+test('compact chat exposes shared new-chat and history controls', async ({
+  page,
+  request,
+  seededWorkspace,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop inspector only')
+  const threadId = await createChatThread(request)
+  await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
+  await page.getByRole('tab', { name: 'chat', exact: true }).click()
+
+  const compact = page.locator('.inspector-chat-surface')
+  const newChat = compact.getByRole('button', { name: 'New chat' })
+  const history = compact.getByRole('button', { name: 'Chat history' })
+  await expect(newChat).toBeVisible()
+  await expect(history).toBeVisible()
+  await expect(newChat).toHaveAttribute('title', 'New chat')
+  await expect(history).toHaveAttribute('title', 'Chat history')
+  for (const control of [newChat, history]) {
+    const bounds = await control.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.width).toBeGreaterThanOrEqual(32)
+    expect(bounds!.height).toBeGreaterThanOrEqual(32)
+    await control.focus()
+    await expect(control).toBeFocused()
+  }
+
+  await page.getByRole('button', { name: 'Open full chat' }).click()
+  await expect(page).toHaveURL(/\/chat\?document=/)
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('sangam.chat-thread.workspace')))
+    .toBe(threadId)
+
+  await page.getByRole('button', { name: 'Return to document' }).click()
+  await page.getByRole('tab', { name: 'chat', exact: true }).click()
+  await newChat.click()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('sangam.chat-thread.workspace')))
+    .toBeNull()
+  await history.click()
+  await expect(compact).toBeVisible()
+
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir) {
+    await compact.screenshot({ path: path.join(evidenceDir, 'issue-118-compact-chat-controls.png') })
+  }
+})
+
+test('durable effect review restores exact pending and completed state', async ({
+  page,
+  request,
+}, testInfo) => {
+  const threadId = await createChatThread(request)
+  const digest = 'a'.repeat(64)
+  const baseEffect = {
+    effect_id: 'effect-browser-review',
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: 'create_document',
+    capability_version: 1,
+    argument_digest: digest,
+    preview: {
+      title: 'Reviewed browser draft',
+      content: '# Exact source\n\nThis is the complete approved content.',
+      content_type: 'text/markdown',
+    },
+    effect_class: 'write',
+    risk: 'workspace',
+    status: 'pending_approval',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: null,
+    resource_id: null,
+    result: null,
+    failure: null,
+    created_at: '2026-08-23T12:00:00Z',
+    decided_at: null,
+    completed_at: null,
+  } as const
+  let visibleEffect: Record<string, unknown> | null = { ...baseEffect }
+  let decisionBody: Record<string, unknown> | null = null
+  await page.route('**/api/v1/chat/effects**', async (route) => {
+    const request = route.request()
+    if (request.method() === 'POST') {
+      decisionBody = request.postDataJSON() as Record<string, unknown>
+      const denied = {
+        ...baseEffect,
+        status: 'denied',
+        decided_at: '2026-08-23T12:01:00Z',
+        completed_at: '2026-08-23T12:01:00Z',
+      }
+      visibleEffect = null
+      await route.fulfill({ json: { effect: denied, client_result: { approved: false, status: 'denied' } } })
+      return
+    }
+    await route.fulfill({ json: visibleEffect ? [visibleEffect] : [] })
+  })
+  await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
+  await page.goto('/chat')
+  const review = page.getByRole('alertdialog', { name: 'Create “Reviewed browser draft”?' })
+  await expect(review).toBeVisible()
+  await expect(review.getByLabel('Document content to create')).toHaveText(
+    '# Exact source\n\nThis is the complete approved content.',
+  )
+  const deny = review.getByRole('button', { name: 'Cancel' })
+  await deny.focus()
+  await expect(deny).toBeFocused()
+  if (testInfo.project.name.includes('touch-mobile')) {
+    const target = await deny.boundingBox()
+    expect(target).not.toBeNull()
+    expect(target!.height).toBeGreaterThanOrEqual(44)
+    await deny.tap()
+  } else {
+    await deny.click()
+  }
+  await expect(review).toBeHidden()
+  expect(decisionBody).toEqual({ verdict: 'deny', argument_digest: digest, reason: null })
+  await page.reload()
+  await expect(review).toHaveCount(0)
+
+  visibleEffect = {
+    ...baseEffect,
+    status: 'completed',
+    resource_type: 'document',
+    resource_id: 'document-browser-review',
+    result: { document_id: 'document-browser-review', title: 'Reviewed browser draft' },
+    decided_at: '2026-08-23T12:01:00Z',
+    completed_at: '2026-08-23T12:01:01Z',
+  }
+  await page.reload()
+  await expect(page.getByText('Document creation completed', { exact: true })).toBeVisible()
+  await expect(page.getByText('Recorded effect effect-b', { exact: false })).toBeVisible()
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir) {
+    await page.locator('.chat-panel').screenshot({
+      path: path.join(evidenceDir, `issue-110-durable-effect-${testInfo.project.name}.png`),
+    })
   }
 })
 

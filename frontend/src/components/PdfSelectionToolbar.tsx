@@ -94,13 +94,13 @@ export function PdfSelectionToolbar({
       </div>
       <span className="pdf-selection-divider" />
       <button type="button" disabled={pending} onClick={onAddNote}>
-        <StickyNote size={14} /> Add note
+        <StickyNote size="var(--icon-inline)" /> Add note
       </button>
       <button type="button" aria-label="Copy selected text" onClick={() => void copy('text')}>
-        {copied === 'text' ? <Check size={14} /> : <Copy size={14} />}
+        {copied === 'text' ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
       </button>
       <button type="button" aria-label="Copy Markdown citation" onClick={() => void copy('citation')}>
-        {copied === 'citation' ? <Check size={14} /> : <FileText size={14} />}
+        {copied === 'citation' ? <Check size="var(--icon-inline)" /> : <FileText size="var(--icon-inline)" />}
       </button>
     </div>,
     document.body,

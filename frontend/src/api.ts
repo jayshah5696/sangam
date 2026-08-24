@@ -447,6 +447,51 @@ export const chatProposalSchema = z.object({
 
 export type ChatProposal = z.infer<typeof chatProposalSchema>
 
+export const chatTurnContextSchema = z.object({
+  context_id: z.string(),
+  entry_point: z.enum(['workspace', 'document']),
+  document_id: z.string().nullable(),
+  revision_id: z.string().nullable(),
+  pdf_page_number: z.number().int().positive().nullable(),
+  annotation_id: z.string().nullable(),
+  selection_digest: z.string(),
+  selected_characters: z.number(),
+  created_at: z.string(),
+})
+
+export const chatEffectSchema = z.object({
+  effect_id: z.string(),
+  thread_id: z.string(),
+  requested_by: z.string(),
+  capability_id: z.enum(['create_document', 'publish_document']),
+  capability_version: z.number(),
+  argument_digest: z.string(),
+  preview: z.record(z.string(), z.unknown()),
+  effect_class: z.enum(['write', 'external']),
+  risk: z.enum(['workspace', 'external']),
+  status: z.enum([
+    'proposed',
+    'pending_approval',
+    'approved',
+    'denied',
+    'executing',
+    'completed',
+    'failed',
+    'expired',
+    'cancelled',
+  ]),
+  expires_at: z.string(),
+  resource_type: z.string().nullable(),
+  resource_id: z.string().nullable(),
+  result: z.record(z.string(), z.unknown()).nullable(),
+  failure: z.record(z.string(), z.unknown()).nullable(),
+  created_at: z.string(),
+  decided_at: z.string().nullable(),
+  completed_at: z.string().nullable(),
+})
+
+export type ChatEffect = z.infer<typeof chatEffectSchema>
+
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
   valid: z.boolean(),
@@ -587,6 +632,44 @@ export const api = {
       await request(`/chat/proposals/${proposalId}/dismiss`, {
         method: 'POST',
         body: JSON.stringify({ reason: trimmed ? trimmed.slice(0, 500) : null }),
+      }),
+    )
+  },
+  async createChatTurnContext(input: {
+    entry_point: 'workspace' | 'document'
+    document_id: string | null
+    revision_id: string | null
+    pdf_page_number?: number | null
+    annotation_id?: string | null
+    selected_text: string
+  }): Promise<z.infer<typeof chatTurnContextSchema>> {
+    return chatTurnContextSchema.parse(
+      await request('/chat/contexts', { method: 'POST', body: JSON.stringify(input) }),
+    )
+  },
+  async getChatEffect(effectId: string): Promise<ChatEffect> {
+    return chatEffectSchema.parse(await request(`/chat/effects/${effectId}`))
+  },
+  async listChatEffects(threadId?: string, statuses: ChatEffect['status'][] = []): Promise<ChatEffect[]> {
+    const params = new URLSearchParams()
+    if (threadId) params.set('thread_id', threadId)
+    statuses.forEach((status) => params.append('status', status))
+    return z.array(chatEffectSchema).parse(await request(`/chat/effects?${params.toString()}`))
+  },
+  async decideChatEffect(
+    effect: ChatEffect,
+    verdict: 'approve' | 'deny',
+    reason?: string,
+  ): Promise<{ effect: ChatEffect; client_result: Record<string, unknown> }> {
+    return z.object({ effect: chatEffectSchema, client_result: z.record(z.string(), z.unknown()) }).parse(
+      await request(`/chat/effects/${effect.effect_id}/decision`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': `chat-effect:${effect.effect_id}:${verdict}` },
+        body: JSON.stringify({
+          verdict,
+          argument_digest: effect.argument_digest,
+          reason: reason?.trim() || null,
+        }),
       }),
     )
   },

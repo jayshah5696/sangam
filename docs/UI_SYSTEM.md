@@ -34,6 +34,22 @@ these semantic tokens instead of hard-coded font sizes.
 - Panels and popovers use `--radius-panel` (8px).
 - Badges and status pills use `--radius-pill`.
 
+## Icons
+
+Lucide icons in application chrome use one semantic size role. Set the `size`
+prop to the matching CSS custom property. Do not use a raw number.
+
+- `--icon-detail` (12px): status markers and secondary indicators.
+- `--icon-inline` (14px): icons paired with text in buttons, menus, badges, and compact rows.
+- `--icon-control` (16px): icon-only buttons, navigation controls, search fields, and rail controls.
+- `--icon-section` (18px): settings sections and other section-level identifiers.
+- `--icon-page` (24px): route headers and intentional empty-state illustrations.
+
+The icon role does not set the interactive target. Keep icon-only controls on
+`--control-height`, `--control-compact`, or `--control-touch` as required. These
+roles do not apply to the Sangam logo, document SVG, Mermaid output, PDF content,
+PDF overlays, or embedded component internals.
+
 ## Rails
 
 Both sidebars use the shared `ui-rail` and `ui-rail-header` anatomy. Use
