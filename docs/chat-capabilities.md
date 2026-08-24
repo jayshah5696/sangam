@@ -1,8 +1,8 @@
 # Chat capabilities and durable effects
 
-Sangam chat is a bounded interface to the document server. The model may choose from capabilities that deterministic application code has already authorized. It cannot grant itself a tool, write SQLite or the workspace, or turn a proposal into an applied revision.
+Sangam chat is a bounded interface to the document server. The model may choose from capabilities that deterministic application code has already authorized. It cannot grant itself a tool, write SQLite or the workspace, or turn a proposal into an applied revision. See [architecture.md](architecture.md) for the core trust model and [operations/integrations.md](operations/integrations.md) for provider configuration.
 
-The [architecture diagram](architecture/chat-capability-lifecycle.html) shows the complete request and effect path. A static [reference image](assets/chat-capability-lifecycle.png) is available for reviews and pull requests.
+The [architecture diagram](assets/chat-capability-lifecycle.html) shows the complete request and effect path. A static [reference image](assets/chat-capability-lifecycle.png) is available for reviews and pull requests.
 
 ## Runtime contract
 

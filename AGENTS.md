@@ -1,6 +1,6 @@
 # UI consistency rules
 
-- Read `docs/UI_SYSTEM.md` and search existing components and CSS before changing application UI.
+- Read `docs/ui-system.md` and search existing components and CSS before changing application UI.
 - Reuse shared tokens for fonts, type sizes, spacing, radii, colors, and control heights.
 - Do not introduce hard-coded UI dimensions when an existing semantic token applies.
 - Keep application chrome on `var(--font-ui)`; reserve display and mono fonts for documented roles.

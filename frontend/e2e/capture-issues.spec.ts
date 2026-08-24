@@ -124,16 +124,23 @@ test.describe('Issue Verification Real Screenshots', () => {
   })
 
   test('capture issue 63 and 67 (folder renaming and organization)', async ({ page, request }) => {
+    const testId = randomUUID().slice(0, 8)
+    const initialFolder = `quantum-computing-${testId}`
+    const initialDoc = `qubit-fidelity-${testId}.md`
+    const renamedFolder = `advanced-quantum-${testId}`
+    const renamedDoc = `qubit-analysis-${testId}.md`
+    const discardedDoc = `qubit-discarded-${testId}.md`
+
     await request.post('/api/v1/folders', {
       headers: { 'Idempotency-Key': randomUUID() },
-      data: { path: 'research/quantum-computing' },
+      data: { path: `research/${initialFolder}` },
     })
     await request.post('/api/v1/documents', {
       headers: { 'Idempotency-Key': randomUUID() },
       data: {
         title: 'Qubit Coherence Study',
         content: '# Qubit Coherence Study\n\nQuantum state fidelity under cryogenic conditions.',
-        path: 'research/quantum-computing/qubit-fidelity.md',
+        path: `research/${initialFolder}/${initialDoc}`,
       },
     })
 
@@ -147,47 +154,43 @@ test.describe('Issue Verification Real Screenshots', () => {
       .screenshot({ path: path.join(outDir, 'issue-63-folder-rename.png') })
 
     // Issue #100: Context menu Rename on folder must show visible inline input and update path
-    const folderItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'quantum-computing' })
+    const folderItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: initialFolder })
     await expect(folderItem).toBeVisible()
     await folderItem.click({ button: 'right' })
 
-    const folderMenu = page.getByRole('menu', { name: 'Actions for quantum-computing' })
+    const folderMenu = page.getByRole('menu', { name: `Actions for ${initialFolder}` })
     await expect(folderMenu).toBeVisible()
     await folderMenu.getByRole('menuitem', { name: 'Rename' }).click()
 
     const renameInput = page.locator('.sangam-file-tree').locator('input[data-item-rename-input]')
     await expect(renameInput).toBeVisible()
     await expect(renameInput).toBeFocused()
-    await renameInput.fill('advanced-quantum')
+    await renameInput.fill(renamedFolder)
     await renameInput.press('Enter')
 
     await expect(
-      page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'advanced-quantum' }),
+      page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedFolder }),
     ).toBeVisible()
 
     // Issue #100: F2 rename on file item must show visible inline input and update path
-    const docItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'qubit-fidelity.md' })
+    const docItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: initialDoc })
     await expect(docItem).toBeVisible()
     await docItem.click()
     await page.keyboard.press('F2')
 
     await expect(renameInput).toBeVisible()
     await expect(renameInput).toBeFocused()
-    await renameInput.fill('qubit-analysis.md')
+    await renameInput.fill(renamedDoc)
     await renameInput.press('Enter')
 
-    await expect(
-      page.locator('.sangam-file-tree').getByRole('treeitem', { name: 'qubit-analysis.md' }),
-    ).toBeVisible()
+    await expect(page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })).toBeVisible()
 
     // Issue #100: Escape cancels rename mode without modifying path
-    const renamedDocItem = page
-      .locator('.sangam-file-tree')
-      .getByRole('treeitem', { name: 'qubit-analysis.md' })
+    const renamedDocItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })
     await renamedDocItem.click()
     await page.keyboard.press('F2')
     await expect(renameInput).toBeVisible()
-    await renameInput.fill('qubit-discarded.md')
+    await renameInput.fill(discardedDoc)
     await renameInput.press('Escape')
     await expect(renameInput).toBeHidden()
     await expect(renamedDocItem).toBeVisible()

@@ -23,7 +23,7 @@ See the generated notes attached to each GitHub Release.
   - Semantic icon role audit aligning Lucide icon tokens across file tree, settings sidebar, PDF viewer, secrets modal, and workbench controls (#121).
   - Automated UI token compliance checks enforcing visual hierarchy (#121).
 - **Chat Capabilities Architecture Documentation**:
-  - Published `docs/CHAT_CAPABILITIES.md` detailing capability contracts, turn state machines, and side-effect boundaries (#121).
+  - Published `docs/chat-capabilities.md` detailing capability contracts, turn state machines, and side-effect boundaries (#121).
   - Added interactive visual lifecycle flow diagrams and documentation media assets (#121).
 
 ## [0.8.1] - 2026-08-22

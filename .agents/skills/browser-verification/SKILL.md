@@ -10,7 +10,7 @@ Treat browser verification as a proof, not a tour of the happy path. Agent-brows
 
 ## 1. Classify the change
 
-Read `docs/UI_SYSTEM.md`, the affected components and styles, and the existing specs under `frontend/e2e/`.
+Read `docs/ui-system.md`, the affected components and styles, and the existing specs under `frontend/e2e/`.
 
 Write down which surfaces apply:
 

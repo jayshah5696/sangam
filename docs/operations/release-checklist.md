@@ -32,7 +32,7 @@ container scan.
 - [ ] The verified set was copied to a separate failure domain and its checksum
   was checked there.
 - [ ] The upgrade was rehearsed against a restored copy of production data.
-- [ ] The restore drill in [Upgrades and rollback](./backups.md)
+- [ ] The restore drill in [Backups, upgrades, and rollback](./backups.md)
   passed, including PDFs, search, history, publications, imports, chat, and a clean
   reconciliation scan.
 - [ ] The previous image digest and pre-upgrade backup ID are recorded in the

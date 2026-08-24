@@ -24,7 +24,7 @@ Rotate the Karakeep API key like any other credential: update the env var, resta
 
 ## Chat runtime
 
-Sangam pairs the ChatKit browser UI with the OpenAI Agents SDK on the backend. Connections are provider-neutral: use the OpenRouter preset or point at any OpenAI-compatible endpoint.
+Sangam pairs the ChatKit browser UI with the OpenAI Agents SDK on the backend. Connections are provider-neutral: use the OpenRouter preset or point at any OpenAI-compatible endpoint. See [docs/chat-capabilities.md](../chat-capabilities.md) for capability descriptors and effect execution boundaries, and [docs/architecture.md](../architecture.md) for the overall architecture.
 
 Configuration:
 
@@ -33,12 +33,12 @@ Configuration:
 | `SANGAM_OPENROUTER_API_KEY` | None | Provider API key |
 | `SANGAM_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL |
 | `SANGAM_CHATKIT_DOMAIN_KEY` | `local-dev` | Domain key registered for your origin |
-| `SANGAM_CHAT_DEFAULT_MODEL` | `openai/gpt-4.1` | Default model slug |
+| `SANGAM_CHAT_DEFAULT_MODEL` | `openai/gpt-5.6-luna` | Default model slug |
 | `SANGAM_CHAT_AVAILABLE_MODELS` | Seed list | JSON list of selectable model slugs |
-| `SANGAM_CHAT_REASONING_EFFORT` | `medium` | Reasoning effort preset |
-| `SANGAM_CHAT_TIMEOUT_SECONDS` | `90` | Per-run timeout |
-| `SANGAM_CHAT_MAX_TOOL_ROUNDS` | `10` | Tool-use round budget |
-| `SANGAM_CHAT_MAX_CONCURRENT_RUNS` | `2` | Concurrent chat runs |
+| `SANGAM_CHAT_REASONING_EFFORT` | `low` | Reasoning effort preset |
+| `SANGAM_CHAT_TIMEOUT_SECONDS` | `120` | Per-run timeout |
+| `SANGAM_CHAT_MAX_TOOL_ROUNDS` | `8` | Tool-use round budget |
+| `SANGAM_CHAT_MAX_CONCURRENT_RUNS` | `4` | Concurrent chat runs |
 
 Manage models directly from **Settings → Operations & AI → AI & models** (custom slugs and connections supported) or via environment variables.
 
