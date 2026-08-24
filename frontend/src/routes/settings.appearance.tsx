@@ -12,13 +12,25 @@ import {
   RotateCcw,
   ShieldCheck,
   Tags,
+  Type,
   Wrench,
 } from 'lucide-react'
 import { api, type Folder, type Tag } from '../api'
 import { AgentAccessSettings } from '../components/AgentAccessSettings'
 import { ChatModelSettings } from '../components/ChatModelSettings'
 import { settingsCategories } from '../components/SettingsSidebar'
-import { themes, useTheme } from '../theme'
+import {
+  editorSizes,
+  monoFonts,
+  themes,
+  uiDensities,
+  uiFonts,
+  useTheme,
+  type EditorSize,
+  type MonoFontId,
+  type UiDensity,
+  type UiFontId,
+} from '../theme'
 import { useWorkbench } from '../workbench'
 
 export const Route = createFileRoute('/settings/appearance')({
@@ -118,6 +130,114 @@ export function WorkspaceSettings() {
                     <small>{theme.description}</small>
                   </button>
                 ))}
+              </div>
+            </SettingsSection>
+          )}
+
+          {activeCategory === 'appearance' && (
+            <SettingsSection
+              id="typography"
+              icon={Type}
+              title="Typography"
+              description="Choose interface fonts and text density. Preferences apply before first paint and stay in this browser."
+            >
+              <div className="settings-rows">
+                <SettingRow
+                  id="typography-ui-font"
+                  label="Interface font"
+                  detail="Application chrome, menus, and controls"
+                >
+                  <select
+                    aria-label="Interface font"
+                    className="settings-select"
+                    value={preferences.uiFont}
+                    onChange={(event) => updatePreferences({ uiFont: event.target.value as UiFontId })}
+                  >
+                    {uiFonts.map((font) => (
+                      <option key={font.id} value={font.id} style={{ fontFamily: font.stack }}>
+                        {font.name}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
+                <SettingRow
+                  id="typography-mono-font"
+                  label="Code font"
+                  detail="Editor content, diffs, and identifiers"
+                >
+                  <select
+                    aria-label="Code font"
+                    className="settings-select"
+                    value={preferences.monoFont}
+                    onChange={(event) => updatePreferences({ monoFont: event.target.value as MonoFontId })}
+                  >
+                    {monoFonts.map((font) => (
+                      <option key={font.id} value={font.id} style={{ fontFamily: font.stack }}>
+                        {font.name}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
+                <SettingRow
+                  id="typography-density"
+                  label="Interface density"
+                  detail="Scales labels, controls, and panel text together"
+                >
+                  <div className="density-switch" role="group" aria-label="Interface density">
+                    {uiDensities.map((density) => (
+                      <button
+                        type="button"
+                        key={density.id}
+                        aria-pressed={preferences.uiDensity === density.id}
+                        className={
+                          preferences.uiDensity === density.id ? 'density-option selected' : 'density-option'
+                        }
+                        onClick={() => updatePreferences({ uiDensity: density.id as UiDensity })}
+                      >
+                        {density.name}
+                      </button>
+                    ))}
+                  </div>
+                </SettingRow>
+                <SettingRow
+                  id="typography-editor-size"
+                  label="Editor text size"
+                  detail="Editable document content only"
+                >
+                  <select
+                    aria-label="Editor text size"
+                    className="settings-select"
+                    value={preferences.editorSize}
+                    onChange={(event) => updatePreferences({ editorSize: event.target.value as EditorSize })}
+                  >
+                    {editorSizes.map((size) => (
+                      <option key={size.id} value={size.id}>
+                        {size.name}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
+                <SettingRow
+                  id="typography-reset"
+                  label="Reset typography"
+                  detail="Return fonts, density, and editor size to their defaults"
+                >
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() =>
+                      updatePreferences({
+                        uiFont: 'system',
+                        monoFont: 'system',
+                        uiDensity: 'default',
+                        editorSize: 'default',
+                      })
+                    }
+                  >
+                    <RotateCcw size="var(--icon-inline)" />
+                    Reset
+                  </button>
+                </SettingRow>
               </div>
             </SettingsSection>
           )}

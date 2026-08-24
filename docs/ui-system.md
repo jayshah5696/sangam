@@ -30,6 +30,19 @@ font sizes are rejected by lint outside `tokens.css`; the one sanctioned excepti
 the relative `0.9em` on inline code inside rendered Markdown, which tracks its parent
 text size. Icon tokens use `rem` so icons scale with the user's root font size.
 
+### Typography preferences
+
+Settings > Appearance > Typography lets each browser choose the interface font
+(`data-ui-font`), code font (`data-mono-font`), interface density
+(`data-ui-density`), and editor text size (`data-editor-size`). The choices are
+stored with the other workspace preferences in `localStorage` and applied as
+`data-*` attributes on `<html>` by an inline script in `index.html` before first
+paint, so there is no flash of the default type. The override blocks live in
+`tokens.css` next to the defaults and are the only place raw font values are
+allowed. Density multiplies the chrome text tokens; it never scales
+`--text-editor`, which has its own control. Touch targets stay at least
+`--control-touch` tall in every density.
+
 ## Dimensions
 
 - Spacing uses `--space-1` through `--space-5`: 4, 8, 12, 16, and 24px.

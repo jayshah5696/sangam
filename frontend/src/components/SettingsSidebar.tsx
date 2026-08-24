@@ -21,7 +21,7 @@ export const settingsCategories: Array<{
   description: string
   icon: typeof Paintbrush
 }> = [
-  { id: 'appearance', label: 'Appearance', description: 'Theme and contrast', icon: Paintbrush },
+  { id: 'appearance', label: 'Appearance', description: 'Theme, typography, and contrast', icon: Paintbrush },
   { id: 'workbench', label: 'Workbench', description: 'Panels and editor groups', icon: MonitorCog },
   { id: 'organization', label: 'Organization', description: 'Tags and folder metadata', icon: FolderTree },
   { id: 'models', label: 'AI & models', description: 'Connections and model policy', icon: Cpu },
@@ -42,6 +42,41 @@ const settingsSearchIndex: Array<{
     label: 'Theme',
     description: 'Color and contrast for this browser',
     keywords: 'appearance river midnight parchment cobalt',
+  },
+  {
+    id: 'typography',
+    category: 'appearance',
+    label: 'Typography',
+    description: 'Fonts and text density for this browser',
+    keywords: 'appearance font family typeface text size density',
+  },
+  {
+    id: 'typography-ui-font',
+    category: 'appearance',
+    label: 'Interface font',
+    description: 'Font family for application chrome and controls',
+    keywords: 'appearance typography font family inter plex serif',
+  },
+  {
+    id: 'typography-mono-font',
+    category: 'appearance',
+    label: 'Code font',
+    description: 'Font family for the editor, diffs, and code',
+    keywords: 'appearance typography mono font jetbrains fira sf mono',
+  },
+  {
+    id: 'typography-density',
+    category: 'appearance',
+    label: 'Interface density',
+    description: 'Scale interface text between compact and comfortable',
+    keywords: 'appearance typography density text size scale compact comfortable',
+  },
+  {
+    id: 'typography-editor-size',
+    category: 'appearance',
+    label: 'Editor text size',
+    description: 'Text size for editable document content',
+    keywords: 'appearance typography editor text size',
   },
   {
     id: 'workspace-sidebar',

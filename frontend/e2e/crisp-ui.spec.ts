@@ -50,6 +50,38 @@ test('display type scale stays consistent across routes and editor modes', async
   }
 })
 
+test('typography preferences apply live, persist, and reset', async ({ page }) => {
+  await page.goto('/settings?category=appearance')
+  const uiFont = page.getByLabel('Interface font')
+  await expect(uiFont).toBeVisible()
+
+  await uiFont.selectOption('serif')
+  await expect(page.locator('html')).toHaveAttribute('data-ui-font', 'serif')
+  const chromeFamily = await page
+    .locator('.settings-compact-header h1')
+    .evaluate((element) => getComputedStyle(element).fontFamily)
+  expect(chromeFamily).toContain('Georgia')
+
+  const controlSizeBefore = await page
+    .locator('#typography-ui-font select')
+    .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  await page.getByRole('button', { name: 'Compact' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+  const controlSizeAfter = await page
+    .locator('#typography-ui-font select')
+    .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(controlSizeAfter).toBeLessThan(controlSizeBefore)
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('data-ui-font', 'serif')
+  await expect(page.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+
+  await page.getByRole('button', { name: 'Reset', exact: true }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-ui-font', 'system')
+  await expect(page.locator('html')).toHaveAttribute('data-ui-density', 'default')
+  await expect(page.locator('html')).toHaveAttribute('data-editor-size', 'default')
+})
+
 test('semantic icon roles render consistently without shrinking control targets', async ({
   page,
 }, testInfo) => {
