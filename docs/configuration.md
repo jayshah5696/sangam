@@ -25,6 +25,7 @@ every variable.
 | --- | --- |
 | `SANGAM_MAX_DOCUMENT_BYTES` | `2000000` |
 | `SANGAM_MAX_PDF_BYTES` | `100000000` |
+| `SANGAM_PDF_EXTRACTION_SHUTDOWN_TIMEOUT_SECONDS` | `5.0` |
 | `SANGAM_MAX_PUBLICATION_ASSET_BYTES` | `10000000` |
 | `SANGAM_MAX_KARAKEEP_SOURCE_BYTES` | `5000000` |
 
@@ -57,12 +58,15 @@ every variable.
 | --- | --- |
 | `SANGAM_OPENROUTER_API_KEY` | Provider API key |
 | `SANGAM_OPENROUTER_BASE_URL` | Any OpenAI-compatible endpoint (default OpenRouter) |
+| `SANGAM_OPENROUTER_HTTP_REFERER` | Public origin sent to OpenRouter (required in production) |
+| `SANGAM_OPENROUTER_APP_TITLE` | App title sent to OpenRouter (default "Sangam") |
 | `SANGAM_CHATKIT_DOMAIN_KEY` | ChatKit key for your origin; `local-dev` only works on localhost |
 | `SANGAM_CHAT_DEFAULT_MODEL` | Must appear in available models |
 | `SANGAM_CHAT_AVAILABLE_MODELS` | JSON list of model slugs |
 | `SANGAM_CHAT_REASONING_EFFORT` | Reasoning preset |
 | `SANGAM_CHAT_TIMEOUT_SECONDS` | Per-run timeout |
 | `SANGAM_CHAT_MAX_TOOL_ROUNDS` | Tool-use budget |
+| `SANGAM_CHAT_MAX_TOOL_RESULT_BYTES` | Tool result byte cap |
 | `SANGAM_CHAT_MAX_CONTEXT_MESSAGES` | Context window size in messages |
 | `SANGAM_CHAT_MAX_REQUEST_BYTES` | Inbound chat request cap |
 | `SANGAM_CHAT_MAX_OUTPUT_TOKENS` | Completion cap |

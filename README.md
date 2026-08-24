@@ -82,13 +82,15 @@ integrations.
 | Doc | Contents |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Core concepts, trust model, data flow |
+| [docs/chat-capabilities.md](docs/chat-capabilities.md) | Chat capability, turn context, effect, and evidence contract |
+| [docs/ui-system.md](docs/ui-system.md) | Visual grammar for UI contributions |
 | [docs/configuration.md](docs/configuration.md) | Every `SANGAM_*` environment variable |
 | [docs/operations/deploy.md](docs/operations/deploy.md) | Dev setup, Docker, production, Cloudflare Access |
 | [docs/operations/backups.md](docs/operations/backups.md) | Backup/verify drills, upgrades, rollback |
 | [docs/operations/agent-access.md](docs/operations/agent-access.md) | Scoped tokens, discovery, incident response |
 | [docs/operations/integrations.md](docs/operations/integrations.md) | Karakeep bridge, ChatKit domain allowlist, chat runtime |
-| [docs/UI_SYSTEM.md](docs/UI_SYSTEM.md) | Visual grammar for UI contributions |
-| [docs/CHAT_CAPABILITIES.md](docs/CHAT_CAPABILITIES.md) | Chat capability, turn context, effect, and evidence contract |
+| [docs/contributing.md](docs/contributing.md) | Development setup, conventions, and test gates |
+| [docs/brand.md](docs/brand.md) | Brand identity, logos, and usage guidelines |
 | [.agents/skills/sangam-agent-guide/SKILL.md](.agents/skills/sangam-agent-guide/SKILL.md) | Skill for AI agents operating a deployed Sangam |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 

@@ -91,4 +91,4 @@ Set with `SANGAM_AUTH_MODE`:
 
 ## Release checklist
 
-Before tagging a release, complete [operations/release-checklist.md](release-checklist.md): `just release-check`, Trivy scan policy, backup/upgrade proof, then push the tag and confirm the signed image and attestations on the GitHub Release.
+Before tagging a release, complete the [release checklist](release-checklist.md): `just release-check`, Trivy scan policy, backup/upgrade proof, then push the tag and confirm the signed image and attestations on the GitHub Release.

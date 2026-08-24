@@ -27,8 +27,9 @@ blocks are validated by CI.
 - Backend: Python 3.13+, FastAPI, typed end to end (mypy strict). Follow the
   existing service-module layout under `src/sangam/`.
 - Frontend: React 19, TypeScript, TanStack Router/Query, CodeMirror 6.
-  Read [UI_SYSTEM.md](UI_SYSTEM.md) before touching any UI; reuse semantic
-  tokens and shared component anatomy.
+  Read [ui-system.md](ui-system.md) before touching any UI; reuse semantic
+  tokens and shared component anatomy. See [brand.md](brand.md) for brand
+  marks, color definitions, and SVG usage rules.
 - Migrations: forward-only SQL under `src/sangam/migrations/`. Never edit an
   applied migration.
 - Tests mirror behavior, not implementation; add coverage alongside fixes.

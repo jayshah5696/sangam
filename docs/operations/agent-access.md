@@ -63,7 +63,7 @@ Path boundaries are enforced per request: an operation outside the token's allow
 
 ## Chat proposals
 
-Agents driving the workspace chat produce **proposals**, not direct writes: a suggested revision pinned to the revision it was generated from. The human reviews the diff in the UI and applies or discards it. Proposals survive restarts and remain recoverable.
+Agents driving the workspace chat produce **proposals**, not direct writes: a suggested revision pinned to the revision it was generated from. The human reviews the diff in the UI and applies or discards it. Proposals survive restarts and remain recoverable. See [docs/chat-capabilities.md](../chat-capabilities.md) for full capability definitions and durable effect contracts.
 
 ## Incident response
 
