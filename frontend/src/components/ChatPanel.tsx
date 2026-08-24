@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import type { TypographyOption } from '@openai/chatkit'
 import { ChatKit, useChatKit } from '@openai/chatkit-react'
 import { ExternalLink, FileText, History, Plus, X } from 'lucide-react'
 import {
@@ -19,7 +20,7 @@ import {
   citationTargetFromData,
   type CitationTarget,
 } from '../citationNavigation'
-import { useTheme } from '../theme'
+import { monoFonts, uiFonts, useTheme } from '../theme'
 import { OneTimeSecret } from './OneTimeSecret'
 import { StateMessage } from './ui/StateMessage'
 import { RevisionMergeView } from './RevisionMergeView'
@@ -236,6 +237,23 @@ export function ChatPanel({
         default: model.id === configQuery.data?.default_model,
       })),
     [configQuery.data],
+  )
+  const chatTypography = useMemo(
+    () => ({
+      fontFamily: uiFonts.find((font) => font.id === preferences.uiFont)?.stack,
+      fontFamilyMono: monoFonts.find((font) => font.id === preferences.monoFont)?.stack,
+      baseSize: 14 as const,
+    }),
+    [preferences.uiFont, preferences.monoFont],
+  )
+  const chatDensity = useMemo<'compact' | 'normal' | 'spacious'>(
+    () =>
+      preferences.uiDensity === 'compact'
+        ? 'compact'
+        : preferences.uiDensity === 'comfortable'
+          ? 'spacious'
+          : 'normal',
+    [preferences.uiDensity],
   )
   const cancelPublication = async () => {
     if (!pendingEffect || publishing) return
@@ -478,6 +496,8 @@ export function ChatPanel({
               key={chatEpoch}
               liveRef={liveRef}
               theme={preferences.theme === 'midnight' ? 'dark' : 'light'}
+              typography={chatTypography}
+              density={chatDensity}
               domainKey={configQuery.data.domain_key}
               inferenceEnabled={configQuery.data.inference_enabled}
               models={models}
@@ -1020,6 +1040,8 @@ export function hasMountedChatInterface(host: HTMLElement) {
 function WorkspaceChatSurface({
   liveRef,
   theme,
+  typography,
+  density,
   domainKey,
   inferenceEnabled,
   models,
@@ -1034,6 +1056,8 @@ function WorkspaceChatSurface({
 }: {
   liveRef: React.MutableRefObject<LiveChatContext>
   theme: 'dark' | 'light'
+  typography: TypographyOption
+  density: 'compact' | 'normal' | 'spacious'
   domainKey: string
   inferenceEnabled: boolean
   models: Array<{ id: string; label: string; description: string; default?: boolean }>
@@ -1088,6 +1112,10 @@ function WorkspaceChatSurface({
     },
     [liveRef],
   )
+  const chatkitTheme = useMemo(
+    () => ({ colorScheme: theme, typography, density }),
+    [theme, typography, density],
+  )
   const chatkit = useChatKit({
     api: {
       url: '/api/v1/chatkit',
@@ -1096,7 +1124,7 @@ function WorkspaceChatSurface({
     },
     frameTitle: 'Workspace chat',
     initialThread: initialThreadId ?? undefined,
-    theme,
+    theme: chatkitTheme,
     header: compact ? { enabled: false } : { enabled: true, title: { text: 'Workspace chat' } },
     history: { enabled: true, showDelete: !compact, showRename: !compact },
     startScreen: {

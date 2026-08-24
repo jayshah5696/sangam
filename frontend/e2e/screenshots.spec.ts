@@ -135,7 +135,15 @@ test('capture the README workspace and settings screenshots', async ({ page, req
   await page.getByRole('button', { name: 'Open full chat' }).click()
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
   await expect(page.getByLabel('Active chat context')).toContainText('Product launch review')
-  await page.waitForTimeout(500)
+  const fullChat = page.locator('.chat-panel:not(.chat-panel-compact)')
+  const fullChatFrame = fullChat.locator('openai-chatkit iframe')
+  await expect(fullChatFrame).toBeVisible({ timeout: 15_000 })
+  await expect(
+    fullChat
+      .frameLocator('openai-chatkit iframe')
+      .getByRole('heading', { name: 'Ask about this workspace' }),
+  ).toBeVisible({ timeout: 20_000 })
+  await page.waitForTimeout(400)
   await page.screenshot({
     path: path.join(repositoryRoot, 'docs/assets/crisp-chat.png'),
     fullPage: false,
