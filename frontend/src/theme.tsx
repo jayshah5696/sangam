@@ -4,7 +4,6 @@ import type { EditorMode } from './documentSessions'
 export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
 
 export type UiFontId = 'system' | 'inter' | 'plex' | 'serif'
-export type MonoFontId = 'system' | 'sfmono' | 'jetbrains' | 'fira'
 export type UiDensity = 'compact' | 'default' | 'comfortable'
 export type EditorSize = 'small' | 'default' | 'large'
 
@@ -23,29 +22,6 @@ export const uiFonts: Array<{ id: UiFontId; name: string; stack: string }> = [
   { id: 'serif', name: 'Serif', stack: 'Georgia, "Times New Roman", serif' },
 ]
 
-export const monoFonts: Array<{ id: MonoFontId; name: string; stack: string }> = [
-  {
-    id: 'system',
-    name: 'System default',
-    stack: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-  },
-  {
-    id: 'sfmono',
-    name: 'SF Mono',
-    stack: '"SF Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace',
-  },
-  {
-    id: 'jetbrains',
-    name: 'JetBrains Mono',
-    stack: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace',
-  },
-  {
-    id: 'fira',
-    name: 'Fira Code',
-    stack: '"Fira Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace',
-  },
-]
-
 export const uiDensities: Array<{ id: UiDensity; name: string }> = [
   { id: 'compact', name: 'Compact' },
   { id: 'default', name: 'Default' },
@@ -59,6 +35,57 @@ export const editorSizes: Array<{ id: EditorSize; name: string }> = [
 ]
 
 export type InspectorTab = 'properties' | 'research' | 'outline' | 'history' | 'chat'
+
+export type CustomTheme = { base: ThemeId; accent: string }
+
+export function hexToRgba(hex: string, alpha: number): string {
+  const value = hex.replace('#', '')
+  const full =
+    value.length === 3
+      ? value
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : value
+  const r = Number.parseInt(full.slice(0, 2), 16)
+  const g = Number.parseInt(full.slice(2, 4), 16)
+  const b = Number.parseInt(full.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+export function readableTextColor(hex: string): string {
+  const value = hex.replace('#', '')
+  const full =
+    value.length === 3
+      ? value
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : value
+  const [r = 0, g = 0, b = 0] = [0, 2, 4].map((i) => {
+    const raw = Number.parseInt(full.slice(i, i + 2), 16) / 255
+    return raw <= 0.03928 ? raw / 12.92 : ((raw + 0.055) / 1.055) ** 2.4
+  })
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return luminance > 0.4 ? '#101318' : '#f7f8f8'
+}
+
+export function isValidAccentHex(value: unknown): value is string {
+  return typeof value === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)
+}
+
+export function applyCustomTheme(root: HTMLElement, custom: CustomTheme | null) {
+  if (custom) {
+    root.dataset.theme = custom.base
+    root.style.setProperty('--accent', custom.accent)
+    root.style.setProperty('--accent-soft', hexToRgba(custom.accent, 0.16))
+    root.style.setProperty('--accent-text', readableTextColor(custom.accent))
+  } else {
+    root.style.removeProperty('--accent')
+    root.style.removeProperty('--accent-soft')
+    root.style.removeProperty('--accent-text')
+  }
+}
 
 export const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
   {
@@ -90,9 +117,9 @@ export const themes: Array<{ id: ThemeId; name: string; description: string; col
 type WorkspacePreferences = {
   theme: ThemeId
   uiFont: UiFontId
-  monoFont: MonoFontId
   uiDensity: UiDensity
   editorSize: EditorSize
+  customTheme: CustomTheme | null
   leftWidth: number
   rightWidth: number
   leftVisible: boolean
@@ -111,9 +138,9 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 const defaults: WorkspacePreferences = {
   theme: 'midnight',
   uiFont: 'system',
-  monoFont: 'system',
   uiDensity: 'default',
   editorSize: 'default',
+  customTheme: null,
   leftWidth: 282,
   rightWidth: 320,
   leftVisible: true,
@@ -128,6 +155,14 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
   return allowed.includes(value as T) ? (value as T) : fallback
 }
 
+function parseCustomTheme(value: unknown): CustomTheme | null {
+  if (typeof value !== 'object' || value === null) return null
+  const candidate = value as { base?: unknown; accent?: unknown }
+  if (!candidate.base || !isValidAccentHex(candidate.accent)) return null
+  if (!['river', 'midnight', 'parchment', 'cobalt'].includes(String(candidate.base))) return null
+  return { base: candidate.base as ThemeId, accent: candidate.accent }
+}
+
 function loadPreferences(): WorkspacePreferences {
   const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 900
   try {
@@ -136,9 +171,9 @@ function loadPreferences(): WorkspacePreferences {
       ...defaults,
       ...stored,
       uiFont: oneOf(stored.uiFont, ['system', 'inter', 'plex', 'serif'] as const, defaults.uiFont),
-      monoFont: oneOf(stored.monoFont, ['system', 'sfmono', 'jetbrains', 'fira'] as const, defaults.monoFont),
       uiDensity: oneOf(stored.uiDensity, ['compact', 'default', 'comfortable'] as const, defaults.uiDensity),
       editorSize: oneOf(stored.editorSize, ['small', 'default', 'large'] as const, defaults.editorSize),
+      customTheme: parseCustomTheme(stored.customTheme),
       rightVisible: isNarrow ? false : (stored.rightVisible ?? true),
       editorMode: ['edit', 'split', 'preview'].includes(String(stored.editorMode))
         ? (stored.editorMode as EditorMode)
@@ -152,16 +187,16 @@ function loadPreferences(): WorkspacePreferences {
 export function applyTypographyAttributes(preferences: WorkspacePreferences) {
   const root = document.documentElement
   root.dataset.uiFont = preferences.uiFont
-  root.dataset.monoFont = preferences.monoFont
   root.dataset.uiDensity = preferences.uiDensity
   root.dataset.editorSize = preferences.editorSize
+  root.dataset.theme = preferences.customTheme ? preferences.customTheme.base : preferences.theme
+  applyCustomTheme(root, preferences.customTheme)
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preferences, setPreferences] = useState(loadPreferences)
 
   useEffect(() => {
-    document.documentElement.dataset.theme = preferences.theme
     applyTypographyAttributes(preferences)
     localStorage.setItem(storageKey, JSON.stringify(preferences))
   }, [preferences])

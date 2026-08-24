@@ -139,9 +139,7 @@ test('capture the README workspace and settings screenshots', async ({ page, req
   const fullChatFrame = fullChat.locator('openai-chatkit iframe')
   await expect(fullChatFrame).toBeVisible({ timeout: 15_000 })
   await expect(
-    fullChat
-      .frameLocator('openai-chatkit iframe')
-      .getByRole('heading', { name: 'Ask about this workspace' }),
+    fullChat.frameLocator('openai-chatkit iframe').getByRole('heading', { name: 'Ask about this workspace' }),
   ).toBeVisible({ timeout: 20_000 })
   await page.waitForTimeout(400)
   await page.screenshot({

@@ -33,15 +33,27 @@ text size. Icon tokens use `rem` so icons scale with the user's root font size.
 ### Typography preferences
 
 Settings > Appearance > Typography lets each browser choose the interface font
-(`data-ui-font`), code font (`data-mono-font`), interface density
-(`data-ui-density`), and editor text size (`data-editor-size`). The choices are
-stored with the other workspace preferences in `localStorage` and applied as
-`data-*` attributes on `<html>` by an inline script in `index.html` before first
-paint, so there is no flash of the default type. The override blocks live in
-`tokens.css` next to the defaults and are the only place raw font values are
-allowed. Density multiplies the chrome text tokens; it never scales
-`--text-editor`, which has its own control. Touch targets stay at least
-`--control-touch` tall in every density.
+(`data-ui-font`), interface density (`data-ui-density`), and editor text size
+(`data-editor-size`). There is no separate code-font choice: the interface font
+applies to all chrome and the editor keeps the shared mono stack for alignment.
+The choices are stored with the other workspace preferences in `localStorage`
+and applied as `data-*` attributes on `<html>` by an external bootstrap script
+in `index.html` before first paint, so there is no flash of the default type.
+The override blocks live in `tokens.css` next to the defaults and are the only
+place raw font values are allowed. Density multiplies the chrome text tokens;
+it never scales `--text-editor`, which has its own control. Touch targets stay
+at least `--control-touch` tall in every density.
+
+### Create theme
+
+Settings > Appearance > Create theme builds a custom accent theme: pick a base
+palette (one of the four themes) and an accent color, preview it live, then
+apply it. A custom theme is stored as `customTheme` in the workspace
+preferences and applied before first paint: `data-theme` is set to the base
+palette while `--accent`, `--accent-soft`, and a luminance-derived
+`--accent-text` are injected as inline custom properties on `<html>`. Choosing
+any built-in theme card clears the custom theme. Custom themes are
+browser-scoped like the rest of Appearance.
 
 ## Dimensions
 

@@ -8,6 +8,7 @@ import {
   FolderTree,
   MonitorCog,
   Paintbrush,
+  Palette,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
@@ -21,13 +22,15 @@ import { ChatModelSettings } from '../components/ChatModelSettings'
 import { settingsCategories } from '../components/SettingsSidebar'
 import {
   editorSizes,
-  monoFonts,
+  hexToRgba,
+  readableTextColor,
   themes,
   uiDensities,
   uiFonts,
   useTheme,
+  type CustomTheme,
   type EditorSize,
-  type MonoFontId,
+  type ThemeId,
   type UiDensity,
   type UiFontId,
 } from '../theme'
@@ -120,17 +123,30 @@ export function WorkspaceSettings() {
                     key={theme.id}
                     className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
                     aria-pressed={preferences.theme === theme.id}
-                    onClick={() => updatePreferences({ theme: theme.id })}
+                    onClick={() => updatePreferences({ theme: theme.id, customTheme: null })}
                   >
                     <ThemeWireframe themeId={theme.id} />
                     <strong>
                       {theme.name}
-                      {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
+                      {!preferences.customTheme && preferences.theme === theme.id && (
+                        <Check size="var(--icon-inline)" />
+                      )}
                     </strong>
                     <small>{theme.description}</small>
                   </button>
                 ))}
               </div>
+            </SettingsSection>
+          )}
+
+          {activeCategory === 'appearance' && (
+            <SettingsSection
+              id="create-theme"
+              icon={Palette}
+              title="Create theme"
+              description="Start from a base palette and pick your own accent. The preview updates live and the theme stays in this browser."
+            >
+              <CreateThemeSection />
             </SettingsSection>
           )}
 
@@ -154,24 +170,6 @@ export function WorkspaceSettings() {
                     onChange={(event) => updatePreferences({ uiFont: event.target.value as UiFontId })}
                   >
                     {uiFonts.map((font) => (
-                      <option key={font.id} value={font.id} style={{ fontFamily: font.stack }}>
-                        {font.name}
-                      </option>
-                    ))}
-                  </select>
-                </SettingRow>
-                <SettingRow
-                  id="typography-mono-font"
-                  label="Code font"
-                  detail="Editor content, diffs, and identifiers"
-                >
-                  <select
-                    aria-label="Code font"
-                    className="settings-select"
-                    value={preferences.monoFont}
-                    onChange={(event) => updatePreferences({ monoFont: event.target.value as MonoFontId })}
-                  >
-                    {monoFonts.map((font) => (
                       <option key={font.id} value={font.id} style={{ fontFamily: font.stack }}>
                         {font.name}
                       </option>
@@ -228,7 +226,6 @@ export function WorkspaceSettings() {
                     onClick={() =>
                       updatePreferences({
                         uiFont: 'system',
-                        monoFont: 'system',
                         uiDensity: 'default',
                         editorSize: 'default',
                       })
@@ -483,6 +480,95 @@ export function WorkspaceSettings() {
             </SettingsSection>
           )}
         </main>
+      </div>
+    </div>
+  )
+}
+
+function CreateThemeSection() {
+  const { preferences, updatePreferences } = useTheme()
+  const custom = preferences.customTheme
+  const [base, setBase] = useState<ThemeId>(custom?.base ?? preferences.theme)
+  const [accent, setAccent] = useState(custom?.accent ?? '#5b59dc')
+  const active =
+    custom !== null && custom.base === base && custom.accent.toLowerCase() === accent.toLowerCase()
+  const baseTheme = themes.find((theme) => theme.id === base) ?? themes[0]!
+  const [sidebarColor = '#0f1011', surfaceColor = '#191a1b'] = baseTheme.colors
+
+  return (
+    <div className="theme-builder">
+      <div className="theme-builder-controls">
+        <label className="settings-field">
+          <span>Base palette</span>
+          <select
+            aria-label="Base palette"
+            className="settings-select"
+            value={base}
+            onChange={(event) => setBase(event.target.value as ThemeId)}
+          >
+            {themes.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-field">
+          <span>Accent color</span>
+          <span className="accent-input">
+            <input
+              aria-label="Accent color"
+              type="color"
+              value={accent}
+              onChange={(event) => setAccent(event.target.value)}
+            />
+            <code>{accent}</code>
+          </span>
+        </label>
+        <div className="theme-builder-actions">
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => updatePreferences({ customTheme: { base, accent } satisfies CustomTheme })}
+          >
+            {active ? <Check size="var(--icon-inline)" /> : null}
+            {active ? 'Using this theme' : 'Use this theme'}
+          </button>
+          {custom && (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => updatePreferences({ customTheme: null })}
+            >
+              Stop using custom theme
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="theme-builder-preview" style={{ background: surfaceColor }} aria-hidden="true">
+        <span className="theme-builder-preview-rail" style={{ background: sidebarColor }}>
+          <i style={{ background: hexToRgba(readableTextColor(sidebarColor), 0.4) }} />
+          <i style={{ background: hexToRgba(readableTextColor(sidebarColor), 0.25) }} />
+          <i style={{ background: hexToRgba(readableTextColor(sidebarColor), 0.25) }} />
+        </span>
+        <span className="theme-builder-preview-body">
+          <i className="line" style={{ background: hexToRgba(readableTextColor(surfaceColor), 0.75) }} />
+          <i
+            className="line short"
+            style={{ background: hexToRgba(readableTextColor(surfaceColor), 0.35) }}
+          />
+          <span className="row">
+            <b
+              className="badge"
+              style={{ background: hexToRgba(accent, 0.16), color: readableTextColor(accent) }}
+            >
+              Draft
+            </b>
+            <b className="button" style={{ background: accent, color: readableTextColor(accent) }}>
+              Publish
+            </b>
+          </span>
+        </span>
       </div>
     </div>
   )

@@ -25,7 +25,7 @@ function Probe() {
   const { preferences, updatePreferences } = useTheme()
   return (
     <button type="button" onClick={() => updatePreferences({ uiDensity: 'compact', uiFont: 'serif' })}>
-      {preferences.uiFont}:{preferences.monoFont}:{preferences.uiDensity}:{preferences.editorSize}
+      {preferences.uiFont}:{preferences.uiDensity}:{preferences.editorSize}
     </button>
   )
 }
@@ -38,7 +38,6 @@ describe('workspace typography preferences', () => {
       </ThemeProvider>,
     )
     expect(document.documentElement.dataset.uiFont).toBe('system')
-    expect(document.documentElement.dataset.monoFont).toBe('system')
     expect(document.documentElement.dataset.uiDensity).toBe('default')
     expect(document.documentElement.dataset.editorSize).toBe('default')
   })
@@ -46,7 +45,13 @@ describe('workspace typography preferences', () => {
   it('falls back to defaults when stored typography values are invalid', () => {
     window.localStorage.setItem(
       'sangam.workspace-preferences.v1',
-      JSON.stringify({ uiFont: 'comic-sans', monoFont: 42, uiDensity: 'huge', editorSize: 'giant' }),
+      JSON.stringify({
+        uiFont: 'comic-sans',
+        monoFont: 42,
+        uiDensity: 'huge',
+        editorSize: 'giant',
+        customTheme: { base: 'nope', accent: 'red' },
+      }),
     )
     render(
       <ThemeProvider>
@@ -54,9 +59,25 @@ describe('workspace typography preferences', () => {
       </ThemeProvider>,
     )
     expect(document.documentElement.dataset.uiFont).toBe('system')
-    expect(document.documentElement.dataset.monoFont).toBe('system')
     expect(document.documentElement.dataset.uiDensity).toBe('default')
     expect(document.documentElement.dataset.editorSize).toBe('default')
+    expect(document.documentElement.dataset.theme).toBe('midnight')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('')
+  })
+
+  it('applies a valid custom theme and rejects an invalid one', () => {
+    window.localStorage.setItem(
+      'sangam.workspace-preferences.v1',
+      JSON.stringify({ customTheme: { base: 'cobalt', accent: '#ff8800' } }),
+    )
+    render(
+      <ThemeProvider>
+        <Probe />
+      </ThemeProvider>,
+    )
+    expect(document.documentElement.dataset.theme).toBe('cobalt')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#ff8800')
+    expect(document.documentElement.style.getPropertyValue('--accent-text')).toBe('#f7f8f8')
   })
 
   it('persists updates and re-applies the data attributes', () => {

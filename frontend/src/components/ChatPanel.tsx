@@ -20,7 +20,7 @@ import {
   citationTargetFromData,
   type CitationTarget,
 } from '../citationNavigation'
-import { monoFonts, uiFonts, useTheme } from '../theme'
+import { uiFonts, useTheme } from '../theme'
 import { OneTimeSecret } from './OneTimeSecret'
 import { StateMessage } from './ui/StateMessage'
 import { RevisionMergeView } from './RevisionMergeView'
@@ -241,10 +241,9 @@ export function ChatPanel({
   const chatTypography = useMemo(
     () => ({
       fontFamily: uiFonts.find((font) => font.id === preferences.uiFont)?.stack,
-      fontFamilyMono: monoFonts.find((font) => font.id === preferences.monoFont)?.stack,
       baseSize: 14 as const,
     }),
-    [preferences.uiFont, preferences.monoFont],
+    [preferences.uiFont],
   )
   const chatDensity = useMemo<'compact' | 'normal' | 'spacious'>(
     () =>

@@ -58,11 +58,11 @@ const settingsSearchIndex: Array<{
     keywords: 'appearance typography font family inter plex serif',
   },
   {
-    id: 'typography-mono-font',
+    id: 'create-theme',
     category: 'appearance',
-    label: 'Code font',
-    description: 'Font family for the editor, diffs, and code',
-    keywords: 'appearance typography mono font jetbrains fira sf mono',
+    label: 'Create theme',
+    description: 'Build a custom accent theme from a base palette',
+    keywords: 'appearance create custom theme accent color builder',
   },
   {
     id: 'typography-density',

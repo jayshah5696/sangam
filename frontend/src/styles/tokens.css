@@ -50,18 +50,6 @@
   --font-ui: Georgia, "Times New Roman", serif;
 }
 
-:root[data-mono-font='sfmono'] {
-  --font-mono: "SF Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
-}
-
-:root[data-mono-font='jetbrains'] {
-  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
-}
-
-:root[data-mono-font='fira'] {
-  --font-mono: "Fira Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
-}
-
 :root[data-ui-density='compact'] {
   --text-meta: calc(0.6875rem * 0.9375);
   --text-label: calc(0.75rem * 0.9375);

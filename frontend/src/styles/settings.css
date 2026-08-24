@@ -68,6 +68,22 @@
 .density-option + .density-option { border-left: 1px solid var(--line); }
 .density-option:hover { color: var(--text); }
 .density-option.selected { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.theme-builder { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(16rem, 1.2fr); gap: var(--space-4); align-items: start; }
+.theme-builder-controls { display: grid; gap: var(--space-3); }
+.settings-field { display: grid; gap: var(--space-1); color: var(--muted); font-size: var(--text-label); }
+.accent-input { display: inline-flex; align-items: center; gap: var(--space-2); }
+.accent-input input { width: 34px; height: var(--control-height); padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); cursor: pointer; }
+.accent-input code { color: var(--text); font-family: var(--font-mono); font-size: var(--text-control); }
+.theme-builder-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.theme-builder-preview { display: grid; grid-template-columns: 56px minmax(0, 1fr); min-height: 150px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); }
+.theme-builder-preview-rail { display: grid; align-content: start; gap: 8px; padding: 10px 8px; }
+.theme-builder-preview-rail i { display: block; height: 6px; border-radius: var(--radius-pill); }
+.theme-builder-preview-body { display: grid; align-content: start; gap: 10px; padding: 14px; }
+.theme-builder-preview-body .line { display: block; width: 70%; height: 8px; border-radius: var(--radius-pill); }
+.theme-builder-preview-body .line.short { width: 45%; }
+.theme-builder-preview-body .row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.theme-builder-preview-body .badge, .theme-builder-preview-body .button { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: var(--radius-pill); font-size: var(--text-meta); font-weight: 600; }
+.theme-builder-preview-body .button { border-radius: var(--radius-control); }
 .compact-switch { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-control); white-space: nowrap; cursor: pointer; }
 .compact-switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .compact-switch:has(input:disabled) { cursor: wait; opacity: .7; }
