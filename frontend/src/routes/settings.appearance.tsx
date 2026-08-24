@@ -113,7 +113,7 @@ export function WorkspaceSettings() {
                     <ThemeWireframe themeId={theme.id} />
                     <strong>
                       {theme.name}
-                      {preferences.theme === theme.id && <Check size={14} />}
+                      {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
                     </strong>
                     <small>{theme.description}</small>
                   </button>
@@ -150,7 +150,7 @@ export function WorkspaceSettings() {
                   detail="Return to one editor and clear the current split arrangement"
                 >
                   <button type="button" className="secondary-action" onClick={workbench.resetLayout}>
-                    <RotateCcw size={14} />
+                    <RotateCcw size="var(--icon-inline)" />
                     Reset layout
                   </button>
                 </SettingRow>
@@ -184,7 +184,7 @@ export function WorkspaceSettings() {
               <section className="settings-subsection" id="tag-settings" tabIndex={-1}>
                 <div className="settings-subtitle">
                   <div>
-                    <Tags size={15} />
+                    <Tags size="var(--icon-control)" />
                     <strong>Tags</strong>
                   </div>
                   <span>{tags.data?.length ?? 0}</span>
@@ -224,7 +224,7 @@ export function WorkspaceSettings() {
               <section className="settings-subsection" id="folder-settings" tabIndex={-1}>
                 <div className="settings-subtitle">
                   <div>
-                    <FolderTree size={15} />
+                    <FolderTree size="var(--icon-control)" />
                     <strong>Folder metadata</strong>
                   </div>
                   <span>{folders.data?.length ?? 0}</span>
@@ -296,7 +296,7 @@ export function WorkspaceSettings() {
                 )}
                 <div className="maintenance-row" id="maintenance" tabIndex={-1}>
                   <div>
-                    <RefreshCw size={17} />
+                    <RefreshCw size="var(--icon-control)" />
                     <span>
                       <strong>Full-text search index</strong>
                       <small>Rebuild search index from canonical workspace documents.</small>
@@ -307,13 +307,13 @@ export function WorkspaceSettings() {
                     disabled={reindex.isPending}
                     onClick={() => reindex.mutate()}
                   >
-                    <RefreshCw size={14} className={reindex.isPending ? 'spin' : ''} />
+                    <RefreshCw size="var(--icon-inline)" className={reindex.isPending ? 'spin' : ''} />
                     {reindex.isPending ? 'Rebuilding…' : 'Rebuild index'}
                   </button>
                 </div>
                 {reindex.isSuccess && (
                   <p className="operation-result success" role="status">
-                    <Check size={14} />
+                    <Check size="var(--icon-inline)" />
                     Indexed {reindex.data} documents.
                   </p>
                 )}
@@ -325,7 +325,7 @@ export function WorkspaceSettings() {
 
                 <div className="maintenance-row" id="app-version" tabIndex={-1}>
                   <div>
-                    <Wrench size={17} />
+                    <Wrench size="var(--icon-control)" />
                     <span>
                       <strong>
                         {health.data ? `Sangam Server v${health.data.version}` : 'Sangam Server'}
@@ -344,13 +344,13 @@ export function WorkspaceSettings() {
                     disabled={health.isFetching}
                     onClick={() => void health.refetch()}
                   >
-                    <RefreshCw size={14} className={health.isFetching ? 'spin' : ''} />
+                    <RefreshCw size="var(--icon-inline)" className={health.isFetching ? 'spin' : ''} />
                     {health.isFetching ? 'Refreshing…' : 'Refresh server status'}
                   </button>
                 </div>
                 {health.isSuccess && (
                   <p className="operation-result success" role="status">
-                    <Check size={14} />
+                    <Check size="var(--icon-inline)" />
                     Server is healthy. Running Sangam v{health.data.version}.
                   </p>
                 )}
@@ -410,7 +410,7 @@ function SettingsDestination({
   return (
     <div className="maintenance-row" id={id} tabIndex={-1}>
       <div>
-        <Icon size={17} />
+        <Icon size="var(--icon-control)" />
         <span>
           <strong>{title}</strong>
           <small>{description}</small>
@@ -441,7 +441,7 @@ function SettingsSection({
   return (
     <section className="settings-panel" id={id} tabIndex={-1}>
       <header>
-        <Icon size={18} />
+        <Icon size="var(--icon-section)" />
         <div>
           <h2>{title}</h2>
           <p>{description}</p>

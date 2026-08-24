@@ -168,7 +168,7 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
     <>
       <div className="settings-sidebar-body">
         <label className="settings-search">
-          <Search size={14} />
+          <Search size="var(--icon-control)" />
           <input
             ref={searchInputRef}
             type="search"
@@ -220,7 +220,7 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
                 onMouseMove={() => setSelectedIndex(index)}
                 onClick={() => openDestination(item.category, item.id)}
               >
-                <SearchCheck size={14} />
+                <SearchCheck size="var(--icon-inline)" />
                 <span>
                   <strong>{item.label}</strong>
                   <small>{item.description}</small>
@@ -239,7 +239,7 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
                 aria-current={activeCategory === id ? 'page' : undefined}
                 onClick={() => openDestination(id)}
               >
-                <Icon size={15} />
+                <Icon size="var(--icon-control)" />
                 <span>
                   <strong>{label}</strong>
                   <small>{description}</small>
@@ -251,7 +251,7 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
       </div>
       <div className="settings-sidebar-footer">
         <button type="button" onClick={onBack}>
-          <ArrowLeft size={15} />
+          <ArrowLeft size="var(--icon-control)" />
           Back to workspace
         </button>
       </div>

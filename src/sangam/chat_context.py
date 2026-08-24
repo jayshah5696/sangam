@@ -16,6 +16,13 @@ class ChatRequestContext:
     pinned_revision_id: str | None = None
     requested_revision_id: str | None = None
     model_ref: str | None = None
+    entry_point: str = "workspace"
+    context_snapshot_id: str | None = None
+    selection_text: str = ""
+    selection_digest: str | None = None
+    pdf_page_number: int | None = None
+    annotation_id: str | None = None
+    run_id: str | None = None
 
 
 AgentRunContext = AgentContext[ChatRequestContext]

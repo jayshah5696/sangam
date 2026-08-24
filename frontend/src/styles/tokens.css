@@ -12,6 +12,11 @@
   --text-title: 1.5625rem;
   --text-title-lg: 2.1875rem;
   --text-input-mobile: 1rem;
+  --icon-detail: 12px;
+  --icon-inline: 14px;
+  --icon-control: 16px;
+  --icon-section: 18px;
+  --icon-page: 24px;
   --leading-tight: 1.2;
   --leading-ui: 1.4;
   --leading-body: 1.55;

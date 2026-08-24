@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const stylesDirectory = new URL('../src/styles/', import.meta.url)
+const sourceDirectory = new URL('../src/', import.meta.url)
 const files = (await readdir(stylesDirectory)).filter((file) => file.endsWith('.css'))
 const violations = []
 const definedVariables = new Set()
@@ -34,6 +35,20 @@ for (const [file, source] of sources) {
       if (!definedVariables.has(match[1])) {
         violations.push(`${join('src/styles', file)}:${index + 1}: define ${match[1]} before using it`)
       }
+    }
+  }
+}
+
+const sourceFiles = (await readdir(sourceDirectory, { recursive: true })).filter((file) =>
+  file.endsWith('.tsx'),
+)
+for (const file of sourceFiles) {
+  const source = await readFile(new URL(file, sourceDirectory), 'utf8')
+  for (const [index, line] of source.split('\n').entries()) {
+    if (/\bsize=\{[^}\n]*\b\d+(?:\.\d+)?\b[^}\n]*\}/.test(line)) {
+      violations.push(
+        `${join('src', file)}:${index + 1}: use a semantic icon size token instead of a raw number`,
+      )
     }
   }
 }

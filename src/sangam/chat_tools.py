@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
@@ -12,28 +12,21 @@ from chatkit.agents import ClientToolCall
 from chatkit.types import CustomTask
 
 from sangam.access import WorkspaceAccessService
+from sangam.chat_capabilities import (
+    ChatCapability,
+    ChatCapabilityRegistry,
+    CreateDocumentInput,
+    ProposeUpdateInput,
+    PublishDocumentInput,
+    ReadDocumentInput,
+    ReadPdfPageInput,
+    WorkspaceSearchInput,
+)
 from sangam.chat_context import ToolContext
+from sangam.chat_effects import ChatEffectService
+from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_proposals import ChatProposalService
 from sangam.errors import NotFoundError, SangamError, ValidationError
-
-
-@dataclass(frozen=True)
-class ToolPolicy:
-    name: str
-    title: str
-    effect: str
-    approval: str
-
-
-TOOL_POLICIES: tuple[ToolPolicy, ...] = (
-    ToolPolicy("get_editor_selection", "Read editor selection", "read", "none"),
-    ToolPolicy("search_workspace", "Search workspace", "read", "none"),
-    ToolPolicy("read_document", "Read document", "read", "none"),
-    ToolPolicy("read_pdf_page", "Read PDF page", "read", "none"),
-    ToolPolicy("propose_update", "Prepare edit proposal", "proposal", "human_review"),
-    ToolPolicy("create_document", "Create document", "write", "client_confirmation"),
-    ToolPolicy("publish_document", "Publish document", "external", "client_confirmation"),
-)
 
 
 class ChatToolset:
@@ -44,15 +37,21 @@ class ChatToolset:
         *,
         workspace: WorkspaceAccessService,
         proposals: ChatProposalService,
+        registry: ChatCapabilityRegistry,
+        effects: ChatEffectService,
+        evidence: ChatEvidenceRepository,
         max_result_bytes: int,
     ) -> None:
         self.workspace = workspace
         self.proposals = proposals
+        self.registry = registry
+        self.effects = effects
+        self.evidence = evidence
         self.max_result_bytes = max_result_bytes
-        self.policies = {item.name: item for item in TOOL_POLICIES}
+        self.policies = registry.by_id
 
-    def as_agent_tools(self) -> list[Any]:
-        return [
+    def as_agent_tools(self, capabilities: tuple[ChatCapability, ...] | None = None) -> list[Any]:
+        tools = [
             function_tool(
                 self.get_editor_selection,
                 description_override="Read selected text from the active Sangam editor.",
@@ -94,25 +93,44 @@ class ChatToolset:
                 ),
             ),
         ]
+        selected_capabilities = (
+            capabilities if capabilities is not None else self.registry.capabilities
+        )
+        allowed = {capability.capability_id for capability in selected_capabilities}
+        return [tool for tool in tools if tool.name in allowed]
 
-    async def get_editor_selection(self, ctx: ToolContext) -> None:
-        ctx.context.client_tool_call = ClientToolCall(
-            name="get_editor_selection",
-            arguments={"document_id": ctx.context.request_context.document_id},
+    async def get_editor_selection(self, ctx: ToolContext) -> str:
+        request_context = ctx.context.request_context
+
+        def operation() -> dict[str, Any]:
+            return {
+                "document_id": request_context.document_id,
+                "revision_id": request_context.pinned_revision_id,
+                "selected_text": request_context.selection_text,
+                "selection_digest": request_context.selection_digest,
+                "pdf_page_number": request_context.pdf_page_number,
+                "annotation_id": request_context.annotation_id,
+            }
+
+        return await self._run_tool(
+            ctx,
+            self.policies["get_editor_selection"],
+            f"{len(request_context.selection_text)} selected characters",
+            operation,
         )
 
     async def search_workspace(self, ctx: ToolContext, query: str, limit: int = 5) -> str:
-        limit = max(1, min(limit, 10))
+        validated = WorkspaceSearchInput.model_validate({"query": query, "limit": limit})
 
         def operation() -> dict[str, Any]:
             documents = self.workspace.search_documents(
                 ctx.context.request_context.principal,
-                query=query,
+                query=validated.query,
                 tag_id=None,
                 category=None,
                 actor_id=None,
                 sort="relevance",
-                limit=limit,
+                limit=validated.limit,
             )
             return {
                 "results": [
@@ -121,9 +139,14 @@ class ChatToolset:
                 ]
             }
 
-        return await self._run_tool(ctx, self.policies["search_workspace"], query, operation)
+        return await self._run_tool(
+            ctx, self.policies["search_workspace"], validated.query, operation
+        )
 
     async def read_document(self, ctx: ToolContext, document_id: str) -> str:
+        validated = ReadDocumentInput.model_validate({"document_id": document_id})
+        document_id = validated.document_id
+
         def operation() -> dict[str, Any]:
             document = self.workspace.get_document(
                 ctx.context.request_context.principal, document_id
@@ -160,6 +183,12 @@ class ChatToolset:
         return await self._run_tool(ctx, self.policies["read_document"], document_id, operation)
 
     async def read_pdf_page(self, ctx: ToolContext, document_id: str, page_number: int) -> str:
+        validated = ReadPdfPageInput.model_validate(
+            {"document_id": document_id, "page_number": page_number}
+        )
+        document_id = validated.document_id
+        page_number = validated.page_number
+
         def operation() -> dict[str, Any]:
             principal = ctx.context.request_context.principal
             document = self.workspace.get_document(principal, document_id)
@@ -206,14 +235,23 @@ class ChatToolset:
         content: str,
         summary: str,
     ) -> str:
+        validated = ProposeUpdateInput.model_validate(
+            {
+                "document_id": document_id,
+                "expected_revision_id": expected_revision_id,
+                "content": content,
+                "summary": summary,
+            }
+        )
+
         def operation() -> dict[str, Any]:
             proposal = self.proposals.create(
                 ctx.context.request_context.principal,
                 thread_id=ctx.context.thread.id,
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                content=content,
-                summary=summary,
+                document_id=validated.document_id,
+                expected_revision_id=validated.expected_revision_id,
+                content=validated.content,
+                summary=validated.summary,
             )
             return {
                 "proposal_id": proposal.proposal_id,
@@ -221,43 +259,96 @@ class ChatToolset:
                 "message": "Waiting for human diff review and approval.",
             }
 
-        return await self._run_tool(ctx, self.policies["propose_update"], summary, operation)
+        return await self._run_tool(
+            ctx, self.policies["propose_update"], validated.summary, operation
+        )
 
     async def create_document(self, ctx: ToolContext, title: str, content: str) -> None:
         normalized_title = " ".join(title.strip().split())
-        if not normalized_title:
-            raise ValidationError("Document title is required")
-        ctx.context.client_tool_call = ClientToolCall(
-            name="confirm_create_document",
-            arguments={
-                "title": normalized_title[:240],
-                "content": self._bounded_text(content, self.max_result_bytes),
+        arguments = CreateDocumentInput.model_validate(
+            {
+                "title": normalized_title,
+                "content": content,
                 "content_type": "text/markdown",
-            },
+            }
+        ).model_dump(mode="json")
+        await self._request_effect(
+            ctx,
+            capability=self.policies["create_document"],
+            arguments=arguments,
+            preview=arguments,
         )
 
     async def publish_document(
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
     ) -> None:
-        if access_policy not in {"private", "unlisted", "public"}:
-            raise ValidationError("Unsupported publication access policy")
         document = self.workspace.get_document(ctx.context.request_context.principal, document_id)
         if document.content_type == "application/pdf":
             raise ValidationError("PDF documents cannot be published")
-        ctx.context.client_tool_call = ClientToolCall(
-            name="confirm_publish_document",
-            arguments={
+        arguments = PublishDocumentInput.model_validate(
+            {
                 "document_id": document.document_id,
-                "document_title": document.title,
+                "revision_id": document.current_revision_id,
                 "slug": slug,
                 "access_policy": access_policy,
+            }
+        ).model_dump(mode="json")
+        await self._request_effect(
+            ctx,
+            capability=self.policies["publish_document"],
+            arguments=arguments,
+            preview={**arguments, "document_title": document.title},
+        )
+
+    async def _request_effect(
+        self,
+        ctx: ToolContext,
+        *,
+        capability: ChatCapability,
+        arguments: dict[str, object],
+        preview: dict[str, object],
+    ) -> None:
+        request_context = ctx.context.request_context
+        if not request_context.run_id:
+            raise RuntimeError("Durable chat effects require a persisted run")
+        tool_call_id = getattr(ctx, "tool_call_id", None)
+        if not tool_call_id:
+            raise RuntimeError("Durable chat effects require a tool call ID")
+        effect = self.effects.propose(
+            request_context.principal,
+            run_id=request_context.run_id,
+            thread_id=ctx.context.thread.id,
+            tool_call_id=tool_call_id,
+            capability=capability,
+            arguments=arguments,
+            preview=preview,
+        )
+        self.evidence.record_tool(
+            run_id=request_context.run_id,
+            tool_call_id=tool_call_id,
+            capability_id=capability.capability_id,
+            capability_version=capability.version,
+            effect_class=capability.effect,
+            approval_policy=capability.approval,
+            outcome="pending_approval",
+            duration_ms=0,
+            result_bytes=0,
+            citation_count=0,
+            error_class=None,
+        )
+        ctx.context.client_tool_call = ClientToolCall(
+            name="review_chat_effect",
+            arguments={
+                "effect_id": effect.effect_id,
+                "capability_id": effect.capability_id,
+                "argument_digest": effect.argument_digest,
             },
         )
 
     async def _run_tool(
         self,
         ctx: ToolContext,
-        policy: ToolPolicy,
+        policy: ChatCapability,
         detail: str,
         operation: Callable[[], dict[str, Any]],
     ) -> str:
@@ -274,7 +365,22 @@ class ChatToolset:
         started = time.monotonic()
         outcome = "accepted"
         try:
-            payload = operation()
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(operation), timeout=policy.timeout_seconds
+            )
+            payload = policy.result_schema.model_validate(payload).model_dump(mode="json")
+        except TimeoutError:
+            outcome = "failed"
+            payload = {
+                "ok": False,
+                "error": {
+                    "code": "tool_timeout",
+                    "message": (
+                        f"{policy.title} exceeded its {policy.timeout_seconds:g} second limit."
+                    ),
+                    "details": {},
+                },
+            }
         except SangamError as error:
             outcome = "failed"
             payload = {
@@ -300,7 +406,31 @@ class ChatToolset:
             f" · {citations} citation{'s' if citations != 1 else ''}" if citations else ""
         )
         await ctx.context.update_workflow_task(task, task_index)
-        return self._bounded_text(json.dumps(payload, ensure_ascii=False), self.max_result_bytes)
+        result = self._bounded_text(
+            json.dumps(payload, ensure_ascii=False),
+            min(self.max_result_bytes, policy.max_result_bytes),
+        )
+        request_context = getattr(ctx.context, "request_context", None)
+        run_id = getattr(request_context, "run_id", None)
+        if run_id:
+            self.evidence.record_tool(
+                run_id=run_id,
+                tool_call_id=getattr(ctx, "tool_call_id", None),
+                capability_id=policy.capability_id,
+                capability_version=policy.version,
+                effect_class=policy.effect,
+                approval_policy=policy.approval,
+                outcome=outcome,
+                duration_ms=duration_ms,
+                result_bytes=len(result.encode("utf-8")),
+                citation_count=citations,
+                error_class=(
+                    str(payload.get("error", {}).get("code"))
+                    if isinstance(payload.get("error"), dict)
+                    else None
+                ),
+            )
+        return result
 
     def _document_source(
         self,

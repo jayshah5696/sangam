@@ -61,7 +61,15 @@ export function DocumentInspector({
         revision: document.current_revision_id,
         returnTo: `/documents/${document.document_id}`,
       },
-      state: chatNavigationState(selectedText),
+      state: chatNavigationState(
+        selectedText,
+        pdf
+          ? {
+              pageNumber: session.pdfState?.pageNumber ?? 1,
+              annotationId: session.pdfSelectedAnnotationId,
+            }
+          : undefined,
+      ),
     })
   const [chatActivated, setChatActivated] = useState(!isNarrow && tab === 'chat')
   const setTab = (next: InspectorTab) => {
@@ -127,7 +135,7 @@ export function DocumentInspector({
           title="Collapse document inspector"
           onClick={onCollapse}
         >
-          <ArrowRight size={16} />
+          <ArrowRight size="var(--icon-control)" />
         </button>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
@@ -304,7 +312,7 @@ export function DocumentInspector({
                 title="Open full chat"
                 onClick={() => void openChat()}
               >
-                <Maximize2 size={14} />
+                <Maximize2 size="var(--icon-inline)" />
                 Open full chat
               </button>
             </header>
@@ -313,6 +321,8 @@ export function DocumentInspector({
                 compact
                 document={document}
                 selectedText={selectedText}
+                pdfPageNumber={pdf ? (session.pdfState?.pageNumber ?? 1) : null}
+                annotationId={pdf ? session.pdfSelectedAnnotationId : null}
                 onDocumentUpdated={onUpdated}
               />
             </Suspense>
@@ -357,7 +367,7 @@ function PdfReplacementControl({ document }: { document: Document }) {
         <p className="small-muted">Import a new immutable document linked to this source.</p>
       </div>
       <label className="pdf-replacement-button" aria-disabled={replacement.isPending || undefined}>
-        <Upload size={14} />
+        <Upload size="var(--icon-inline)" />
         <span>{replacement.isPending ? 'Importing…' : 'Choose PDF'}</span>
         <input
           type="file"

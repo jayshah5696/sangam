@@ -27,7 +27,10 @@ export function StateMessage({
 
   return (
     <div className={`ui-state ui-state-${kind} ${compact ? 'ui-state-compact' : ''}`} role={role}>
-      <Icon className={kind === 'loading' ? 'spin' : ''} size={compact ? 15 : 18} />
+      <Icon
+        className={kind === 'loading' ? 'spin' : ''}
+        size={compact ? 'var(--icon-control)' : 'var(--icon-section)'}
+      />
       <div>
         <strong>{title}</strong>
         {description && <p>{description}</p>}

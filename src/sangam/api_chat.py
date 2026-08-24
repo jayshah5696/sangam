@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from chatkit.server import NonStreamingResult, StreamingResult
@@ -11,10 +12,15 @@ from sangam.chat import ChatRequestContext, SangamChatServer
 from sangam.errors import ValidationError
 from sangam.schemas import (
     ApplyChatProposal,
+    ChatEffect,
+    ChatEffectDecision,
+    ChatEffectDecisionResult,
     ChatModelSelectionUpdate,
     ChatModelSettings,
     ChatProposal,
     ChatRuntimeConfig,
+    ChatTurnContext,
+    CreateChatTurnContext,
     CreateProviderConnection,
     DismissChatProposal,
     ProviderConnection,
@@ -139,6 +145,8 @@ def create_chat_router(
         document_id: str | None = Header(default=None, alias="X-Sangam-Document-ID"),
         revision_id: str | None = Header(default=None, alias="X-Sangam-Revision-ID"),
         workspace_context: str | None = Header(default=None, alias="X-Sangam-Workspace-Context"),
+        context_id: str | None = Header(default=None, alias="X-Sangam-Context-ID"),
+        entry_point: str = Header(default="workspace", alias="X-Sangam-Chat-Entry"),
         principal: Principal = principal_dependency,
     ) -> Response:
         content_length = request.headers.get("content-length")
@@ -159,6 +167,8 @@ def create_chat_router(
                 document_id=document_id,
                 requested_revision_id=revision_id,
                 workspace_context=workspace_context == "1",
+                context_snapshot_id=context_id,
+                entry_point="document" if entry_point == "document" else "workspace",
             ),
         )
         if isinstance(result, StreamingResult):
@@ -173,6 +183,65 @@ def create_chat_router(
         if not isinstance(result, NonStreamingResult):
             raise TypeError("Unsupported ChatKit result")
         return Response(content=result.json, media_type="application/json")
+
+    @router.post("/chat/contexts", response_model=ChatTurnContext, status_code=201)
+    def create_turn_context(
+        body: CreateChatTurnContext,
+        principal: Principal = principal_dependency,
+    ) -> ChatTurnContext:
+        context = chat.evidence.create_turn_context(
+            principal,
+            entry_point=body.entry_point,
+            document_id=body.document_id,
+            revision_id=body.revision_id,
+            selected_text=body.selected_text,
+            pdf_page_number=body.pdf_page_number,
+            annotation_id=body.annotation_id,
+        )
+        return ChatTurnContext(
+            context_id=context.context_id,
+            entry_point=context.entry_point,
+            document_id=context.document_id,
+            revision_id=context.revision_id,
+            pdf_page_number=context.pdf_page_number,
+            annotation_id=context.annotation_id,
+            selection_digest=context.selection_digest,
+            selected_characters=len(context.selection_text),
+            created_at=context.created_at,
+        )
+
+    @router.get("/chat/effects", response_model=list[ChatEffect])
+    def list_effects(
+        thread_id: str | None = Query(default=None),
+        status: Annotated[list[str] | None, Query()] = None,
+        principal: Principal = principal_dependency,
+    ) -> list[ChatEffect]:
+        return chat.effects.list(principal, thread_id=thread_id, statuses=tuple(status or ()))
+
+    @router.get("/chat/effects/{effect_id}", response_model=ChatEffect)
+    def get_effect(
+        effect_id: str,
+        principal: Principal = principal_dependency,
+    ) -> ChatEffect:
+        return chat.effects.get(principal, effect_id)
+
+    @router.post("/chat/effects/{effect_id}/decision", response_model=ChatEffectDecisionResult)
+    def decide_effect(
+        effect_id: str,
+        body: ChatEffectDecision,
+        principal: Principal = principal_dependency,
+    ) -> ChatEffectDecisionResult:
+        execution = chat.effects.decide(
+            principal,
+            effect_id=effect_id,
+            verdict=body.verdict,
+            argument_digest=body.argument_digest,
+            reason=body.reason,
+        )
+        return ChatEffectDecisionResult(
+            effect=execution.effect,
+            client_result=execution.client_result,
+        )
 
     @router.get("/chat/proposals", response_model=list[ChatProposal])
     def list_proposals(

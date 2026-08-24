@@ -280,7 +280,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
     >
       <section className="command-palette">
         <label>
-          <Search size={17} />
+          <Search size="var(--icon-control)" />
           <input
             ref={inputRef}
             value={query}
@@ -318,7 +318,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
                 onMouseMove={() => setSelectedIndex(index)}
                 onClick={() => run(command)}
               >
-                <command.icon size={16} />
+                <command.icon size="var(--icon-inline)" />
                 <span>
                   <strong>{command.label}</strong>
                   <small>{command.detail}</small>

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { api, collectPages, type ChatProposal } from './api'
+import { api, collectPages, type ChatEffect, type ChatProposal } from './api'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -62,5 +62,47 @@ describe('chat proposal requests', () => {
 
     const keys = fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get('Idempotency-Key'))
     expect(keys).toEqual(['chat-proposal:proposal-1', 'chat-proposal:proposal-1'])
+  })
+})
+
+describe('chat effect requests', () => {
+  it('binds the decision to the persisted argument digest and a stable key', async () => {
+    const effect: ChatEffect = {
+      effect_id: 'effect-1',
+      thread_id: 'thread-1',
+      requested_by: 'human:jay',
+      capability_id: 'create_document',
+      capability_version: 1,
+      argument_digest: 'a'.repeat(64),
+      preview: { title: 'Draft' },
+      effect_class: 'write',
+      risk: 'workspace',
+      status: 'pending_approval',
+      expires_at: '2026-08-23T01:00:00Z',
+      resource_type: null,
+      resource_id: null,
+      result: null,
+      failure: null,
+      created_at: '2026-08-23T00:00:00Z',
+      decided_at: null,
+      completed_at: null,
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ effect: { ...effect, status: 'denied' }, client_result: {} }), {
+        status: 200,
+      }),
+    )
+
+    await api.decideChatEffect(effect, 'deny', 'Not this one')
+
+    const call = fetchMock.mock.calls[0]
+    expect(call).toBeDefined()
+    const [, init] = call!
+    expect(new Headers(init?.headers).get('Idempotency-Key')).toBe('chat-effect:effect-1:deny')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      verdict: 'deny',
+      argument_digest: 'a'.repeat(64),
+      reason: 'Not this one',
+    })
   })
 })

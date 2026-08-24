@@ -34,15 +34,18 @@ test('capture the README workspace and settings screenshots', async ({ page, req
       const chatTab = page.getByRole('tab', { name: 'chat' })
       if (await chatTab.isVisible()) {
         await chatTab.click()
-        await page.waitForTimeout(400)
+        const chatFrame = page.locator('openai-chatkit iframe')
+        await expect(chatFrame).toBeVisible({ timeout: 15_000 })
+        await expect(
+          page
+            .frameLocator('openai-chatkit iframe')
+            .getByRole('heading', { name: 'Ask about this workspace' }),
+        ).toBeVisible({ timeout: 15_000 })
         await page.screenshot({
           path: path.join(repositoryRoot, 'docs/assets/crisp-chat-narrow.png'),
           fullPage: false,
         })
       }
-
-      await page.getByRole('button', { name: 'Collapse document inspector' }).click()
-      await page.waitForTimeout(300)
     }
 
     // 4. Mobile Settings

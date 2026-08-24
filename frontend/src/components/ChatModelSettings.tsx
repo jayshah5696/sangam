@@ -198,7 +198,7 @@ export function ChatModelSettings() {
   return (
     <section className="settings-panel" id="chat-models" tabIndex={-1}>
       <header>
-        <Cpu size={18} />
+        <Cpu size="var(--icon-section)" />
         <div>
           <h2>AI connections & models</h2>
           <p>Connect any compatible endpoint, then choose the models available to workspace chat.</p>
@@ -305,7 +305,7 @@ export function ChatModelSettings() {
               />
             </label>
             <button className="secondary-action" disabled={createConnection.isPending}>
-              <Plus size={14} />
+              <Plus size="var(--icon-inline)" />
               {createConnection.isPending ? 'Adding…' : 'Add connection'}
             </button>
             {createConnection.isError && (
@@ -316,7 +316,7 @@ export function ChatModelSettings() {
 
         <div className="settings-subtitle">
           <div>
-            <ServerCog size={15} />
+            <ServerCog size="var(--icon-control)" />
             <strong>Model catalog</strong>
           </div>
           <span>{catalog.length} models</span>
@@ -340,7 +340,7 @@ export function ChatModelSettings() {
             onChange={(event) => setManualModel(event.target.value)}
           />
           <button className="secondary-action" disabled={!manualModel.trim()}>
-            <Plus size={14} /> Add unknown model
+            <Plus size="var(--icon-inline)" /> Add unknown model
           </button>
         </form>
         <p className="small-muted">
@@ -406,7 +406,7 @@ export function ChatModelSettings() {
           )}
           {save.isSuccess && !dirty && (
             <span className="operation-result success">
-              <Check size={14} /> Saved
+              <Check size="var(--icon-inline)" /> Saved
             </span>
           )}
           <button
@@ -518,14 +518,14 @@ function ConnectionCard({
           <span>{draft.enabled ? 'Enabled' : 'Disabled'}</span>
         </label>
         <button className="secondary-action" disabled={test.isPending || dirty} onClick={() => test.mutate()}>
-          <TestTube2 size={14} /> {test.isPending ? 'Testing…' : 'Test'}
+          <TestTube2 size="var(--icon-inline)" /> {test.isPending ? 'Testing…' : 'Test'}
         </button>
         <button
           className="secondary-action"
           disabled={refresh.isPending || dirty}
           onClick={() => refresh.mutate()}
         >
-          <RefreshCw size={14} className={refresh.isPending ? 'spin' : ''} />
+          <RefreshCw size="var(--icon-inline)" className={refresh.isPending ? 'spin' : ''} />
           {refresh.isPending ? 'Discovering…' : 'Discover models'}
         </button>
         <button className="primary-button" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>

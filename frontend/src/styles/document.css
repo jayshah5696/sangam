@@ -205,6 +205,7 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-panel-compact { gap: var(--space-2); overflow: hidden; }
 .chat-panel-compact > .ui-state, .chat-panel-compact > .chat-runtime-status, .chat-panel-compact > .chat-proposals-error { margin: var(--space-2); }
 .chat-panel-compact .chatkit-frame, .chat-panel-compact .chatkit-state-overlay { border: 0; border-radius: 0; }
+.chat-compact-controls { flex: none; display: flex; justify-content: flex-end; gap: var(--space-1); padding: 0 var(--space-2); }
 .chatkit-shell { position: relative; min-height: 0; flex: 1; display: flex; }
 .chatkit-frame { display: block; min-height: 30rem; flex: 1 0 30rem; width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
 .chatkit-state-overlay { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
@@ -257,6 +258,7 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-create-preview { width: 100%; max-height: 16rem; margin: var(--space-2) 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); padding: var(--space-3); color: var(--text); font: var(--text-meta)/var(--leading-body) var(--font-mono); }
 .chat-create-preview code { font: inherit; }
 .chat-effect-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+@media (pointer: coarse) { .chat-effect-actions > button { min-height: var(--control-touch); } }
 .chat-effect-complete, .chat-citation-status { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); font-size: var(--text-control); }
 .chat-effect-complete { flex-wrap: wrap; }
 .chat-effect-complete-copy { min-width: 0; flex: 1; display: grid; gap: var(--space-1); }

@@ -71,7 +71,7 @@ function KarakeepConfluence() {
 
       <section className="karakeep-panel" aria-labelledby="karakeep-select-heading">
         <header>
-          <Search size={18} />
+          <Search size="var(--icon-control)" />
           <div>
             <h2 id="karakeep-select-heading">Find archived content</h2>
             <p>Search stays in Karakeep. Only bookmarks you select become Sangam documents.</p>
@@ -90,7 +90,7 @@ function KarakeepConfluence() {
               />
             </label>
             <button className="secondary-action" disabled={!searchInput.trim() || bookmarks.isFetching}>
-              <Search size={14} /> {bookmarks.isFetching ? 'Searching…' : 'Search'}
+              <Search size="var(--icon-inline)" /> {bookmarks.isFetching ? 'Searching…' : 'Search'}
             </button>
           </form>
           {health.data && !health.data.configured && (
@@ -113,7 +113,7 @@ function KarakeepConfluence() {
                       to="/documents/$documentId"
                       params={{ documentId: bookmark.imported_document_id }}
                     >
-                      <FileText size={14} /> Open document
+                      <FileText size="var(--icon-inline)" /> Open document
                     </Link>
                   ) : (
                     <button
@@ -121,7 +121,7 @@ function KarakeepConfluence() {
                       disabled={importBookmark.isPending}
                       onClick={() => importBookmark.mutate(bookmark.bookmark_id)}
                     >
-                      <Archive size={14} /> Import
+                      <Archive size="var(--icon-inline)" /> Import
                     </button>
                   )}
                 </article>
@@ -240,7 +240,7 @@ function ImportReview({
         <div className="karakeep-actions">
           {detail.source_url && (
             <a className="secondary-action" href={detail.source_url} target="_blank" rel="noreferrer">
-              <ExternalLink size={14} /> Original
+              <ExternalLink size="var(--icon-inline)" /> Original
             </a>
           )}
           {detail.document_id && (
@@ -249,11 +249,11 @@ function ImportReview({
               to="/documents/$documentId"
               params={{ documentId: detail.document_id }}
             >
-              <FileText size={14} /> Edit working copy
+              <FileText size="var(--icon-inline)" /> Edit working copy
             </Link>
           )}
           <button className="secondary-action" disabled={refreshing} onClick={onRefresh}>
-            <RefreshCw size={14} /> {refreshing ? 'Refreshing…' : 'Check for refresh'}
+            <RefreshCw size="var(--icon-inline)" /> {refreshing ? 'Refreshing…' : 'Check for refresh'}
           </button>
         </div>
       </header>

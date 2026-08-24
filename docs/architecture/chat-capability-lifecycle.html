@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sangam chat capability and durable effect lifecycle</title>
+  <style>
+    :root { color-scheme: dark; --bg:#000; --surface:#111; --raised:#181818; --line:#2a2a2a; --text:#f5f7fa; --muted:#a9adb5; --cyan:#55d6e8; --green:#4ade80; --yellow:#facc15; --coral:#fb7185; --violet:#a78bfa; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(1180px, calc(100% - 32px)); margin:0 auto; padding:36px 0 48px; }
+    header { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; padding-bottom:22px; border-bottom:1px solid var(--line); }
+    h1,h2,h3,p { margin-top:0; }
+    h1 { max-width:820px; margin-bottom:8px; font-size:clamp(26px,4vw,44px); line-height:1.05; letter-spacing:-.035em; }
+    h2 { margin-bottom:14px; font-size:18px; letter-spacing:-.01em; }
+    h3 { margin-bottom:5px; font-size:14px; }
+    p { color:var(--muted); }
+    code,.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .kicker { color:var(--cyan); text-transform:uppercase; letter-spacing:.12em; font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .stamp { text-align:right; color:var(--muted); font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
+    section { margin-top:26px; }
+    .summary { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .metric,.card { min-width:0; padding:14px; border:1px solid var(--line); background:var(--surface); }
+    .metric strong { display:block; color:var(--cyan); font-size:20px; }
+    .metric span { color:var(--muted); font-size:12px; }
+    .flow { overflow-x:auto; border:1px solid var(--line); background:var(--surface); }
+    svg { display:block; width:100%; min-width:980px; height:auto; }
+    .box { fill:var(--raised); stroke:var(--line); stroke-width:1.5; }
+    .boundary { fill:none; stroke:#3b434b; stroke-width:1.5; stroke-dasharray:6 6; }
+    .arrow { fill:none; stroke:#737b86; stroke-width:2; marker-end:url(#arrow); }
+    .arrow.cyan { stroke:var(--cyan); } .arrow.green { stroke:var(--green); } .arrow.yellow { stroke:var(--yellow); }
+    .svg-title { fill:var(--text); font:700 15px ui-sans-serif,system-ui; }
+    .svg-copy { fill:var(--muted); font:12px ui-sans-serif,system-ui; }
+    .svg-label { fill:var(--cyan); font:700 10px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.08em; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .card p { margin-bottom:0; font-size:13px; }
+    .tag { display:inline-block; margin-bottom:8px; padding:2px 7px; border:1px solid currentColor; color:var(--cyan); font:700 10px ui-monospace,SFMono-Regular,Menlo,monospace; text-transform:uppercase; letter-spacing:.08em; }
+    .tag.green { color:var(--green); } .tag.yellow { color:var(--yellow); } .tag.coral { color:var(--coral); }
+    .states { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:7px; align-items:center; }
+    .state { min-height:72px; display:grid; place-items:center; padding:8px; border:1px solid var(--line); background:var(--surface); text-align:center; font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .connector { color:var(--muted); text-align:center; }
+    .notes { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    ul { margin:0; padding-left:19px; color:var(--muted); }
+    li + li { margin-top:5px; }
+    a { color:var(--cyan); }
+    footer { margin-top:28px; padding-top:16px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    @media (max-width:760px) { header,.notes { grid-template-columns:1fr; } .stamp { text-align:left; } .summary,.grid { grid-template-columns:1fr 1fr; } .states { grid-template-columns:1fr; } .connector { transform:rotate(90deg); } }
+    @media (max-width:460px) { main { width:min(100% - 20px,1180px); padding-top:22px; } .summary,.grid { grid-template-columns:1fr; } }
+    @media print { body { background:#fff; color:#111; } main { width:100%; padding:10mm; } .metric,.card,.flow,.state { background:#fff; border-color:#bbb; break-inside:avoid; } p,ul,.stamp,footer { color:#444; } h1,h2,h3 { color:#111; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><p class="kicker">Architecture reference · issue 110 · August 2026</p><h1>Chat requests capabilities. Sangam owns authority and effects.</h1><p>One registry serves full and compact chat. SQLite preserves the exact turn, approval, execution, and result without creating a second write path.</p></div>
+    <div class="stamp">Sangam modular monolith<br />schema migration 018</div>
+  </header>
+
+  <section class="summary" aria-label="Architecture constraints">
+    <div class="metric"><strong>7</strong><span>versioned capabilities</span></div>
+    <div class="metric"><strong>4</strong><span>effect classes</span></div>
+    <div class="metric"><strong>1</strong><span>authorization and attribution boundary</span></div>
+    <div class="metric"><strong>0</strong><span>browser-owned domain mutations</span></div>
+  </section>
+
+  <section aria-labelledby="run-title">
+    <h2 id="run-title">Turn, tool, and effect path</h2>
+    <div class="flow">
+      <svg viewBox="0 0 1120 540" role="img" aria-labelledby="svg-title svg-desc">
+        <title id="svg-title">Sangam chat capability and effect architecture</title>
+        <desc id="svg-desc">A browser captures a bounded context and sends it through ChatKit. The server resolves authorized capabilities, runs the model, and routes all reads and effects through WorkspaceAccessService. SQLite stores context, run evidence, approvals, and canonical document state.</desc>
+        <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="context-stroke" /></marker></defs>
+        <rect x="22" y="28" width="1076" height="470" rx="8" class="boundary" />
+        <text x="42" y="52" class="svg-label">ONE PROCESS · ONE POLICY BOUNDARY · ONE SQLITE DATABASE</text>
+
+        <rect x="54" y="88" width="210" height="104" rx="5" class="box" />
+        <text x="74" y="119" class="svg-title">Browser surfaces</text><text x="74" y="143" class="svg-copy">Full chat + compact inspector</text><text x="74" y="165" class="svg-copy">Context capture + effect review</text>
+
+        <rect x="332" y="88" width="210" height="104" rx="5" class="box" />
+        <text x="352" y="119" class="svg-title">ChatKit adapter</text><text x="352" y="143" class="svg-copy">Thread, history, streaming</text><text x="352" y="165" class="svg-copy">One review_chat_effect bridge</text>
+
+        <rect x="610" y="88" width="230" height="104" rx="5" class="box" />
+        <text x="630" y="119" class="svg-title">Capability resolver</text><text x="630" y="143" class="svg-copy">Principal + scope + context</text><text x="630" y="165" class="svg-copy">Content type + model + version</text>
+
+        <rect x="888" y="88" width="178" height="104" rx="5" class="box" />
+        <text x="908" y="119" class="svg-title">Agents SDK</text><text x="908" y="143" class="svg-copy">Bounded turn loop</text><text x="908" y="165" class="svg-copy">Resolved tools only</text>
+
+        <path d="M264 140H332" class="arrow cyan" /><path d="M542 140H610" class="arrow cyan" /><path d="M840 140H888" class="arrow cyan" />
+        <text x="272" y="126" class="svg-copy">snapshot ID</text><text x="551" y="126" class="svg-copy">run input</text><text x="848" y="126" class="svg-copy">manifest</text>
+
+        <rect x="112" y="274" width="272" height="112" rx="5" class="box" />
+        <text x="132" y="305" class="svg-title">Durable effect service</text><text x="132" y="329" class="svg-copy">Normalize → digest → persist → review</text><text x="132" y="351" class="svg-copy">Recheck → reserve key → execute</text>
+
+        <rect x="468" y="274" width="284" height="112" rx="5" class="box" />
+        <text x="488" y="305" class="svg-title">WorkspaceAccessService</text><text x="488" y="329" class="svg-copy">Authorization · revision checks</text><text x="488" y="351" class="svg-copy">Attribution · idempotent operations</text>
+
+        <rect x="836" y="274" width="230" height="112" rx="5" class="box" />
+        <text x="856" y="305" class="svg-title">SQLite canonical state</text><text x="856" y="329" class="svg-copy">Documents + revisions</text><text x="856" y="351" class="svg-copy">Contexts + runs + effects</text>
+
+        <path d="M952 192V244H610V274" class="arrow yellow" /><text x="764" y="235" class="svg-copy">read / propose / effect request</text>
+        <path d="M384 330H468" class="arrow green" /><path d="M752 330H836" class="arrow green" />
+        <path d="M836 363H752" class="arrow" /><path d="M468 363H384" class="arrow" />
+        <path d="M248 274V226H159V192" class="arrow cyan" /><text x="91" y="240" class="svg-copy">stored approval request</text>
+        <path d="M112 363H76V174" class="arrow yellow" /><text x="40" y="342" class="svg-copy" transform="rotate(-90 40 342)">decision + safe result</text>
+
+        <rect x="112" y="430" width="954" height="40" rx="4" class="box" />
+        <text x="132" y="455" class="svg-copy">Untrusted data: messages, documents, PDFs, annotations, imports, model output, and tool output never grant authority.</text>
+      </svg>
+    </div>
+  </section>
+
+  <section aria-labelledby="states-title">
+    <h2 id="states-title">Exact-effect state machine</h2>
+    <div class="states" aria-label="Durable effect states">
+      <div class="state">PROPOSED</div><div class="connector">→</div><div class="state">PENDING<br />APPROVAL</div><div class="connector">→</div><div class="state">APPROVED<br />or DENIED</div><div class="connector">→</div><div class="state">EXECUTING</div><div class="state">COMPLETED<br />or FAILED</div>
+    </div>
+  </section>
+
+  <section aria-labelledby="controls-title">
+    <h2 id="controls-title">Controls that do not depend on model prose</h2>
+    <div class="grid">
+      <article class="card"><span class="tag">Before run</span><h3>Least-visible tools</h3><p>The resolver intersects principal authority, resource scope, entry point, content type, model support, and pinned versions.</p></article>
+      <article class="card"><span class="tag green">Before effect</span><h3>Exact review</h3><p>The user sees material arguments. The decision names one stored digest, requester, capability version, and expiry.</p></article>
+      <article class="card"><span class="tag yellow">At execution</span><h3>Current policy</h3><p>The server rechecks authorization and revision state, then calls the same application service used by the normal API.</p></article>
+      <article class="card"><span class="tag coral">On failure</span><h3>Convergent retry</h3><p>The reserved operation key survives connection loss. Safe retries return or recover the original resource instead of duplicating it.</p></article>
+      <article class="card"><span class="tag">On retry</span><h3>Original meaning</h3><p>Document, revision, bounded selection, model, and capability versions come from the original turn context.</p></article>
+      <article class="card"><span class="tag green">For review</span><h3>Content-off evidence</h3><p>Run and tool metadata include status, latency, usage, citations, IDs, and safe error classes without copying ordinary content.</p></article>
+    </div>
+  </section>
+
+  <section class="notes" aria-label="Boundaries">
+    <article class="card"><h2>Always inside the boundary</h2><ul><li><code>WorkspaceAccessService</code> authorization and attribution</li><li>revision-pinned proposals for existing documents</li><li>SQLite identity, run, decision, effect, and resource records</li><li>strict schemas and bounded results</li></ul></article>
+    <article class="card"><h2>Deliberately absent</h2><ul><li>direct browser mutations for agent effects</li><li>generic network, shell, filesystem, SQL, or credential tools</li><li>prompt-only authorization or approval</li><li>a broker, workflow service, Redis, MCP server, or second deployment process</li></ul></article>
+  </section>
+
+  <footer>Authoritative implementation: <code>src/sangam/chat_capabilities.py</code>, <code>chat_evidence.py</code>, <code>chat_effects.py</code>, and migration <code>018_chat_capabilities_and_effects.sql</code>.</footer>
+</main>
+</body>
+</html>

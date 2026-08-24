@@ -29,6 +29,8 @@ function WorkspaceChat() {
   const search = Route.useSearch()
   const location = useLocation()
   const selectedText = search.document ? (location.state.sangamChatContext?.selectedText ?? '') : ''
+  const pdfPageNumber = search.document ? location.state.sangamChatContext?.pdfPageNumber : undefined
+  const annotationId = search.document ? location.state.sangamChatContext?.annotationId : undefined
   const navigate = useNavigate({ from: '/chat' })
   const queryClient = useQueryClient()
   const documentQuery = useQuery({
@@ -63,7 +65,7 @@ function WorkspaceChat() {
           title={search.returnTo ? 'Return to document' : 'Return to workspace'}
           onClick={() => void navigate({ href: safeReturnPath(search.returnTo) })}
         >
-          <ArrowLeft size={17} />
+          <ArrowLeft size="var(--icon-control)" />
         </button>
         <div>
           <p className="eyebrow">{document ? 'Document conversation' : 'Whole workspace'}</p>
@@ -74,7 +76,7 @@ function WorkspaceChat() {
               : 'Search, compare, and create across your notes.'}
           </p>
         </div>
-        <MessageSquareText size={24} />
+        <MessageSquareText size="var(--icon-page)" />
       </header>
       <div className="workspace-chat-surface">
         {documentQuery.isLoading ? (
@@ -110,6 +112,8 @@ function WorkspaceChat() {
             <ChatPanel
               document={document}
               selectedText={selectedText}
+              pdfPageNumber={document?.content_type === 'application/pdf' ? pdfPageNumber : null}
+              annotationId={document?.content_type === 'application/pdf' ? annotationId : null}
               onClearContext={document ? () => void clearContext() : undefined}
               onDocumentUpdated={document ? updateDocument : undefined}
             />

@@ -168,7 +168,7 @@ export function PdfViewer({
               disabled={pageNumber <= 1}
               onClick={() => scrollToPage(pageNumber - 1)}
             >
-              <ChevronLeft size={15} />
+              <ChevronLeft size="var(--icon-control)" />
             </button>
             <label>
               Page
@@ -196,7 +196,7 @@ export function PdfViewer({
               disabled={!pdf || pageNumber >= pdf.numPages}
               onClick={() => scrollToPage(pageNumber + 1)}
             >
-              <ChevronRight size={15} />
+              <ChevronRight size="var(--icon-control)" />
             </button>
           </div>
           <div className="pdf-zoom-controls">
@@ -206,7 +206,7 @@ export function PdfViewer({
               disabled={effectiveScale <= 0.4}
               onClick={() => chooseScale(Math.max(0.4, Number((effectiveScale - 0.2).toFixed(1))))}
             >
-              <ZoomOut size={15} />
+              <ZoomOut size="var(--icon-control)" />
             </button>
             <output aria-label="PDF zoom">{Math.round(effectiveScale * 100)}%</output>
             <button
@@ -215,7 +215,7 @@ export function PdfViewer({
               disabled={effectiveScale >= 2.4}
               onClick={() => chooseScale(Math.min(2.4, Number((effectiveScale + 0.2).toFixed(1))))}
             >
-              <ZoomIn size={15} />
+              <ZoomIn size="var(--icon-control)" />
             </button>
             <button
               className={pdfState.zoomMode === 'fit-width' ? 'active' : ''}
@@ -224,7 +224,7 @@ export function PdfViewer({
               title="Fit to width"
               onClick={fitWidth}
             >
-              <Maximize2 size={14} /> <span className="pdf-action-text">Fit width</span>
+              <Maximize2 size="var(--icon-inline)" /> <span className="pdf-action-text">Fit width</span>
             </button>
           </div>
         </div>
@@ -235,7 +235,7 @@ export function PdfViewer({
             aria-label={isSelectingArea ? 'Cancel area selection' : 'Area highlight'}
             onClick={() => setIsSelectingArea((current) => !current)}
           >
-            <MapIcon size={14} />
+            <MapIcon size="var(--icon-inline)" />
             <span className="pdf-action-text">{isSelectingArea ? 'Cancel area' : 'Area highlight'}</span>
           </button>
           <button
@@ -247,7 +247,7 @@ export function PdfViewer({
               )
             }
           >
-            <Copy size={14} /> <span className="pdf-action-text">Copy page link</span>
+            <Copy size="var(--icon-inline)" /> <span className="pdf-action-text">Copy page link</span>
           </button>
         </div>
       </div>
@@ -513,7 +513,7 @@ function PdfPage({
             >
               {annotation.annotation_type === 'area_highlight' && index === 0 && (
                 <span className="pdf-area-highlight-chip" aria-hidden="true">
-                  <MapIcon size={11} />
+                  <MapIcon size="var(--icon-detail)" />
                 </span>
               )}
             </button>
@@ -568,10 +568,10 @@ function PdfPage({
 }
 
 function AnnotationPinIcon({ annotation }: { annotation: Annotation }) {
-  if (annotation.annotation_type === 'bookmark') return <Bookmark size={14} />
-  if (annotation.annotation_type === 'citation_marker') return <Quote size={14} />
-  if (annotation.annotation_type === 'comment') return <MessageSquare size={14} />
-  return <StickyNote size={14} />
+  if (annotation.annotation_type === 'bookmark') return <Bookmark size="var(--icon-inline)" />
+  if (annotation.annotation_type === 'citation_marker') return <Quote size="var(--icon-inline)" />
+  if (annotation.annotation_type === 'comment') return <MessageSquare size="var(--icon-inline)" />
+  return <StickyNote size="var(--icon-inline)" />
 }
 
 function pageElement(documentId: string, pageNumber: number) {

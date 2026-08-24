@@ -5,3 +5,13 @@
 @import './styles/ui-system.css';
 @import './styles/pdf-research.css';
 @import './styles/karakeep.css';
+
+@media (pointer: coarse) {
+  /* Icon-only controls keep their compact glyphs while exposing a full touch target. */
+  .icon-button.icon-button {
+    width: var(--control-touch);
+    min-width: var(--control-touch);
+    height: var(--control-touch);
+    min-height: var(--control-touch);
+  }
+}

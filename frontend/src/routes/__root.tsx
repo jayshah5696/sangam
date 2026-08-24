@@ -131,7 +131,7 @@ function RootLayout() {
           title={isSettings ? 'Show settings sidebar' : 'Show workspace sidebar'}
           onClick={showSidebar}
         >
-          <PanelLeftOpen size={17} />
+          <PanelLeftOpen size="var(--icon-control)" />
         </button>
       )}
       <div className="workbench-center">
@@ -247,7 +247,7 @@ function PrimarySidebar({
           title="Hide sidebar"
           onClick={onCollapse}
         >
-          <PanelLeftClose size={16} />
+          <PanelLeftClose size="var(--icon-control)" />
         </button>
       </header>
       {settings ? (
@@ -265,7 +265,7 @@ function PrimarySidebar({
               onClick={() => onMode('files')}
               onKeyDown={activateTabFromKeyboard}
             >
-              <FileText size={14} /> Files
+              <FileText size="var(--icon-inline)" /> Files
             </button>
             <button
               role="tab"
@@ -277,7 +277,7 @@ function PrimarySidebar({
               onClick={() => onMode('search')}
               onKeyDown={activateTabFromKeyboard}
             >
-              <Search size={14} /> Search
+              <Search size="var(--icon-inline)" /> Search
             </button>
           </div>
           {mode === 'files' && (
@@ -326,7 +326,7 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
             activeProps={{ className: 'active' }}
             onClick={onNavigate}
           >
-            <Icon size={16} />
+            <Icon size="var(--icon-control)" />
           </Link>
         ))}
       </nav>
@@ -370,24 +370,24 @@ function WorkspaceFreshness() {
     <div className={`workspace-freshness ${statusClass}`} role="status" aria-live="polite">
       {!online ? (
         <>
-          <CloudOff size={13} />
+          <CloudOff size="var(--icon-inline)" />
           <span>Offline</span>
         </>
       ) : conflicts.isError ? (
         <button type="button" onClick={() => void conflicts.refetch()}>
-          <CloudOff size={13} />
+          <CloudOff size="var(--icon-inline)" />
           <span>Server unavailable · Retry</span>
         </button>
       ) : conflictCount ? (
         <Link to="/reconciliation" aria-label={`${conflictCount} unresolved workspace conflicts`}>
-          <ShieldAlert size={13} />
+          <ShieldAlert size="var(--icon-inline)" />
           <span>
             {conflictCount} unresolved {conflictCount === 1 ? 'conflict' : 'conflicts'}
           </span>
         </Link>
       ) : (
         <>
-          <RefreshCw className="spin" size={13} />
+          <RefreshCw className="spin" size="var(--icon-inline)" />
           <span>Refreshing {fetching}</span>
         </>
       )}
@@ -405,7 +405,7 @@ function SearchPanel() {
   return (
     <div className="sidebar-content search-panel">
       <label className="sidebar-search-input">
-        <Search size={14} />
+        <Search size="var(--icon-control)" />
         <input
           autoFocus
           type="search"
@@ -447,7 +447,7 @@ function DocumentLink({ document, showPath = false }: { document: DocumentSummar
       className="file-link"
       activeProps={{ className: 'file-link active' }}
     >
-      <FileText size={13} />
+      <FileText size="var(--icon-inline)" />
       <span>{label}</span>
       {showPath && <small>{document.path ?? 'Draft'}</small>}
       {document.search_snippet && (

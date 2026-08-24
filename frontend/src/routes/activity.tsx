@@ -38,7 +38,7 @@ function AgentActivity() {
           <h1>Agent activity</h1>
           <p>Accepted, denied, conflicted, and failed operations without credentials or document bodies.</p>
         </div>
-        <Activity size={28} />
+        <Activity size="var(--icon-page)" />
       </header>
       <div className="activity-filters">
         <label>
@@ -91,7 +91,7 @@ function AgentActivity() {
       </div>
       {invalidRange && (
         <div className="activity-range-error" role="alert">
-          <CalendarDays size={16} /> Start must not be after end.
+          <CalendarDays size="var(--icon-inline)" /> Start must not be after end.
         </div>
       )}
       <section className="activity-list" aria-live="polite">
@@ -99,9 +99,9 @@ function AgentActivity() {
           <article key={event.event_id} className={`activity-event ${event.outcome}`}>
             <span className="activity-outcome">
               {event.outcome === 'denied' || event.outcome === 'conflict' ? (
-                <ShieldAlert size={16} />
+                <ShieldAlert size="var(--icon-inline)" />
               ) : (
-                <Bot size={16} />
+                <Bot size="var(--icon-inline)" />
               )}
               {event.outcome}
             </span>
@@ -119,7 +119,7 @@ function AgentActivity() {
             </div>
             {event.resource_id && event.resource_type === 'document' && (
               <Link to="/documents/$documentId" params={{ documentId: event.resource_id }}>
-                <FileText size={14} /> Review document
+                <FileText size="var(--icon-inline)" /> Review document
               </Link>
             )}
           </article>

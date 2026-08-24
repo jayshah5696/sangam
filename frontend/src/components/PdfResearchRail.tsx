@@ -41,7 +41,7 @@ export function PdfResearchRail({ document }: { document: Document }) {
         }}
       >
         <label>
-          <Search size={14} />
+          <Search size="var(--icon-control)" />
           <input
             aria-label="Search PDF text"
             placeholder="Search PDF text"
@@ -73,7 +73,7 @@ export function PdfResearchRail({ document }: { document: Document }) {
             title={label}
             onClick={() => research.setDraft(emptyDraft(type))}
           >
-            <Icon size={15} />
+            <Icon size="var(--icon-control)" />
           </button>
         ))}
       </div>
@@ -201,7 +201,7 @@ function AnnotationComposer({
         <input type="color" value={color} onChange={(event) => setColor(event.target.value)} />
       </label>
       <button className="panel-button" disabled={create.isPending}>
-        <Highlighter size={14} /> {create.isPending ? 'Saving…' : 'Save annotation'}
+        <Highlighter size="var(--icon-inline)" /> {create.isPending ? 'Saving…' : 'Save annotation'}
       </button>
       {create.isError && <p className="error-text">The annotation could not be saved.</p>}
     </form>
@@ -271,7 +271,7 @@ function AnnotationDetail({ annotation, onClose }: { annotation: Annotation; onC
         <button
           onClick={() => void navigator.clipboard.writeText(`[PDF p. ${annotation.page_number}](${link})`)}
         >
-          <Copy size={14} /> Copy Markdown link
+          <Copy size="var(--icon-inline)" /> Copy Markdown link
         </button>
         <button className="danger-button" disabled={remove.isPending} onClick={() => remove.mutate()}>
           Remove

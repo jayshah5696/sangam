@@ -1,6 +1,148 @@
 import AxeBuilder from '@axe-core/playwright'
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 
 import { expect, test } from './fixtures'
+
+async function expectRenderedIconSize(locator: import('@playwright/test').Locator, expected: number) {
+  const box = await locator.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box!.width).toBe(expected)
+  expect(box!.height).toBe(expected)
+}
+
+test('semantic icon roles render consistently without shrinking control targets', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/publications')
+  const tokens = await page.evaluate(() => {
+    const styles = getComputedStyle(document.documentElement)
+    return ['--icon-detail', '--icon-inline', '--icon-control', '--icon-section', '--icon-page'].map((name) =>
+      styles.getPropertyValue(name).trim(),
+    )
+  })
+  expect(tokens).toEqual(['12px', '14px', '16px', '18px', '24px'])
+  await expectRenderedIconSize(page.locator('.utility-header > .lucide').first(), 24)
+  await expectRenderedIconSize(page.locator('.publication-filters .lucide-search'), 16)
+
+  await page.goto('/settings')
+  if (page.viewportSize()?.width !== 1440) {
+    await page.getByRole('button', { name: 'Show settings sidebar' }).click()
+  }
+  await expectRenderedIconSize(page.locator('.settings-search .lucide-search'), 16)
+
+  await page.goto('/')
+  await page.locator('body').press('ControlOrMeta+k')
+  await expectRenderedIconSize(page.locator('.command-palette > label .lucide-search'), 16)
+  await page.getByRole('textbox', { name: 'Search workspace and actions' }).fill('settings')
+  await expectRenderedIconSize(
+    page.locator('.command-palette').getByRole('option').first().locator('.lucide'),
+    14,
+  )
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir && testInfo.project.name === 'chromium-desktop') {
+    await page.screenshot({ path: path.join(evidenceDir, 'issue-119-semantic-icon-roles.png') })
+  }
+  await page.keyboard.press('Escape')
+
+  const iconButton = page.locator('.icon-button:visible').first()
+  if (await iconButton.count()) {
+    const target = await iconButton.boundingBox()
+    expect(target).not.toBeNull()
+    const minimum = test.info().project.name.includes('touch-mobile') ? 44 : 32
+    expect(target!.width).toBeGreaterThanOrEqual(minimum)
+    expect(target!.height).toBeGreaterThanOrEqual(minimum)
+  }
+  await expect(page.locator('body')).toHaveJSProperty('scrollWidth', page.viewportSize()!.width)
+})
+
+test('file tree labels remain bound to their rows through collapse, focus, and rename', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
+  const suffix = randomUUID().slice(0, 6)
+  const firstFolder = `agents-${suffix}`
+  const secondFolder = `agentic-rl-${suffix}`
+  const firstFile = `linux-guide-${suffix}.html`
+  const secondFile = `reinforcement-learning-${suffix}.md`
+  for (const folder of [firstFolder, secondFolder]) {
+    const response = await request.post('/api/v1/folders', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { path: folder },
+    })
+    expect(response.ok(), await response.text()).toBeTruthy()
+  }
+  const activeResponse = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: `Linux guide ${suffix}`,
+      content: '<h1>Linux guide</h1>',
+      content_type: 'text/html',
+      path: `${firstFolder}/${firstFile}`,
+    },
+  })
+  const active = (await activeResponse.json()) as { document_id: string }
+  await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: `RL guide ${suffix}`,
+      content: '# Reinforcement learning',
+      path: `${secondFolder}/${secondFile}`,
+    },
+  })
+
+  await page.goto(`/documents/${active.document_id}`)
+  await page.locator('#workspace-tab-files').click()
+  const tree = page.locator('.sangam-file-tree')
+  const agents = tree.getByRole('treeitem', { name: firstFolder, exact: true })
+  const agentic = tree.getByRole('treeitem', { name: secondFolder, exact: true })
+  await expect(agents).toBeVisible()
+  await expect(agentic).toBeVisible()
+  if ((await agents.getAttribute('aria-expanded')) !== 'true') await agents.click()
+  const linux = tree.getByRole('treeitem', { name: firstFile, exact: true })
+  await expect(linux).toBeVisible()
+  await expect(linux).toHaveAttribute('aria-selected', 'true')
+
+  await agents.focus()
+  if ((await agents.getAttribute('aria-expanded')) === 'true') await agents.press('ArrowLeft')
+  await expect(linux).toBeHidden()
+  await expect(agentic).toHaveAttribute('aria-label', secondFolder)
+  await expect(agentic.locator('[data-truncate-content="visible"]')).toHaveText([
+    secondFolder.slice(0, Math.ceil(secondFolder.length / 2)),
+    secondFolder.slice(Math.ceil(secondFolder.length / 2)),
+  ])
+  await agentic.focus()
+  await expect(agentic).toBeFocused()
+  if ((await agentic.getAttribute('aria-expanded')) === 'true') await agentic.press('ArrowLeft')
+  await expect(agentic).toHaveAttribute('aria-expanded', 'false')
+  await agentic.press('ArrowRight')
+  await expect(tree.getByRole('treeitem', { name: secondFile, exact: true })).toBeVisible()
+  await expect(page.locator('.document-header h1')).toHaveText(`Linux guide ${suffix}`)
+
+  await agentic.press('F2')
+  const rename = tree.locator('input[data-item-rename-input]')
+  await expect(rename).toBeFocused()
+  const renamedFolder = `${secondFolder}-reviewed`
+  await rename.fill(renamedFolder)
+  await rename.press('Enter')
+  await expect(tree.getByRole('treeitem', { name: renamedFolder, exact: true })).toBeVisible()
+  await expect(tree.locator('[data-sangam-label]')).toHaveCount(0)
+
+  await agents.focus()
+  if ((await agents.getAttribute('aria-expanded')) !== 'true') await agents.press('ArrowRight')
+  await expect(tree.getByRole('treeitem', { name: firstFile, exact: true })).toBeVisible()
+  await expect(tree.getByRole('treeitem', { name: firstFile, exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir) {
+    await page.locator('.primary-sidebar').screenshot({
+      path: path.join(evidenceDir, `issue-120-file-tree-${testInfo.project.name}.png`),
+    })
+  }
+})
 
 test('settings replaces the workspace rail while preserving width and returning cleanly', async ({
   page,

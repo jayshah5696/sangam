@@ -65,7 +65,7 @@ def create_thread(
         for line in response.text.splitlines()
         if line.startswith("data: ")
     ]
-    assert [event["type"] for event in events] == [
+    assert [event["type"] for event in events[:4]] == [
         "thread.created",
         "thread.item.done",
         "stream_options",
@@ -142,13 +142,15 @@ def test_document_chat_persists_the_requested_pinned_revision(client: TestClient
         actor_id="human:jay", display_name="Jay", operation_id="pinned-context-test"
     )
     request_context = ChatRequestContext(principal=principal, document_id=document["document_id"])
-    thread = asyncio.run(
-        client.app.state.services.chat.store_adapter.load_thread(thread_id, request_context)
+    user_item_id = next(
+        event["item"]["id"] for event in events if event["type"] == "thread.item.done"
     )
-
-    turn_contexts = thread.metadata["turn_contexts"]
-    assert len(turn_contexts) == 1
-    assert next(iter(turn_contexts.values()))["revision_id"] == pinned_revision
+    turn_context = client.app.state.services.chat.evidence.context_for_item(
+        request_context.principal, user_item_id
+    )
+    assert turn_context is not None
+    assert turn_context.thread_id == thread_id
+    assert turn_context.revision_id == pinned_revision
 
 
 def test_document_chat_rejects_an_unknown_requested_revision(client: TestClient) -> None:
@@ -613,6 +615,55 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
     assert {event["outcome"] for event in tool_events} == {"accepted"}
 
 
+def durable_effect_context(
+    client: TestClient,
+    principal: Principal,
+    *,
+    document_id: str | None = None,
+) -> tuple[Any, str]:
+    thread_id = create_thread(client, document_id=document_id)
+    chat = client.app.state.services.chat
+    entry_point = "document" if document_id else "workspace"
+    turn = chat.evidence.create_turn_context(
+        principal,
+        entry_point=entry_point,
+        document_id=document_id,
+        revision_id=None,
+        selected_text="",
+    )
+    capability = chat.capabilities.get("publish_document" if document_id else "create_document")
+    manifest = (capability.manifest_item(),)
+    item_id = f"manual_{thread_id}"
+    turn = chat.evidence.attach_turn_context(
+        principal,
+        context_id=turn.context_id,
+        thread_id=thread_id,
+        user_item_id=item_id,
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+    run_id = chat.evidence.begin_run(
+        principal,
+        thread_id=thread_id,
+        user_item_id=item_id,
+        context_id=turn.context_id,
+        connection_id="openrouter",
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+    agent_context = SimpleNamespace(
+        request_context=ChatRequestContext(
+            principal=principal,
+            document_id=document_id,
+            run_id=run_id,
+        ),
+        thread=SimpleNamespace(id=thread_id),
+        client_tool_call=None,
+    )
+    ctx = cast(Any, SimpleNamespace(context=agent_context, tool_call_id=f"call_{thread_id}"))
+    return ctx, thread_id
+
+
 def test_publish_tool_requires_client_confirmation_before_any_side_effect(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -625,13 +676,8 @@ def test_publish_tool_requires_client_confirmation_before_any_side_effect(
         actor_id="human:jay", display_name="Jay", operation_id="chat-publish-confirm"
     )
     toolset = client.app.state.services.chat.toolset
-    agent_context = SimpleNamespace(
-        request_context=ChatRequestContext(
-            principal=principal, document_id=document["document_id"]
-        ),
-        client_tool_call=None,
-    )
-    ctx = cast(Any, SimpleNamespace(context=agent_context))
+    ctx, _thread_id = durable_effect_context(client, principal, document_id=document["document_id"])
+    agent_context = ctx.context
     monkeypatch.setattr(
         toolset.workspace,
         "create_publication",
@@ -648,9 +694,14 @@ def test_publish_tool_requires_client_confirmation_before_any_side_effect(
     )
 
     assert result is None
-    assert agent_context.client_tool_call.name == "confirm_publish_document"
-    assert agent_context.client_tool_call.arguments == {
+    assert agent_context.client_tool_call.name == "review_chat_effect"
+    effect = client.get(
+        f"/api/v1/chat/effects/{agent_context.client_tool_call.arguments['effect_id']}"
+    ).json()
+    assert effect["argument_digest"] == agent_context.client_tool_call.arguments["argument_digest"]
+    assert effect["preview"] == {
         "document_id": document["document_id"],
+        "revision_id": document["current_revision_id"],
         "document_title": "Release notes",
         "slug": "release-notes",
         "access_policy": "public",
@@ -666,11 +717,8 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
         actor_id="human:jay", display_name="Jay", operation_id="chat-create-confirm"
     )
     toolset = client.app.state.services.chat.toolset
-    agent_context = SimpleNamespace(
-        request_context=ChatRequestContext(principal=principal),
-        client_tool_call=None,
-    )
-    ctx = cast(Any, SimpleNamespace(context=agent_context))
+    ctx, _thread_id = durable_effect_context(client, principal)
+    agent_context = ctx.context
     monkeypatch.setattr(
         toolset.workspace,
         "create_document",
@@ -682,8 +730,12 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
     )
 
     assert result is None
-    assert agent_context.client_tool_call.name == "confirm_create_document"
-    assert agent_context.client_tool_call.arguments == {
+    assert agent_context.client_tool_call.name == "review_chat_effect"
+    effect = client.get(
+        f"/api/v1/chat/effects/{agent_context.client_tool_call.arguments['effect_id']}"
+    ).json()
+    assert effect["argument_digest"] == agent_context.client_tool_call.arguments["argument_digest"]
+    assert effect["preview"] == {
         "title": "Research note",
         "content": "# Evidence",
         "content_type": "text/markdown",

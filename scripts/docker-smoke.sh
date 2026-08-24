@@ -79,7 +79,7 @@ CHATKIT_STREAM=$(curl --fail --silent \
   --data '{"type":"threads.create","params":{"input":{"content":[{"type":"input_text","text":"Docker ChatKit smoke"}],"attachments":[],"inference_options":{"model":"openai/gpt-5.4-nano"}}}}' \
   "http://127.0.0.1:$PORT/api/v1/chatkit")
 CHATKIT_THREAD_ID=$(printf '%s' "$CHATKIT_STREAM" \
-  | python3 -c 'import json,sys; events=[json.loads(line[6:]) for line in sys.stdin if line.startswith("data: ")]; assert [item["type"] for item in events] == ["thread.created", "thread.item.done", "stream_options", "error"]; assert events[-1]["code"] == "custom"; print(events[0]["thread"]["id"])')
+  | python3 -c 'import json,sys; events=[json.loads(line[6:]) for line in sys.stdin if line.startswith("data: ")]; assert [item["type"] for item in events[:4]] == ["thread.created", "thread.item.done", "stream_options", "error"]; assert events[3]["code"] == "custom"; assert "thread.updated" in {item["type"] for item in events[4:]}; print(events[0]["thread"]["id"])')
 echo "Verified ChatKit protocol, durable thread creation, and safe unconfigured runtime."
 
 CREATED=$(curl --fail --silent \

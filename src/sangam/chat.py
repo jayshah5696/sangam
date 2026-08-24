@@ -19,7 +19,10 @@ from openai.types.shared.reasoning import Reasoning
 
 from sangam.access import WorkspaceAccessService
 from sangam.capabilities import Capability
+from sangam.chat_capabilities import ChatCapabilityRegistry
 from sangam.chat_context import AgentRunContext, ChatRequestContext
+from sangam.chat_effects import ChatEffectService
+from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_models import ChatModelCatalog
 from sangam.chat_proposals import ChatProposalRepository, ChatProposalService
 from sangam.chat_store import SQLiteChatKitStore
@@ -90,6 +93,13 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         self.store_adapter = SQLiteChatKitStore[ChatRequestContext](database)
         super().__init__(self.store_adapter)
 
+        self.capabilities = ChatCapabilityRegistry()
+        self.evidence = ChatEvidenceRepository(database, workspace)
+        self.effects = ChatEffectService(
+            database=database,
+            workspace=workspace,
+            registry=self.capabilities,
+        )
         proposal_repository = ChatProposalRepository(database)
         self.proposals = ChatProposalService(
             repository=proposal_repository,
@@ -98,6 +108,9 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         self.toolset = ChatToolset(
             workspace=workspace,
             proposals=self.proposals,
+            registry=self.capabilities,
+            effects=self.effects,
+            evidence=self.evidence,
             max_result_bytes=config.max_tool_result_bytes,
         )
         self.tools = self.toolset.as_agent_tools()
@@ -169,9 +182,6 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         selected_model = self.model_catalog.get_model(selected_ref)
         if selected_model.id not in state.enabled_models:
             raise CustomStreamError("That model is not enabled for this Sangam server.")
-        connection = self.provider_connections.get(selected_model.connection_id)
-        if connection.status != "ready":
-            raise CustomStreamError(self.runtime_config().message)
         if not context.principal.administrator and context.principal.identity_kind != "system":
             try:
                 self.workspace.policy.require(context.principal, Capability.INFERENCE, None)
@@ -184,48 +194,100 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             title = _derive_thread_title(input_user_message)
             if title:
                 thread.title = title
-
-        document_id = (
-            context.document_id
-            if context.document_id is not None or context.workspace_context
-            else thread.metadata.get("document_id")
-        )
-        turn_contexts = dict(thread.metadata.get("turn_contexts", {}))
-        item_id = input_user_message.id if input_user_message else None
-        snapshot = turn_contexts.get(item_id) if item_id else None
-        if snapshot is None:
-            revision_id = None
-            if document_id:
-                document = self.workspace.get_document(context.principal, document_id)
-                revision_id = context.requested_revision_id or document.current_revision_id
-                if revision_id != document.current_revision_id:
-                    valid_revision_ids = {
-                        revision.revision_id
-                        for revision in self.workspace.history(context.principal, document_id)
-                    }
-                    if revision_id not in valid_revision_ids:
-                        raise CustomStreamError(
-                            "The attached document revision no longer exists. "
-                            "Return to the document and attach its current revision."
-                        )
-            snapshot = {
-                "document_id": document_id,
-                "revision_id": revision_id,
-                "model_ref": selected_model.id,
-            }
-            if item_id:
-                turn_contexts[item_id] = snapshot
-                thread.metadata = {**thread.metadata, "turn_contexts": turn_contexts}
                 await self.store.save_thread(thread, context)
+
+        item_id = input_user_message.id if input_user_message else None
+        turn_record = (
+            self.evidence.context_for_item(context.principal, item_id) if item_id else None
+        )
+        if turn_record is not None:
+            document_id = turn_record.document_id
+            if not turn_record.model_ref:
+                raise CustomStreamError("The stored turn context does not include a model.")
+            selected_model = self.model_catalog.get_model(turn_record.model_ref)
+            document = (
+                self.workspace.get_document(context.principal, document_id) if document_id else None
+            )
+            currently_allowed = self.capabilities.resolve(
+                principal=context.principal,
+                policy=self.workspace.policy,
+                entry_point=turn_record.entry_point,
+                document=document,
+                model_supports_tools=selected_model.supports_tools,
+            )
+            pinned = {
+                (str(item["id"]), int(item["version"])) for item in turn_record.capability_manifest
+            }
+            resolved_capabilities = tuple(
+                capability
+                for capability in currently_allowed
+                if (capability.capability_id, capability.version) in pinned
+            )
         else:
-            document_id = snapshot.get("document_id")
-            selected_model = self.model_catalog.get_model(snapshot["model_ref"])
-            connection = self.provider_connections.get(selected_model.connection_id)
+            document_id = (
+                context.document_id
+                if context.document_id is not None or context.workspace_context
+                else thread.metadata.get("document_id")
+            )
+            entry_point = "document" if document_id else context.entry_point
+            try:
+                if context.context_snapshot_id:
+                    turn_record = self.evidence.get_turn_context(
+                        context.principal, context.context_snapshot_id
+                    )
+                    document_id = turn_record.document_id
+                    entry_point = turn_record.entry_point
+                else:
+                    turn_record = self.evidence.create_turn_context(
+                        context.principal,
+                        entry_point=entry_point,
+                        document_id=document_id,
+                        revision_id=context.requested_revision_id,
+                        selected_text="",
+                    )
+                document = (
+                    self.workspace.get_document(context.principal, document_id)
+                    if document_id
+                    else None
+                )
+            except Exception as error:
+                message = getattr(error, "message", str(error))
+                raise CustomStreamError(message) from error
+            resolved_capabilities = self.capabilities.resolve(
+                principal=context.principal,
+                policy=self.workspace.policy,
+                entry_point=turn_record.entry_point,
+                document=document,
+                model_supports_tools=selected_model.supports_tools,
+            )
+            manifest = tuple(capability.manifest_item() for capability in resolved_capabilities)
+            if item_id:
+                turn_record = self.evidence.attach_turn_context(
+                    context.principal,
+                    context_id=turn_record.context_id,
+                    thread_id=thread.id,
+                    user_item_id=item_id,
+                    model_ref=selected_model.id,
+                    capability_manifest=manifest,
+                )
+
+        if selected_model.id not in state.enabled_models:
+            raise CustomStreamError("The model pinned to this turn is no longer enabled.")
+        connection = self.provider_connections.get(selected_model.connection_id)
+        if connection.status != "ready":
+            raise CustomStreamError(self.runtime_config().message)
+        manifest = tuple(capability.manifest_item() for capability in resolved_capabilities)
         request_context = replace(
             context,
-            document_id=document_id,
-            pinned_revision_id=snapshot.get("revision_id"),
+            document_id=turn_record.document_id,
+            pinned_revision_id=turn_record.revision_id,
             model_ref=selected_model.id,
+            entry_point=turn_record.entry_point,
+            context_snapshot_id=turn_record.context_id,
+            selection_text=turn_record.selection_text,
+            selection_digest=turn_record.selection_digest,
+            pdf_page_number=turn_record.pdf_page_number,
+            annotation_id=turn_record.annotation_id,
         )
         app_context = await self._app_context(request_context)
         page = await self.store.load_thread_items(
@@ -243,54 +305,99 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                 "content": [{"type": "input_text", "text": app_context}],
             },
         )
+        agent: Agent[AgentRunContext] = Agent(
+            name="Sangam workspace agent",
+            instructions=_AGENT_INSTRUCTIONS,
+            tools=self.toolset.as_agent_tools(resolved_capabilities),
+        )
+        reasoning: Reasoning | None = None
+        if self.config.reasoning_effort != "none" and selected_model.supports_reasoning is True:
+            reasoning = Reasoning(effort=self.config.reasoning_effort)
+        run_id = self.evidence.begin_run(
+            context.principal,
+            thread_id=thread.id,
+            user_item_id=item_id,
+            context_id=turn_record.context_id,
+            connection_id=connection.connection_id,
+            model_ref=selected_model.id,
+            capability_manifest=manifest,
+        )
+        request_context = replace(request_context, run_id=run_id)
         agent_context = AgentContext(
             thread=thread,
             store=self.store,
             request_context=request_context,
         )
-        agent: Agent[AgentRunContext] = Agent(
-            name="Sangam workspace agent",
-            instructions=_AGENT_INSTRUCTIONS,
-            tools=self.tools,
-        )
-        reasoning: Reasoning | None = None
-        if self.config.reasoning_effort != "none" and selected_model.supports_reasoning is True:
-            reasoning = Reasoning(effort=self.config.reasoning_effort)
-        async with self._run_semaphore:
-            result = Runner.run_streamed(
-                agent,
-                input=input_items,
-                context=agent_context,
-                max_turns=self.config.max_turns,
-                run_config=RunConfig(
-                    model=selected_model.model_id,
-                    model_provider=self.provider_connections.model_provider(
-                        connection.connection_id
+        try:
+            stream_failed = False
+            async with self._run_semaphore:
+                result = Runner.run_streamed(
+                    agent,
+                    input=input_items,
+                    context=agent_context,
+                    max_turns=self.config.max_turns,
+                    run_config=RunConfig(
+                        model=selected_model.model_id,
+                        model_provider=self.provider_connections.model_provider(
+                            connection.connection_id
+                        ),
+                        model_settings=ModelSettings(
+                            reasoning=reasoning,
+                            max_tokens=self.config.max_output_tokens,
+                            store=False,
+                            parallel_tool_calls=False,
+                        ),
+                        tracing_disabled=True,
+                        workflow_name="Sangam workspace chat",
                     ),
-                    model_settings=ModelSettings(
-                        reasoning=reasoning,
-                        max_tokens=self.config.max_output_tokens,
-                        store=False,
-                        parallel_tool_calls=False,
-                    ),
-                    tracing_disabled=True,
-                    workflow_name="Sangam workspace chat",
+                )
+                async for event in stream_agent_response(agent_context, result):
+                    if getattr(event, "type", None) == "error":
+                        stream_failed = True
+                    yield event
+        except asyncio.CancelledError:
+            self.evidence.complete_run(run_id, status="cancelled")
+            raise
+        except Exception as error:
+            self.evidence.complete_run(run_id, status="failed", error_class=type(error).__name__)
+            raise
+        else:
+            input_tokens = sum(response.usage.input_tokens for response in result.raw_responses)
+            output_tokens = sum(response.usage.output_tokens for response in result.raw_responses)
+            correlation_id = next(
+                (
+                    response.request_id or response.response_id
+                    for response in reversed(result.raw_responses)
+                    if response.request_id or response.response_id
                 ),
+                None,
             )
-            async for event in stream_agent_response(agent_context, result):
-                yield event
+            self.evidence.complete_run(
+                run_id,
+                status="failed" if stream_failed else "completed",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                provider_correlation_id=correlation_id,
+                error_class="stream_error" if stream_failed else None,
+            )
 
     async def _app_context(self, context: ChatRequestContext) -> str:
         if not context.document_id:
             return "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
         document = self.workspace.get_document(context.principal, context.document_id)
         revision_id = context.pinned_revision_id or document.current_revision_id
+        pdf_context = ""
+        if context.pdf_page_number is not None:
+            pdf_context = f"Active PDF page: {context.pdf_page_number}\n"
+            if context.annotation_id:
+                pdf_context += f"Selected annotation id: {context.annotation_id}\n"
         return (
             "<SANGAM_CONTEXT>\n"
             f"Current document id: {document.document_id}\n"
             f"Title: {document.title}\n"
             f"Revision pinned for this turn: {revision_id}\n"
             f"Content type: {document.content_type}\n"
+            f"{pdf_context}"
             "Call read_document or read_pdf_page before making claims about its content. "
             "Call get_editor_selection when the user's request refers to selected text.\n"
             "</SANGAM_CONTEXT>"

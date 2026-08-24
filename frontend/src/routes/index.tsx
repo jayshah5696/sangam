@@ -60,7 +60,7 @@ function Welcome() {
           : 'Create Markdown documents, group them into folders, organize them with categories and tags, and find them again through full-text search.'}
       </p>
       <label className="welcome-search">
-        <Search size={16} />
+        <Search size="var(--icon-control)" />
         <input
           type="search"
           value={searchQuery}
@@ -105,7 +105,7 @@ function Welcome() {
               role="listitem"
               onClick={() => setSearchQuery('')}
             >
-              <FileText size={14} />
+              <FileText size="var(--icon-inline)" />
               <span>{document.path ?? document.title}</span>
             </Link>
           ))}
@@ -127,16 +127,16 @@ function Welcome() {
           disabled={createDocument.isPending}
           onClick={() => createDocument.mutate()}
         >
-          <FilePlus2 size={16} />
+          <FilePlus2 size="var(--icon-control)" />
           {createDocument.isPending
             ? 'Creating…'
             : `Create ${contentType === 'text/html' ? 'HTML' : 'Markdown'}`}
         </button>
         <Link className="secondary-action welcome-chat-action" to="/chat">
-          <MessageSquareText size={16} /> Ask workspace
+          <MessageSquareText size="var(--icon-control)" /> Ask workspace
         </Link>
         <label className="pdf-import-control">
-          <FileUp size={16} />
+          <FileUp size="var(--icon-control)" />
           <span>{importPdf.isPending ? 'Importing PDF…' : 'Import PDF'}</span>
           <input
             type="file"

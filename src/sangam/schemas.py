@@ -615,3 +615,66 @@ class ApplyChatProposal(MutationRequest):
 
 class DismissChatProposal(MutationRequest):
     reason: str | None = Field(default=None, max_length=500)
+
+
+class CreateChatTurnContext(MutationRequest):
+    entry_point: Literal["workspace", "document"]
+    document_id: str | None = Field(default=None, max_length=200)
+    revision_id: str | None = Field(default=None, max_length=200)
+    pdf_page_number: int | None = Field(default=None, ge=1)
+    annotation_id: str | None = Field(default=None, max_length=200)
+    selected_text: str = Field(default="", max_length=20_000)
+
+
+class ChatTurnContext(BaseModel):
+    context_id: str
+    entry_point: Literal["workspace", "document"]
+    document_id: str | None
+    revision_id: str | None
+    pdf_page_number: int | None
+    annotation_id: str | None
+    selection_digest: str
+    selected_characters: int
+    created_at: str
+
+
+class ChatEffectDecision(MutationRequest):
+    verdict: Literal["approve", "deny"]
+    argument_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class ChatEffect(BaseModel):
+    effect_id: str
+    thread_id: str
+    requested_by: str
+    capability_id: Literal["create_document", "publish_document"]
+    capability_version: int
+    argument_digest: str
+    preview: dict[str, object]
+    effect_class: Literal["write", "external"]
+    risk: Literal["workspace", "external"]
+    status: Literal[
+        "proposed",
+        "pending_approval",
+        "approved",
+        "denied",
+        "executing",
+        "completed",
+        "failed",
+        "expired",
+        "cancelled",
+    ]
+    expires_at: str
+    resource_type: str | None
+    resource_id: str | None
+    result: dict[str, object] | None
+    failure: dict[str, object] | None
+    created_at: str
+    decided_at: str | None
+    completed_at: str | None
+
+
+class ChatEffectDecisionResult(BaseModel):
+    effect: ChatEffect
+    client_result: dict[str, object]
