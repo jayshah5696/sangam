@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 from agents import function_tool
@@ -58,11 +58,18 @@ class ChatToolset:
             ),
             function_tool(
                 self.search_workspace,
-                description_override="Search authorized Sangam documents.",
+                description_override=(
+                    "Search authorized Sangam documents. Paginated: pass offset to "
+                    "page past the first limit results."
+                ),
             ),
             function_tool(
                 self.read_document,
-                description_override="Read one authorized Markdown or HTML document.",
+                description_override=(
+                    "Read one authorized Markdown or HTML document. Long documents are "
+                    "paginated: pass offset (character position) to page through; check "
+                    "total_chars and truncated in the result."
+                ),
             ),
             function_tool(
                 self.read_pdf_page,
@@ -71,8 +78,12 @@ class ChatToolset:
             function_tool(
                 self.propose_update,
                 description_override=(
-                    "Create a full-content edit proposal against an exact document revision. "
-                    "This never applies the edit."
+                    "Create a revision-pinned edit proposal. Prefer patch modes: "
+                    "mode='replace' replaces an exact anchor string with new text (set "
+                    "replace_all for every occurrence); mode='insert_before'/"
+                    "'insert_after' insert relative to an anchor; mode='append' adds to "
+                    "the end. Use mode='full' only for small documents. This never "
+                    "applies the edit; a human reviews the diff."
                 ),
             ),
             function_tool(
@@ -119,8 +130,12 @@ class ChatToolset:
             operation,
         )
 
-    async def search_workspace(self, ctx: ToolContext, query: str, limit: int = 5) -> str:
-        validated = WorkspaceSearchInput.model_validate({"query": query, "limit": limit})
+    async def search_workspace(
+        self, ctx: ToolContext, query: str, limit: int = 5, offset: int = 0
+    ) -> str:
+        validated = WorkspaceSearchInput.model_validate(
+            {"query": query, "limit": limit, "offset": offset}
+        )
 
         def operation() -> dict[str, Any]:
             documents = self.workspace.search_documents(
@@ -131,6 +146,7 @@ class ChatToolset:
                 actor_id=None,
                 sort="relevance",
                 limit=validated.limit,
+                offset=validated.offset,
             )
             return {
                 "results": [
@@ -143,8 +159,12 @@ class ChatToolset:
             ctx, self.policies["search_workspace"], validated.query, operation
         )
 
-    async def read_document(self, ctx: ToolContext, document_id: str) -> str:
-        validated = ReadDocumentInput.model_validate({"document_id": document_id})
+    async def read_document(
+        self, ctx: ToolContext, document_id: str, offset: int = 0, limit: int = 20_000
+    ) -> str:
+        validated = ReadDocumentInput.model_validate(
+            {"document_id": document_id, "offset": offset, "limit": limit}
+        )
         document_id = validated.document_id
 
         def operation() -> dict[str, Any]:
@@ -154,6 +174,8 @@ class ChatToolset:
             if document.content_type == "application/pdf":
                 raise ValidationError("Use read_pdf_page for PDF documents")
             pinned_revision = ctx.context.request_context.pinned_revision_id
+            content = document.content
+            revision_id = document.current_revision_id
             if (
                 pinned_revision
                 and ctx.context.request_context.document_id == document_id
@@ -171,13 +193,16 @@ class ChatToolset:
                 )
                 if revision is None:
                     raise NotFoundError(f"Pinned document revision not found: {pinned_revision}")
-                return {
-                    "source": self._document_source(document, revision_id=revision.revision_id),
-                    "content": self._bounded_text(revision.content),
-                }
+                content = revision.content
+                revision_id = revision.revision_id
+            total_chars = len(content)
             return {
-                "source": self._document_source(document),
-                "content": self._bounded_text(document.content),
+                "source": self._document_source(document, revision_id=revision_id),
+                "content": content[validated.offset : validated.offset + validated.limit],
+                "offset": validated.offset,
+                "limit": validated.limit,
+                "total_chars": total_chars,
+                "truncated": validated.offset + validated.limit < total_chars,
             }
 
         return await self._run_tool(ctx, self.policies["read_document"], document_id, operation)
@@ -232,14 +257,20 @@ class ChatToolset:
         ctx: ToolContext,
         document_id: str,
         expected_revision_id: str,
-        content: str,
         summary: str,
+        content: str = "",
+        mode: Literal["full", "replace", "insert_before", "insert_after", "append"] = "full",
+        anchor: str | None = None,
+        replace_all: bool = False,
     ) -> str:
         validated = ProposeUpdateInput.model_validate(
             {
                 "document_id": document_id,
                 "expected_revision_id": expected_revision_id,
                 "content": content,
+                "mode": mode,
+                "anchor": anchor,
+                "replace_all": replace_all,
                 "summary": summary,
             }
         )
@@ -252,6 +283,9 @@ class ChatToolset:
                 expected_revision_id=validated.expected_revision_id,
                 content=validated.content,
                 summary=validated.summary,
+                mode=validated.mode,
+                anchor=validated.anchor,
+                replace_all=validated.replace_all,
             )
             return {
                 "proposal_id": proposal.proposal_id,

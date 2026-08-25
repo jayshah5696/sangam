@@ -65,11 +65,11 @@ every variable.
 | `SANGAM_CHAT_AVAILABLE_MODELS` | JSON list of model slugs |
 | `SANGAM_CHAT_REASONING_EFFORT` | Reasoning preset |
 | `SANGAM_CHAT_TIMEOUT_SECONDS` | Per-run timeout |
-| `SANGAM_CHAT_MAX_TOOL_ROUNDS` | Tool-use budget |
+| `SANGAM_CHAT_MAX_TOOL_ROUNDS` | Tool-use budget (default 24) |
 | `SANGAM_CHAT_MAX_TOOL_RESULT_BYTES` | Tool result byte cap |
 | `SANGAM_CHAT_MAX_CONTEXT_MESSAGES` | Context window size in messages |
 | `SANGAM_CHAT_MAX_REQUEST_BYTES` | Inbound chat request cap |
-| `SANGAM_CHAT_MAX_OUTPUT_TOKENS` | Completion cap |
+| `SANGAM_CHAT_MAX_OUTPUT_TOKENS` | Completion cap (default 16384) |
 | `SANGAM_CHAT_MAX_CONCURRENT_RUNS` | Parallel chat runs |
 
 ## Karakeep bridge
