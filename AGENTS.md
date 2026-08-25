@@ -1,4 +1,8 @@
-# UI consistency rules
+# Repository rules
+
+- Always use `just` recipes as the canonical interface for testing, formatting, linting, building, and running Sangam. Do not assemble ad-hoc shell commands or bypass `justfile`.
+
+## UI consistency rules
 
 - Read `docs/ui-system.md` and search existing components and CSS before changing application UI.
 - Reuse shared tokens for fonts, type sizes, spacing, radii, colors, and control heights.
@@ -12,4 +16,4 @@
   `browser-verification` skill before calling the work verified. It defines the
   desktop, narrow-desktop, true touch-mobile, affected-breakpoint, and visual
   evidence gates.
-- Run formatting, UI lint, build, unit tests, and `test:e2e` before updating verified screenshots.
+- Run `just format`, `just test`, and `just test-e2e` before updating verified screenshots.

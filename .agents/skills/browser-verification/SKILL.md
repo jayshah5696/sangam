@@ -59,14 +59,17 @@ Completion criterion: each changed image has been inspected against the checklis
 Run the focused tests first, then the complete applicable gates:
 
 ```bash
-npm --prefix frontend run format:check
-npm --prefix frontend run lint
-npm --prefix frontend run build
-npm --prefix frontend run test
-npm --prefix frontend run test:e2e
+just test-frontend
+just test-e2e
 ```
 
-Run `uv run pytest` when the browser workflow crosses or changes an API contract. Run the explicit visual or screenshot update command only when the task requires that artifact.
+Or run the full local verification suite:
+
+```bash
+just test
+```
+
+When visual screenshot baselines need updating for verified changes, run `just update-screenshots`.
 
 Completion criterion: all required commands pass, or the handoff names each failure and why it remains.
 

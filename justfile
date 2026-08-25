@@ -21,7 +21,7 @@ test:
     npm --prefix frontend run test
 
 # Run source, documentation, version, configuration, and distribution gates.
-check: test test-docs
+check: test test-docs validate-compose
     uv run python scripts/verify-release-config.py
     uv run python scripts/verify-version.py --frontend-dist
     ./scripts/audit-dependencies.sh
@@ -49,6 +49,19 @@ test-frontend:
 # Exercise desktop and narrow browser interactions against isolated data.
 test-e2e:
     npm --prefix frontend run test:e2e
+
+# Update verified Playwright screenshot baselines.
+update-screenshots:
+    npm --prefix frontend run update:screenshots
+
+# Check Python and frontend code style and linting.
+lint:
+    uv run ruff check .
+    npm --prefix frontend run lint
+
+# Validate development and production Compose configurations.
+validate-compose:
+    ./scripts/validate-compose.sh
 
 # Format Python sources and tests.
 format:
