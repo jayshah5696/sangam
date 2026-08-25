@@ -68,7 +68,7 @@ Pin an immutable image digest, set explicit environment
 in front of the origin:
 
 ```sh
-cosign verify ghcr.io/jayshah5696/sangam@sha256:bbc05f3f865052311f96f509ae360a7a902bc5012de30eb5682a2e5dd15ed6d9 \
+cosign verify ghcr.io/jayshah5696/sangam@sha256:a48bd3162c87f9676a9bfc256b47099112ad5ab30102eec985b94abe8311ca2d \
   --certificate-identity-regexp '^https://github.com/jayshah5696/sangam/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
