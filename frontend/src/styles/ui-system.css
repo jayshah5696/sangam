@@ -30,9 +30,13 @@ small {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :where(button, input, select, textarea, a, *):not([data-allow-motion]) {
-    transition: none !important;
-    animation: none !important;
+  *,
+  *::before,
+  *::after {
+    animation-duration: var(--motion-instant) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--motion-instant) !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -322,6 +326,9 @@ textarea::placeholder {
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--surface) 74%, transparent);
   color: var(--muted);
+  transition: background var(--motion-control) var(--ease-ui-out),
+    border-color var(--motion-control) var(--ease-ui-out),
+    color var(--motion-control) var(--ease-ui-out);
 }
 
 .ui-state > svg {

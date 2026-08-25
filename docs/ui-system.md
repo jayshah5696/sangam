@@ -142,6 +142,61 @@ Use `StateMessage` for loading, empty, error, success, and offline messages on
 utility routes and recoverable workbench surfaces. Use compact mode inside a
 row or panel; use the standard mode when the state replaces the page content.
 
+## Motion
+
+Motion in Sangam is restrained, functional, and semantic. It exists to explain state
+and spatial relationships rather than decorate the workbench. If removing motion loses
+no information, keep it subtle or omit it.
+
+### Principles
+
+1. **Motion explains a state or spatial relationship:** It clarifies where a panel
+   or menu came from, which tab became active, whether work is running/complete/failed,
+   or how expanded content relates to its trigger.
+2. **Immediate interaction results:** Animation must not delay input readiness,
+   keyboard focus, navigation, saving, approvals, or error recovery.
+3. **Composite performance:** Large surfaces animate using `transform` and `opacity`
+   to avoid triggering layout recalculations on every frame.
+4. **Direct pointer response:** User-driven resizing on desktop split handles has
+   direct response with zero easing between the pointer and the rail position.
+5. **Geometry preservation:** A moving indicator or active state must preserve the
+   control's geometry. Hover, focus, selection, and dirty status must not resize tabs or rows.
+6. **Paired entry and exit:** An overlay that enters from an edge or origin pairs
+   with an intuitive reverse action, backdrop click, Escape key dismiss, and focus return.
+7. **Active work representation:** Loading animation runs during real asynchronous
+   work and stops immediately when work completes, fails, or unmounts.
+8. **Reduced-motion parity:** `prefers-reduced-motion: reduce` strips travel, scale,
+   blur, and infinite animation while keeping final states (open, selected, success,
+   error) fully visible and functional without delay.
+9. **No document content animation:** Document text and code surfaces do not animate
+   merely because adjacent application chrome changed.
+10. **ChatKit boundary:** ChatKit owns motion inside its iframe; Sangam owns the
+    surrounding host chrome, proposals, context banner, and tool status.
+
+### Tokens
+
+- `--motion-instant` (80ms): instant feedback, micro-interactions, and brief delays.
+- `--motion-fast` (120ms): tooltips, split handle feedback, badges, and small menu popovers.
+- `--motion-control` (160ms): standard buttons, inputs, tabs, and interactive state transitions.
+- `--motion-panel` (220ms): drawers, dialog overlays, command palette, and bottom sheets.
+- `--ease-ui-out` (`cubic-bezier(0.16, 1, 0.3, 1)`): standard decelerating curve for natural entries and overlays.
+- `--ease-ui-in-out` (`cubic-bezier(0.4, 0, 0.2, 1)`): smooth balanced curve for continuous element transitions.
+- `--transition-fast` (`var(--motion-control) ease`): compatibility alias for legacy controls.
+
+### Implementation and dependencies
+
+CSS custom properties, CSS transitions, and `@keyframes` are sufficient for Sangam's
+workbench interactions. Do not install external motion libraries without concrete evidence
+that platform CSS and standard Web APIs are inadequate, including bundle impact and
+performance benchmarks.
+
+### Prohibited patterns
+
+- Raw millisecond durations or custom `cubic-bezier()` curves defined outside `tokens.css`.
+- Bouncy, elastic, or overshooting transforms that distract from content.
+- Animated dimensions (`width`, `height`) during drag/resize interactions.
+- Unbounded or unconstrained infinite animations when no work is active.
+
 ## Settings
 
 Settings is a dedicated task surface inside the shared application chrome. The

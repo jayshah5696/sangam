@@ -33,7 +33,22 @@
   --radius-control: 0.375rem;
   --radius-panel: 0.5rem;
   --radius-pill: 999px;
-  --transition-fast: 150ms ease;
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-control: 160ms;
+  --motion-panel: 220ms;
+  --ease-ui-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-ui-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: var(--motion-control) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 0.01ms;
+    --motion-fast: 0.01ms;
+    --motion-control: 0.01ms;
+    --motion-panel: 0.01ms;
+  }
 }
 
 /* Typography preferences (Settings > Appearance > Typography). These blocks are
