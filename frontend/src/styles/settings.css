@@ -85,7 +85,8 @@
 .theme-studio-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
 .theme-studio-list strong { font-size: var(--text-body); }
 .theme-import { display: grid; gap: var(--space-2); justify-items: start; }
-.theme-import summary { color: var(--accent); font-size: var(--text-control); cursor: pointer; }
+.theme-import summary { color: var(--text); font-size: var(--text-control); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; cursor: pointer; }
+.theme-import summary:hover { text-decoration-thickness: 2px; }
 .theme-import textarea { width: 100%; min-height: 6rem; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); padding: var(--space-2); font-family: var(--font-mono); font-size: var(--text-meta); }
 .danger-action { color: var(--danger); }
 .danger-action:hover { border-color: var(--danger); }
