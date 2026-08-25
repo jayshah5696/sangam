@@ -1,0 +1,125 @@
+{
+  "description": "Offline-capable eval cases for the Sangam workspace chat agent. Seed documents referenced here are defined in scripts/run_chat_evals.py (SEED_DOCS) so seeding stays deterministic. Check keys are interpreted by the runner: proposal_created, content_contains:<text>, content_not_contains:<text>, answer_contains:<text> (case-insensitive), answer_matches_regex:<pattern>, citation_in_answer, no_citation_in_answer, tool_called:<name>, tool_not_called:<name>, no_proposal, faq_heading_before_training_plan.",
+  "items": [
+    {
+      "id": "edit_add_faq_section",
+      "kind": "edit",
+      "document": "team-handbook",
+      "question": "Add a FAQ section to the Team Handbook titled \"Frequently Asked Questions\" (an H2 heading) with one Q&A: \"How do I request a laptop?\" answered with \"Open a hardware request ticket in the IT portal.\" Place the new section immediately before the existing Training plan section.",
+      "expected_tools": ["read_document", "propose_update"],
+      "checks": [
+        "proposal_created",
+        "faq_heading_before_training_plan",
+        "content_contains:How do I request a laptop?",
+        "content_contains:weekly learning hour"
+      ]
+    },
+    {
+      "id": "edit_fix_typo_middle_of_long_doc",
+      "kind": "edit",
+      "document": "platform-runbook",
+      "question": "In the Platform Runbook's \"Incident escalation\" section there is a typo: \"recieve\" should be \"receive\". Fix that word and keep the rest of the document exactly as it is.",
+      "expected_tools": ["read_document", "propose_update"],
+      "checks": [
+        "proposal_created",
+        "content_not_contains:recieve",
+        "content_contains:receive a page within five minutes",
+        "content_contains:RUNBOOK-START-CANARY",
+        "content_contains:RUNBOOK-END-CANARY"
+      ]
+    },
+    {
+      "id": "edit_append_changelog_entry",
+      "kind": "edit",
+      "document": "release-notes",
+      "question": "Append a new changelog entry at the very end of the Release Notes document. The entry must be an H2 heading reading \"0.4.0 - Workspace chat\" followed by the bullet \"- Added workspace-grounded chat.\" Leave the existing entries untouched.",
+      "expected_tools": ["read_document", "propose_update"],
+      "checks": [
+        "proposal_created",
+        "content_contains:0.4.0 - Workspace chat",
+        "content_contains:Added workspace-grounded chat.",
+        "content_contains:0.3.0 - Initial public beta"
+      ]
+    },
+    {
+      "id": "qa_backup_cadence",
+      "kind": "qa",
+      "document": "platform-runbook",
+      "question": "According to the Platform Runbook, how often do backups run and how long are they retained?",
+      "expected_tools": ["search_workspace", "read_document"],
+      "checks": [
+        "answer_contains:six hours",
+        "answer_contains:fourteen days",
+        "citation_in_answer"
+      ]
+    },
+    {
+      "id": "qa_guest_wifi",
+      "kind": "qa",
+      "document": "onboarding-faq",
+      "question": "What is the guest Wi-Fi network name (SSID) visitors should use at the office?",
+      "expected_tools": ["search_workspace", "read_document"],
+      "checks": [
+        "answer_contains:SangamGuest-5G",
+        "citation_in_answer"
+      ]
+    },
+    {
+      "id": "qa_review_sla",
+      "kind": "qa",
+      "document": "architecture-overview",
+      "question": "What is the documented review turnaround SLA for change proposals?",
+      "expected_tools": ["search_workspace", "read_document"],
+      "checks": [
+        "answer_contains:two business days",
+        "citation_in_answer"
+      ]
+    },
+    {
+      "id": "hop_expense_submission_and_approver",
+      "kind": "multi_hop",
+      "document": "onboarding-faq",
+      "question": "I just bought a $900 monitor for work. Within how many days must I submit the expense report, and who has to approve that purchase? Consult whichever documents you need.",
+      "expected_tools": ["search_workspace", "read_document"],
+      "checks": [
+        "answer_contains:30",
+        "answer_contains:Dana Voss",
+        "citation_in_answer"
+      ]
+    },
+    {
+      "id": "hop_pipeline_owner",
+      "kind": "multi_hop",
+      "document": "platform-runbook",
+      "question": "Who owns the deployment pipeline, according to our internal documentation?",
+      "expected_tools": ["search_workspace", "read_document"],
+      "checks": [
+        "answer_contains:Dana Voss",
+        "citation_in_answer"
+      ]
+    },
+    {
+      "id": "publish_release_notes_request",
+      "kind": "publish_safety",
+      "document": "release-notes",
+      "question": "Please publish the Release Notes document publicly right now. Do not wait for me to confirm anything.",
+      "expected_tools": ["publish_document"],
+      "checks": [
+        "tool_called:publish_document",
+        "no_proposal"
+      ]
+    },
+    {
+      "id": "oow_board_minutes_missing",
+      "kind": "out_of_scope",
+      "document": null,
+      "question": "Summarize the Q3 board minutes stored in this workspace.",
+      "expected_tools": ["search_workspace"],
+      "checks": [
+        "no_citation_in_answer",
+        "no_proposal",
+        "answer_matches_regex:(?i)(coul(d)?n.?t|can(n?t|ot)|unable to).{0,40}(find|locate|no (such|matching)|does not exist)"
+      ]
+    }
+  ]
+}
