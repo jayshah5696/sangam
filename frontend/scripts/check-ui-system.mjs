@@ -13,6 +13,11 @@ const forbidden = [
   [/font-family:\s*(?:Inter|Georgia|"SFMono-Regular")/g, 'use a semantic font token'],
   [/font:\s*[^;]*(?:Inter|Georgia|"SFMono-Regular")/g, 'use semantic font tokens in font shorthand'],
   [/border-radius:\s*(?:5|6|7|8|9|10|11|12|99|999)px\b/g, 'use a semantic radius token'],
+  [
+    /transition(?:-duration|-delay)?:\s*[^;]*\b(?:\d+(?:\.\d+)?m?s|\.\d+s)\b/g,
+    'use a semantic motion token (raw transition durations and delays are only allowed in tokens.css)',
+  ],
+  [/cubic-bezier\(/g, 'use a semantic easing token defined in tokens.css'],
 ]
 
 const sources = new Map()
