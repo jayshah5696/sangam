@@ -9,10 +9,12 @@ import {
   MonitorCog,
   Paintbrush,
   Palette,
+  Plus,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
   Tags,
+  Trash2,
   Type,
   Wrench,
 } from 'lucide-react'
@@ -21,15 +23,22 @@ import { AgentAccessSettings } from '../components/AgentAccessSettings'
 import { ChatModelSettings } from '../components/ChatModelSettings'
 import { settingsCategories } from '../components/SettingsSidebar'
 import {
+  activeCustomTheme,
+  baseThemeColors,
+  customThemeRef,
   editorSizes,
   hexToRgba,
+  isValidColorValue,
   readableTextColor,
+  resolveCustomThemeColors,
+  themeColorRoles,
   themes,
   uiDensities,
   uiFonts,
   useTheme,
   type CustomTheme,
   type EditorSize,
+  type ThemeColorKey,
   type ThemeId,
   type UiDensity,
   type UiFontId,
@@ -123,18 +132,37 @@ export function WorkspaceSettings() {
                     key={theme.id}
                     className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
                     aria-pressed={preferences.theme === theme.id}
-                    onClick={() => updatePreferences({ theme: theme.id, customTheme: null })}
+                    onClick={() => updatePreferences({ theme: theme.id })}
                   >
                     <ThemeWireframe themeId={theme.id} />
                     <strong>
                       {theme.name}
-                      {!preferences.customTheme && preferences.theme === theme.id && (
-                        <Check size="var(--icon-inline)" />
-                      )}
+                      {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
                     </strong>
                     <small>{theme.description}</small>
                   </button>
                 ))}
+                {preferences.customThemes.map((custom) => {
+                  const ref = customThemeRef(custom.id)
+                  const selected = preferences.theme === ref
+                  const colors = resolveCustomThemeColors(custom)
+                  return (
+                    <button
+                      type="button"
+                      key={ref}
+                      className={selected ? 'theme-card selected' : 'theme-card'}
+                      aria-pressed={selected}
+                      onClick={() => updatePreferences({ theme: ref })}
+                    >
+                      <CustomThemeWireframe colors={colors} />
+                      <strong>
+                        {custom.name}
+                        {selected && <Check size="var(--icon-inline)" />}
+                      </strong>
+                      <small>Custom theme · {custom.base}</small>
+                    </button>
+                  )
+                })}
               </div>
             </SettingsSection>
           )}
@@ -144,7 +172,7 @@ export function WorkspaceSettings() {
               id="create-theme"
               icon={Palette}
               title="Create theme"
-              description="Start from a base palette and pick your own accent. The preview updates live and the theme stays in this browser."
+              description="Build a theme from a base palette, edit its colors with live preview on the real workspace, and share it as JSON."
             >
               <CreateThemeSection />
             </SettingsSection>
@@ -485,92 +513,262 @@ export function WorkspaceSettings() {
   )
 }
 
+const studioEditableRoles = themeColorRoles.filter((role) => role.key !== 'line')
+
 function CreateThemeSection() {
   const { preferences, updatePreferences } = useTheme()
-  const custom = preferences.customTheme
-  const [base, setBase] = useState<ThemeId>(custom?.base ?? preferences.theme)
-  const [accent, setAccent] = useState(custom?.accent ?? '#5b59dc')
-  const active =
-    custom !== null && custom.base === base && custom.accent.toLowerCase() === accent.toLowerCase()
-  const baseTheme = themes.find((theme) => theme.id === base) ?? themes[0]!
-  const [sidebarColor = '#0f1011', surfaceColor = '#191a1b'] = baseTheme.colors
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [importJson, setImportJson] = useState('')
+  const [importError, setImportError] = useState('')
+  const [copied, setCopied] = useState(false)
+  const editing = preferences.customThemes.find((theme) => theme.id === editingId) ?? null
+
+  const patchTheme = (id: string, patch: Partial<CustomTheme>) => {
+    updatePreferences({
+      customThemes: preferences.customThemes.map((theme) =>
+        theme.id === id ? { ...theme, ...patch } : theme,
+      ),
+    })
+  }
+
+  const setColor = (id: string, key: ThemeColorKey, value: string) => {
+    const current = preferences.customThemes.find((theme) => theme.id === id)
+    if (!current) return
+    patchTheme(id, { colors: { ...current.colors, [key]: value } })
+  }
+
+  const createTheme = () => {
+    const id = `theme-${Date.now().toString(36)}`
+    const theme: CustomTheme = {
+      id,
+      name: 'My theme',
+      base: activeCustomTheme(preferences)?.base ?? (preferences.theme as ThemeId),
+      colors: {},
+    }
+    updatePreferences({ customThemes: [...preferences.customThemes, theme], theme: customThemeRef(id) })
+    setEditingId(id)
+  }
+
+  const deleteTheme = (id: string) => {
+    const remaining = preferences.customThemes.filter((theme) => theme.id !== id)
+    updatePreferences({
+      customThemes: remaining,
+      theme:
+        preferences.theme === customThemeRef(id)
+          ? (activeCustomTheme(preferences)?.base ?? 'midnight')
+          : preferences.theme,
+    })
+    if (editingId === id) setEditingId(null)
+  }
+
+  const importTheme = () => {
+    setImportError('')
+    try {
+      const parsed = JSON.parse(importJson) as Record<string, unknown>
+      const colors: Partial<Record<ThemeColorKey, string>> = {}
+      const rawColors = (parsed.colors ?? {}) as Record<string, unknown>
+      for (const role of themeColorRoles) {
+        const color = rawColors[role.key]
+        if (isValidColorValue(color)) colors[role.key] = color
+      }
+      const base = ['river', 'midnight', 'parchment', 'cobalt'].includes(String(parsed.base))
+        ? (parsed.base as ThemeId)
+        : 'midnight'
+      let id = typeof parsed.id === 'string' && /^[a-z0-9-]+$/.test(parsed.id) ? parsed.id : ''
+      if (!id || preferences.customThemes.some((theme) => theme.id === id)) {
+        id = `theme-${Date.now().toString(36)}`
+      }
+      const theme: CustomTheme = {
+        id,
+        name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name : 'Imported theme',
+        base,
+        colors,
+      }
+      updatePreferences({
+        customThemes: [...preferences.customThemes, theme],
+        theme: customThemeRef(id),
+      })
+      setEditingId(id)
+      setImportJson('')
+    } catch {
+      setImportError('That is not valid theme JSON.')
+    }
+  }
+
+  const exportTheme = async (theme: CustomTheme) => {
+    await navigator.clipboard.writeText(JSON.stringify(theme, null, 2))
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
+  }
 
   return (
-    <div className="theme-builder">
-      <div className="theme-builder-controls">
-        <label className="settings-field">
-          <span>Base palette</span>
-          <select
-            aria-label="Base palette"
-            className="settings-select"
-            value={base}
-            onChange={(event) => setBase(event.target.value as ThemeId)}
-          >
-            {themes.map((theme) => (
-              <option key={theme.id} value={theme.id}>
-                {theme.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="settings-field">
-          <span>Accent color</span>
-          <span className="accent-input">
-            <input
-              aria-label="Accent color"
-              type="color"
-              value={accent}
-              onChange={(event) => setAccent(event.target.value)}
+    <div className="theme-studio">
+      {!editing && (
+        <div className="theme-studio-empty">
+          <p>
+            Build a theme from a base palette, edit its color roles with live preview, and share it as JSON.
+          </p>
+          <div className="theme-builder-actions">
+            <button type="button" className="secondary-action" onClick={createTheme}>
+              <Plus size="var(--icon-inline)" />
+              New theme
+            </button>
+          </div>
+          <details className="theme-import">
+            <summary>Import theme JSON</summary>
+            <textarea
+              aria-label="Theme JSON"
+              value={importJson}
+              placeholder='{"id":"my-theme","name":"My theme","base":"midnight","colors":{"accent":"#ff8800"}}'
+              onChange={(event) => setImportJson(event.target.value)}
             />
-            <code>{accent}</code>
-          </span>
-        </label>
-        <div className="theme-builder-actions">
-          <button
-            type="button"
-            className="secondary-action"
-            onClick={() => updatePreferences({ customTheme: { base, accent } satisfies CustomTheme })}
-          >
-            {active ? <Check size="var(--icon-inline)" /> : null}
-            {active ? 'Using this theme' : 'Use this theme'}
-          </button>
-          {custom && (
+            {importError && <p className="error-text">{importError}</p>}
             <button
               type="button"
               className="secondary-action"
-              onClick={() => updatePreferences({ customTheme: null })}
+              disabled={!importJson.trim()}
+              onClick={importTheme}
             >
-              Stop using custom theme
+              Import
             </button>
-          )}
+          </details>
         </div>
-      </div>
-      <div className="theme-builder-preview" style={{ background: surfaceColor }} aria-hidden="true">
-        <span className="theme-builder-preview-rail" style={{ background: sidebarColor }}>
-          <i style={{ background: hexToRgba(readableTextColor(sidebarColor), 0.4) }} />
-          <i style={{ background: hexToRgba(readableTextColor(sidebarColor), 0.25) }} />
-          <i style={{ background: hexToRgba(readableTextColor(sidebarColor), 0.25) }} />
-        </span>
-        <span className="theme-builder-preview-body">
-          <i className="line" style={{ background: hexToRgba(readableTextColor(surfaceColor), 0.75) }} />
-          <i
-            className="line short"
-            style={{ background: hexToRgba(readableTextColor(surfaceColor), 0.35) }}
-          />
-          <span className="row">
-            <b
-              className="badge"
-              style={{ background: hexToRgba(accent, 0.16), color: readableTextColor(accent) }}
+      )}
+      {editing && (
+        <div className="theme-studio-editor">
+          <div className="theme-studio-row">
+            <label className="settings-field">
+              <span>Name</span>
+              <input
+                aria-label="Theme name"
+                value={editing.name}
+                onChange={(event) => patchTheme(editing.id, { name: event.target.value })}
+              />
+            </label>
+            <label className="settings-field">
+              <span>Base palette</span>
+              <select
+                aria-label="Base palette"
+                className="settings-select"
+                value={editing.base}
+                onChange={(event) => patchTheme(editing.id, { base: event.target.value as ThemeId })}
+              >
+                {themes.map((theme) => (
+                  <option key={theme.id} value={theme.id}>
+                    {theme.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="theme-studio-colors">
+            {studioEditableRoles.map((role) => {
+              const value = editing.colors[role.key] ?? baseThemeColors[editing.base][role.key]
+              return (
+                <label className="settings-field theme-color-row" key={role.key}>
+                  <span>{role.label}</span>
+                  <span className="accent-input">
+                    <input
+                      aria-label={role.label}
+                      type="color"
+                      value={value}
+                      onChange={(event) => setColor(editing.id, role.key, event.target.value)}
+                    />
+                    <code>{value}</code>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          <p className="setting-value">
+            Changes apply live across the workspace. Unset roles follow the base palette.
+          </p>
+          <div className="theme-builder-actions">
+            {preferences.theme !== customThemeRef(editing.id) && (
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => updatePreferences({ theme: customThemeRef(editing.id) })}
+              >
+                Use this theme
+              </button>
+            )}
+            {preferences.theme === customThemeRef(editing.id) && (
+              <span className="setting-value">
+                <Check size="var(--icon-inline)" /> Active
+              </span>
+            )}
+            <button type="button" className="secondary-action" onClick={() => void exportTheme(editing)}>
+              {copied ? <Check size="var(--icon-inline)" /> : null}
+              {copied ? 'Copied JSON' : 'Export JSON'}
+            </button>
+            <button type="button" className="secondary-action" onClick={() => setEditingId(null)}>
+              Done
+            </button>
+            <button
+              type="button"
+              className="secondary-action danger-action"
+              onClick={() => deleteTheme(editing.id)}
             >
-              Draft
-            </b>
-            <b className="button" style={{ background: accent, color: readableTextColor(accent) }}>
-              Publish
-            </b>
-          </span>
-        </span>
-      </div>
+              <Trash2 size="var(--icon-inline)" />
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+      {preferences.customThemes.length > 0 && !editing && (
+        <ul className="theme-studio-list">
+          {preferences.customThemes.map((theme) => (
+            <li key={theme.id}>
+              <strong>{theme.name}</strong>
+              <span className="setting-value">
+                {preferences.theme === customThemeRef(theme.id) ? 'Active' : theme.base}
+              </span>
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => {
+                  setEditingId(theme.id)
+                  if (preferences.theme !== customThemeRef(theme.id)) {
+                    updatePreferences({ theme: customThemeRef(theme.id) })
+                  }
+                }}
+              >
+                Edit
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
+  )
+}
+
+function CustomThemeWireframe({ colors }: { colors: Record<ThemeColorKey, string> }) {
+  const ink = readableTextColor(colors.surface)
+  return (
+    <span className="theme-wireframe" aria-hidden="true" style={{ background: colors.surface }}>
+      <i className="theme-wireframe-sidebar" style={{ background: colors.sidebar }}>
+        <b style={{ background: hexToRgba(colors.sidebarText, 0.4) }} />
+        <b style={{ background: hexToRgba(colors.sidebarText, 0.25) }} />
+        <b style={{ background: hexToRgba(colors.sidebarText, 0.25) }} />
+      </i>
+      <i className="theme-wireframe-editor">
+        <b style={{ background: hexToRgba(ink, 0.8), width: '72%', height: '7px' }} />
+        <b style={{ background: hexToRgba(ink, 0.3) }} />
+        <b style={{ background: hexToRgba(ink, 0.3) }} />
+        <b style={{ background: hexToRgba(ink, 0.3) }} />
+      </i>
+      <i className="theme-wireframe-inspector">
+        <b style={{ background: hexToRgba(ink, 0.25) }} />
+        <b style={{ background: hexToRgba(ink, 0.25) }} />
+        <b style={{ background: colors.accent }} />
+      </i>
+      <i
+        className="theme-wireframe-focus"
+        style={{ borderColor: colors.accent, background: hexToRgba(colors.accent, 0.18) }}
+      />
+    </span>
   )
 }
 

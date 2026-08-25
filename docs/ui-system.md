@@ -46,13 +46,16 @@ at least `--control-touch` tall in every density.
 
 ### Create theme
 
-Settings > Appearance > Create theme builds a custom accent theme: pick a base
-palette (one of the four themes) and an accent color, preview it live, then
-apply it. A custom theme is stored as `customTheme` in the workspace
-preferences and applied before first paint: `data-theme` is set to the base
-palette while `--accent`, `--accent-soft`, and a luminance-derived
-`--accent-text` are injected as inline custom properties on `<html>`. Choosing
-any built-in theme card clears the custom theme. Custom themes are
+Settings > Appearance > Create theme is a theme studio: start a theme from one
+of the four base palettes, edit its color roles (app background, surface,
+raised surface, text, muted text, sidebar, sidebar text, accent) with live
+preview on the real workspace, then keep editing or export it as JSON for
+sharing. Import theme JSON recreates a shared theme. Custom themes are stored
+in the workspace preferences as `customThemes` and applied before first paint:
+`data-theme` is set to the theme's base palette while each overridden color
+role is injected as an inline custom property on `<html>`, with
+`--accent-soft` and a luminance-derived `--accent-text` derived from the
+accent. Custom themes appear as cards in the Theme grid and are
 browser-scoped like the rest of Appearance.
 
 ## Dimensions

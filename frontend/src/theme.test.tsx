@@ -50,7 +50,8 @@ describe('workspace typography preferences', () => {
         monoFont: 42,
         uiDensity: 'huge',
         editorSize: 'giant',
-        customTheme: { base: 'nope', accent: 'red' },
+        theme: 'custom:ghost',
+        customThemes: [{ id: 'ghost', name: 'Ghost', base: 'nope', colors: { accent: 'red' } }],
       }),
     )
     render(
@@ -65,10 +66,13 @@ describe('workspace typography preferences', () => {
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('')
   })
 
-  it('applies a valid custom theme and rejects an invalid one', () => {
+  it('applies an active custom theme with color overrides', () => {
     window.localStorage.setItem(
       'sangam.workspace-preferences.v1',
-      JSON.stringify({ customTheme: { base: 'cobalt', accent: '#ff8800' } }),
+      JSON.stringify({
+        theme: 'custom:sunset',
+        customThemes: [{ id: 'sunset', name: 'Sunset', base: 'cobalt', colors: { accent: '#ff8800' } }],
+      }),
     )
     render(
       <ThemeProvider>
@@ -77,6 +81,7 @@ describe('workspace typography preferences', () => {
     )
     expect(document.documentElement.dataset.theme).toBe('cobalt')
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#ff8800')
+    expect(document.documentElement.style.getPropertyValue('--accent-soft')).toBe('rgba(255, 136, 0, 0.16)')
     expect(document.documentElement.style.getPropertyValue('--accent-text')).toBe('#f7f8f8')
   })
 

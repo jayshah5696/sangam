@@ -36,7 +36,91 @@ export const editorSizes: Array<{ id: EditorSize; name: string }> = [
 
 export type InspectorTab = 'properties' | 'research' | 'outline' | 'history' | 'chat'
 
-export type CustomTheme = { base: ThemeId; accent: string }
+export const themeColorRoles = [
+  { key: 'appBg', label: 'App background', token: '--app-bg' },
+  { key: 'surface', label: 'Surface', token: '--surface' },
+  { key: 'surfaceSoft', label: 'Raised surface', token: '--surface-soft' },
+  { key: 'text', label: 'Text', token: '--text' },
+  { key: 'muted', label: 'Muted text', token: '--muted' },
+  { key: 'line', label: 'Borders', token: '--line' },
+  { key: 'sidebar', label: 'Sidebar', token: '--sidebar' },
+  { key: 'sidebarText', label: 'Sidebar text', token: '--sidebar-text' },
+  { key: 'accent', label: 'Accent', token: '--accent' },
+] as const
+
+export type ThemeColorKey = (typeof themeColorRoles)[number]['key']
+
+export const baseThemeColors: Record<ThemeId, Record<ThemeColorKey, string>> = {
+  midnight: {
+    appBg: '#08090a',
+    surface: '#191a1b',
+    surfaceSoft: '#23252a',
+    text: '#f7f8f8',
+    muted: '#8a8f98',
+    line: 'rgba(255, 255, 255, 0.08)',
+    sidebar: '#0f1011',
+    sidebarText: '#f7f8f8',
+    accent: '#5b59dc',
+  },
+  river: {
+    appBg: '#f3f0e7',
+    surface: '#fffdf8',
+    surfaceSoft: '#ebe7dc',
+    text: '#20241f',
+    muted: '#5d665f',
+    line: '#d5d0c5',
+    sidebar: '#1d2b25',
+    sidebarText: '#f7f3e9',
+    accent: '#327a62',
+  },
+  parchment: {
+    appBg: '#f1e5cc',
+    surface: '#fff8e8',
+    surfaceSoft: '#e7d7ba',
+    text: '#3d3024',
+    muted: '#6d5c48',
+    line: '#cfb995',
+    sidebar: '#4a3728',
+    sidebarText: '#fff4dc',
+    accent: '#b85c38',
+  },
+  cobalt: {
+    appBg: '#edf4fb',
+    surface: '#ffffff',
+    surfaceSoft: '#dfeaf5',
+    text: '#102a43',
+    muted: '#566b81',
+    line: '#c8d9e9',
+    sidebar: '#102a43',
+    sidebarText: '#f4f9ff',
+    accent: '#1769c2',
+  },
+}
+
+export type CustomTheme = {
+  id: string
+  name: string
+  base: ThemeId
+  colors: Partial<Record<ThemeColorKey, string>>
+}
+
+export const customThemeIdPrefix = 'custom:'
+
+export function customThemeRef(id: string): `${typeof customThemeIdPrefix}${string}` {
+  return `${customThemeIdPrefix}${id}`
+}
+
+export function isValidColorValue(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ||
+      /^rgba?\(([\d.]+\s*,\s*){2}[\d.]+(?:\s*,\s*[\d.]+)?\)$/.test(value))
+  )
+}
+
+export function isValidAccentHex(value: unknown): value is string {
+  return typeof value === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)
+}
 
 export function hexToRgba(hex: string, alpha: number): string {
   const value = hex.replace('#', '')
@@ -70,21 +154,21 @@ export function readableTextColor(hex: string): string {
   return luminance > 0.4 ? '#101318' : '#f7f8f8'
 }
 
-export function isValidAccentHex(value: unknown): value is string {
-  return typeof value === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)
+export function resolveCustomThemeColors(custom: CustomTheme): Record<ThemeColorKey, string> {
+  return { ...baseThemeColors[custom.base], ...custom.colors }
 }
 
-export function applyCustomTheme(root: HTMLElement, custom: CustomTheme | null) {
-  if (custom) {
-    root.dataset.theme = custom.base
-    root.style.setProperty('--accent', custom.accent)
-    root.style.setProperty('--accent-soft', hexToRgba(custom.accent, 0.16))
-    root.style.setProperty('--accent-text', readableTextColor(custom.accent))
-  } else {
-    root.style.removeProperty('--accent')
-    root.style.removeProperty('--accent-soft')
-    root.style.removeProperty('--accent-text')
+const overrideTokens = [...themeColorRoles.map((role) => role.token), '--accent-soft', '--accent-text']
+
+export function applyThemeColors(root: HTMLElement, custom: CustomTheme | null) {
+  for (const token of overrideTokens) root.style.removeProperty(token)
+  if (!custom) return
+  const colors = resolveCustomThemeColors(custom)
+  for (const role of themeColorRoles) {
+    if (custom.colors[role.key]) root.style.setProperty(role.token, colors[role.key])
   }
+  root.style.setProperty('--accent-soft', hexToRgba(colors.accent, 0.16))
+  root.style.setProperty('--accent-text', readableTextColor(colors.accent))
 }
 
 export const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
@@ -115,11 +199,11 @@ export const themes: Array<{ id: ThemeId; name: string; description: string; col
 ]
 
 type WorkspacePreferences = {
-  theme: ThemeId
+  theme: ThemeId | `${typeof customThemeIdPrefix}${string}`
   uiFont: UiFontId
   uiDensity: UiDensity
   editorSize: EditorSize
-  customTheme: CustomTheme | null
+  customThemes: CustomTheme[]
   leftWidth: number
   rightWidth: number
   leftVisible: boolean
@@ -140,7 +224,7 @@ const defaults: WorkspacePreferences = {
   uiFont: 'system',
   uiDensity: 'default',
   editorSize: 'default',
-  customTheme: null,
+  customThemes: [],
   leftWidth: 282,
   rightWidth: 320,
   leftVisible: true,
@@ -155,25 +239,50 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
   return allowed.includes(value as T) ? (value as T) : fallback
 }
 
-function parseCustomTheme(value: unknown): CustomTheme | null {
-  if (typeof value !== 'object' || value === null) return null
-  const candidate = value as { base?: unknown; accent?: unknown }
-  if (!candidate.base || !isValidAccentHex(candidate.accent)) return null
-  if (!['river', 'midnight', 'parchment', 'cobalt'].includes(String(candidate.base))) return null
-  return { base: candidate.base as ThemeId, accent: candidate.accent }
+function parseCustomThemes(value: unknown): CustomTheme[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const parsed: CustomTheme[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const candidate = entry as { id?: unknown; name?: unknown; base?: unknown; colors?: unknown }
+    if (typeof candidate.id !== 'string' || !/^[a-z0-9-]+$/.test(candidate.id)) continue
+    if (seen.has(candidate.id)) continue
+    if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) continue
+    if (!['river', 'midnight', 'parchment', 'cobalt'].includes(String(candidate.base))) continue
+    const colors: Partial<Record<ThemeColorKey, string>> = {}
+    if (typeof candidate.colors === 'object' && candidate.colors !== null) {
+      for (const role of themeColorRoles) {
+        const color = (candidate.colors as Record<string, unknown>)[role.key]
+        if (isValidColorValue(color)) colors[role.key] = color
+      }
+    }
+    seen.add(candidate.id)
+    parsed.push({ id: candidate.id, name: candidate.name, base: candidate.base as ThemeId, colors })
+  }
+  return parsed
 }
 
 function loadPreferences(): WorkspacePreferences {
   const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 900
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as Partial<WorkspacePreferences>
+    const customThemes = parseCustomThemes(stored.customThemes)
+    const storedTheme = String(stored.theme ?? defaults.theme)
+    const themeIsValidCustom =
+      storedTheme.startsWith(customThemeIdPrefix) &&
+      customThemes.some((entry) => customThemeRef(entry.id) === storedTheme)
+    const theme = themeIsValidCustom
+      ? (storedTheme as WorkspacePreferences['theme'])
+      : oneOf(stored.theme, ['river', 'midnight', 'parchment', 'cobalt'] as const, defaults.theme)
     return {
       ...defaults,
       ...stored,
+      theme,
       uiFont: oneOf(stored.uiFont, ['system', 'inter', 'plex', 'serif'] as const, defaults.uiFont),
       uiDensity: oneOf(stored.uiDensity, ['compact', 'default', 'comfortable'] as const, defaults.uiDensity),
       editorSize: oneOf(stored.editorSize, ['small', 'default', 'large'] as const, defaults.editorSize),
-      customTheme: parseCustomTheme(stored.customTheme),
+      customThemes,
       rightVisible: isNarrow ? false : (stored.rightVisible ?? true),
       editorMode: ['edit', 'split', 'preview'].includes(String(stored.editorMode))
         ? (stored.editorMode as EditorMode)
@@ -184,13 +293,20 @@ function loadPreferences(): WorkspacePreferences {
   }
 }
 
+export function activeCustomTheme(preferences: WorkspacePreferences): CustomTheme | null {
+  if (!preferences.theme.startsWith(customThemeIdPrefix)) return null
+  const id = preferences.theme.slice(customThemeIdPrefix.length)
+  return preferences.customThemes.find((entry) => entry.id === id) ?? null
+}
+
 export function applyTypographyAttributes(preferences: WorkspacePreferences) {
   const root = document.documentElement
+  const custom = activeCustomTheme(preferences)
   root.dataset.uiFont = preferences.uiFont
   root.dataset.uiDensity = preferences.uiDensity
   root.dataset.editorSize = preferences.editorSize
-  root.dataset.theme = preferences.customTheme ? preferences.customTheme.base : preferences.theme
-  applyCustomTheme(root, preferences.customTheme)
+  root.dataset.theme = custom ? custom.base : preferences.theme
+  applyThemeColors(root, custom)
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

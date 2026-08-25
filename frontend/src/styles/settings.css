@@ -68,22 +68,27 @@
 .density-option + .density-option { border-left: 1px solid var(--line); }
 .density-option:hover { color: var(--text); }
 .density-option.selected { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
-.theme-builder { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(16rem, 1.2fr); gap: var(--space-4); align-items: start; }
-.theme-builder-controls { display: grid; gap: var(--space-3); }
 .settings-field { display: grid; gap: var(--space-1); color: var(--muted); font-size: var(--text-label); }
 .accent-input { display: inline-flex; align-items: center; gap: var(--space-2); }
 .accent-input input { width: 34px; height: var(--control-height); padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); cursor: pointer; }
 .accent-input code { color: var(--text); font-family: var(--font-mono); font-size: var(--text-control); }
 .theme-builder-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.theme-builder-preview { display: grid; grid-template-columns: 56px minmax(0, 1fr); min-height: 150px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); }
-.theme-builder-preview-rail { display: grid; align-content: start; gap: 8px; padding: 10px 8px; }
-.theme-builder-preview-rail i { display: block; height: 6px; border-radius: var(--radius-pill); }
-.theme-builder-preview-body { display: grid; align-content: start; gap: 10px; padding: 14px; }
-.theme-builder-preview-body .line { display: block; width: 70%; height: 8px; border-radius: var(--radius-pill); }
-.theme-builder-preview-body .line.short { width: 45%; }
-.theme-builder-preview-body .row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.theme-builder-preview-body .badge, .theme-builder-preview-body .button { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: var(--radius-pill); font-size: var(--text-meta); font-weight: 600; }
-.theme-builder-preview-body .button { border-radius: var(--radius-control); }
+.theme-studio { display: grid; gap: var(--space-4); }
+.theme-studio-empty { display: grid; justify-items: start; gap: var(--space-3); }
+.theme-studio-empty p { margin: 0; max-width: 38rem; color: var(--muted); font-size: var(--text-control); line-height: 1.5; }
+.theme-studio-editor { display: grid; gap: var(--space-3); }
+.theme-studio-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-3); }
+.theme-studio-row input { min-height: var(--control-height); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); padding: 0 var(--space-3); font-size: var(--text-control); }
+.theme-studio-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: var(--space-2) var(--space-3); }
+.theme-color-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); }
+.theme-studio-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.theme-studio-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
+.theme-studio-list strong { font-size: var(--text-body); }
+.theme-import { display: grid; gap: var(--space-2); justify-items: start; }
+.theme-import summary { color: var(--accent); font-size: var(--text-control); cursor: pointer; }
+.theme-import textarea { width: 100%; min-height: 6rem; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); padding: var(--space-2); font-family: var(--font-mono); font-size: var(--text-meta); }
+.danger-action { color: var(--danger); }
+.danger-action:hover { border-color: var(--danger); }
 .compact-switch { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-control); white-space: nowrap; cursor: pointer; }
 .compact-switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .compact-switch:has(input:disabled) { cursor: wait; opacity: .7; }

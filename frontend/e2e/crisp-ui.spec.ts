@@ -82,28 +82,45 @@ test('typography preferences apply live, persist, and reset', async ({ page }) =
   await expect(page.locator('html')).toHaveAttribute('data-editor-size', 'default')
 })
 
-test('create theme applies a custom accent and clears cleanly', async ({ page }) => {
+test('create theme builds, applies, persists, imports, and deletes', async ({ page }) => {
   await page.goto('/settings?category=appearance')
   const builder = page.locator('#create-theme')
   await expect(builder).toBeVisible()
 
+  await builder.getByRole('button', { name: 'New theme' }).click()
+  await builder.getByLabel('Theme name').fill('Sunset')
   await builder.getByLabel('Base palette').selectOption('cobalt')
-  await builder.getByLabel('Accent color').fill('#ff8800')
-  await builder.getByRole('button', { name: 'Use this theme' }).click()
+  await builder.getByLabel('Accent', { exact: true }).fill('#ff8800')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
-  const accent = await page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent'))
-  expect(accent).toBe('#ff8800')
+  await expect
+    .poll(() => page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent')))
+    .toBe('#ff8800')
 
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
   expect(await page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent'))).toBe(
     '#ff8800',
   )
+  await expect(page.locator('.theme-card', { hasText: 'Sunset' })).toBeVisible()
 
-  await builder.getByRole('button', { name: 'Stop using custom theme' }).click()
+  await builder.getByRole('button', { name: 'Edit', exact: true }).first().click()
+  await builder.getByRole('button', { name: 'Export JSON' }).click()
+  await builder.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
+
+  await builder.getByText('Import theme JSON').click()
+  await builder.getByLabel('Theme JSON').fill(
+    JSON.stringify({
+      id: 'imported-sunset',
+      name: 'Imported Sunset',
+      base: 'midnight',
+      colors: { accent: '#22d3ee' },
+    }),
+  )
+  await builder.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight')
   expect(await page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent'))).toBe(
-    '',
+    '#22d3ee',
   )
 })
 
