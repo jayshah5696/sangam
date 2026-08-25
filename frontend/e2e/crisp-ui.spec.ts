@@ -249,6 +249,19 @@ test('file tree labels remain bound to their rows through collapse, focus, and r
     'aria-selected',
     'true',
   )
+  const guideOverride = await tree.evaluate((element) =>
+    getComputedStyle(element).getPropertyValue('--trees-indent-guide-bg-override').trim(),
+  )
+  expect(guideOverride).toBe('transparent')
+
+  await tree.hover()
+  const spacingItemBorderColor = await tree.evaluate((element) => {
+    const shadow = element.shadowRoot
+    const spacingItem = shadow?.querySelector('[data-item-section="spacing-item"]')
+    return spacingItem ? getComputedStyle(spacingItem).borderLeftColor : 'transparent'
+  })
+  expect(['transparent', 'rgba(0, 0, 0, 0)']).toContain(spacingItemBorderColor)
+
   const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
   if (evidenceDir) {
     await page.locator('.primary-sidebar').screenshot({
