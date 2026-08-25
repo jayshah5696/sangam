@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
@@ -50,7 +50,8 @@ class EditorSelectionResult(StrictCapabilityModel):
 
 class WorkspaceSearchInput(StrictCapabilityModel):
     query: str = Field(min_length=1, max_length=500)
-    limit: int = Field(default=5, ge=1, le=10)
+    limit: int = Field(default=5, ge=1, le=25)
+    offset: int = Field(default=0, ge=0)
 
 
 class CitationSource(StrictCapabilityModel):
@@ -65,16 +66,22 @@ class CitationSource(StrictCapabilityModel):
 
 
 class WorkspaceSearchResult(StrictCapabilityModel):
-    results: list[CitationSource] = Field(max_length=10)
+    results: list[CitationSource] = Field(max_length=25)
 
 
 class ReadDocumentInput(StrictCapabilityModel):
     document_id: str = Field(min_length=1, max_length=200)
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=20_000, ge=1, le=40_000)
 
 
 class ReadDocumentResult(StrictCapabilityModel):
     source: CitationSource
     content: str = Field(max_length=40_000)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=40_000)
+    total_chars: int = Field(ge=0)
+    truncated: bool
 
 
 class ReadPdfPageInput(StrictCapabilityModel):
@@ -96,11 +103,38 @@ class ReadPdfPageResult(StrictCapabilityModel):
     annotations: list[PdfAnnotationResult] = Field(max_length=20)
 
 
+ProposeUpdateMode = Literal["full", "replace", "insert_before", "insert_after", "append"]
+
+
 class ProposeUpdateInput(StrictCapabilityModel):
     document_id: str = Field(min_length=1, max_length=200)
     expected_revision_id: str = Field(min_length=1, max_length=200)
-    content: str = Field(max_length=2_000_000)
+    mode: ProposeUpdateMode = "full"
+    content: str = Field(default="", max_length=2_000_000)
+    anchor: str | None = Field(default=None, max_length=100_000)
+    replace_all: bool = False
     summary: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _check_mode_shape(self) -> ProposeUpdateInput:
+        if self.mode == "full":
+            if not self.content:
+                raise ValueError("mode='full' requires non-empty content")
+            if self.anchor is not None:
+                raise ValueError("mode='full' must not include an anchor")
+        elif self.mode == "append":
+            if not self.content:
+                raise ValueError("mode='append' requires non-empty content")
+            if self.anchor is not None:
+                raise ValueError("mode='append' must not include an anchor")
+            if self.replace_all:
+                raise ValueError("replace_all is only allowed with mode='replace'")
+        else:
+            if not self.anchor or not self.anchor.strip():
+                raise ValueError(f"mode='{self.mode}' requires a non-empty anchor")
+            if self.replace_all and self.mode != "replace":
+                raise ValueError("replace_all is only allowed with mode='replace'")
+        return self
 
 
 class ProposeUpdateResult(StrictCapabilityModel):

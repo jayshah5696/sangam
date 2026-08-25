@@ -65,11 +65,11 @@ class Settings(BaseSettings):
     )
     chat_reasoning_effort: ChatReasoningEffort = "low"
     chat_timeout_seconds: float = Field(default=120.0, ge=5.0, le=600.0)
-    chat_max_tool_rounds: int = Field(default=8, ge=1, le=20)
+    chat_max_tool_rounds: int = Field(default=24, ge=1, le=48)
     chat_max_tool_result_bytes: int = Field(default=40_000, ge=1_024, le=500_000)
     chat_max_context_messages: int = Field(default=20, ge=2, le=100)
     chat_max_request_bytes: int = Field(default=1_000_000, ge=16_384, le=10_000_000)
-    chat_max_output_tokens: int = Field(default=4_096, ge=128, le=32_768)
+    chat_max_output_tokens: int = Field(default=16_384, ge=128, le=32_768)
     chat_max_concurrent_runs: int = Field(default=4, ge=1, le=32)
     auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"

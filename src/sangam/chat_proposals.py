@@ -4,6 +4,7 @@ import hashlib
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from typing import Literal
 
 from sangam.access import WorkspaceAccessService
 from sangam.db import Database, utc_now
@@ -217,20 +218,32 @@ class ChatProposalService:
         expected_revision_id: str,
         content: str,
         summary: str,
+        mode: Literal["full", "replace", "insert_before", "insert_after", "append"] = "full",
+        anchor: str | None = None,
+        replace_all: bool = False,
     ) -> ChatProposal:
         self.repository.require_thread_owner(thread_id, principal)
+        resolved_content = self.resolve_content(
+            principal,
+            document_id=document_id,
+            expected_revision_id=expected_revision_id,
+            mode=mode,
+            content=content,
+            anchor=anchor,
+            replace_all=replace_all,
+        )
         self.workspace.validate_proposed_update(
             principal,
             document_id=document_id,
             expected_revision_id=expected_revision_id,
-            content=content,
+            content=resolved_content,
         )
         proposal_id = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 "sangam:"
                 f"{thread_id}:{document_id}:{expected_revision_id}:"
-                f"{hashlib.sha256(content.encode()).hexdigest()}",
+                f"{hashlib.sha256(resolved_content.encode()).hexdigest()}",
             )
         )
         return self.repository.create(
@@ -239,9 +252,71 @@ class ChatProposalService:
             thread_id=thread_id,
             document_id=document_id,
             expected_revision_id=expected_revision_id,
-            content=content,
+            content=resolved_content,
             summary=_bounded_text(summary, 500),
         )
+
+    def resolve_content(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        mode: Literal["full", "replace", "insert_before", "insert_after", "append"],
+        content: str,
+        anchor: str | None,
+        replace_all: bool,
+    ) -> str:
+        """Resolve a patch-mode proposal into the resulting full document content."""
+        if mode == "full":
+            return content
+        document = self.workspace.get_document(principal, document_id)
+        if expected_revision_id == document.current_revision_id:
+            document_content = document.content
+        else:
+            revision = next(
+                (
+                    item
+                    for item in self.workspace.history(principal, document_id)
+                    if item.revision_id == expected_revision_id
+                ),
+                None,
+            )
+            if revision is None:
+                raise NotFoundError(f"Document revision not found: {expected_revision_id}")
+            document_content = revision.content
+        if mode == "append":
+            boundary = "" if (document_content.endswith("\n") or content.startswith("\n")) else "\n"
+            return document_content + boundary + content
+        assert anchor is not None
+        count = document_content.count(anchor)
+        if count == 0:
+            raise _patch_error(
+                "anchor_not_found",
+                "The anchor was not found in the document. The anchor must match the "
+                f"document content exactly. Anchor start: {anchor[:80]!r}",
+            )
+        if mode == "replace":
+            if count > 1 and not replace_all:
+                raise _patch_error(
+                    "anchor_not_unique",
+                    f"The anchor matches {count} locations; provide a longer unique "
+                    "anchor or set replace_all.",
+                )
+            return (
+                document_content.replace(anchor, content)
+                if replace_all
+                else (document_content.replace(anchor, content, 1))
+            )
+        if count != 1:
+            raise _patch_error(
+                "anchor_not_unique",
+                f"The anchor must match exactly one location for {mode}; it matches "
+                f"{count} locations. Provide a longer unique anchor.",
+            )
+        if mode == "insert_before":
+            return document_content.replace(anchor, content + anchor, 1)
+        return document_content.replace(anchor, anchor + content, 1)
 
     def list(
         self, principal: Principal, *, thread_id: str | None, document_id: str | None
@@ -287,6 +362,12 @@ class ChatProposalService:
         if reason:
             summary = f"{summary or 'Proposal'} — {_bounded_text(reason, 500)}"
         return self.repository.dismiss(principal, proposal_id, summary)
+
+
+def _patch_error(code: str, message: str) -> ValidationError:
+    error = ValidationError(message)
+    error.code = code
+    return error
 
 
 def _proposal_from_row(row: sqlite3.Row) -> ChatProposal:

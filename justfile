@@ -46,6 +46,16 @@ test-frontend:
     npm --prefix frontend run lint
     npm --prefix frontend run test
 
+# Run the 10-item chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
+eval-chat output="test-results/chat-evals.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --output "{{ output }}"
+
+# Run the chat eval suite against another checkout's code for before/after comparison.
+eval-chat-against source output="test-results/chat-evals-baseline.json":
+    mkdir -p test-results
+    cd "{{ source }}" && uv run python "{{ justfile_directory() }}/scripts/run_chat_evals.py" --output "{{ output }}"
+
 # Exercise desktop and narrow browser interactions against isolated data.
 test-e2e:
     npm --prefix frontend run test:e2e
