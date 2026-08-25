@@ -50,6 +50,80 @@ test('display type scale stays consistent across routes and editor modes', async
   }
 })
 
+test('typography preferences apply live, persist, and reset', async ({ page }) => {
+  await page.goto('/settings?category=appearance')
+  const uiFont = page.getByLabel('Interface font')
+  await expect(uiFont).toBeVisible()
+
+  await uiFont.selectOption('serif')
+  await expect(page.locator('html')).toHaveAttribute('data-ui-font', 'serif')
+  const chromeFamily = await page
+    .locator('.settings-compact-header h1')
+    .evaluate((element) => getComputedStyle(element).fontFamily)
+  expect(chromeFamily).toContain('Georgia')
+
+  const controlSizeBefore = await page
+    .locator('#typography-ui-font select')
+    .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  await page.getByRole('button', { name: 'Compact' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+  const controlSizeAfter = await page
+    .locator('#typography-ui-font select')
+    .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(controlSizeAfter).toBeLessThan(controlSizeBefore)
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('data-ui-font', 'serif')
+  await expect(page.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+
+  await page.getByRole('button', { name: 'Reset', exact: true }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-ui-font', 'system')
+  await expect(page.locator('html')).toHaveAttribute('data-ui-density', 'default')
+  await expect(page.locator('html')).toHaveAttribute('data-editor-size', 'default')
+})
+
+test('create theme builds, applies, persists, imports, and deletes', async ({ page }) => {
+  await page.goto('/settings?category=appearance')
+  const builder = page.locator('#create-theme')
+  await expect(builder).toBeVisible()
+
+  await builder.getByRole('button', { name: 'New theme' }).click()
+  await builder.getByLabel('Theme name').fill('Sunset')
+  await builder.getByLabel('Base palette').selectOption('cobalt')
+  await builder.getByLabel('Accent', { exact: true }).fill('#ff8800')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
+  await expect
+    .poll(() => page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent')))
+    .toBe('#ff8800')
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
+  expect(await page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent'))).toBe(
+    '#ff8800',
+  )
+  await expect(page.locator('.theme-card', { hasText: 'Sunset' })).toBeVisible()
+
+  await builder.getByRole('button', { name: 'Edit', exact: true }).first().click()
+  await builder.getByRole('button', { name: 'Export JSON' }).click()
+  await builder.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
+
+  await builder.getByText('Import theme JSON').click()
+  await builder.getByLabel('Theme JSON').fill(
+    JSON.stringify({
+      id: 'imported-sunset',
+      name: 'Imported Sunset',
+      base: 'midnight',
+      colors: { accent: '#22d3ee' },
+    }),
+  )
+  await builder.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight')
+  expect(await page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent'))).toBe(
+    '#22d3ee',
+  )
+})
+
 test('semantic icon roles render consistently without shrinking control targets', async ({
   page,
 }, testInfo) => {

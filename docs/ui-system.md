@@ -30,6 +30,34 @@ font sizes are rejected by lint outside `tokens.css`; the one sanctioned excepti
 the relative `0.9em` on inline code inside rendered Markdown, which tracks its parent
 text size. Icon tokens use `rem` so icons scale with the user's root font size.
 
+### Typography preferences
+
+Settings > Appearance > Typography lets each browser choose the interface font
+(`data-ui-font`), interface density (`data-ui-density`), and editor text size
+(`data-editor-size`). There is no separate code-font choice: the interface font
+applies to all chrome and the editor keeps the shared mono stack for alignment.
+The choices are stored with the other workspace preferences in `localStorage`
+and applied as `data-*` attributes on `<html>` by an external bootstrap script
+in `index.html` before first paint, so there is no flash of the default type.
+The override blocks live in `tokens.css` next to the defaults and are the only
+place raw font values are allowed. Density multiplies the chrome text tokens;
+it never scales `--text-editor`, which has its own control. Touch targets stay
+at least `--control-touch` tall in every density.
+
+### Create theme
+
+Settings > Appearance > Create theme is a theme studio: start a theme from one
+of the four base palettes, edit its color roles (app background, surface,
+raised surface, text, muted text, sidebar, sidebar text, accent) with live
+preview on the real workspace, then keep editing or export it as JSON for
+sharing. Import theme JSON recreates a shared theme. Custom themes are stored
+in the workspace preferences as `customThemes` and applied before first paint:
+`data-theme` is set to the theme's base palette while each overridden color
+role is injected as an inline custom property on `<html>`, with
+`--accent-soft` and a luminance-derived `--accent-text` derived from the
+accent. Custom themes appear as cards in the Theme grid and are
+browser-scoped like the rest of Appearance.
+
 ## Dimensions
 
 - Spacing uses `--space-1` through `--space-5`: 4, 8, 12, 16, and 24px.
