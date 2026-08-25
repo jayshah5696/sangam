@@ -7,6 +7,42 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.10.0] - 2026-08-25
+
+### Added
+
+- Chat edit proposals can now replace a unique anchor, insert before or after an
+  anchor, or append content. The server resolves each patch against the pinned
+  document revision before creating the proposal, so review and stale-revision
+  checks still use the complete proposed document (#132).
+- `read_document` and `search_workspace` now support pagination. Read-only chat
+  tools can run in parallel, the maximum output budget is 16,384 tokens, and the
+  default tool-round limit is 24 (#132).
+- `just eval-chat` runs a 10-case live chat suite for edits, cited answers,
+  multi-step tasks, publishing safety, and workspace boundaries (#132).
+- Shared motion tokens now cover menus, dialogs, drawers, tabs, and controls.
+  Reduced-motion preferences disable these animations (#137).
+
+### Changed
+
+- Workspace tabs share the available width and scroll the active tab into view.
+  Compact inspector chat now fits the full supported 290 px to 720 px rail range
+  without horizontal overflow (#136).
+- `just` recipes are now the canonical interface for formatting, tests, browser
+  checks, Compose validation, and screenshot updates (#135).
+
+### Fixed
+
+- File-tree indent guides no longer appear when the tree is hovered or a row is
+  active (#131).
+
+### Upgrade notes
+
+- This release has no database migrations, security-specific changes, or new
+  required configuration. Replace the running container with the 0.10.0 image.
+- The optional live chat eval suite requires `SANGAM_OPENROUTER_API_KEY` and makes
+  paid provider requests. It is not part of the runtime upgrade.
+
 ## [0.9.1] - 2026-08-24
 
 ### Added
@@ -208,7 +244,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.0
 [0.9.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.1
 [0.9.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.0
 [0.8.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.1
