@@ -21,9 +21,14 @@ conflict.
 - `--text-control` (13px): buttons, inputs, tabs, menu items, and tree rows.
 - `--text-body` (14px): primary UI values and descriptions.
 - `--text-editor` (14px): editable document content.
+- `--text-display-sm` (22–31px, fluid): document route headers in normal and split modes.
+- `--text-display` (36–64px, fluid): full-page heroes such as the welcome and publication pages.
 
 Interactive text must not be smaller than `--text-control` (13px). New styles must use
-these semantic tokens instead of hard-coded font sizes.
+these semantic tokens instead of hard-coded font sizes. Raw `px`, `rem`, and `clamp()`
+font sizes are rejected by lint outside `tokens.css`; the one sanctioned exception is
+the relative `0.9em` on inline code inside rendered Markdown, which tracks its parent
+text size. Icon tokens use `rem` so icons scale with the user's root font size.
 
 ## Dimensions
 

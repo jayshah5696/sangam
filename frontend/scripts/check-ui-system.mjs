@@ -7,7 +7,9 @@ const files = (await readdir(stylesDirectory)).filter((file) => file.endsWith('.
 const violations = []
 const definedVariables = new Set()
 const forbidden = [
-  [/font-size:\s*(?:8|9|10|11|12|13|14)px\b/g, 'use a semantic text token'],
+  [/font-size:\s*[\d.]+px\b/g, 'use a semantic text token (raw px font sizes are only allowed in tokens.css)'],
+  [/font-size:\s*[\d.]+rem\b/g, 'use a semantic text token (raw rem font sizes are only allowed in tokens.css)'],
+  [/font-size:\s*clamp\(/g, 'use a display text token defined in tokens.css'],
   [/font-family:\s*(?:Inter|Georgia|"SFMono-Regular")/g, 'use a semantic font token'],
   [/font:\s*[^;]*(?:Inter|Georgia|"SFMono-Regular")/g, 'use semantic font tokens in font shorthand'],
   [/border-radius:\s*(?:5|6|7|8|9|10|11|12|99|999)px\b/g, 'use a semantic radius token'],

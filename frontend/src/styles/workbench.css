@@ -262,7 +262,6 @@
 .empty-editor-group p { font-size: var(--text-label); }
 .split-workbench .document-workspace { padding: 20px 22px 22px; }
 .split-workbench .document-header { margin-bottom: 13px; }
-.split-workbench .document-header h1 { font-size: clamp(22px, 2.3vw, 31px); }
 .split-workbench .document-badges { display: none; }
 .split-workbench .editor,
 .split-workbench .editor .cm-editor,

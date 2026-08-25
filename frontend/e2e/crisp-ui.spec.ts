@@ -11,6 +11,45 @@ async function expectRenderedIconSize(locator: import('@playwright/test').Locato
   expect(box!.height).toBe(expected)
 }
 
+test('display type scale stays consistent across routes and editor modes', async ({
+  page,
+  seededWorkspace,
+}) => {
+  await page.goto('/')
+  const heroSize = await page
+    .locator('.welcome h1')
+    .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(heroSize).toBeGreaterThanOrEqual(36)
+  expect(heroSize).toBeLessThanOrEqual(64)
+
+  const publicationSize = await (async () => {
+    await page.goto('/publications')
+    const header = page.locator('.publication-page > header h1')
+    if ((await header.count()) === 0) return null
+    return Number.parseFloat(await header.evaluate((element) => getComputedStyle(element).fontSize))
+  })()
+  if (publicationSize !== null) {
+    expect(publicationSize).toBe(heroSize)
+  }
+
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
+  const header = page.locator('.document-header h1')
+  await expect(header).toBeVisible()
+  const normalSize = await header.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(normalSize).toBeGreaterThanOrEqual(22)
+  expect(normalSize).toBeLessThanOrEqual(31)
+
+  const splitButton = page.getByRole('tab', { name: 'Split' })
+  if (await splitButton.count()) {
+    await splitButton.click()
+    await expect(page.locator('.split-workbench .document-header h1')).toBeVisible()
+    const splitSize = await page
+      .locator('.split-workbench .document-header h1')
+      .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+    expect(splitSize).toBe(normalSize)
+  }
+})
+
 test('semantic icon roles render consistently without shrinking control targets', async ({
   page,
 }, testInfo) => {
@@ -21,7 +60,7 @@ test('semantic icon roles render consistently without shrinking control targets'
       styles.getPropertyValue(name).trim(),
     )
   })
-  expect(tokens).toEqual(['12px', '14px', '16px', '18px', '24px'])
+  expect(tokens).toEqual(['.75rem', '.875rem', '1rem', '1.125rem', '1.5rem'])
   await expectRenderedIconSize(page.locator('.utility-header > .lucide').first(), 24)
   await expectRenderedIconSize(page.locator('.publication-filters .lucide-search'), 16)
 
