@@ -21,7 +21,7 @@ test:
     npm --prefix frontend run test
 
 # Run source, documentation, version, configuration, and distribution gates.
-check: test test-docs
+check: test test-docs validate-compose
     uv run python scripts/verify-release-config.py
     uv run python scripts/verify-version.py --frontend-dist
     ./scripts/audit-dependencies.sh
@@ -46,9 +46,32 @@ test-frontend:
     npm --prefix frontend run lint
     npm --prefix frontend run test
 
+# Run the 10-item chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
+eval-chat output="test-results/chat-evals.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --output "{{ output }}"
+
+# Run the chat eval suite against another checkout's code for before/after comparison.
+eval-chat-against source output="test-results/chat-evals-baseline.json":
+    mkdir -p test-results
+    cd "{{ source }}" && uv run python "{{ justfile_directory() }}/scripts/run_chat_evals.py" --output "{{ output }}"
+
 # Exercise desktop and narrow browser interactions against isolated data.
 test-e2e:
     npm --prefix frontend run test:e2e
+
+# Update verified Playwright screenshot baselines.
+update-screenshots:
+    npm --prefix frontend run update:screenshots
+
+# Check Python and frontend code style and linting.
+lint:
+    uv run ruff check .
+    npm --prefix frontend run lint
+
+# Validate development and production Compose configurations.
+validate-compose:
+    ./scripts/validate-compose.sh
 
 # Format Python sources and tests.
 format:

@@ -26,8 +26,11 @@ from openai.types.responses import (
     ResponseTextDeltaEvent,
     ResponseTextDoneEvent,
 )
+from pydantic import ValidationError as PydanticValidationError
 
+from sangam.chat_capabilities import ProposeUpdateInput, WorkspaceSearchInput
 from sangam.chat_context import ChatRequestContext
+from sangam.config import Settings
 from sangam.errors import ValidationError
 from sangam.security import Principal
 
@@ -1032,3 +1035,351 @@ def test_long_first_message_title_is_truncated_with_ellipsis(client: TestClient)
     title = loaded.json()["title"]
     assert len(title) <= 48
     assert title.endswith("\u2026")
+
+
+def _proposal_principal(operation_id: str) -> Principal:
+    return Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id=operation_id
+    )
+
+
+def test_propose_update_input_enforces_patch_mode_shape() -> None:
+    base = {"document_id": "doc-1", "expected_revision_id": "rev-1", "summary": "Edit"}
+
+    full = ProposeUpdateInput.model_validate({**base, "content": "Full text"})
+    assert full.mode == "full"
+    assert full.anchor is None
+
+    deletion = ProposeUpdateInput.model_validate(
+        {**base, "mode": "replace", "anchor": "gone", "content": ""}
+    )
+    assert deletion.content == ""
+
+    with pytest.raises(PydanticValidationError):
+        ProposeUpdateInput.model_validate({**base, "content": ""})
+    with pytest.raises(PydanticValidationError):
+        ProposeUpdateInput.model_validate({**base, "content": "text", "anchor": "x"})
+    with pytest.raises(PydanticValidationError):
+        ProposeUpdateInput.model_validate(
+            {**base, "mode": "append", "anchor": "x", "content": "text"}
+        )
+    with pytest.raises(PydanticValidationError):
+        ProposeUpdateInput.model_validate({**base, "mode": "append", "content": ""})
+    with pytest.raises(PydanticValidationError):
+        ProposeUpdateInput.model_validate(
+            {**base, "mode": "insert_before", "anchor": "", "content": "t"}
+        )
+    with pytest.raises(PydanticValidationError):
+        ProposeUpdateInput.model_validate(
+            {**base, "mode": "insert_before", "anchor": "a", "content": "t", "replace_all": True}
+        )
+
+
+def test_patch_mode_replace_proposal_resolves_to_full_content(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Patch replace", "content": "alpha beta gamma"},
+        headers=headers("patch-replace-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = _proposal_principal("patch-replace")
+    proposals = client.app.state.services.chat.proposals
+
+    proposal = proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="delta",
+        summary="Replace beta",
+        mode="replace",
+        anchor="beta",
+    )
+
+    assert proposal.content == "alpha delta gamma"
+
+
+def test_patch_mode_replace_all_replaces_every_occurrence(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Patch replace all", "content": "one two one"},
+        headers=headers("patch-replace-all-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = _proposal_principal("patch-replace-all")
+    proposals = client.app.state.services.chat.proposals
+    arguments: dict[str, object] = {
+        "thread_id": thread_id,
+        "document_id": document["document_id"],
+        "expected_revision_id": document["current_revision_id"],
+        "summary": "Replace every one",
+        "mode": "replace",
+        "anchor": "one",
+        "content": "X",
+    }
+
+    with pytest.raises(ValidationError) as unique_error:
+        proposals.create(principal, **arguments)
+    assert unique_error.value.code == "anchor_not_unique"
+
+    arguments["replace_all"] = True
+    proposal = proposals.create(principal, **arguments)
+    assert proposal.content == "X two X"
+
+
+def test_patch_mode_replace_supports_pure_deletion(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Patch delete", "content": "keep cut keep"},
+        headers=headers("patch-delete-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    proposal = client.app.state.services.chat.proposals.create(
+        _proposal_principal("patch-delete"),
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="",
+        summary="Remove the filler",
+        mode="replace",
+        anchor="cut ",
+    )
+    assert proposal.content == "keep keep"
+
+
+def test_patch_mode_anchor_errors_include_hint_and_preview(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Patch missing", "content": "actual content"},
+        headers=headers("patch-missing-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    proposals = client.app.state.services.chat.proposals
+    principal = _proposal_principal("patch-missing")
+
+    with pytest.raises(ValidationError) as missing_error:
+        proposals.create(
+            principal,
+            thread_id=thread_id,
+            document_id=document["document_id"],
+            expected_revision_id=document["current_revision_id"],
+            content="new",
+            summary="Missing anchor",
+            mode="replace",
+            anchor="z" * 120,
+        )
+    assert missing_error.value.code == "anchor_not_found"
+    assert "z" * 80 in missing_error.value.message
+    assert "exactly" in missing_error.value.message
+
+
+def test_patch_mode_insert_before_and_after_preserve_the_anchor(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Patch insert", "content": "start middle end"},
+        headers=headers("patch-insert-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    proposals = client.app.state.services.chat.proposals
+    principal = _proposal_principal("patch-insert")
+    common = {
+        "thread_id": thread_id,
+        "document_id": document["document_id"],
+        "expected_revision_id": document["current_revision_id"],
+        "anchor": "middle",
+    }
+
+    before = proposals.create(
+        principal, content="[before] ", summary="Insert before", mode="insert_before", **common
+    )
+    after = proposals.create(
+        principal, content=" [after]", summary="Insert after", mode="insert_after", **common
+    )
+
+    assert before.content == "start [before] middle end"
+    assert after.content == "start middle [after] end"
+
+
+def test_append_mode_joins_with_a_single_newline_boundary(client: TestClient) -> None:
+    without_newline = client.post(
+        "/api/v1/documents",
+        json={"title": "Append plain", "content": "first line"},
+        headers=headers("append-plain-source"),
+    ).json()
+    with_newline = client.post(
+        "/api/v1/documents",
+        json={"title": "Append newline", "content": "ends with newline\n"},
+        headers=headers("append-newline-source"),
+    ).json()
+    proposals = client.app.state.services.chat.proposals
+    principal = _proposal_principal("append-mode")
+
+    plain = proposals.create(
+        principal,
+        thread_id=create_thread(client, document_id=without_newline["document_id"]),
+        document_id=without_newline["document_id"],
+        expected_revision_id=without_newline["current_revision_id"],
+        content="second line",
+        summary="Append a line",
+        mode="append",
+    )
+    joined = proposals.create(
+        principal,
+        thread_id=create_thread(client, document_id=with_newline["document_id"]),
+        document_id=with_newline["document_id"],
+        expected_revision_id=with_newline["current_revision_id"],
+        content="another line",
+        summary="Append another line",
+        mode="append",
+    )
+
+    assert plain.content == "first line\nsecond line"
+    assert joined.content == "ends with newline\nanother line"
+
+
+def test_resolve_content_uses_the_pinned_historical_revision(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Pinned patch", "content": "old anchor old"},
+        headers=headers("pinned-patch-source"),
+    ).json()
+    original_revision = document["current_revision_id"]
+    client.patch(
+        f"/api/v1/documents/{document['document_id']}",
+        json={
+            "expected_revision_id": original_revision,
+            "content": "entirely different content now",
+        },
+        headers=headers("pinned-patch-edit"),
+    )
+    service = client.app.state.services.chat.proposals
+
+    resolved = service.resolve_content(
+        _proposal_principal("pinned-patch"),
+        document_id=document["document_id"],
+        expected_revision_id=original_revision,
+        mode="replace",
+        content="new",
+        anchor="old",
+        replace_all=True,
+    )
+
+    assert resolved == "new anchor new"
+
+
+def test_full_mode_proposal_behavior_is_unchanged(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Full mode", "content": "Original evidence"},
+        headers=headers("full-mode-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    proposal = client.app.state.services.chat.proposals.create(
+        _proposal_principal("full-mode"),
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="Original evidence\n\nGrounded conclusion.",
+        summary="Add grounded conclusion from workspace chat",
+    )
+
+    assert proposal.content == "Original evidence\n\nGrounded conclusion."
+
+
+def test_read_document_paginates_by_character_offset_and_limit(
+    client: TestClient,
+) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Paginated read", "content": "0123456789" * 10},
+        headers=headers("paginated-read-source"),
+    ).json()
+    token = issue_agent_token(client, capabilities=("read",))
+    thread_id = create_thread(
+        client,
+        document_id=document["document_id"],
+        Authorization=f"Bearer {token}",
+    )
+    principal = client.app.state.services.identity.authenticate(token, operation_id="paged-read")
+    request_context = ChatRequestContext(principal=principal, document_id=document["document_id"])
+    chat = client.app.state.services.chat
+    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    agent_context = AgentContext(
+        thread=thread, store=chat.store_adapter, request_context=request_context
+    )
+    read_tool = next(tool for tool in chat.tools if tool.name == "read_document")
+
+    def invoke(arguments: dict[str, object]) -> dict[str, object]:
+        run_context = AgentsToolContext(
+            context=agent_context,
+            tool_name=read_tool.name,
+            tool_call_id=f"call-{json.dumps(arguments, sort_keys=True)}",
+            tool_arguments=json.dumps(arguments),
+        )
+        result = asyncio.run(read_tool.on_invoke_tool(run_context, json.dumps(arguments)))
+        return json.loads(result)
+
+    first_page = invoke(
+        {
+            "document_id": document["document_id"],
+            "offset": 10,
+            "limit": 20,
+        }
+    )
+    last_page = invoke({"document_id": document["document_id"], "offset": 90})
+
+    assert first_page["content"] == "01234567890123456789"
+    assert first_page["offset"] == 10
+    assert first_page["limit"] == 20
+    assert first_page["total_chars"] == 100
+    assert first_page["truncated"] is True
+    assert last_page["content"] == "0123456789"
+    assert last_page["offset"] == 90
+    assert last_page["total_chars"] == 100
+    assert last_page["truncated"] is False
+
+
+def test_search_workspace_passes_pagination_and_caps_limit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def spy(_principal: Principal, **kwargs: object) -> list[object]:
+        captured.update(kwargs)
+        return []
+
+    chat = client.app.state.services.chat
+    monkeypatch.setattr(chat.toolset.workspace, "search_documents", spy)
+    with pytest.raises(PydanticValidationError):
+        WorkspaceSearchInput.model_validate({"query": "evidence", "limit": 26})
+    with pytest.raises(PydanticValidationError):
+        WorkspaceSearchInput.model_validate({"query": "evidence", "offset": -1})
+
+    token = issue_agent_token(client, capabilities=("read", "search"))
+    thread_id = create_thread(client, Authorization=f"Bearer {token}")
+    principal = client.app.state.services.identity.authenticate(token, operation_id="paged-search")
+    request_context = ChatRequestContext(principal=principal)
+    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    agent_context = AgentContext(
+        thread=thread, store=chat.store_adapter, request_context=request_context
+    )
+    search_tool = next(tool for tool in chat.tools if tool.name == "search_workspace")
+    run_context = AgentsToolContext(
+        context=agent_context,
+        tool_name=search_tool.name,
+        tool_call_id="call-paged-search",
+        tool_arguments=json.dumps({"query": "evidence", "limit": 25, "offset": 30}),
+    )
+    asyncio.run(search_tool.on_invoke_tool(run_context, run_context.tool_arguments))
+
+    assert captured["limit"] == 25
+    assert captured["offset"] == 30
+
+
+def test_execution_budget_defaults_support_longer_runs() -> None:
+    defaults = Settings.model_fields
+
+    assert defaults["chat_max_output_tokens"].default == 16_384
+    assert defaults["chat_max_tool_rounds"].default == 24
+    with pytest.raises(PydanticValidationError):
+        Settings(chat_max_tool_rounds=49, chat_max_output_tokens=32_769)
