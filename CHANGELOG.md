@@ -7,6 +7,36 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.9.1] - 2026-08-24
+
+### Added
+
+- **User-Configurable Typography Preferences**:
+  - Added interface font, interface density, and editor font size customization in **Settings > Appearance > Typography** (#126, #128).
+  - Pre-paint bootstrap script (`typography-bootstrap.js`) loads stored preferences before first paint to prevent layout shifts while complying with Content Security Policy (#128).
+- **Custom Theme Studio & Theme Sharing**:
+  - Interactive Theme Studio in **Settings > Appearance > Create theme** allowing full customization of eight semantic color roles (app background, surface, raised surface, text, muted text, sidebar, sidebar text, accent) with real-time workspace preview (#128).
+  - JSON import and export support for sharing custom themes across instances and browsers (#128).
+  - Named theme cards with live wireframe previews and graceful fallback on active theme removal (#128).
+- **ChatKit Typography & Density Synchronization**:
+  - Propagates workspace font family, mono family, base font size, and density preferences directly into the ChatKit assistant iframe using memoized configuration to prevent frame re-initialization (#128).
+- **Tokenized Fluid Display Type Scale**:
+  - Consolidated ad-hoc display-header clamps into fluid `--text-display-sm` and `--text-display` design tokens (#125, #127).
+  - Converted icon sizing tokens to `rem` units so icons scale seamlessly with user font preferences (#127).
+  - Extended automated UI linting (`check-ui-system`) to strictly enforce design token usage and block hardcoded font sizes outside tokens (#127).
+
+### Changed
+
+- **Documentation Architecture & Hygiene**:
+  - Standardized documentation naming to lowercase kebab-case (`chat-capabilities.md`, `ui-system.md`) (#124).
+  - Relocated interactive lifecycle diagrams to `docs/assets/` and cleaned legacy assets (#124).
+  - Connected documentation cross-links across architecture, chat capabilities, and operations guides (#124).
+
+### Fixed
+
+- **Theme Import Contrast Accessibility**:
+  - Resolved WCAG AA color contrast defect in theme import summary under dark themes using high-contrast text styling with accent underlines (#128).
+
 ## [0.9.0] - 2026-08-23
 
 ### Added
@@ -178,7 +208,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.1
 [0.9.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.0
 [0.8.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.1
 [0.8.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.8.0
