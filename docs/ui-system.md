@@ -90,6 +90,25 @@ Both sidebars use the shared `ui-rail` and `ui-rail-header` anatomy. Use
 inspection surfaces. Rail-specific CSS may change layout or color, but must not
 introduce a new type scale, control height, or radius system.
 
+The document inspector rail supports continuous resizing between 290px and
+720px. Embedded tools such as compact ChatKit must reflow inside
+`.inspector-chat-surface` across the entire supported rail width without
+overflowing the rail or producing page-level horizontal scrollbars.
+
+## Workspace tabs
+
+Open-document tabs in an editor group use equal-width fluid distribution:
+
+- Open tabs share available width equally up to the maximum width (220px).
+- When space is constrained, tabs shrink together down to the minimum width
+  (118px). Below that threshold, the tab strip enables horizontal scrolling
+  while keeping tab widths uniform.
+- Pinned tabs use the same outer width as unpinned tabs.
+- Hovering or focusing close controls never causes layout shift or tab width
+  changes.
+- Activating an offscreen tab via pointer, keyboard navigation, route
+  restoration, or tab reopen scrolls the active tab into view.
+
 ## Interaction states
 
 Every interactive surface must define the states that apply to it. Reuse the

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -512,10 +512,18 @@ function DocumentTab({
   onActivate: (documentId: string) => void
   onClose: (documentId: string) => void
 }) {
+  const tabRef = useRef<HTMLDivElement | null>(null)
   const session = useDocumentSession(tab.documentId)
   const dirty = session.saveState !== 'saved'
+
+  useEffect(() => {
+    if (active && tabRef.current) {
+      tabRef.current.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    }
+  }, [active])
+
   return (
-    <div className={active ? 'editor-tab active' : 'editor-tab'} role="presentation">
+    <div ref={tabRef} className={active ? 'editor-tab active' : 'editor-tab'} role="presentation">
       <button
         id={`editor-tab-${groupId}-${tab.documentId}`}
         role="tab"

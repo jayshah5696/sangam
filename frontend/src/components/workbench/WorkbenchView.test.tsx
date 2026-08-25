@@ -178,4 +178,20 @@ describe('WorkbenchView - Issue #62 & #74', () => {
     expect(screen.getByLabelText('Revision history')).toBeDefined()
     expect(screen.getByLabelText('Ask about this document')).toBeDefined()
   })
+
+  it('scrolls active tab into view', () => {
+    const scrollIntoViewMock = vi.fn()
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock
+    state.root = {
+      kind: 'group',
+      id: 'group-1',
+      activeTabId: 'doc-1',
+      tabs: [
+        { documentId: 'doc-1', title: 'Doc 1', pinned: false },
+        { documentId: 'doc-2', title: 'Doc 2', pinned: false },
+      ],
+    }
+    render(<WorkbenchView routeDocumentId="doc-1" />)
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' })
+  })
 })

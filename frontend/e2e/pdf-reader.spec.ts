@@ -212,8 +212,16 @@ test('narrow PDF reader fits the viewport and opens research in the inspector sh
   await expect(page.getByRole('button', { name: 'Close document inspector' })).toBeVisible()
 })
 
-test('PDF page and zoom survive workbench tab switches', async ({ page, request, seededWorkspace }) => {
+test('PDF page and zoom survive workbench tab switches', async ({ page, request }) => {
   test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
+  await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: 'Tab Switch Target',
+      content: '# Target\n\nTarget content for tab switch test.',
+      path: 'tab-switch-target.md',
+    },
+  })
   const document = await importSamplePdf(request, path.join(import.meta.dirname, 'assets/multipage.pdf'))
   await page.goto(`/documents/${document.document_id}`)
   await expect(page.locator('[data-pdf-page="2"]')).toBeVisible()
@@ -229,8 +237,10 @@ test('PDF page and zoom survive workbench tab switches', async ({ page, request,
   await page.getByRole('button', { name: 'Zoom in' }).click()
   const zoom = await page.getByLabel('PDF zoom').textContent()
 
-  await page.getByRole('treeitem', { name: seededWorkspace.documentTitle }).click()
-  await expect(page.getByRole('tab', { name: seededWorkspace.documentTitle })).toBeVisible()
+  const targetItem = page.getByRole('treeitem', { name: 'tab-switch-target.md' })
+  await targetItem.scrollIntoViewIfNeeded()
+  await targetItem.click()
+  await expect(page.getByRole('tab', { name: 'Tab Switch Target' })).toBeVisible()
   await page.getByRole('tab', { name: 'PDF reader evidence' }).click()
   await expect(page.getByRole('textbox', { name: 'PDF page number' })).toHaveValue('2')
   await expect(page.getByLabel('PDF zoom')).toHaveText(zoom ?? '')

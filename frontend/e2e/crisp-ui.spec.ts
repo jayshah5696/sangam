@@ -385,6 +385,144 @@ test('document workbench exposes active, save, and inspector state', async ({ pa
   await expect(page.getByRole('heading', { name: 'Product review' })).toBeVisible()
 })
 
+test('workspace tabs distribute available width equally across short, medium, and long titles with pinned tabs', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop workbench tab strip only')
+  const ids: string[] = []
+  const titles = ['A', 'Medium project note', 'An unusually long document title for tab stress testing']
+
+  for (const title of titles) {
+    const res = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title,
+        content: `# ${title}\n\nContent for ${title}`,
+        content_type: 'text/markdown',
+      },
+    })
+    const data = (await res.json()) as { document_id: string }
+    ids.push(data.document_id)
+  }
+
+  // Seed 3 tabs initially: short, medium, long
+  await page.addInitScript(
+    ({ allIds, allTitles }) => {
+      localStorage.setItem(
+        'sangam.workbench.v1',
+        JSON.stringify({
+          schemaVersion: 1,
+          root: {
+            kind: 'group',
+            id: 'group-1',
+            activeTabId: allIds[0],
+            tabs: [
+              { documentId: allIds[0], title: allTitles[0], pinned: false },
+              { documentId: allIds[1], title: allTitles[1], pinned: false },
+              { documentId: allIds[2], title: allTitles[2], pinned: false },
+            ],
+          },
+          activeGroupId: 'group-1',
+          recentlyClosed: [],
+        }),
+      )
+    },
+    { allIds: ids, allTitles: titles },
+  )
+
+  await page.goto(`/documents/${ids[0]}`)
+  const tabLocator = page.locator('.editor-tab')
+  await expect(tabLocator).toHaveCount(3)
+
+  // Verify 3 tabs with short, medium, and long titles have equal widths within 1px
+  const width0 = (await tabLocator.nth(0).boundingBox())!.width
+  const width1 = (await tabLocator.nth(1).boundingBox())!.width
+  const width2 = (await tabLocator.nth(2).boundingBox())!.width
+
+  expect(Math.abs(width0 - width1)).toBeLessThanOrEqual(1.01)
+  expect(Math.abs(width1 - width2)).toBeLessThanOrEqual(1.01)
+
+  // Pin first tab, ensure outer width remains equal
+  await page.getByRole('button', { name: 'Editor group actions' }).click()
+  await page.getByRole('menuitem', { name: 'Pin tab' }).click()
+  const pinnedWidth0 = (await tabLocator.nth(0).boundingBox())!.width
+  const unpinnedWidth1 = (await tabLocator.nth(1).boundingBox())!.width
+  expect(Math.abs(pinnedWidth0 - unpinnedWidth1)).toBeLessThanOrEqual(1.01)
+})
+
+test('workspace tabs clamp at 118px minimum width, enable horizontal scroll, and scroll offscreen tab into view', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop workbench tab strip only')
+  const ids: string[] = []
+  const titles = Array.from({ length: 14 }, (_, i) => `Overflow Document Tab ${i + 1}`)
+
+  for (const title of titles) {
+    const res = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title,
+        content: `# ${title}\n\nContent for ${title}`,
+        content_type: 'text/markdown',
+      },
+    })
+    const data = (await res.json()) as { document_id: string }
+    ids.push(data.document_id)
+  }
+
+  await page.addInitScript(
+    ({ allIds, allTitles }) => {
+      localStorage.setItem(
+        'sangam.workbench.v1',
+        JSON.stringify({
+          schemaVersion: 1,
+          root: {
+            kind: 'group',
+            id: 'group-1',
+            activeTabId: allIds[0],
+            tabs: allIds.map((id: string, idx: number) => ({
+              documentId: id,
+              title: allTitles[idx],
+              pinned: idx === 0,
+            })),
+          },
+          activeGroupId: 'group-1',
+          recentlyClosed: [],
+        }),
+      )
+    },
+    { allIds: ids, allTitles: titles },
+  )
+
+  await page.goto(`/documents/${ids[0]}`)
+  const tabLocator = page.locator('.editor-tab')
+  await expect(tabLocator).toHaveCount(14)
+
+  // Verify tabs clamp at minimum width of 118px
+  const tab0Box = await tabLocator.nth(0).boundingBox()
+  expect(Math.round(tab0Box!.width)).toBe(118)
+
+  const scrollContainer = page.locator('.editor-tabs-scroll')
+  const isOverflowing = await scrollContainer.evaluate((el) => el.scrollWidth > el.clientWidth)
+  expect(isOverflowing).toBe(true)
+
+  // Switch to first tab, then activate last tab (which is offscreen)
+  await tabLocator.nth(0).getByRole('tab').click()
+  const lastTab = tabLocator.nth(13)
+  await lastTab.getByRole('tab').click()
+  await expect(lastTab).toHaveClass(/active/)
+
+  // Verify the active tab is scrolled into view
+  const scrollBox = await scrollContainer.boundingBox()
+  const lastTabBox = await lastTab.boundingBox()
+  expect(lastTabBox).not.toBeNull()
+  expect(scrollBox).not.toBeNull()
+  expect(lastTabBox!.x + lastTabBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width + 2)
+  expect(lastTabBox!.x).toBeGreaterThanOrEqual(scrollBox!.x - 2)
+})
+
 test('primary routes have no detectable WCAG A or AA violations', async ({ page }) => {
   const routes = test.info().project.name.includes('touch-mobile')
     ? ['/settings', '/reconciliation']

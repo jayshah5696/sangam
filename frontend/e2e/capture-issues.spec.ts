@@ -353,4 +353,87 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await expect(backupCard.getByRole('button', { name: 'Cancel' })).toBeVisible()
     await page.locator('.utility-page').screenshot({ path: path.join(outDir, 'issue-68-backup-delete.png') })
   })
+
+  test('capture issue 133 (equal-width fluid tabs and compact inspector chat containment)', async ({
+    page,
+    request,
+  }) => {
+    const doc1 = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Short',
+        content: '# Short\n\nBrief note.',
+      },
+    })
+    const doc2 = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Medium title document',
+        content: '# Medium title document\n\nMedium description.',
+      },
+    })
+    const doc3 = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'A significantly longer document title for rhythm testing',
+        content: '# Longer document title\n\nDetailed specifications.',
+      },
+    })
+    const d1 = (await doc1.json()) as { document_id: string }
+    const d2 = (await doc2.json()) as { document_id: string }
+    const d3 = (await doc3.json()) as { document_id: string }
+
+    await page.addInitScript(
+      ({ id1, id2, id3 }) => {
+        localStorage.setItem(
+          'sangam.workbench.v1',
+          JSON.stringify({
+            schemaVersion: 1,
+            root: {
+              kind: 'group',
+              id: 'group-1',
+              activeTabId: id1,
+              tabs: [
+                { documentId: id1, title: 'Short', pinned: true },
+                { documentId: id2, title: 'Medium title document', pinned: false },
+                {
+                  documentId: id3,
+                  title: 'A significantly longer document title for rhythm testing',
+                  pinned: false,
+                },
+              ],
+            },
+            activeGroupId: 'group-1',
+            recentlyClosed: [],
+          }),
+        )
+      },
+      { id1: d1.document_id, id2: d2.document_id, id3: d3.document_id },
+    )
+
+    await page.goto(`/documents/${d1.document_id}`)
+    await expect(page.locator('.editor-tab')).toHaveCount(3)
+
+    // Capture tab strip showing equal-width distribution with pinned tab
+    await page
+      .locator('.editor-tabbar')
+      .first()
+      .screenshot({ path: path.join(outDir, 'issue-133-equal-width-tabs.png') })
+
+    // Open chat tab in inspector and resize to minimum 290px
+    await page.getByRole('tab', { name: 'chat', exact: true }).click()
+    await page.evaluate(() => {
+      const stored = JSON.parse(localStorage.getItem('sangam.theme-preferences') || '{}')
+      stored.rightWidth = 290
+      localStorage.setItem('sangam.theme-preferences', JSON.stringify(stored))
+      window.dispatchEvent(new Event('storage'))
+    })
+    await page.waitForTimeout(100)
+
+    const chatSurface = page.locator('.inspector-chat-surface')
+    await expect(chatSurface).toBeVisible()
+    await page
+      .locator('.document-inspector')
+      .screenshot({ path: path.join(outDir, 'issue-133-compact-chat-290px.png') })
+  })
 })

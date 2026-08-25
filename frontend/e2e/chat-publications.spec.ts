@@ -151,6 +151,69 @@ test('compact chat exposes shared new-chat and history controls', async ({
   }
 })
 
+test('compact document chat stays contained across supported inspector widths and resize controls', async ({
+  page,
+  seededWorkspace,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop inspector only')
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
+  await page.getByRole('tab', { name: 'chat', exact: true }).click()
+
+  const chatSurface = page.locator('.inspector-chat-surface')
+  const chatShell = page.locator('.chat-panel-compact .chatkit-shell')
+  await expect(chatSurface).toBeVisible()
+  await expect(chatShell).toBeVisible()
+
+  const handle = page.locator('.resize-handle[aria-label="Resize right sidebar"]')
+  await expect(handle).toBeVisible()
+
+  const sampleWidths = [290, 320, 480, 510, 720]
+  for (const width of sampleWidths) {
+    await page.evaluate((targetWidth) => {
+      const stored = JSON.parse(localStorage.getItem('sangam.theme-preferences') || '{}')
+      stored.rightWidth = targetWidth
+      localStorage.setItem('sangam.theme-preferences', JSON.stringify(stored))
+      window.dispatchEvent(new Event('storage'))
+    }, width)
+    await page.waitForTimeout(50)
+
+    const surfaceBox = await chatSurface.boundingBox()
+    const shellBox = await chatShell.boundingBox()
+    expect(surfaceBox).not.toBeNull()
+    expect(shellBox).not.toBeNull()
+    expect(shellBox!.x + shellBox!.width).toBeLessThanOrEqual(surfaceBox!.x + surfaceBox!.width + 1.5)
+    expect(shellBox!.width).toBeLessThanOrEqual(surfaceBox!.width + 1.5)
+
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    )
+    expect(overflows).toBe(false)
+  }
+
+  // Keyboard resize with Home (min 290) and End (max 720) and arrow keys
+  await handle.focus()
+  await page.keyboard.press('Home')
+  const atMinBox = await chatShell.boundingBox()
+  const surfaceMinBox = await chatSurface.boundingBox()
+  expect(atMinBox!.width).toBeLessThanOrEqual(surfaceMinBox!.width + 1.5)
+
+  await page.keyboard.press('End')
+  const atMaxBox = await chatShell.boundingBox()
+  const surfaceMaxBox = await chatSurface.boundingBox()
+  expect(atMaxBox!.width).toBeLessThanOrEqual(surfaceMaxBox!.width + 1.5)
+
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('Shift+ArrowLeft')
+  const atShiftBox = await chatShell.boundingBox()
+  const surfaceShiftBox = await chatSurface.boundingBox()
+  expect(atShiftBox!.width).toBeLessThanOrEqual(surfaceShiftBox!.width + 1.5)
+
+  const overflows = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  )
+  expect(overflows).toBe(false)
+})
+
 test('durable effect review restores exact pending and completed state', async ({
   page,
   request,
