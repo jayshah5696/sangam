@@ -132,6 +132,7 @@
   --trees-font-size-override: var(--text-control);
   --trees-border-radius-override: var(--radius-control);
   --trees-item-margin-x-override: 0px;
+  --trees-indent-guide-bg-override: transparent;
 }
 .tree-context-menu {
   position: fixed;
