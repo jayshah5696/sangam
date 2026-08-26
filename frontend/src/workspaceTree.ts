@@ -1,3 +1,4 @@
+import type { FileTreeSortEntry } from '@pierre/trees'
 import type { DocumentSummary, Folder as WorkspaceFolder } from './api'
 
 export type WorkspaceTreeAdapter = {
@@ -105,4 +106,87 @@ function uniqueDraftPath(root: string, title: string, usedPaths: Set<string>) {
     suffix += 1
   }
   return candidate
+}
+
+type WorkspaceSortNode = Pick<FileTreeSortEntry, 'basename' | 'isDirectory' | 'path'>
+
+function compareWorkspaceNames(left: string, right: string) {
+  const insensitive = left.localeCompare(right, undefined, { sensitivity: 'base' })
+  if (insensitive !== 0 || left === right) return insensitive
+  return left < right ? -1 : 1
+}
+
+function compareWorkspaceHierarchy(
+  left: FileTreeSortEntry,
+  right: FileTreeSortEntry,
+  compareSiblings: (left: WorkspaceSortNode, right: WorkspaceSortNode) => number,
+) {
+  const sharedDepth = Math.min(left.segments.length, right.segments.length)
+  for (let depth = 0; depth < sharedDepth; depth += 1) {
+    const leftSegment = left.segments[depth]!
+    const rightSegment = right.segments[depth]!
+    if (leftSegment === rightSegment) continue
+
+    return compareSiblings(
+      {
+        basename: leftSegment,
+        isDirectory: depth < left.segments.length - 1 || left.isDirectory,
+        path: left.segments.slice(0, depth + 1).join('/'),
+      },
+      {
+        basename: rightSegment,
+        isDirectory: depth < right.segments.length - 1 || right.isDirectory,
+        path: right.segments.slice(0, depth + 1).join('/'),
+      },
+    )
+  }
+
+  if (left.segments.length !== right.segments.length) {
+    return left.segments.length < right.segments.length ? -1 : 1
+  }
+  if (left.isDirectory === right.isDirectory) return 0
+  return left.isDirectory ? -1 : 1
+}
+
+/**
+ * Builds a comparator that sorts siblings Z–A (reverse alphabetical),
+ * with directories before documents while keeping each subtree contiguous.
+ */
+export function buildNameDescSortComparator(): (a: FileTreeSortEntry, b: FileTreeSortEntry) => number {
+  return (left, right) =>
+    compareWorkspaceHierarchy(left, right, (leftSibling, rightSibling) => {
+      if (leftSibling.isDirectory !== rightSibling.isDirectory) {
+        return leftSibling.isDirectory ? -1 : 1
+      }
+      return compareWorkspaceNames(rightSibling.basename, leftSibling.basename)
+    })
+}
+
+/**
+ * Builds a comparator that sorts siblings by updated_at DESC (newest first),
+ * with directories before documents and a stable name tie-breaker. Pierre
+ * sorts the complete path list, so the comparator must keep descendants next
+ * to their parent instead of grouping all directories ahead of all files.
+ */
+export function buildModifiedSortComparator(
+  timestamps: Map<string, string>,
+): (a: FileTreeSortEntry, b: FileTreeSortEntry) => number {
+  const timestampFor = (entry: WorkspaceSortNode): string => {
+    if (!entry.isDirectory) return timestamps.get(entry.path) ?? ''
+    let max = ''
+    for (const [path, ts] of timestamps) {
+      if (path.startsWith(entry.path + '/') && ts > max) max = ts
+    }
+    return max
+  }
+  return (left, right) =>
+    compareWorkspaceHierarchy(left, right, (leftSibling, rightSibling) => {
+      if (leftSibling.isDirectory !== rightSibling.isDirectory) {
+        return leftSibling.isDirectory ? -1 : 1
+      }
+      const leftTimestamp = timestampFor(leftSibling)
+      const rightTimestamp = timestampFor(rightSibling)
+      if (leftTimestamp !== rightTimestamp) return rightTimestamp.localeCompare(leftTimestamp)
+      return compareWorkspaceNames(leftSibling.basename, rightSibling.basename)
+    })
 }

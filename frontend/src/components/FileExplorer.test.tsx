@@ -204,15 +204,15 @@ describe('FileExplorerPanel', () => {
     expect(state.model.startRenaming).toHaveBeenCalledWith('projects/note.md')
   })
 
-  it('keeps Pierre native labels visible instead of caching labels in pseudo-elements', () => {
+  it('renders labels via aria-label pseudo-element and hides Pierre MiddleTruncate', () => {
     render(<FileExplorerPanel onSearch={vi.fn()} />)
 
     const unsafeCSS = state.useFileTreeOptions[0]?.unsafeCSS as string
     expect(unsafeCSS).not.toContain('data-sangam-label')
-    expect(unsafeCSS).not.toContain('content: attr(')
-    expect(unsafeCSS).not.toMatch(
-      /\[data-item-section="content"\][^{]*>\s*\*\s*\{[^}]*display:\s*none\s*!important;/,
-    )
+    expect(unsafeCSS).toContain('content: attr(aria-label)')
+    expect(unsafeCSS).toContain('[data-item-section="content"]')
+    expect(unsafeCSS).toContain('display: none !important')
+    expect(unsafeCSS).toContain(':not(:has([data-item-rename-input]))')
   })
 
   it('handles rename validation and mutation for documents and folders', () => {
@@ -230,5 +230,13 @@ describe('FileExplorerPanel', () => {
     expect(options?.renaming?.canRename({ isFolder: true, path: 'Drafts' })).toBe(false)
     expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/note.md' })).toBe(true)
     expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/paper.pdf' })).toBe(false)
+  })
+
+  it('applies sort via prepareFileTreeInput on resetPaths, not on useFileTree options', () => {
+    state.documents = [document]
+    render(<FileExplorerPanel onSearch={vi.fn()} />)
+
+    const options = state.useFileTreeOptions[0] as { sort?: unknown }
+    expect(options?.sort).toBeUndefined()
   })
 })

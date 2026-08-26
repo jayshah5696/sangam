@@ -18,13 +18,27 @@ import type {
   FileTreeRenamingItem,
   FileTreeRowDecorationContext,
 } from '@pierre/trees'
+import { prepareFileTreeInput } from '@pierre/trees'
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react'
 import { createPortal } from 'react-dom'
-import { Copy, FilePlus2, FolderPlus, PanelRightOpen, Pencil, Search, Trash2 } from 'lucide-react'
+import {
+  ArrowDownAZ,
+  ArrowUpZA,
+  Clock,
+  Copy,
+  FilePlus2,
+  FolderPlus,
+  PanelRightOpen,
+  Pencil,
+  Search,
+  Trash2,
+} from 'lucide-react'
 import { api, type DocumentSummary, type Folder } from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
+  buildModifiedSortComparator,
+  buildNameDescSortComparator,
   buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
   joinWorkspacePath,
@@ -45,7 +59,15 @@ type TreeCallbacks = {
   renderRowDecoration: (context: FileTreeRowDecorationContext) => { text: string; title: string } | null
 }
 
+type ExplorerSort = 'modified' | 'name-asc' | 'name-desc'
+const sortStorageKey = 'sangam.explorer.sort.v1'
 const expandedStorageKey = 'sangam.explorer.expanded.v2'
+
+function sortLabel(sort: ExplorerSort) {
+  if (sort === 'modified') return 'Last modified'
+  if (sort === 'name-asc') return 'Name A–Z'
+  return 'Name Z–A'
+}
 
 export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
@@ -64,6 +86,27 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const [createName, setCreateName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const pendingFocusDocumentIdRef = useRef<string | null>(null)
+  const [explorerSort, setExplorerSort] = useState<ExplorerSort>(() => {
+    try {
+      const stored = localStorage.getItem(sortStorageKey)
+      if (stored === 'name-asc' || stored === 'name-desc') return stored
+      return 'modified'
+    } catch {
+      return 'modified'
+    }
+  })
+
+  const sortComparator = useMemo(() => {
+    if (explorerSort === 'name-asc') return undefined
+    if (explorerSort === 'name-desc') {
+      return buildNameDescSortComparator()
+    }
+    const timestamps = new Map<string, string>()
+    for (const [treePath, doc] of adapter.documentByTreePath) {
+      timestamps.set(treePath, doc.updated_at)
+    }
+    return buildModifiedSortComparator(timestamps)
+  }, [explorerSort, adapter.documentByTreePath])
 
   const refresh = async () => {
     await Promise.all([
@@ -259,20 +302,31 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     density: 'compact',
     icons: 'minimal',
     flattenEmptyDirectories: false,
+    // Hide Pierre's MiddleTruncate and render label from aria-label (upstream: pierrecomputer/pierre#939)
     unsafeCSS: `
+      [data-type="item"]:not(:has([data-item-rename-input]))
+        > [data-item-section="content"] {
+        display: none !important;
+      }
+      [data-type="item"]:not(:has([data-item-rename-input]))::after {
+        content: attr(aria-label);
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        text-align: start;
+      }
+      [data-item-section="decoration"],
+      [data-item-section="git"],
+      [data-item-section="action"] {
+        order: 1;
+      }
       [data-item-section="decoration"] {
         flex: 0 0 auto !important;
       }
       [data-item-section="decoration"]:empty {
         display: none !important;
-      }
-      [data-item-section="content"] {
-        flex: 1 1 auto !important;
-        min-width: 0 !important;
-        max-width: 100% !important;
-        overflow: hidden !important;
-        white-space: nowrap !important;
-        text-overflow: ellipsis !important;
       }
     `,
     initialExpansion: 'open',
@@ -296,12 +350,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   })
 
   useEffect(() => {
-    model.resetPaths(adapter.paths, {
+    const preparedInput = prepareFileTreeInput(adapter.paths, {
+      sort: sortComparator ?? 'default',
+    })
+    model.resetPaths({
+      preparedInput,
       initialExpandedPaths: loadExpanded().filter(
         (path) => adapter.folderByTreePath.has(path) || path === adapter.draftsRootPath,
       ),
     })
-  }, [adapter, model])
+  }, [adapter, model, sortComparator])
 
   useEffect(() => {
     if (!activeDocumentId) return
@@ -416,7 +474,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     const host = event.currentTarget as HTMLElement
     const activeElement = host.shadowRoot?.activeElement
     const anchorElement = activeElement instanceof HTMLElement ? activeElement : null
-    if (!item || !anchorElement) return
+    if (!item || !anchorElement || !anchorElement.closest('[data-type="item"]')) return
     event.preventDefault()
     event.stopPropagation()
     openContextMenu(item, anchorElement, {
@@ -442,7 +500,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           title="New folder"
           onClick={() => setCreateMode({ kind: 'folder', parentPath: selectedFolderPath })}
         >
-          <FolderPlus size="var(--icon-control)" />
+          <FolderPlus size="var(--icon-page)" />
         </button>
       </div>
       {createMode && (
@@ -473,7 +531,25 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       </button>
       <div className="sidebar-section-title">
         <span>Workspace</span>
-        <small>{documents.data?.length ?? 0}</small>
+        <span className="explorer-heading-actions">
+          <button
+            className="explorer-sort"
+            type="button"
+            aria-label={`Sort: ${sortLabel(explorerSort)}. Click to change.`}
+            title={sortLabel(explorerSort)}
+            onClick={() => {
+              const order: ExplorerSort[] = ['modified', 'name-asc', 'name-desc']
+              const next = order[(order.indexOf(explorerSort) + 1) % order.length]!
+              setExplorerSort(next)
+              localStorage.setItem(sortStorageKey, next)
+            }}
+          >
+            {explorerSort === 'modified' && <Clock size="var(--icon-detail)" />}
+            {explorerSort === 'name-asc' && <ArrowDownAZ size="var(--icon-detail)" />}
+            {explorerSort === 'name-desc' && <ArrowUpZA size="var(--icon-detail)" />}
+          </button>
+          <small>{documents.data?.length ?? 0}</small>
+        </span>
       </div>
       {error && (
         <div className="explorer-error" role="alert">
@@ -571,6 +647,17 @@ function ExplorerContextMenu({
     setPosition({ top, left })
     menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
   }, [anchorRect.bottom, anchorRect.left, anchorRect.top])
+
+  useEffect(() => {
+    const handleClickOutside = (event: globalThis.MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        onClose()
+        context.restoreFocus()
+      }
+    }
+    globalThis.document.addEventListener('mousedown', handleClickOutside)
+    return () => globalThis.document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose, context])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const menu = menuRef.current

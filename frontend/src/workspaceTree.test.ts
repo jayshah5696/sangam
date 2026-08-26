@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { DocumentSummary, Folder } from './api'
+import { prepareFileTreeInput, type FileTreeSortEntry } from '@pierre/trees'
 import {
+  buildModifiedSortComparator,
+  buildNameDescSortComparator,
   buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
   joinWorkspacePath,
@@ -73,5 +76,91 @@ describe('Pierre workspace tree adapter', () => {
     expect(parentWorkspacePath('projects/research/notes.md')).toBe('projects/research')
     expect(ensureMarkdownExtension('notes')).toBe('notes.md')
     expect(ensureMarkdownExtension('notes.MD')).toBe('notes.MD')
+  })
+})
+
+describe('buildModifiedSortComparator', () => {
+  const entry = (overrides: Partial<FileTreeSortEntry>): FileTreeSortEntry => ({
+    basename: overrides.basename ?? overrides.path?.split('/').pop() ?? '',
+    depth: overrides.depth ?? 0,
+    isDirectory: overrides.isDirectory ?? false,
+    path: overrides.path ?? '',
+    segments: overrides.segments ?? overrides.path?.split('/') ?? [],
+  })
+
+  it('sorts documents newest first', () => {
+    const timestamps = new Map([
+      ['alpha.md', '2026-01-01T00:00:00Z'],
+      ['zebra.md', '2026-06-15T00:00:00Z'],
+    ])
+    const compare = buildModifiedSortComparator(timestamps)
+    const a = entry({ path: 'alpha.md', basename: 'alpha.md' })
+    const b = entry({ path: 'zebra.md', basename: 'zebra.md' })
+    expect(compare(a, b)).toBeGreaterThan(0)
+    expect(compare(b, a)).toBeLessThan(0)
+  })
+
+  it('places directories before documents', () => {
+    const timestamps = new Map([['docs/note.md', '2026-01-01T00:00:00Z']])
+    const compare = buildModifiedSortComparator(timestamps)
+    const dir = entry({ path: 'docs', basename: 'docs', isDirectory: true })
+    const file = entry({ path: 'readme.md', basename: 'readme.md' })
+    expect(compare(dir, file)).toBeLessThan(0)
+    expect(compare(file, dir)).toBeGreaterThan(0)
+  })
+
+  it('sorts directories by their newest descendant', () => {
+    const timestamps = new Map([
+      ['old-project/doc.md', '2026-01-01T00:00:00Z'],
+      ['new-project/doc.md', '2026-08-01T00:00:00Z'],
+    ])
+    const compare = buildModifiedSortComparator(timestamps)
+    const oldDir = entry({ path: 'old-project', basename: 'old-project', isDirectory: true })
+    const newDir = entry({ path: 'new-project', basename: 'new-project', isDirectory: true })
+    expect(compare(oldDir, newDir)).toBeGreaterThan(0)
+    expect(compare(newDir, oldDir)).toBeLessThan(0)
+  })
+
+  it('uses name as tie-breaker when timestamps are equal', () => {
+    const ts = '2026-06-01T00:00:00Z'
+    const timestamps = new Map([
+      ['alpha.md', ts],
+      ['beta.md', ts],
+    ])
+    const compare = buildModifiedSortComparator(timestamps)
+    const a = entry({ path: 'alpha.md', basename: 'alpha.md' })
+    const b = entry({ path: 'beta.md', basename: 'beta.md' })
+    expect(compare(a, b)).toBeLessThan(0)
+    expect(compare(b, a)).toBeGreaterThan(0)
+  })
+
+  it('handles documents with no timestamp gracefully', () => {
+    const timestamps = new Map([['known.md', '2026-06-01T00:00:00Z']])
+    const compare = buildModifiedSortComparator(timestamps)
+    const known = entry({ path: 'known.md', basename: 'known.md' })
+    const unknown = entry({ path: 'unknown.md', basename: 'unknown.md' })
+    expect(compare(unknown, known)).toBeGreaterThan(0)
+  })
+
+  it('keeps each folder adjacent to its descendants', () => {
+    const timestamps = new Map([
+      ['alpha/old.md', '2026-01-01T00:00:00Z'],
+      ['zeta/new.md', '2026-08-01T00:00:00Z'],
+    ])
+    const prepared = prepareFileTreeInput(['alpha/', 'alpha/old.md', 'zeta/', 'zeta/new.md'], {
+      sort: buildModifiedSortComparator(timestamps),
+    })
+
+    expect(prepared.paths).toEqual(['zeta/', 'zeta/new.md', 'alpha/', 'alpha/old.md'])
+  })
+})
+
+describe('buildNameDescSortComparator', () => {
+  it('sorts sibling names without separating folders from their descendants', () => {
+    const prepared = prepareFileTreeInput(['alpha/', 'alpha/zebra.md', 'zeta/', 'zeta/alpha.md'], {
+      sort: buildNameDescSortComparator(),
+    })
+
+    expect(prepared.paths).toEqual(['zeta/', 'zeta/alpha.md', 'alpha/', 'alpha/zebra.md'])
   })
 })

@@ -221,10 +221,12 @@ test('file tree labels remain bound to their rows through collapse, focus, and r
   if ((await agents.getAttribute('aria-expanded')) === 'true') await agents.press('ArrowLeft')
   await expect(linux).toBeHidden()
   await expect(agentic).toHaveAttribute('aria-label', secondFolder)
-  await expect(agentic.locator('[data-truncate-content="visible"]')).toHaveText([
-    secondFolder.slice(0, Math.ceil(secondFolder.length / 2)),
-    secondFolder.slice(Math.ceil(secondFolder.length / 2)),
-  ])
+  // Label is rendered via ::after pseudo-element from aria-label, not Pierre's MiddleTruncate
+  const agenticLayout = await agentic.evaluate((row) => ({
+    clientWidth: row.clientWidth,
+    scrollWidth: row.scrollWidth,
+  }))
+  expect(agenticLayout.scrollWidth).toBeLessThanOrEqual(agenticLayout.clientWidth)
   await agentic.focus()
   await expect(agentic).toBeFocused()
   if ((await agentic.getAttribute('aria-expanded')) === 'true') await agentic.press('ArrowLeft')

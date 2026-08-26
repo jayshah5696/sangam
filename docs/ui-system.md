@@ -236,6 +236,28 @@ Persisted browser state may outlive a workspace database. If a saved tab points
 to a missing document, show a specific recovery state with **Retry** and
 **Close stale tab**. Do not strand the editor behind a generic error.
 
+## File tree labels
+
+File and folder labels in the workspace tree use one LTR text run with standard
+end ellipsis (`text-overflow: ellipsis`). Sangam does not use middle truncation
+or RTL layout for file extensions.
+
+- The full file or folder name remains the accessible name (`aria-label`).
+- The visible label is rendered via a `::after` pseudo-element reading
+  `attr(aria-label)`. Do not cache a second label in component state, DOM data
+  attributes, or mutation observers.
+- The label yields space to the decoration, git, and action lanes without
+  overlap. Decoration, git, and action sections use `order: 1` to stay after
+  the pseudo-element.
+- Rename mode (F2) hides the pseudo-element and restores Pierre's native
+  content section, keeping the rename input visible and focused.
+- Pierre's `MiddleTruncate` content section is hidden via `display: none` on
+  `[data-item-section="content"]`, guarded by `:not(:has([data-item-rename-input]))`.
+- Overrides live in the `unsafeCSS` boundary of `FileExplorer.tsx` and name
+  the upstream issue (`pierrecomputer/pierre#939`) as the removal condition.
+- Changes to tree label rendering require desktop, breakpoint, and true
+  touch-mobile browser coverage.
+
 ## Embedded components
 
 Pierre Trees and Diffs receive the same font stacks, sizes, and radii through
