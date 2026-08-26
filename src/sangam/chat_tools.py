@@ -89,10 +89,11 @@ class ChatToolset:
             function_tool(
                 self.create_document,
                 description_override=(
-                    "When the user explicitly requests a new Markdown document, call this tool "
-                    "immediately with the complete title and content. The tool opens Sangam's "
-                    "browser confirmation UI. Never ask for confirmation in prose before "
-                    "calling it."
+                    "When the user explicitly requests a new document, call this tool "
+                    "immediately with the complete title, content, and content_type. "
+                    "Set content_type to 'text/markdown' for Markdown or 'text/html' "
+                    "for HTML. The tool opens Sangam's browser confirmation UI. Never "
+                    "ask for confirmation in prose before calling it."
                 ),
             ),
             function_tool(
@@ -297,13 +298,15 @@ class ChatToolset:
             ctx, self.policies["propose_update"], validated.summary, operation
         )
 
-    async def create_document(self, ctx: ToolContext, title: str, content: str) -> None:
+    async def create_document(
+        self, ctx: ToolContext, title: str, content: str, content_type: str
+    ) -> None:
         normalized_title = " ".join(title.strip().split())
         arguments = CreateDocumentInput.model_validate(
             {
                 "title": normalized_title,
                 "content": content,
-                "content_type": "text/markdown",
+                "content_type": content_type,
             }
         ).model_dump(mode="json")
         await self._request_effect(

@@ -729,7 +729,9 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
     )
 
     result = asyncio.run(
-        toolset.create_document(ctx, title="  Research   note  ", content="# Evidence")
+        toolset.create_document(
+            ctx, title="  Research   note  ", content="# Evidence", content_type="text/markdown"
+        )
     )
 
     assert result is None

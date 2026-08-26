@@ -12,7 +12,33 @@ describe('ChatCreateConfirmation', () => {
     expect(parseCreateConfirmation({ title: 'Draft', content: 42 })).toBeNull()
   })
 
-  it('shows the exact effect and waits for approval', () => {
+  it('parses Markdown content type', () => {
+    const result = parseCreateConfirmation({ title: 'Note', content: '# Hi', content_type: 'text/markdown' })
+    expect(result).toEqual({ title: 'Note', content: '# Hi', contentType: 'text/markdown' })
+  })
+
+  it('parses HTML content type', () => {
+    const result = parseCreateConfirmation({
+      title: 'Page',
+      content: '<h1>Hi</h1>',
+      content_type: 'text/html',
+    })
+    expect(result).toEqual({ title: 'Page', content: '<h1>Hi</h1>', contentType: 'text/html' })
+  })
+
+  it('falls back to Markdown when content_type is absent (v1 compat)', () => {
+    const result = parseCreateConfirmation({ title: 'Legacy', content: '# Old' })
+    expect(result).toEqual({ title: 'Legacy', content: '# Old', contentType: 'text/markdown' })
+  })
+
+  it('rejects unsupported content types', () => {
+    expect(parseCreateConfirmation({ title: 'Bad', content: 'x', content_type: 'text/plain' })).toBeNull()
+    expect(
+      parseCreateConfirmation({ title: 'Bad', content: 'x', content_type: 'application/pdf' }),
+    ).toBeNull()
+  })
+
+  it('shows Markdown confirmation and waits for approval', () => {
     const onApprove = vi.fn()
     const onCancel = vi.fn()
     render(
@@ -26,9 +52,28 @@ describe('ChatCreateConfirmation', () => {
     )
 
     expect(screen.getByRole('alertdialog').textContent).toContain('No document is created until you approve')
+    expect(screen.getByRole('alertdialog').textContent).toContain('Markdown document')
     expect(screen.getByLabelText('Document content to create').textContent).toBe('# Evidence')
-    fireEvent.click(screen.getByRole('button', { name: 'Approve document creation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve Markdown document creation' }))
     expect(onApprove).toHaveBeenCalledOnce()
     expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it('shows HTML confirmation with format-specific copy', () => {
+    const onApprove = vi.fn()
+    render(
+      <ChatCreateConfirmation
+        request={{ title: 'Landing page', content: '<h1>Hello</h1>', contentType: 'text/html' }}
+        pending={false}
+        error={false}
+        onApprove={onApprove}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('alertdialog').textContent).toContain('HTML document')
+    expect(screen.getByRole('alertdialog').textContent).toContain('Create HTML document "Landing page"')
+    fireEvent.click(screen.getByRole('button', { name: 'Approve HTML document creation' }))
+    expect(onApprove).toHaveBeenCalledOnce()
   })
 })
