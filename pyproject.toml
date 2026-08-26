@@ -1,6 +1,6 @@
 [project]
 name = "sangam"
-version = "0.10.0"
+version = "0.10.1"
 description = "A small, self-hosted document server for humans and agents"
 readme = "README.md"
 license = "Apache-2.0"
