@@ -18,6 +18,7 @@ import type {
   FileTreeRenamingItem,
   FileTreeRowDecorationContext,
 } from '@pierre/trees'
+import { prepareFileTreeInput } from '@pierre/trees'
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react'
 import { createPortal } from 'react-dom'
 import { Copy, FilePlus2, FolderPlus, PanelRightOpen, Pencil, Search, Trash2 } from 'lucide-react'
@@ -25,6 +26,7 @@ import { api, type DocumentSummary, type Folder } from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
+  buildModifiedSortComparator,
   buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
   joinWorkspacePath,
@@ -45,6 +47,8 @@ type TreeCallbacks = {
   renderRowDecoration: (context: FileTreeRowDecorationContext) => { text: string; title: string } | null
 }
 
+type ExplorerSort = 'modified' | 'name'
+const sortStorageKey = 'sangam.explorer.sort.v1'
 const expandedStorageKey = 'sangam.explorer.expanded.v2'
 
 export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
@@ -64,6 +68,22 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const [createName, setCreateName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const pendingFocusDocumentIdRef = useRef<string | null>(null)
+  const [explorerSort, setExplorerSort] = useState<ExplorerSort>(() => {
+    try {
+      return localStorage.getItem(sortStorageKey) === 'name' ? 'name' : 'modified'
+    } catch {
+      return 'modified'
+    }
+  })
+
+  const sortComparator = useMemo(() => {
+    if (explorerSort === 'name') return undefined
+    const timestamps = new Map<string, string>()
+    for (const [treePath, doc] of adapter.documentByTreePath) {
+      timestamps.set(treePath, doc.updated_at)
+    }
+    return buildModifiedSortComparator(timestamps)
+  }, [explorerSort, adapter.documentByTreePath])
 
   const refresh = async () => {
     await Promise.all([
@@ -259,20 +279,32 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     density: 'compact',
     icons: 'minimal',
     flattenEmptyDirectories: false,
+    sort: sortComparator ?? 'default',
+    // Hide Pierre's MiddleTruncate and render label from aria-label (upstream: pierrecomputer/pierre#939)
     unsafeCSS: `
+      [data-type="item"]:not(:has([data-item-rename-input]))
+        > [data-item-section="content"] {
+        display: none !important;
+      }
+      [data-type="item"]:not(:has([data-item-rename-input]))::after {
+        content: attr(aria-label);
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        text-align: start;
+      }
+      [data-item-section="decoration"],
+      [data-item-section="git"],
+      [data-item-section="action"] {
+        order: 1;
+      }
       [data-item-section="decoration"] {
         flex: 0 0 auto !important;
       }
       [data-item-section="decoration"]:empty {
         display: none !important;
-      }
-      [data-item-section="content"] {
-        flex: 1 1 auto !important;
-        min-width: 0 !important;
-        max-width: 100% !important;
-        overflow: hidden !important;
-        white-space: nowrap !important;
-        text-overflow: ellipsis !important;
       }
     `,
     initialExpansion: 'open',
@@ -296,12 +328,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   })
 
   useEffect(() => {
-    model.resetPaths(adapter.paths, {
+    const preparedInput = prepareFileTreeInput(adapter.paths, {
+      sort: sortComparator ?? 'default',
+    })
+    model.resetPaths({
+      preparedInput,
       initialExpandedPaths: loadExpanded().filter(
         (path) => adapter.folderByTreePath.has(path) || path === adapter.draftsRootPath,
       ),
     })
-  }, [adapter, model])
+  }, [adapter, model, sortComparator])
 
   useEffect(() => {
     if (!activeDocumentId) return
@@ -473,6 +509,19 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       </button>
       <div className="sidebar-section-title">
         <span>Workspace</span>
+        <label className="sidebar-sort">
+          <select
+            value={explorerSort}
+            onChange={(event) => {
+              const value = event.target.value as ExplorerSort
+              setExplorerSort(value)
+              localStorage.setItem(sortStorageKey, value)
+            }}
+          >
+            <option value="modified">Last modified</option>
+            <option value="name">Name</option>
+          </select>
+        </label>
         <small>{documents.data?.length ?? 0}</small>
       </div>
       {error && (

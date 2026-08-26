@@ -53,20 +53,17 @@ test.describe('Issue Verification Real Screenshots', () => {
     await page.locator('#workspace-tab-files').click()
     await page.waitForTimeout(400)
 
-    // Issue #60: clean single-line truncation with no duplicate text or marker overlays.
+    // Issue #60 / #140: clean single-line truncation via aria-label pseudo-element.
     const longDocument = page.locator('.sangam-file-tree').getByRole('treeitem', {
       name: 'raft-and-paxos-comparative-study-2026.md',
     })
     await expect(longDocument).toBeVisible()
+    await expect(longDocument).toHaveAttribute('aria-label', 'raft-and-paxos-comparative-study-2026.md')
     const labelLayout = await longDocument.evaluate((row) => ({
       clientWidth: row.clientWidth,
       scrollWidth: row.scrollWidth,
-      visibleText: [...row.querySelectorAll<HTMLElement>('[data-truncate-content="visible"]')]
-        .map((node) => node.textContent)
-        .join(''),
     }))
     expect(labelLayout.scrollWidth).toBeLessThanOrEqual(labelLayout.clientWidth)
-    expect(labelLayout.visibleText).toBe('raft-and-paxos-comparative-study-2026.md')
     await page.locator('.primary-sidebar').screenshot({ path: path.join(outDir, 'issue-60-file-tree.png') })
 
     // Issue #61: context menu is portaled beyond the sidebar clip and dismisses with Escape.

@@ -1,3 +1,4 @@
+import type { FileTreeSortEntry } from '@pierre/trees'
 import type { DocumentSummary, Folder as WorkspaceFolder } from './api'
 
 export type WorkspaceTreeAdapter = {
@@ -105,4 +106,27 @@ function uniqueDraftPath(root: string, title: string, usedPaths: Set<string>) {
     suffix += 1
   }
   return candidate
+}
+
+/**
+ * Builds a comparator that sorts siblings by updated_at DESC (newest first),
+ * with directories before documents and a stable name tie-breaker.
+ */
+export function buildModifiedSortComparator(
+  timestamps: Map<string, string>,
+): (a: FileTreeSortEntry, b: FileTreeSortEntry) => number {
+  const directoryMaxTimestamp = (entry: FileTreeSortEntry): string => {
+    let max = ''
+    for (const [path, ts] of timestamps) {
+      if (path.startsWith(entry.path + '/') && ts > max) max = ts
+    }
+    return max
+  }
+  return (a: FileTreeSortEntry, b: FileTreeSortEntry): number => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+    const tsA = a.isDirectory ? directoryMaxTimestamp(a) : (timestamps.get(a.path) ?? '')
+    const tsB = b.isDirectory ? directoryMaxTimestamp(b) : (timestamps.get(b.path) ?? '')
+    if (tsA !== tsB) return tsB.localeCompare(tsA)
+    return a.basename.localeCompare(b.basename, undefined, { sensitivity: 'base' })
+  }
 }
