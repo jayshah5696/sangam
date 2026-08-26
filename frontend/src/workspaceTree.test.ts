@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { DocumentSummary, Folder } from './api'
-import type { FileTreeSortEntry } from '@pierre/trees'
+import { prepareFileTreeInput, type FileTreeSortEntry } from '@pierre/trees'
 import {
   buildModifiedSortComparator,
+  buildNameDescSortComparator,
   buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
   joinWorkspacePath,
@@ -139,5 +140,27 @@ describe('buildModifiedSortComparator', () => {
     const known = entry({ path: 'known.md', basename: 'known.md' })
     const unknown = entry({ path: 'unknown.md', basename: 'unknown.md' })
     expect(compare(unknown, known)).toBeGreaterThan(0)
+  })
+
+  it('keeps each folder adjacent to its descendants', () => {
+    const timestamps = new Map([
+      ['alpha/old.md', '2026-01-01T00:00:00Z'],
+      ['zeta/new.md', '2026-08-01T00:00:00Z'],
+    ])
+    const prepared = prepareFileTreeInput(['alpha/', 'alpha/old.md', 'zeta/', 'zeta/new.md'], {
+      sort: buildModifiedSortComparator(timestamps),
+    })
+
+    expect(prepared.paths).toEqual(['zeta/', 'zeta/new.md', 'alpha/', 'alpha/old.md'])
+  })
+})
+
+describe('buildNameDescSortComparator', () => {
+  it('sorts sibling names without separating folders from their descendants', () => {
+    const prepared = prepareFileTreeInput(['alpha/', 'alpha/zebra.md', 'zeta/', 'zeta/alpha.md'], {
+      sort: buildNameDescSortComparator(),
+    })
+
+    expect(prepared.paths).toEqual(['zeta/', 'zeta/alpha.md', 'alpha/', 'alpha/zebra.md'])
   })
 })
