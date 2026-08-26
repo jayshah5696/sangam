@@ -165,6 +165,9 @@
 .sidebar-search-input input:focus, .sidebar-search-input input:focus-visible { outline: none; box-shadow: none; }
 .sidebar-sort { display: flex; align-items: center; justify-content: space-between; color: var(--sidebar-muted); font-size: var(--text-label); }
 .sidebar-sort select { border: 1px solid color-mix(in srgb, var(--sidebar-text) 15%, transparent); border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-text); padding: 4px 6px; font-size: var(--text-control); }
+.explorer-heading-actions { display: flex; align-items: center; gap: var(--space-1); }
+.explorer-sort { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; border-radius: var(--radius-control); background: transparent; color: var(--sidebar-muted); cursor: pointer; }
+.explorer-sort:hover { background: color-mix(in srgb, var(--sidebar-text) 10%, transparent); color: var(--sidebar-text); }
 .search-results { min-height: 0; overflow: auto; }
 
 .sidebar-footer { flex: none; border-top: 1px solid color-mix(in srgb, var(--sidebar-text) 11%, transparent); }

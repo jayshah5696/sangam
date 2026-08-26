@@ -21,7 +21,16 @@ import type {
 import { prepareFileTreeInput } from '@pierre/trees'
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react'
 import { createPortal } from 'react-dom'
-import { Copy, FilePlus2, FolderPlus, PanelRightOpen, Pencil, Search, Trash2 } from 'lucide-react'
+import {
+  ArrowUpDown,
+  Copy,
+  FilePlus2,
+  FolderPlus,
+  PanelRightOpen,
+  Pencil,
+  Search,
+  Trash2,
+} from 'lucide-react'
 import { api, type DocumentSummary, type Folder } from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
@@ -508,21 +517,22 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       </button>
       <div className="sidebar-section-title">
         <span>Workspace</span>
-        <label className="sidebar-sort">
-          Sort
-          <select
-            value={explorerSort}
-            onChange={(event) => {
-              const value = event.target.value as ExplorerSort
-              setExplorerSort(value)
-              localStorage.setItem(sortStorageKey, value)
+        <span className="explorer-heading-actions">
+          <button
+            className="explorer-sort"
+            type="button"
+            aria-label={`Sort by ${explorerSort === 'modified' ? 'name' : 'last modified'}`}
+            title={`Sorted by ${explorerSort === 'modified' ? 'last modified' : 'name'}`}
+            onClick={() => {
+              const next: ExplorerSort = explorerSort === 'modified' ? 'name' : 'modified'
+              setExplorerSort(next)
+              localStorage.setItem(sortStorageKey, next)
             }}
           >
-            <option value="modified">Last modified</option>
-            <option value="name">Name</option>
-          </select>
-        </label>
-        <small>{documents.data?.length ?? 0}</small>
+            <ArrowUpDown size="var(--icon-detail)" />
+          </button>
+          <small>{documents.data?.length ?? 0}</small>
+        </span>
       </div>
       {error && (
         <div className="explorer-error" role="alert">
