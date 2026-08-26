@@ -232,11 +232,11 @@ describe('FileExplorerPanel', () => {
     expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/paper.pdf' })).toBe(false)
   })
 
-  it('passes a sort comparator to Pierre when sort is "modified" (default)', () => {
+  it('applies sort via prepareFileTreeInput on resetPaths, not on useFileTree options', () => {
     state.documents = [document]
     render(<FileExplorerPanel onSearch={vi.fn()} />)
 
     const options = state.useFileTreeOptions[0] as { sort?: unknown }
-    expect(typeof options?.sort).toBe('function')
+    expect(options?.sort).toBeUndefined()
   })
 })

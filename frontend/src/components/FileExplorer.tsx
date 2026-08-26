@@ -279,7 +279,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     density: 'compact',
     icons: 'minimal',
     flattenEmptyDirectories: false,
-    sort: sortComparator ?? 'default',
     // Hide Pierre's MiddleTruncate and render label from aria-label (upstream: pierrecomputer/pierre#939)
     unsafeCSS: `
       [data-type="item"]:not(:has([data-item-rename-input]))
@@ -510,6 +509,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       <div className="sidebar-section-title">
         <span>Workspace</span>
         <label className="sidebar-sort">
+          Sort
           <select
             value={explorerSort}
             onChange={(event) => {
