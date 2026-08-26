@@ -7,6 +7,30 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.10.1] - 2026-08-25
+
+### Added
+
+- Workspace files can now be sorted by last modified time, name A-Z, or name
+  Z-A. The selected order persists in the browser, and folders stay with their
+  descendants (#143).
+
+### Fixed
+
+- Chat can now create HTML documents as well as Markdown documents. The review
+  dialog identifies the selected format before the document is approved (#144).
+- File-tree labels now use one left-to-right text run with end truncation. This
+  prevents overlapping text and reversed extension fragments in narrow sidebars
+  while preserving the full accessible name and inline rename behavior (#143).
+- The file-tree context menu now closes after a click outside the menu. A
+  secondary click on empty tree space no longer opens it (#143).
+
+### Upgrade notes
+
+- This release has no database migrations, security-specific changes, new
+  required configuration, manual upgrade steps, or release-specific known
+  limits. Replace the running container with the 0.10.1 image.
+
 ## [0.10.0] - 2026-08-25
 
 ### Added
@@ -244,7 +268,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.1
 [0.10.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.0
 [0.9.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.1
 [0.9.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.0
