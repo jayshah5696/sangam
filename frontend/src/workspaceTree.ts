@@ -109,6 +109,17 @@ function uniqueDraftPath(root: string, title: string, usedPaths: Set<string>) {
 }
 
 /**
+ * Builds a comparator that sorts siblings Z–A (reverse alphabetical),
+ * with directories before documents.
+ */
+export function buildNameDescSortComparator(): (a: FileTreeSortEntry, b: FileTreeSortEntry) => number {
+  return (a: FileTreeSortEntry, b: FileTreeSortEntry): number => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+    return b.basename.localeCompare(a.basename, undefined, { sensitivity: 'base' })
+  }
+}
+
+/**
  * Builds a comparator that sorts siblings by updated_at DESC (newest first),
  * with directories before documents and a stable name tie-breaker.
  */

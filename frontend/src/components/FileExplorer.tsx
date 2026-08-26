@@ -22,7 +22,9 @@ import { prepareFileTreeInput } from '@pierre/trees'
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react'
 import { createPortal } from 'react-dom'
 import {
-  ArrowUpDown,
+  ArrowDownAZ,
+  ArrowUpZA,
+  Clock,
   Copy,
   FilePlus2,
   FolderPlus,
@@ -36,6 +38,7 @@ import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
   buildModifiedSortComparator,
+  buildNameDescSortComparator,
   buildWorkspaceTreeAdapter,
   ensureMarkdownExtension,
   joinWorkspacePath,
@@ -56,9 +59,15 @@ type TreeCallbacks = {
   renderRowDecoration: (context: FileTreeRowDecorationContext) => { text: string; title: string } | null
 }
 
-type ExplorerSort = 'modified' | 'name'
+type ExplorerSort = 'modified' | 'name-asc' | 'name-desc'
 const sortStorageKey = 'sangam.explorer.sort.v1'
 const expandedStorageKey = 'sangam.explorer.expanded.v2'
+
+function sortLabel(sort: ExplorerSort) {
+  if (sort === 'modified') return 'Last modified'
+  if (sort === 'name-asc') return 'Name A–Z'
+  return 'Name Z–A'
+}
 
 export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
@@ -79,14 +88,19 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const pendingFocusDocumentIdRef = useRef<string | null>(null)
   const [explorerSort, setExplorerSort] = useState<ExplorerSort>(() => {
     try {
-      return localStorage.getItem(sortStorageKey) === 'name' ? 'name' : 'modified'
+      const stored = localStorage.getItem(sortStorageKey)
+      if (stored === 'name-asc' || stored === 'name-desc') return stored
+      return 'modified'
     } catch {
       return 'modified'
     }
   })
 
   const sortComparator = useMemo(() => {
-    if (explorerSort === 'name') return undefined
+    if (explorerSort === 'name-asc') return undefined
+    if (explorerSort === 'name-desc') {
+      return buildNameDescSortComparator()
+    }
     const timestamps = new Map<string, string>()
     for (const [treePath, doc] of adapter.documentByTreePath) {
       timestamps.set(treePath, doc.updated_at)
@@ -460,7 +474,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     const host = event.currentTarget as HTMLElement
     const activeElement = host.shadowRoot?.activeElement
     const anchorElement = activeElement instanceof HTMLElement ? activeElement : null
-    if (!item || !anchorElement) return
+    if (!item || !anchorElement || !anchorElement.closest('[data-type="item"]')) return
     event.preventDefault()
     event.stopPropagation()
     openContextMenu(item, anchorElement, {
@@ -521,15 +535,18 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           <button
             className="explorer-sort"
             type="button"
-            aria-label={`Sort by ${explorerSort === 'modified' ? 'name' : 'last modified'}`}
-            title={`Sorted by ${explorerSort === 'modified' ? 'last modified' : 'name'}`}
+            aria-label={`Sort: ${sortLabel(explorerSort)}. Click to change.`}
+            title={sortLabel(explorerSort)}
             onClick={() => {
-              const next: ExplorerSort = explorerSort === 'modified' ? 'name' : 'modified'
+              const order: ExplorerSort[] = ['modified', 'name-asc', 'name-desc']
+              const next = order[(order.indexOf(explorerSort) + 1) % order.length]!
               setExplorerSort(next)
               localStorage.setItem(sortStorageKey, next)
             }}
           >
-            <ArrowUpDown size="var(--icon-detail)" />
+            {explorerSort === 'modified' && <Clock size="var(--icon-detail)" />}
+            {explorerSort === 'name-asc' && <ArrowDownAZ size="var(--icon-detail)" />}
+            {explorerSort === 'name-desc' && <ArrowUpZA size="var(--icon-detail)" />}
           </button>
           <small>{documents.data?.length ?? 0}</small>
         </span>
@@ -630,6 +647,17 @@ function ExplorerContextMenu({
     setPosition({ top, left })
     menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
   }, [anchorRect.bottom, anchorRect.left, anchorRect.top])
+
+  useEffect(() => {
+    const handleClickOutside = (event: globalThis.MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        onClose()
+        context.restoreFocus()
+      }
+    }
+    globalThis.document.addEventListener('mousedown', handleClickOutside)
+    return () => globalThis.document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose, context])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const menu = menuRef.current
