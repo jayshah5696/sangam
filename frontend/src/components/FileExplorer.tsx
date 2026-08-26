@@ -500,7 +500,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           title="New folder"
           onClick={() => setCreateMode({ kind: 'folder', parentPath: selectedFolderPath })}
         >
-          <FolderPlus size="var(--icon-control)" />
+          <FolderPlus size="var(--icon-page)" />
         </button>
       </div>
       {createMode && (
