@@ -146,7 +146,7 @@ class ProposeUpdateResult(StrictCapabilityModel):
 class CreateDocumentInput(StrictCapabilityModel):
     title: str = Field(min_length=1, max_length=240)
     content: str = Field(max_length=2_000_000)
-    content_type: Literal["text/markdown"] = "text/markdown"
+    content_type: Literal["text/markdown", "text/html"]
 
 
 class PublishDocumentInput(StrictCapabilityModel):
@@ -292,9 +292,9 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
     ),
     ChatCapability(
         "create_document",
-        1,
+        2,
         "Create document",
-        "Request one exact Markdown document creation.",
+        "Request one exact Markdown or HTML document creation.",
         CreateDocumentInput,
         EffectRequestResult,
         EffectClass.WRITE,

@@ -110,6 +110,16 @@
       ]
     },
     {
+      "id": "create_html_document",
+      "kind": "create",
+      "document": null,
+      "question": "Create an HTML document titled \"Landing Page\" with an H1 heading that says \"Welcome\" and a paragraph that says \"This is the landing page.\" Make it a proper HTML document.",
+      "expected_tools": ["create_document"],
+      "checks": [
+        "tool_called:create_document"
+      ]
+    },
+    {
       "id": "oow_board_minutes_missing",
       "kind": "out_of_scope",
       "document": null,

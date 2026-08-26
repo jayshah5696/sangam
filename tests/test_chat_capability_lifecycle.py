@@ -13,7 +13,7 @@ from pypdf import PdfWriter
 from test_phase_seven_chat import install_fake_model
 
 from sangam.capabilities import Capability
-from sangam.chat_capabilities import WorkspaceSearchInput
+from sangam.chat_capabilities import CreateDocumentInput, WorkspaceSearchInput
 from sangam.errors import AuthorizationError, ValidationError
 from sangam.security import Principal, ScopeGrant
 
@@ -565,3 +565,42 @@ def test_interrupted_publication_recovers_after_document_changes(
     assert recovered.effect.status == "completed"
     publication = client.get(f"/api/v1/publications/by-document/{document['document_id']}").json()
     assert publication["publication_id"] == recovered.effect.resource_id
+
+
+def test_html_document_creation_lifecycle(client: TestClient) -> None:
+    prepared = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={
+            "title": "HTML page",
+            "content": "<h1>Hello</h1>",
+            "content_type": "text/html",
+        },
+    )
+    assert prepared.effect.capability_version == 2
+
+    decision = client.post(
+        f"/api/v1/chat/effects/{prepared.effect.effect_id}/decision",
+        json={
+            "verdict": "approve",
+            "argument_digest": prepared.effect.argument_digest,
+            "reason": None,
+        },
+    )
+    assert decision.status_code == 200
+    assert decision.json()["effect"]["status"] == "completed"
+    document_id = decision.json()["client_result"]["document_id"]
+    document = client.get(f"/api/v1/documents/{document_id}").json()
+    assert document["content_type"] == "text/html"
+    assert document["content"] == "<h1>Hello</h1>"
+
+
+def test_create_document_rejects_missing_and_unsupported_content_type(
+    client: TestClient,
+) -> None:
+    with pytest.raises(PydanticValidationError):
+        CreateDocumentInput.model_validate({"title": "Bad", "content": "x"})
+    with pytest.raises(PydanticValidationError):
+        CreateDocumentInput.model_validate(
+            {"title": "Bad", "content": "x", "content_type": "text/plain"}
+        )

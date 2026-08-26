@@ -225,7 +225,7 @@ test('durable effect review restores exact pending and completed state', async (
     thread_id: threadId,
     requested_by: 'human:jay',
     capability_id: 'create_document',
-    capability_version: 1,
+    capability_version: 2,
     argument_digest: digest,
     preview: {
       title: 'Reviewed browser draft',
@@ -264,7 +264,7 @@ test('durable effect review restores exact pending and completed state', async (
   })
   await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
   await page.goto('/chat')
-  const review = page.getByRole('alertdialog', { name: 'Create “Reviewed browser draft”?' })
+  const review = page.getByRole('alertdialog', { name: /Create Markdown document/ })
   await expect(review).toBeVisible()
   await expect(review.getByLabel('Document content to create')).toHaveText(
     '# Exact source\n\nThis is the complete approved content.',
