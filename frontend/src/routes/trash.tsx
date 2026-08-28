@@ -11,7 +11,6 @@ function TrashPage() {
     <section className="utility-page">
       <header className="utility-header">
         <div>
-          <p className="eyebrow">Recoverable deletion</p>
           <h1>Trash</h1>
           <p>Deleted documents keep their stable identity and immutable history until restored.</p>
         </div>

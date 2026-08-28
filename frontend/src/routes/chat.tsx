@@ -68,7 +68,6 @@ function WorkspaceChat() {
           <ArrowLeft size="var(--icon-control)" />
         </button>
         <div>
-          <p className="eyebrow">{document ? 'Document conversation' : 'Whole workspace'}</p>
           <h1>Workspace chat</h1>
           <p>
             {document

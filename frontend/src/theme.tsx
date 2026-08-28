@@ -4,7 +4,7 @@ import type { EditorMode } from './documentSessions'
 
 export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
 
-export type UiFontId = 'system' | 'inter' | 'plex' | 'serif'
+export type UiFontId = 'system' | 'inter' | 'geist' | 'plex' | 'serif'
 export type UiDensity = 'compact' | 'default' | 'comfortable'
 export type EditorSize = 'small' | 'default' | 'large'
 
@@ -15,6 +15,12 @@ export const uiFonts: Array<{ id: UiFontId; name: string; stack: string }> = [
     stack: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   { id: 'inter', name: 'Inter', stack: 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif' },
+  {
+    id: 'geist',
+    name: 'Geist',
+    stack:
+      'Geist, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  },
   {
     id: 'plex',
     name: 'IBM Plex Sans',

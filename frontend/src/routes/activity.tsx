@@ -34,7 +34,6 @@ function AgentActivity() {
     <section className="activity-page">
       <header>
         <div>
-          <p className="eyebrow">Human review</p>
           <h1>Agent activity</h1>
           <p>Accepted, denied, conflicted, and failed operations without credentials or document bodies.</p>
         </div>

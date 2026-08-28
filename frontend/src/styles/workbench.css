@@ -2,14 +2,14 @@
 .workbench-shell {
   display: flex;
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--app-bg);
 }
 .primary-sidebar {
   min-width: 220px;
   max-width: 460px;
-  height: 100vh;
+  height: 100dvh;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -190,19 +190,19 @@
 .workspace-freshness.conflict { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--sidebar-text); }
 .workspace-freshness.conflict svg { color: var(--danger); }
 
-.workbench-center { min-width: 0; height: 100vh; flex: 1; display: flex; flex-direction: column; }
+.workbench-center { min-width: 0; height: 100dvh; flex: 1; display: flex; flex-direction: column; }
 .layout-recovery-notice { min-height: 38px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 12px; border-bottom: 1px solid #b17b24; background: #f2e2b8; color: #5f440d; font-size: var(--text-meta); }
 .layout-recovery-notice button { border: 0; background: transparent; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .workbench-main { min-width: 0; min-height: 0; flex: 1; overflow: auto; background: var(--app-bg); }
 .workbench-main > .document-layout { min-height: 100%; }
-.workbench-shell > .resize-handle { height: 100vh; }
+.workbench-shell > .resize-handle { height: 100dvh; }
 
-.command-dialog { position: fixed; inset: 0; width: 100vw; max-width: none; height: 100vh; max-height: none; margin: 0; padding: min(16vh, 140px) var(--space-3) 0; overflow: hidden; border: 0; background: transparent; color: inherit; }
+.command-dialog { position: fixed; inset: 0; width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: min(16dvh, 140px) var(--space-3) 0; overflow: hidden; border: 0; background: transparent; color: inherit; }
 .command-dialog::backdrop { background: rgba(8,12,10,.5); backdrop-filter: blur(3px); animation: overlay-fade-in var(--motion-panel) var(--ease-ui-out); }
-.command-palette { width: min(610px, calc(100vw - 28px)); margin: 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: 0 28px 80px rgba(0,0,0,.32); animation: command-palette-enter var(--motion-panel) var(--ease-ui-out); }
+.command-palette { width: min(610px, calc(100vw - 28px)); margin: 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: var(--shadow-panel-inset), 0 28px 80px rgba(0,0,0,.32); animation: command-palette-enter var(--motion-panel) var(--ease-ui-out); }
 .command-palette > label { min-height: 48px; display: flex; align-items: center; gap: 9px; padding: 0 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
 .command-palette > label input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-editor); }
-.command-palette [role="listbox"] { max-height: min(430px, 55vh); overflow: auto; padding: 6px; }
+.command-palette [role="listbox"] { max-height: min(430px, 55dvh); overflow: auto; padding: 6px; }
 .command-result { display: grid; }
 .command-group { padding: var(--space-2) var(--space-2) var(--space-1); color: var(--text-subtle); font-size: var(--text-meta); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .command-palette [role="option"] { width: 100%; min-height: 47px; display: flex; align-items: center; gap: 11px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text); padding: 7px 10px; text-align: left; transition: background var(--motion-fast) var(--ease-ui-out), color var(--motion-fast) var(--ease-ui-out); }
@@ -274,7 +274,7 @@
 .split-workbench .editing-surface,
 .split-workbench .markdown-preview { min-height: 360px; }
 
-.action-menu-popover { position: fixed; z-index: 120; width: max-content; min-width: 178px; max-width: min(340px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 5px; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: 0 18px 48px rgba(0,0,0,.24); animation: popover-enter var(--motion-fast) var(--ease-ui-out); transform-origin: top right; }
+.action-menu-popover { position: fixed; z-index: 120; width: max-content; min-width: 178px; max-width: min(340px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 5px; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: var(--shadow-panel-inset), 0 18px 48px rgba(0,0,0,.24); animation: popover-enter var(--motion-fast) var(--ease-ui-out); transform-origin: top right; }
 .action-menu-popover > button,
 .action-menu-popover .document-layout-actions > button { min-height: var(--control-height); display: flex; align-items: center; gap: 7px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; padding: 0 8px; text-align: left; font-size: var(--text-control); }
 .action-menu-popover > button:hover,
@@ -283,6 +283,15 @@
 .action-menu-popover .document-layout-actions > button:focus-visible { background: var(--surface-soft); }
 .action-menu-popover button.danger { color: var(--danger); }
 .action-menu-popover hr { width: 100%; margin: 3px 0; border: 0; border-top: 1px solid var(--line); }
+
+@keyframes command-palette-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 
 @keyframes popover-enter {
   from {
@@ -354,4 +363,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .split-separator { transition: none; }
+  .command-palette { animation: none; }
 }

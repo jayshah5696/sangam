@@ -60,7 +60,6 @@ function KarakeepConfluence() {
     <section className="karakeep-page">
       <header className="karakeep-header">
         <div>
-          <p className="eyebrow">Archive confluence</p>
           <h1>Karakeep imports</h1>
           <p>
             Select archived sources, preserve provenance, and review refreshes before they become revisions.

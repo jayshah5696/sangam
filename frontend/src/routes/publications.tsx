@@ -60,7 +60,6 @@ function PublicationsDashboard() {
     <section className="utility-page publications-dashboard">
       <header className="utility-header">
         <div>
-          <p className="eyebrow">Exposure review</p>
           <h1>Publications</h1>
           <p>See every workspace publication, its reach, and the credential state behind unlisted links.</p>
         </div>

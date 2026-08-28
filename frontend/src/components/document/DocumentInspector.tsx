@@ -128,7 +128,7 @@ export function DocumentInspector({
       style={{ width }}
     >
       <div className="right-panel-header ui-rail-header">
-        <p className="eyebrow">Inspector</p>
+        <strong>Inspector</strong>
         <button
           className="icon-button"
           aria-label="Collapse document inspector"
@@ -138,7 +138,11 @@ export function DocumentInspector({
           <ArrowRight size="var(--icon-control)" />
         </button>
       </div>
-      <div className="inspector-tabs" role="tablist" aria-label="Document inspector">
+      <div
+        className={`inspector-tabs ${inspectorTabs.length === 5 ? 'inspector-tabs-5' : ''}`}
+        role="tablist"
+        aria-label="Document inspector"
+      >
         {inspectorTabs.map((candidate) => (
           <button
             role="tab"
@@ -362,7 +366,6 @@ function PdfReplacementControl({ document }: { document: Document }) {
   return (
     <section className="metadata-editor pdf-replacement-properties">
       <div>
-        <p className="eyebrow">Source lifecycle</p>
         <strong>Replacement PDF</strong>
         <p className="small-muted">Import a new immutable document linked to this source.</p>
       </div>
@@ -408,7 +411,7 @@ function HistoryList({
 }) {
   return (
     <section className="history-section">
-      <p className="eyebrow">History</p>
+      <h3>History</h3>
       {history.map((revision) => (
         <article className="revision" key={revision.revision_id}>
           <div>
@@ -498,7 +501,6 @@ function PublicationEditor({
     <section className="metadata-editor publication-editor">
       <header className="publication-section-header">
         <div>
-          <p className="eyebrow">Publishing</p>
           <strong>Rendering & access</strong>
         </div>
         <span className={`scope-badge ${publication?.active ? 'workspace' : ''}`}>
@@ -596,7 +598,6 @@ function MetadataEditor({
   return (
     <section className="metadata-editor">
       <div className="document-properties-summary">
-        <p className="eyebrow">Document info</p>
         <div className="properties-meta-grid">
           <div>
             <small>Format</small>

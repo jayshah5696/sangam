@@ -66,8 +66,8 @@ const expandedStorageKey = 'sangam.explorer.expanded.v2'
 
 function sortLabel(sort: ExplorerSort) {
   if (sort === 'modified') return 'Last modified'
-  if (sort === 'name-asc') return 'Name A–Z'
-  return 'Name Z–A'
+  if (sort === 'name-asc') return 'Name A-Z'
+  return 'Name Z-A'
 }
 
 export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
