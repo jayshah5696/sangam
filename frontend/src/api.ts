@@ -123,6 +123,24 @@ export const folderSchema = z.object({
 
 export type Folder = z.infer<typeof folderSchema>
 
+export const bulkOrganizationItemResultSchema = z.object({
+  document_id: z.string(),
+  status: z.enum(['completed', 'skipped', 'conflicted', 'failed']),
+  path: z.string().nullable(),
+  revision_id: z.string().nullable(),
+  metadata_version: z.number().nullable(),
+  message: z.string().nullable(),
+  error_code: z.string().nullable(),
+})
+
+export const bulkOrganizationResultSchema = z.object({
+  operation: z.enum(['move', 'tag', 'trash']),
+  status: z.enum(['completed', 'partial', 'failed']),
+  results: z.array(bulkOrganizationItemResultSchema),
+})
+
+export type BulkOrganizationResult = z.infer<typeof bulkOrganizationResultSchema>
+
 export const revisionSchema = z.object({
   revision_id: z.string(),
   document_id: z.string(),
@@ -810,6 +828,64 @@ export const api = {
       await request(`/folders/${folder.folder_id}/move`, {
         method: 'POST',
         body: JSON.stringify({ path }),
+      }),
+    )
+  },
+  async bulkMoveDocuments(
+    documents: DocumentSummary[],
+    destinationFolderPath: string,
+    operationKey = crypto.randomUUID(),
+  ): Promise<BulkOrganizationResult> {
+    return bulkOrganizationResultSchema.parse(
+      await request('/organization/documents/move', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': operationKey },
+        body: JSON.stringify({
+          documents: documents.map((document) => ({
+            document_id: document.document_id,
+            expected_revision_id: document.current_revision_id,
+            expected_source_path: document.path,
+          })),
+          destination_folder_path: destinationFolderPath,
+        }),
+      }),
+    )
+  },
+  async bulkTagDocuments(
+    documents: DocumentSummary[],
+    addTagIds: string[],
+    removeTagIds: string[],
+    operationKey = crypto.randomUUID(),
+  ): Promise<BulkOrganizationResult> {
+    return bulkOrganizationResultSchema.parse(
+      await request('/organization/documents/tag', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': operationKey },
+        body: JSON.stringify({
+          documents: documents.map((document) => ({
+            document_id: document.document_id,
+            expected_metadata_version: document.metadata_version,
+          })),
+          add_tag_ids: addTagIds,
+          remove_tag_ids: removeTagIds,
+        }),
+      }),
+    )
+  },
+  async bulkTrashDocuments(
+    documents: DocumentSummary[],
+    operationKey = crypto.randomUUID(),
+  ): Promise<BulkOrganizationResult> {
+    return bulkOrganizationResultSchema.parse(
+      await request('/organization/documents/trash', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': operationKey },
+        body: JSON.stringify({
+          documents: documents.map((document) => ({
+            document_id: document.document_id,
+            expected_revision_id: document.current_revision_id,
+          })),
+        }),
       }),
     )
   },

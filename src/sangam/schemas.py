@@ -184,6 +184,53 @@ class MoveFolder(MutationRequest):
     path: str
 
 
+class BulkDocumentMoveItem(MutationRequest):
+    document_id: str = Field(min_length=1, max_length=120)
+    expected_revision_id: str = Field(min_length=1, max_length=120)
+    expected_source_path: str = Field(min_length=1, max_length=500)
+
+
+class BulkMoveDocuments(MutationRequest):
+    documents: list[BulkDocumentMoveItem] = Field(min_length=1, max_length=100)
+    destination_folder_path: str = Field(default="", max_length=500)
+
+
+class BulkDocumentMetadataItem(MutationRequest):
+    document_id: str = Field(min_length=1, max_length=120)
+    expected_metadata_version: int = Field(ge=0)
+
+
+class BulkTagDocuments(MutationRequest):
+    documents: list[BulkDocumentMetadataItem] = Field(min_length=1, max_length=100)
+    add_tag_ids: list[str] = Field(default_factory=list, max_length=50)
+    remove_tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class BulkTrashDocumentItem(MutationRequest):
+    document_id: str = Field(min_length=1, max_length=120)
+    expected_revision_id: str = Field(min_length=1, max_length=120)
+
+
+class BulkTrashDocuments(MutationRequest):
+    documents: list[BulkTrashDocumentItem] = Field(min_length=1, max_length=100)
+
+
+class BulkOrganizationItemResult(BaseModel):
+    document_id: str
+    status: Literal["completed", "skipped", "conflicted", "failed"]
+    path: str | None = None
+    revision_id: str | None = None
+    metadata_version: int | None = None
+    message: str | None = None
+    error_code: str | None = None
+
+
+class BulkOrganizationResult(BaseModel):
+    operation: Literal["move", "tag", "trash"]
+    status: Literal["completed", "partial", "failed"]
+    results: list[BulkOrganizationItemResult]
+
+
 class UpdateDocument(MutationRequest):
     expected_revision_id: str
     content: str

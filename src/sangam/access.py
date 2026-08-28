@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from pathlib import PurePosixPath
 from typing import TypeVar
 
 from sangam.activity import ActivityService
@@ -14,6 +15,11 @@ from sangam.schemas import (
     Annotation,
     AnnotationEvent,
     AnnotationType,
+    BulkDocumentMetadataItem,
+    BulkDocumentMoveItem,
+    BulkOrganizationItemResult,
+    BulkOrganizationResult,
+    BulkTrashDocumentItem,
     Document,
     DocumentSummary,
     Folder,
@@ -762,6 +768,279 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             ),
         )
+
+    def bulk_move_documents(
+        self,
+        principal: Principal,
+        *,
+        items: list[BulkDocumentMoveItem],
+        destination_folder_path: str,
+        idempotency_key: str,
+    ) -> BulkOrganizationResult:
+        """Move a bounded document set after validating every observed source.
+
+        Individual document moves retain their existing filesystem/revision
+        transaction. A late race can therefore produce an explicit partial
+        result; retrying with the same operation key converges through the
+        derived per-document idempotency keys.
+        """
+        self._require_unique_resource_ids([item.document_id for item in items])
+        destination = (
+            self.organization.normalize_folder_path(destination_folder_path)
+            if destination_folder_path.strip()
+            else ""
+        )
+        if destination and not any(
+            folder.path == destination for folder in self.organization.list_folders()
+        ):
+            raise ValidationError(
+                "The destination folder does not exist", details={"path": destination}
+            )
+
+        documents = {
+            item.document_id: self.documents.get_document(item.document_id) for item in items
+        }
+        moving_ids = set(documents)
+        occupied_document_paths = {
+            document.path: document.document_id
+            for document in self.documents.list_documents()
+            if document.path and document.document_id not in moving_ids
+        }
+        occupied_folder_paths = {folder.path for folder in self.organization.list_folders()}
+        targets: dict[str, str] = {}
+        for item in items:
+            current = documents[item.document_id]
+            if current.current_revision_id != item.expected_revision_id:
+                raise ConflictError(
+                    "A document changed before the bulk move",
+                    details={
+                        "document_id": item.document_id,
+                        "expected_revision_id": item.expected_revision_id,
+                        "current_revision_id": current.current_revision_id,
+                    },
+                )
+            if current.path != canonicalize_document_path(item.expected_source_path):
+                raise ConflictError(
+                    "A document path changed before the bulk move",
+                    details={
+                        "document_id": item.document_id,
+                        "expected_source_path": item.expected_source_path,
+                        "current_path": current.path,
+                    },
+                )
+            self.policy.require(principal, Capability.MOVE, current.path)
+            target = canonicalize_document_path(
+                "/".join(part for part in (destination, PurePosixPath(current.path).name) if part)
+            )
+            self.policy.require(principal, Capability.MOVE, target)
+            if target in targets:
+                raise ConflictError(
+                    "Several selected documents resolve to the same destination",
+                    details={"path": target, "document_ids": [targets[target], item.document_id]},
+                )
+            if target in occupied_document_paths or target in occupied_folder_paths:
+                raise ConflictError(
+                    "A destination path is already occupied",
+                    details={"document_id": item.document_id, "path": target},
+                )
+            targets[target] = item.document_id
+
+        results: list[BulkOrganizationItemResult] = []
+        for index, item in enumerate(items):
+            current = documents[item.document_id]
+            target = next(
+                path for path, document_id in targets.items() if document_id == item.document_id
+            )
+            if current.path == target:
+                results.append(
+                    BulkOrganizationItemResult(
+                        document_id=item.document_id,
+                        status="skipped",
+                        path=current.path,
+                        revision_id=current.current_revision_id,
+                        message="The document is already in that folder.",
+                    )
+                )
+                continue
+            try:
+                moved = self.move_document(
+                    principal,
+                    document_id=item.document_id,
+                    expected_revision_id=item.expected_revision_id,
+                    path=target,
+                    summary=f"Bulk moved to {destination or 'workspace root'}",
+                    idempotency_key=f"{idempotency_key}:move:{index}",
+                )
+            except SangamError as error:
+                results.append(self._bulk_error_result(item.document_id, error))
+            else:
+                results.append(
+                    BulkOrganizationItemResult(
+                        document_id=moved.document_id,
+                        status="completed",
+                        path=moved.path,
+                        revision_id=moved.current_revision_id,
+                        metadata_version=moved.metadata_version,
+                    )
+                )
+        return BulkOrganizationResult(
+            operation="move", status=self._bulk_status(results), results=results
+        )
+
+    def bulk_tag_documents(
+        self,
+        principal: Principal,
+        *,
+        items: list[BulkDocumentMetadataItem],
+        add_tag_ids: list[str],
+        remove_tag_ids: list[str],
+        idempotency_key: str,
+    ) -> BulkOrganizationResult:
+        self._require_unique_resource_ids([item.document_id for item in items])
+        add_ids = set(add_tag_ids)
+        remove_ids = set(remove_tag_ids)
+        if add_ids & remove_ids:
+            raise ValidationError(
+                "A tag cannot be added and removed in the same operation",
+                details={"tag_ids": sorted(add_ids & remove_ids)},
+            )
+        known_tag_ids = {tag.tag_id for tag in self.organization.list_tags()}
+        unknown = sorted((add_ids | remove_ids) - known_tag_ids)
+        if unknown:
+            raise ValidationError("One or more tags do not exist", details={"tag_ids": unknown})
+
+        documents = {
+            item.document_id: self.documents.get_document(item.document_id) for item in items
+        }
+        resulting_tags: dict[str, list[str]] = {}
+        for item in items:
+            current = documents[item.document_id]
+            if current.metadata_version != item.expected_metadata_version:
+                raise ConflictError(
+                    "Document metadata changed before the bulk tag operation",
+                    details={
+                        "document_id": item.document_id,
+                        "expected_metadata_version": item.expected_metadata_version,
+                        "current_metadata_version": current.metadata_version,
+                    },
+                )
+            self.policy.require(principal, Capability.TAG, current.path)
+            current_ids = {tag.tag_id for tag in current.tags}
+            resulting_tags[item.document_id] = sorted((current_ids | add_ids) - remove_ids)
+
+        results: list[BulkOrganizationItemResult] = []
+        for index, item in enumerate(items):
+            current = documents[item.document_id]
+            tag_ids = resulting_tags[item.document_id]
+            if tag_ids == sorted(tag.tag_id for tag in current.tags):
+                results.append(
+                    BulkOrganizationItemResult(
+                        document_id=item.document_id,
+                        status="skipped",
+                        path=current.path,
+                        revision_id=current.current_revision_id,
+                        metadata_version=current.metadata_version,
+                        message="The requested tag assignment is already current.",
+                    )
+                )
+                continue
+            try:
+                updated = self.update_document_metadata(
+                    principal,
+                    document_id=item.document_id,
+                    expected_metadata_version=item.expected_metadata_version,
+                    category=current.category,
+                    tag_ids=tag_ids,
+                    idempotency_key=f"{idempotency_key}:tag:{index}",
+                )
+            except SangamError as error:
+                results.append(self._bulk_error_result(item.document_id, error))
+            else:
+                results.append(
+                    BulkOrganizationItemResult(
+                        document_id=updated.document_id,
+                        status="completed",
+                        path=updated.path,
+                        revision_id=updated.current_revision_id,
+                        metadata_version=updated.metadata_version,
+                    )
+                )
+        return BulkOrganizationResult(
+            operation="tag", status=self._bulk_status(results), results=results
+        )
+
+    def bulk_trash_documents(
+        self,
+        principal: Principal,
+        *,
+        items: list[BulkTrashDocumentItem],
+        idempotency_key: str,
+    ) -> BulkOrganizationResult:
+        self._require_unique_resource_ids([item.document_id for item in items])
+        documents = {
+            item.document_id: self.documents.get_document(item.document_id) for item in items
+        }
+        for item in items:
+            current = documents[item.document_id]
+            if current.current_revision_id != item.expected_revision_id:
+                raise ConflictError(
+                    "A document changed before the bulk Trash operation",
+                    details={
+                        "document_id": item.document_id,
+                        "expected_revision_id": item.expected_revision_id,
+                        "current_revision_id": current.current_revision_id,
+                    },
+                )
+            self.policy.require(principal, Capability.DELETE, current.path)
+
+        results: list[BulkOrganizationItemResult] = []
+        for index, item in enumerate(items):
+            try:
+                deleted = self.delete_document(
+                    principal,
+                    document_id=item.document_id,
+                    expected_revision_id=item.expected_revision_id,
+                    summary="Bulk moved to Trash",
+                    idempotency_key=f"{idempotency_key}:trash:{index}",
+                )
+            except SangamError as error:
+                results.append(self._bulk_error_result(item.document_id, error))
+            else:
+                results.append(
+                    BulkOrganizationItemResult(
+                        document_id=deleted.document_id,
+                        status="completed",
+                        path=deleted.path,
+                        revision_id=deleted.current_revision_id,
+                        metadata_version=deleted.metadata_version,
+                    )
+                )
+        return BulkOrganizationResult(
+            operation="trash", status=self._bulk_status(results), results=results
+        )
+
+    @staticmethod
+    def _require_unique_resource_ids(resource_ids: list[str]) -> None:
+        if len(resource_ids) != len(set(resource_ids)):
+            raise ValidationError("A bulk organization request cannot repeat a document")
+
+    @staticmethod
+    def _bulk_error_result(document_id: str, error: SangamError) -> BulkOrganizationItemResult:
+        return BulkOrganizationItemResult(
+            document_id=document_id,
+            status="conflicted" if isinstance(error, ConflictError) else "failed",
+            message=error.message,
+            error_code=error.code,
+        )
+
+    @staticmethod
+    def _bulk_status(results: list[BulkOrganizationItemResult]) -> str:
+        completed = sum(result.status in {"completed", "skipped"} for result in results)
+        if completed == len(results):
+            return "completed"
+        if completed:
+            return "partial"
+        return "failed"
 
     def list_tags(self, principal: Principal) -> list[Tag]:
         def operation() -> list[Tag]:

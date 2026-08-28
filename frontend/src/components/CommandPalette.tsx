@@ -9,6 +9,7 @@ import {
   FileText,
   FilePlus2,
   Files,
+  FolderInput,
   Globe2,
   MessageSquareText,
   RotateCcw,
@@ -16,9 +17,11 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Tags,
   Trash2,
 } from 'lucide-react'
 import { api } from '../api'
+import { dispatchExplorerCommand } from '../explorerCommands'
 import { canSplitActiveGroup } from '../splitPolicy'
 import { findGroup, useWorkbench } from '../workbench'
 
@@ -83,6 +86,30 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         icon: Search,
         group: 'Actions',
         run: onSearch,
+      },
+      {
+        id: 'organize.move',
+        label: 'Move selected item(s)…',
+        detail: 'Choose another workspace folder',
+        icon: FolderInput,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand('move'),
+      },
+      {
+        id: 'organize.tags',
+        label: 'Edit tags for selected item(s)…',
+        detail: 'Apply or remove workspace tags',
+        icon: Tags,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand('tags'),
+      },
+      {
+        id: 'organize.trash',
+        label: 'Move selected document(s) to Trash',
+        detail: 'Review before removing documents',
+        icon: Trash2,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand('trash'),
       },
       {
         id: 'group.splitRight',
