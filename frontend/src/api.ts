@@ -483,7 +483,7 @@ export const chatEffectSchema = z.object({
   effect_id: z.string(),
   thread_id: z.string(),
   requested_by: z.string(),
-  capability_id: z.enum(['create_document', 'publish_document']),
+  capability_id: z.enum(['create_document', 'publish_document', 'apply_workspace_organization_plan']),
   capability_version: z.number(),
   argument_digest: z.string(),
   preview: z.record(z.string(), z.unknown()),

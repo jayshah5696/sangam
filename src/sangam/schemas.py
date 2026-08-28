@@ -698,7 +698,7 @@ class ChatEffect(BaseModel):
     effect_id: str
     thread_id: str
     requested_by: str
-    capability_id: Literal["create_document", "publish_document"]
+    capability_id: Literal["create_document", "publish_document", "apply_workspace_organization_plan"]
     capability_version: int
     argument_digest: str
     preview: dict[str, object]
