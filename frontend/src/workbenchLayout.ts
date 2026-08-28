@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 export type SplitDirection = 'horizontal' | 'vertical'
 
 export type WorkbenchTab = {
@@ -130,10 +132,12 @@ export function closeOtherTabs(
   }
 }
 
-export function reopenClosedTab(state: WorkbenchLayoutState): {
+export interface ReopenedTabResult {
   state: WorkbenchLayoutState
   documentId: string | null
-} {
+}
+
+export function reopenClosedTab(state: WorkbenchLayoutState): ReopenedTabResult {
   const closed = state.recentlyClosed[0]
   if (!closed) return { state, documentId: null }
   const targetGroupId = collectGroups(state.root).some((group) => group.id === closed.groupId)
@@ -288,67 +292,111 @@ function removeGroup(root: LayoutNode, groupId: string): LayoutNode | null {
   return { ...root, first, second }
 }
 
-export function isLayoutNode(value: unknown): value is LayoutNode {
-  return isValidLayoutNode(value, new Set())
-}
+export const workbenchTabSchema = z.object({
+  documentId: z.string().min(1),
+  title: z.string(),
+  pinned: z.boolean(),
+})
 
-export function parseWorkbenchLayoutState(value: unknown): WorkbenchLayoutState | null {
-  if (!value || typeof value !== 'object') return null
-  const candidate = value as Partial<WorkbenchLayoutState> & { schemaVersion?: unknown }
-  if (candidate.schemaVersion !== undefined && candidate.schemaVersion !== 1) return null
-  if (!isLayoutNode(candidate.root)) return null
-  const groups = collectGroups(candidate.root)
-  if (groups.length === 0) return null
-  const activeGroupId = groups.some((group) => group.id === candidate.activeGroupId)
-    ? candidate.activeGroupId!
-    : groups[0]!.id
-  const recentlyClosed = Array.isArray(candidate.recentlyClosed)
-    ? candidate.recentlyClosed.filter(isClosedTab).slice(0, 12)
-    : []
-  return { schemaVersion: 1, root: candidate.root, activeGroupId, recentlyClosed }
-}
+export const closedTabSchema = z.object({
+  groupId: z.string(),
+  tab: workbenchTabSchema,
+})
 
-function isValidLayoutNode(value: unknown, ids: Set<string>): value is LayoutNode {
-  if (!value || typeof value !== 'object') return false
-  const node = value as Partial<LayoutNode>
-  if (typeof node.id !== 'string' || !node.id || ids.has(node.id)) return false
+export const groupNodeSchema = z.object({
+  kind: z.literal('group'),
+  id: z.string().min(1),
+  tabs: z.array(workbenchTabSchema),
+  activeTabId: z.string().nullable(),
+})
+
+export const layoutNodeSchema: z.ZodType<LayoutNode> = z.lazy(() =>
+  z.union([
+    groupNodeSchema,
+    z.object({
+      kind: z.literal('split'),
+      id: z.string().min(1),
+      direction: z.enum(['horizontal', 'vertical']),
+      ratio: z.number().min(10).max(90),
+      first: layoutNodeSchema,
+      second: layoutNodeSchema,
+    }),
+  ]),
+)
+
+export const workbenchLayoutStateSchema = z.object({
+  schemaVersion: z.literal(1).optional().default(1),
+  root: layoutNodeSchema,
+  activeGroupId: z.string(),
+  recentlyClosed: z.array(closedTabSchema).optional().default([]),
+})
+
+function hasUniqueIds(node: LayoutNode, ids: Set<string>): boolean {
+  if (ids.has(node.id)) return false
   ids.add(node.id)
   if (node.kind === 'group') {
-    if (!Array.isArray(node.tabs) || !node.tabs.every(isWorkbenchTab)) return false
     const documentIds = new Set(node.tabs.map((tab) => tab.documentId))
-    return (
-      documentIds.size === node.tabs.length &&
-      (node.activeTabId === null ||
-        (typeof node.activeTabId === 'string' && documentIds.has(node.activeTabId)))
-    )
+    if (documentIds.size !== node.tabs.length) return false
+    if (node.activeTabId !== null && !documentIds.has(node.activeTabId)) return false
+    return true
   }
-  if (node.kind === 'split') {
-    return (
-      (node.direction === 'horizontal' || node.direction === 'vertical') &&
-      typeof node.ratio === 'number' &&
-      Number.isFinite(node.ratio) &&
-      node.ratio >= 10 &&
-      node.ratio <= 90 &&
-      isValidLayoutNode(node.first, ids) &&
-      isValidLayoutNode(node.second, ids)
-    )
-  }
-  return false
+  return hasUniqueIds(node.first, ids) && hasUniqueIds(node.second, ids)
 }
 
-function isWorkbenchTab(value: unknown): value is WorkbenchTab {
-  if (!value || typeof value !== 'object') return false
-  const tab = value as Partial<WorkbenchTab>
-  return (
-    typeof tab.documentId === 'string' &&
-    Boolean(tab.documentId) &&
-    typeof tab.title === 'string' &&
-    typeof tab.pinned === 'boolean'
-  )
+export interface RawWorkbenchTab {
+  documentId?: unknown
+  title?: unknown
+  pinned?: unknown
 }
 
-function isClosedTab(value: unknown): value is ClosedTab {
-  if (!value || typeof value !== 'object') return false
-  const closed = value as Partial<ClosedTab>
-  return typeof closed.groupId === 'string' && isWorkbenchTab(closed.tab)
+export interface RawClosedTab {
+  groupId?: unknown
+  tab?: RawWorkbenchTab
+}
+
+export interface RawGroupNode {
+  kind?: unknown
+  id?: unknown
+  tabs?: RawWorkbenchTab[]
+  activeTabId?: unknown
+}
+
+export interface RawSplitNode {
+  kind?: unknown
+  id?: unknown
+  direction?: unknown
+  ratio?: unknown
+  first?: LayoutNodeCandidate
+  second?: LayoutNodeCandidate
+}
+
+export type LayoutNodeCandidate = RawGroupNode | RawSplitNode | null | undefined
+
+export interface WorkbenchLayoutCandidate {
+  schemaVersion?: unknown
+  root?: LayoutNodeCandidate
+  activeGroupId?: unknown
+  recentlyClosed?: RawClosedTab[]
+}
+
+export type WorkbenchLayoutStateCandidate = WorkbenchLayoutCandidate | null | undefined
+
+export function isLayoutNode(value: LayoutNodeCandidate): value is LayoutNode {
+  const result = layoutNodeSchema.safeParse(value)
+  if (!result.success) return false
+  return hasUniqueIds(result.data, new Set())
+}
+
+export function parseWorkbenchLayoutState(value: WorkbenchLayoutStateCandidate): WorkbenchLayoutState | null {
+  const parsed = workbenchLayoutStateSchema.safeParse(value)
+  if (!parsed.success) return null
+  const state = parsed.data
+  if (!hasUniqueIds(state.root, new Set())) return null
+  const groups = collectGroups(state.root)
+  if (groups.length === 0) return null
+  const activeGroupId = groups.some((group) => group.id === state.activeGroupId)
+    ? state.activeGroupId
+    : groups[0]!.id
+  const recentlyClosed = state.recentlyClosed.slice(0, 12)
+  return { schemaVersion: 1, root: state.root, activeGroupId, recentlyClosed }
 }

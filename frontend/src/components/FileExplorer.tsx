@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react'
+import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import type {
@@ -471,7 +472,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const handleTreeContextMenu = (event: MouseEvent<HTMLElement>) => {
     const path = model.getFocusedPath()
     const item = path ? itemFromPath(path) : null
-    const host = event.currentTarget as HTMLElement
+    const host = event.currentTarget
     const activeElement = host.shadowRoot?.activeElement
     const anchorElement = activeElement instanceof HTMLElement ? activeElement : null
     if (!item || !anchorElement || !anchorElement.closest('[data-type="item"]')) return
@@ -650,7 +651,7 @@ function ExplorerContextMenu({
 
   useEffect(() => {
     const handleClickOutside = (event: globalThis.MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      if (event.target instanceof Node && menuRef.current && !menuRef.current.contains(event.target)) {
         onClose()
         context.restoreFocus()
       }
@@ -672,7 +673,10 @@ function ExplorerContextMenu({
     const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')]
     if (!items.length) return
     event.preventDefault()
-    const current = items.indexOf(globalThis.document.activeElement as HTMLElement)
+    const current =
+      globalThis.document.activeElement instanceof HTMLElement
+        ? items.indexOf(globalThis.document.activeElement)
+        : -1
     const next =
       event.key === 'Home'
         ? 0
@@ -742,9 +746,10 @@ function ExplorerContextMenu({
   )
 }
 
-function loadExpanded() {
+function loadExpanded(): string[] {
   try {
-    return JSON.parse(localStorage.getItem(expandedStorageKey) ?? '[]') as string[]
+    const raw = JSON.parse(localStorage.getItem(expandedStorageKey) ?? '[]')
+    return z.array(z.string()).safeParse(raw).data ?? []
   } catch {
     return []
   }

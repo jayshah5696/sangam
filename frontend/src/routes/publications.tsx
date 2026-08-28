@@ -80,7 +80,12 @@ function PublicationsDashboard() {
         <select
           aria-label="Publication access policy"
           value={policy}
-          onChange={(event) => setPolicy(event.target.value as PolicyFilter)}
+          onChange={(event) => {
+            const val = event.target.value
+            if (val === 'all' || val === 'public' || val === 'unlisted' || val === 'private') {
+              setPolicy(val)
+            }
+          }}
         >
           <option value="all">All policies</option>
           <option value="public">Public</option>
@@ -90,7 +95,12 @@ function PublicationsDashboard() {
         <select
           aria-label="Publication status"
           value={status}
-          onChange={(event) => setStatus(event.target.value as StatusFilter)}
+          onChange={(event) => {
+            const val = event.target.value
+            if (val === 'all' || val === 'live' || val === 'unpublished') {
+              setStatus(val)
+            }
+          }}
         >
           <option value="all">All statuses</option>
           <option value="live">Live</option>
@@ -258,7 +268,12 @@ function PublicationEditor({
           <span>Access policy</span>
           <select
             value={accessPolicy}
-            onChange={(event) => setAccessPolicy(event.target.value as Publication['access_policy'])}
+            onChange={(event) => {
+              const val = event.target.value
+              if (val === 'private' || val === 'unlisted' || val === 'public') {
+                setAccessPolicy(val)
+              }
+            }}
           >
             <option value="private">Private</option>
             <option value="unlisted">Unlisted</option>

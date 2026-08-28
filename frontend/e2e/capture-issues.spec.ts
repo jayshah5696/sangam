@@ -43,6 +43,7 @@ test.describe('Issue Verification Real Screenshots', () => {
         path: 'projects/high-throughput-storage-engine-design-specifications.md',
       },
     })
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const docData = (await doc.json()) as { document_id: string }
 
     await page.goto(`/documents/${docData.document_id}`)
@@ -97,6 +98,7 @@ test.describe('Issue Verification Real Screenshots', () => {
         content: '# Cluster Performance Metrics\n\nThroughput metrics across 10 nodes.',
       },
     })
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const docData = (await doc.json()) as { document_id: string }
 
     await page.goto(`/documents/${docData.document_id}`)
@@ -255,6 +257,7 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
         path: 'architecture/overview.md',
       },
     })
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const docData = (await doc.json()) as { document_id: string }
 
     await page.goto(`/documents/${docData.document_id}`)
@@ -376,8 +379,11 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
         content: '# Longer document title\n\nDetailed specifications.',
       },
     })
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const d1 = (await doc1.json()) as { document_id: string }
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const d2 = (await doc2.json()) as { document_id: string }
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const d3 = (await doc3.json()) as { document_id: string }
 
     await page.addInitScript(

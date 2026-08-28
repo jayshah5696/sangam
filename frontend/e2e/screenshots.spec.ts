@@ -71,6 +71,7 @@ test('capture the README workspace and settings screenshots', async ({ page, req
         },
       )
       if (pdfUploadRes.ok()) {
+        // SAFETY: POST /api/v1/documents/import returns document entity with document_id
         const pdfDoc = (await pdfUploadRes.json()) as { document_id: string }
         await page.goto(`/documents/${pdfDoc.document_id}`)
         await expect(page.getByRole('heading', { name: 'Architecture Research' })).toBeVisible()
@@ -95,6 +96,7 @@ test('capture the README workspace and settings screenshots', async ({ page, req
       },
     })
     if (htmlDocRes.ok()) {
+      // SAFETY: POST /api/v1/documents returns document entity with document_id
       const htmlDoc = (await htmlDocRes.json()) as { document_id: string }
       await page.goto(`/documents/${htmlDoc.document_id}`)
       await expect(page.getByRole('heading', { name: 'Interactive Sales Dashboard' })).toBeVisible()
@@ -120,6 +122,7 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     },
   })
   expect(document.ok(), await document.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/documents returns document entity with document_id
   const payload = (await document.json()) as { document_id: string }
 
   await page.goto(`/documents/${payload.document_id}`)

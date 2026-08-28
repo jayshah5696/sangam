@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { z } from 'zod'
 import type { EditorMode } from './documentSessions'
 
 export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
@@ -50,7 +51,7 @@ export const themeColorRoles = [
 
 export type ThemeColorKey = (typeof themeColorRoles)[number]['key']
 
-export const baseThemeColors: Record<ThemeId, Record<ThemeColorKey, string>> = {
+export const baseThemeColors = {
   midnight: {
     appBg: '#08090a',
     surface: '#191a1b',
@@ -95,7 +96,7 @@ export const baseThemeColors: Record<ThemeId, Record<ThemeColorKey, string>> = {
     sidebarText: '#f4f9ff',
     accent: '#1769c2',
   },
-}
+} satisfies Record<ThemeId, Record<ThemeColorKey, string>>
 
 export type CustomTheme = {
   id: string
@@ -104,22 +105,33 @@ export type CustomTheme = {
   colors: Partial<Record<ThemeColorKey, string>>
 }
 
+export interface ResolvedThemeColors {
+  appBg: string
+  surface: string
+  surfaceSoft: string
+  text: string
+  muted: string
+  line: string
+  sidebar: string
+  sidebarText: string
+  accent: string
+}
+
 export const customThemeIdPrefix = 'custom:'
 
 export function customThemeRef(id: string): `${typeof customThemeIdPrefix}${string}` {
   return `${customThemeIdPrefix}${id}`
 }
 
-export function isValidColorValue(value: unknown): value is string {
+export function isValidColorValue(value: string): boolean {
   return (
-    typeof value === 'string' &&
-    (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ||
-      /^rgba?\(([\d.]+\s*,\s*){2}[\d.]+(?:\s*,\s*[\d.]+)?\)$/.test(value))
+    /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ||
+    /^rgba?\(([\d.]+\s*,\s*){2}[\d.]+(?:\s*,\s*[\d.]+)?\)$/.test(value)
   )
 }
 
-export function isValidAccentHex(value: unknown): value is string {
-  return typeof value === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)
+export function isValidAccentHex(value: string): boolean {
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)
 }
 
 export function hexToRgba(hex: string, alpha: number): string {
@@ -154,8 +166,9 @@ export function readableTextColor(hex: string): string {
   return luminance > 0.4 ? '#101318' : '#f7f8f8'
 }
 
-export function resolveCustomThemeColors(custom: CustomTheme): Record<ThemeColorKey, string> {
-  return { ...baseThemeColors[custom.base], ...custom.colors }
+export function resolveCustomThemeColors(custom: CustomTheme): ResolvedThemeColors {
+  const base = baseThemeColors[custom.base]
+  return { ...base, ...custom.colors }
 }
 
 const overrideTokens = [...themeColorRoles.map((role) => role.token), '--accent-soft', '--accent-text']
@@ -235,58 +248,88 @@ const defaults: WorkspacePreferences = {
 
 const storageKey = 'sangam.workspace-preferences.v1'
 
-function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
-  return allowed.includes(value as T) ? (value as T) : fallback
-}
+const themeIdSchema = z.enum(['midnight', 'river', 'parchment', 'cobalt'])
+const uiFontIdSchema = z.enum(['system', 'inter', 'plex', 'serif'])
+const uiDensitySchema = z.enum(['compact', 'default', 'comfortable'])
+const editorSizeSchema = z.enum(['small', 'default', 'large'])
+const editorModeSchema = z.enum(['edit', 'split', 'preview'])
+const inspectorTabSchema = z.enum(['properties', 'research', 'outline', 'history', 'chat'])
 
-function parseCustomThemes(value: unknown): CustomTheme[] {
+const rawCustomThemeSchema = z.object({
+  id: z.string().regex(/^[a-z0-9-]+$/),
+  name: z.string().trim().min(1),
+  base: themeIdSchema,
+  colors: z.record(z.string(), z.string()).optional().default({}),
+})
+
+function parseCustomThemes(value: Array<z.input<typeof rawCustomThemeSchema>> | undefined): CustomTheme[] {
   if (!Array.isArray(value)) return []
   const seen = new Set<string>()
   const parsed: CustomTheme[] = []
   for (const entry of value) {
-    if (typeof entry !== 'object' || entry === null) continue
-    const candidate = entry as { id?: unknown; name?: unknown; base?: unknown; colors?: unknown }
-    if (typeof candidate.id !== 'string' || !/^[a-z0-9-]+$/.test(candidate.id)) continue
-    if (seen.has(candidate.id)) continue
-    if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) continue
-    if (!['river', 'midnight', 'parchment', 'cobalt'].includes(String(candidate.base))) continue
+    const result = rawCustomThemeSchema.safeParse(entry)
+    if (!result.success || seen.has(result.data.id)) continue
     const colors: Partial<Record<ThemeColorKey, string>> = {}
-    if (typeof candidate.colors === 'object' && candidate.colors !== null) {
-      for (const role of themeColorRoles) {
-        const color = (candidate.colors as Record<string, unknown>)[role.key]
-        if (isValidColorValue(color)) colors[role.key] = color
+    for (const role of themeColorRoles) {
+      const color = result.data.colors[role.key]
+      if (color && isValidColorValue(color)) {
+        colors[role.key] = color
       }
     }
-    seen.add(candidate.id)
-    parsed.push({ id: candidate.id, name: candidate.name, base: candidate.base as ThemeId, colors })
+    seen.add(result.data.id)
+    parsed.push({
+      id: result.data.id,
+      name: result.data.name,
+      base: result.data.base,
+      colors,
+    })
   }
   return parsed
 }
 
+const rawStoredPreferencesSchema = z.object({
+  theme: z.string().optional(),
+  uiFont: uiFontIdSchema.optional(),
+  uiDensity: uiDensitySchema.optional(),
+  editorSize: editorSizeSchema.optional(),
+  editorMode: editorModeSchema.optional(),
+  leftWidth: z.number().optional(),
+  rightWidth: z.number().optional(),
+  leftVisible: z.boolean().optional(),
+  rightVisible: z.boolean().optional(),
+  rightTab: inspectorTabSchema.optional(),
+  customThemes: z.array(rawCustomThemeSchema.passthrough()).optional(),
+})
+
 function loadPreferences(): WorkspacePreferences {
-  const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 900
+  const isNarrow = Boolean(globalThis.window && globalThis.window.innerWidth <= 900)
   try {
-    const stored = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as Partial<WorkspacePreferences>
+    const raw = JSON.parse(localStorage.getItem(storageKey) ?? '{}')
+    const parsed = rawStoredPreferencesSchema.safeParse(raw)
+    if (!parsed.success) {
+      return { ...defaults, rightVisible: isNarrow ? false : true }
+    }
+    const stored = parsed.data
     const customThemes = parseCustomThemes(stored.customThemes)
-    const storedTheme = String(stored.theme ?? defaults.theme)
+    const storedTheme = stored.theme ?? defaults.theme
     const themeIsValidCustom =
       storedTheme.startsWith(customThemeIdPrefix) &&
       customThemes.some((entry) => customThemeRef(entry.id) === storedTheme)
-    const theme = themeIsValidCustom
-      ? (storedTheme as WorkspacePreferences['theme'])
-      : oneOf(stored.theme, ['river', 'midnight', 'parchment', 'cobalt'] as const, defaults.theme)
+    const parsedTheme = themeIdSchema.safeParse(stored.theme)
+    // SAFETY: themeIsValidCustom guarantees storedTheme starts with customThemeIdPrefix
+    const customRef = storedTheme as `custom:${string}`
+    const theme = themeIsValidCustom ? customRef : parsedTheme.success ? parsedTheme.data : defaults.theme
+
     return {
       ...defaults,
       ...stored,
       theme,
-      uiFont: oneOf(stored.uiFont, ['system', 'inter', 'plex', 'serif'] as const, defaults.uiFont),
-      uiDensity: oneOf(stored.uiDensity, ['compact', 'default', 'comfortable'] as const, defaults.uiDensity),
-      editorSize: oneOf(stored.editorSize, ['small', 'default', 'large'] as const, defaults.editorSize),
+      uiFont: stored.uiFont ?? defaults.uiFont,
+      uiDensity: stored.uiDensity ?? defaults.uiDensity,
+      editorSize: stored.editorSize ?? defaults.editorSize,
+      editorMode: stored.editorMode ?? defaults.editorMode,
       customThemes,
       rightVisible: isNarrow ? false : (stored.rightVisible ?? true),
-      editorMode: ['edit', 'split', 'preview'].includes(String(stored.editorMode))
-        ? (stored.editorMode as EditorMode)
-        : defaults.editorMode,
     }
   } catch {
     return { ...defaults, rightVisible: isNarrow ? false : true }

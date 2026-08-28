@@ -26,13 +26,13 @@ export function PierreRevisionDiff({ oldFile, newFile, options }: PierreRevision
           setPreloadState({ oldFile, newFile, options, prerenderedHTML: result.prerenderedHTML })
         }
       })
-      .catch((reason: unknown) => {
+      .catch((error) => {
         if (!cancelled) {
           setPreloadState({
             oldFile,
             newFile,
             options,
-            error: reason instanceof Error ? reason.message : 'Unable to render this comparison.',
+            error: error instanceof Error ? error.message : 'Unable to render this comparison.',
           })
         }
       })

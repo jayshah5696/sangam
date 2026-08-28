@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, getRouteApi, Link, redirect, useNavigate } from '@tanstack/react-router'
 import {
@@ -37,11 +38,8 @@ import {
   uiFonts,
   useTheme,
   type CustomTheme,
-  type EditorSize,
   type ThemeColorKey,
   type ThemeId,
-  type UiDensity,
-  type UiFontId,
 } from '../theme'
 import { useWorkbench } from '../workbench'
 
@@ -195,7 +193,10 @@ export function WorkspaceSettings() {
                     aria-label="Interface font"
                     className="settings-select"
                     value={preferences.uiFont}
-                    onChange={(event) => updatePreferences({ uiFont: event.target.value as UiFontId })}
+                    onChange={(event) => {
+                      const font = uiFonts.find((f) => f.id === event.target.value)
+                      if (font) updatePreferences({ uiFont: font.id })
+                    }}
                   >
                     {uiFonts.map((font) => (
                       <option key={font.id} value={font.id} style={{ fontFamily: font.stack }}>
@@ -218,7 +219,7 @@ export function WorkspaceSettings() {
                         className={
                           preferences.uiDensity === density.id ? 'density-option selected' : 'density-option'
                         }
-                        onClick={() => updatePreferences({ uiDensity: density.id as UiDensity })}
+                        onClick={() => updatePreferences({ uiDensity: density.id })}
                       >
                         {density.name}
                       </button>
@@ -234,7 +235,10 @@ export function WorkspaceSettings() {
                     aria-label="Editor text size"
                     className="settings-select"
                     value={preferences.editorSize}
-                    onChange={(event) => updatePreferences({ editorSize: event.target.value as EditorSize })}
+                    onChange={(event) => {
+                      const size = editorSizes.find((s) => s.id === event.target.value)
+                      if (size) updatePreferences({ editorSize: size.id })
+                    }}
                   >
                     {editorSizes.map((size) => (
                       <option key={size.id} value={size.id}>
@@ -537,12 +541,24 @@ function CreateThemeSection() {
     patchTheme(id, { colors: { ...current.colors, [key]: value } })
   }
 
+  const importedThemeSchema = z.object({
+    id: z
+      .string()
+      .regex(/^[a-z0-9-]+$/)
+      .optional(),
+    name: z.string().trim().optional(),
+    base: z.enum(['river', 'midnight', 'parchment', 'cobalt']).optional().default('midnight'),
+    colors: z.record(z.string(), z.string()).optional().default({}),
+  })
+
   const createTheme = () => {
     const id = `theme-${Date.now().toString(36)}`
+    const matchingTheme = themes.find((t) => t.id === preferences.theme)
+    const defaultBase: ThemeId = matchingTheme ? matchingTheme.id : 'midnight'
     const theme: CustomTheme = {
       id,
       name: 'My theme',
-      base: activeCustomTheme(preferences)?.base ?? (preferences.theme as ThemeId),
+      base: activeCustomTheme(preferences)?.base ?? defaultBase,
       colors: {},
     }
     updatePreferences({ customThemes: [...preferences.customThemes, theme], theme: customThemeRef(id) })
@@ -564,24 +580,26 @@ function CreateThemeSection() {
   const importTheme = () => {
     setImportError('')
     try {
-      const parsed = JSON.parse(importJson) as Record<string, unknown>
-      const colors: Partial<Record<ThemeColorKey, string>> = {}
-      const rawColors = (parsed.colors ?? {}) as Record<string, unknown>
-      for (const role of themeColorRoles) {
-        const color = rawColors[role.key]
-        if (isValidColorValue(color)) colors[role.key] = color
+      const raw = JSON.parse(importJson)
+      const result = importedThemeSchema.safeParse(raw)
+      if (!result.success) {
+        setImportError('That is not valid theme JSON.')
+        return
       }
-      const base = ['river', 'midnight', 'parchment', 'cobalt'].includes(String(parsed.base))
-        ? (parsed.base as ThemeId)
-        : 'midnight'
-      let id = typeof parsed.id === 'string' && /^[a-z0-9-]+$/.test(parsed.id) ? parsed.id : ''
+      const parsed = result.data
+      const colors: Partial<Record<ThemeColorKey, string>> = {}
+      for (const role of themeColorRoles) {
+        const color = parsed.colors[role.key]
+        if (color && isValidColorValue(color)) colors[role.key] = color
+      }
+      let id = parsed.id ?? ''
       if (!id || preferences.customThemes.some((theme) => theme.id === id)) {
         id = `theme-${Date.now().toString(36)}`
       }
       const theme: CustomTheme = {
         id,
-        name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name : 'Imported theme',
-        base,
+        name: parsed.name && parsed.name.trim() ? parsed.name : 'Imported theme',
+        base: parsed.base,
         colors,
       }
       updatePreferences({
@@ -651,7 +669,10 @@ function CreateThemeSection() {
                 aria-label="Base palette"
                 className="settings-select"
                 value={editing.base}
-                onChange={(event) => patchTheme(editing.id, { base: event.target.value as ThemeId })}
+                onChange={(event) => {
+                  const baseTheme = themes.find((t) => t.id === event.target.value)
+                  if (baseTheme) patchTheme(editing.id, { base: baseTheme.id })
+                }}
               >
                 {themes.map((theme) => (
                   <option key={theme.id} value={theme.id}>

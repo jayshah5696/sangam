@@ -8,7 +8,7 @@ afterEach(() => vi.useRealTimers())
 describe('DebouncedStorageWriter', () => {
   it('coalesces rapid layout updates and flushes the latest state', async () => {
     vi.useFakeTimers()
-    const storage = { setItem: vi.fn() } as unknown as Storage
+    const storage = { setItem: vi.fn() }
     const writer = new DebouncedStorageWriter(storage, 'layout', 100)
 
     writer.schedule({ ratio: 40 })
@@ -24,7 +24,7 @@ describe('DebouncedStorageWriter', () => {
 
   it('flushes a pending update synchronously when disposed', () => {
     vi.useFakeTimers()
-    const storage = { setItem: vi.fn() } as unknown as Storage
+    const storage = { setItem: vi.fn() }
     const writer = new DebouncedStorageWriter(storage, 'layout')
     writer.schedule({ activeGroupId: 'group-2' })
     writer.dispose()

@@ -40,31 +40,34 @@ describe('AgentAccessSettings', () => {
     renderSettings()
 
     expect(screen.getByRole('button', { name: /Read only/ }).getAttribute('aria-pressed')).toBe('true')
+    // SAFETY: role checkbox renders as an HTMLInputElement in jsdom
     expect((screen.getByRole('checkbox', { name: 'read' }) as HTMLInputElement).checked).toBe(true)
+    // SAFETY: role checkbox renders as an HTMLInputElement in jsdom
     expect((screen.getByRole('checkbox', { name: 'search' }) as HTMLInputElement).checked).toBe(true)
+    // SAFETY: role checkbox renders as an HTMLInputElement in jsdom
     expect((screen.getByRole('checkbox', { name: 'create' }) as HTMLInputElement).checked).toBe(false)
     expect(screen.getByText('read: /agents/**')).not.toBeNull()
     expect(screen.getByText('search: /agents/**')).not.toBeNull()
+    // SAFETY: expiration input renders as an HTMLInputElement in jsdom
     expect((screen.getByLabelText(/Expiration/) as HTMLInputElement).value).not.toBe('')
   })
 
   it('edits active token authority without exposing or rotating the secret', async () => {
-    vi.mocked(api.listAgentTokens).mockResolvedValue([
-      {
-        token_id: 'agt_123',
-        actor_id: 'agent:researcher',
-        actor_display_name: 'Researcher',
-        label: 'Research workspace',
-        scopes: [{ capability: 'read', path_prefix: 'agents' }],
-        version: 3,
-        created_at: '2026-08-20T12:00:00Z',
-        expires_at: null,
-        revoked_at: null,
-        last_used_at: null,
-        rotated_from_token_id: null,
-      },
-    ])
-    vi.mocked(api.updateAgentToken).mockResolvedValue({} as never)
+    const sampleToken = {
+      token_id: 'agt_123',
+      actor_id: 'agent:researcher',
+      actor_display_name: 'Researcher',
+      label: 'Research workspace',
+      scopes: [{ capability: 'read' as const, path_prefix: 'agents' }],
+      version: 3,
+      created_at: '2026-08-20T12:00:00Z',
+      expires_at: null,
+      revoked_at: null,
+      last_used_at: null,
+      rotated_from_token_id: null,
+    }
+    vi.mocked(api.listAgentTokens).mockResolvedValue([sampleToken])
+    vi.mocked(api.updateAgentToken).mockResolvedValue(sampleToken)
     renderSettings()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
@@ -95,6 +98,7 @@ describe('AgentAccessSettings', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'publish' }))
     expect(screen.getByRole('alert').textContent).toContain('Publish can expose document content')
 
+    // SAFETY: button element is an HTMLButtonElement
     const issue = screen.getByRole('button', { name: 'Issue token' }) as HTMLButtonElement
     expect(issue.disabled).toBe(false)
     fireEvent.click(issue)

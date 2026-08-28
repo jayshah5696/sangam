@@ -24,12 +24,17 @@ const state = vi.hoisted(() => {
     isSelected: vi.fn(() => false),
     select: vi.fn(),
   }
+  const documents: DocumentSummary[] = []
+  const folders: Folder[] = []
+  const mutationOptions: Array<{ onSuccess?: (value: DocumentSummary) => Promise<void> }> = []
+  const decorations: Array<{ text: string; title?: string } | null> = []
+  const useFileTreeOptions: MockFileTreeOptions[] = []
   return {
-    documents: [] as DocumentSummary[],
-    folders: [] as Folder[],
-    mutationOptions: [] as Array<{ onSuccess?: (value: DocumentSummary) => Promise<void> }>,
-    decorations: [] as Array<{ text: string; title?: string } | null>,
-    useFileTreeOptions: [] as MockFileTreeOptions[],
+    documents,
+    folders,
+    mutationOptions,
+    decorations,
+    useFileTreeOptions,
     item,
     model: {
       getFocusedPath: vi.fn((): string | null => null),
@@ -207,6 +212,7 @@ describe('FileExplorerPanel', () => {
   it('renders labels via aria-label pseudo-element and hides Pierre MiddleTruncate', () => {
     render(<FileExplorerPanel onSearch={vi.fn()} />)
 
+    // SAFETY: MockFileTreeOptions captures unsafeCSS as string
     const unsafeCSS = state.useFileTreeOptions[0]?.unsafeCSS as string
     expect(unsafeCSS).not.toContain('data-sangam-label')
     expect(unsafeCSS).toContain('content: attr(aria-label)')
@@ -236,7 +242,7 @@ describe('FileExplorerPanel', () => {
     state.documents = [document]
     render(<FileExplorerPanel onSearch={vi.fn()} />)
 
-    const options = state.useFileTreeOptions[0] as { sort?: unknown }
-    expect(options?.sort).toBeUndefined()
+    const options = state.useFileTreeOptions[0]
+    expect(options && 'sort' in options).toBe(false)
   })
 })

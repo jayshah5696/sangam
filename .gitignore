@@ -43,6 +43,7 @@ frontend/test-results/
 # Browser-test output when Playwright is run from the repository root
 playwright-report/
 test-results/
+docs/assets/walkthrough/
 
 # Logs and local process state
 *.log

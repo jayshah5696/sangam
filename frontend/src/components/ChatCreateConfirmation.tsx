@@ -1,5 +1,7 @@
-const SUPPORTED_CONTENT_TYPES = ['text/markdown', 'text/html'] as const
-type DocumentContentType = (typeof SUPPORTED_CONTENT_TYPES)[number]
+import { z } from 'zod'
+import type { JsonScalar } from '../api'
+
+export type DocumentContentType = 'text/markdown' | 'text/html'
 
 export type CreateConfirmationRequest = {
   title: string
@@ -7,20 +9,29 @@ export type CreateConfirmationRequest = {
   contentType: DocumentContentType
 }
 
-const FORMAT_LABEL: Record<DocumentContentType, string> = {
+export type CreateConfirmationInput = Record<string, JsonScalar>
+
+const FORMAT_LABEL = {
   'text/markdown': 'Markdown',
   'text/html': 'HTML',
-}
+} satisfies Record<DocumentContentType, string>
 
-export function parseCreateConfirmation(params: Record<string, unknown>): CreateConfirmationRequest | null {
-  const title = typeof params.title === 'string' ? params.title.trim() : ''
-  if (typeof params.content !== 'string') return null
-  const content = params.content
-  if (!title || title.length > 240 || content.length > 2_000_000) return null
-  // Fall back to text/markdown for v1 effects that lack content_type
-  const rawType = typeof params.content_type === 'string' ? params.content_type : 'text/markdown'
-  if (!SUPPORTED_CONTENT_TYPES.includes(rawType as DocumentContentType)) return null
-  return { title, content, contentType: rawType as DocumentContentType }
+const createConfirmationSchema = z.object({
+  title: z.string().trim().min(1).max(240),
+  content: z.string().max(2_000_000),
+  content_type: z.enum(['text/markdown', 'text/html']).optional().default('text/markdown'),
+})
+
+export function parseCreateConfirmation(
+  params: CreateConfirmationInput | null | undefined,
+): CreateConfirmationRequest | null {
+  const result = createConfirmationSchema.safeParse(params)
+  if (!result.success) return null
+  return {
+    title: result.data.title,
+    content: result.data.content,
+    contentType: result.data.content_type,
+  }
 }
 
 export function ChatCreateConfirmation({

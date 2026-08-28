@@ -48,8 +48,13 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
       setPosition({ top, left, visible: true })
     }
     const outside = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) closeMenu(false)
+      if (
+        event.target instanceof Node &&
+        !menuRef.current?.contains(event.target) &&
+        !triggerRef.current?.contains(event.target)
+      ) {
+        closeMenu(false)
+      }
     }
     const escape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -86,7 +91,7 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
     ]
     if (items.length === 0) return
     event.preventDefault()
-    const current = items.indexOf(document.activeElement as HTMLElement)
+    const current = document.activeElement instanceof HTMLElement ? items.indexOf(document.activeElement) : -1
     const next =
       event.key === 'Home'
         ? 0
@@ -177,8 +182,13 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
       setPosition({ top, left, visible: true })
     }
     const outside = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!dialogRef.current?.contains(target) && !triggerRef.current?.contains(target)) closeDialog(false)
+      if (
+        event.target instanceof Node &&
+        !dialogRef.current?.contains(event.target) &&
+        !triggerRef.current?.contains(event.target)
+      ) {
+        closeDialog(false)
+      }
     }
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {

@@ -53,6 +53,7 @@ export function PdfResearchWorkspace({ document }: { document: Document }) {
 
   useEffect(() => {
     const receiveCitation = (event: Event) => {
+      // SAFETY: CITATION_NAVIGATION_EVENT dispatches CustomEvent with detail: CitationTarget
       const target = (event as CustomEvent<CitationTarget>).detail
       if (target.documentId !== document.document_id) return
       if (target.pageNumber) scrollToPage(target.pageNumber)
@@ -79,7 +80,7 @@ export function PdfResearchWorkspace({ document }: { document: Document }) {
         onOpenResearch={() => updatePreferences({ rightVisible: true, rightTab: 'research' })}
         setDraft={(updater) => {
           const currentDraft = sessions.getSession(document.document_id).pdfDraft ?? null
-          const nextDraft = typeof updater === 'function' ? updater(currentDraft) : updater
+          const nextDraft = updater instanceof Function ? updater(currentDraft) : updater
           sessions.updateSession(document.document_id, { pdfDraft: nextDraft })
         }}
       />

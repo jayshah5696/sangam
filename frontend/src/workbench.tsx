@@ -40,11 +40,17 @@ function defaultState(): WorkbenchLayoutState {
   return createDefaultLayoutState(crypto.randomUUID())
 }
 
-function loadState(): { state: WorkbenchLayoutState; recovered: boolean } {
+export interface WorkbenchLoadedState {
+  state: WorkbenchLayoutState
+  recovered: boolean
+}
+
+function loadState(): WorkbenchLoadedState {
   const raw = localStorage.getItem(workbenchStorageKey)
   if (!raw) return { state: defaultState(), recovered: false }
   try {
-    const state = parseWorkbenchLayoutState(JSON.parse(raw) as unknown)
+    const parsed = JSON.parse(raw)
+    const state = parseWorkbenchLayoutState(parsed)
     return state ? { state, recovered: false } : { state: defaultState(), recovered: true }
   } catch {
     return { state: defaultState(), recovered: true }

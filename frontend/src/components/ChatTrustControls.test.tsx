@@ -2,7 +2,6 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Document } from '../api'
 import {
   ChatContextBanner,
   CitationNavigationStatus,
@@ -69,7 +68,7 @@ describe('chat trust controls', () => {
     const currentDocument = {
       document_id: 'doc-1',
       current_revision_id: 'rev-current',
-    } as Document
+    }
     render(
       <CitationNavigationStatus
         target={{ documentId: 'doc-1', revisionId: 'rev-cited', pageNumber: 8, annotationId: 'note-3' }}

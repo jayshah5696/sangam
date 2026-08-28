@@ -91,6 +91,7 @@ test('HTML JavaScript setting remains usable without horizontal overflow on touc
 async function enableHtmlJavascript(request: APIRequestContext) {
   const response = await request.get('/api/v1/settings/html-javascript')
   expect(response.ok(), await response.text()).toBeTruthy()
+  // SAFETY: GET /api/v1/settings/html-javascript returns settings payload with enabled and version
   const settings = (await response.json()) as { enabled: boolean; version: number }
   if (settings.enabled) return
   const enabled = await request.put('/api/v1/settings/html-javascript', {
@@ -109,5 +110,6 @@ async function createHtml(request: APIRequestContext) {
     },
   })
   expect(response.ok(), await response.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/documents returns document entity with document_id and current_revision_id
   return (await response.json()) as { document_id: string; current_revision_id: string }
 }

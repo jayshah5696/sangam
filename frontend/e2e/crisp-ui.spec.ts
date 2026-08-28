@@ -195,6 +195,7 @@ test('file tree labels remain bound to their rows through collapse, focus, and r
       path: `${firstFolder}/${firstFile}`,
     },
   })
+  // SAFETY: POST /api/v1/documents returns document entity with document_id
   const active = (await activeResponse.json()) as { document_id: string }
   await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': randomUUID() },
@@ -417,6 +418,7 @@ test('workspace tabs distribute available width equally across short, medium, an
         content_type: 'text/markdown',
       },
     })
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const data = (await res.json()) as { document_id: string }
     ids.push(data.document_id)
   }
@@ -483,6 +485,7 @@ test('workspace tabs clamp at 118px minimum width, enable horizontal scroll, and
         content_type: 'text/markdown',
       },
     })
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
     const data = (await res.json()) as { document_id: string }
     ids.push(data.document_id)
   }

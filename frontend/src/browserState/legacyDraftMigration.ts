@@ -1,13 +1,30 @@
+import { z } from 'zod'
 import type { DraftRecord, DraftStorage } from './draftStorage'
 
 export const workbenchStorageKey = 'sangam.workbench.v1'
 export const legacyDraftMigrationKey = 'sangam.browser-state.migration.legacy-drafts.v1'
 const legacyDraftBridgeKey = 'sangam.document-drafts.migration.v1'
 
-type LegacyWorkbenchState = {
-  sessions?: Record<string, { content?: unknown; baseRevisionId?: unknown }>
-  [key: string]: unknown
-}
+const legacySessionSchema = z.object({
+  content: z.string().optional(),
+  baseRevisionId: z.string().optional(),
+})
+
+const legacyWorkbenchStateSchema = z
+  .object({
+    sessions: z.record(z.string(), legacySessionSchema).optional(),
+  })
+  .passthrough()
+
+type LegacyWorkbenchState = z.infer<typeof legacyWorkbenchStateSchema>
+
+const bridgeDraftSchema = z.object({
+  content: z.string().optional(),
+  baseRevisionId: z.string().optional(),
+  updatedAt: z.number().optional(),
+})
+
+const bridgeDraftsMapSchema = z.record(z.string(), bridgeDraftSchema)
 
 export async function migrateLegacyDrafts(
   draftStorage: DraftStorage,
@@ -36,8 +53,9 @@ export async function migrateLegacyDrafts(
 function parseLegacyState(rawState: string | null): LegacyWorkbenchState | null {
   if (!rawState) return null
   try {
-    const value = JSON.parse(rawState) as unknown
-    return value && typeof value === 'object' ? (value as LegacyWorkbenchState) : null
+    const parsed = JSON.parse(rawState)
+    const result = legacyWorkbenchStateSchema.safeParse(parsed)
+    return result.success ? result.data : null
   } catch {
     return null
   }
@@ -45,12 +63,12 @@ function parseLegacyState(rawState: string | null): LegacyWorkbenchState | null 
 
 function collectLegacyDrafts(state: LegacyWorkbenchState | null): DraftRecord[] {
   return Object.entries(state?.sessions ?? {}).flatMap(([documentId, session]) => {
-    if (typeof session.content !== 'string') return []
+    if (session.content === undefined) return []
     return [
       {
         documentId,
         content: session.content,
-        baseRevisionId: typeof session.baseRevisionId === 'string' ? session.baseRevisionId : undefined,
+        baseRevisionId: session.baseRevisionId,
         updatedAt: Date.now(),
       },
     ]
@@ -60,15 +78,17 @@ function collectLegacyDrafts(state: LegacyWorkbenchState | null): DraftRecord[] 
 function collectBridgeDrafts(rawDrafts: string | null): DraftRecord[] {
   if (!rawDrafts) return []
   try {
-    const drafts = JSON.parse(rawDrafts) as Record<string, Partial<DraftRecord>>
-    return Object.entries(drafts).flatMap(([documentId, draft]) =>
-      typeof draft.content === 'string'
+    const parsed = JSON.parse(rawDrafts)
+    const result = bridgeDraftsMapSchema.safeParse(parsed)
+    if (!result.success) return []
+    return Object.entries(result.data).flatMap(([documentId, draft]) =>
+      draft.content !== undefined
         ? [
             {
               documentId,
               content: draft.content,
-              baseRevisionId: typeof draft.baseRevisionId === 'string' ? draft.baseRevisionId : undefined,
-              updatedAt: typeof draft.updatedAt === 'number' ? draft.updatedAt : Date.now(),
+              baseRevisionId: draft.baseRevisionId,
+              updatedAt: draft.updatedAt ?? Date.now(),
             },
           ]
         : [],

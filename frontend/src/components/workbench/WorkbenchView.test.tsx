@@ -5,8 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchView } from './WorkbenchView'
 import type { LayoutNode } from '../../workbench'
 
-const state = vi.hoisted(() => ({
-  root: {
+const state = vi.hoisted(() => {
+  // SAFETY: test workbench layout fixture
+  const root = {
     kind: 'split',
     id: 'split-1',
     direction: 'horizontal',
@@ -23,22 +24,25 @@ const state = vi.hoisted(() => ({
       activeTabId: 'doc-2',
       tabs: [{ documentId: 'doc-2', title: 'Doc 2', pinned: false }],
     },
-  } as LayoutNode,
-  activeGroupId: 'group-1',
-  preferences: {
-    rightVisible: false,
-    rightWidth: 320,
-    rightTab: 'properties',
-    theme: 'river',
-    contrast: 'normal',
-    density: 'comfortable',
-    fontSize: 14,
-    leftVisible: true,
-    leftWidth: 260,
-    editorLayout: 'stacked',
-    editorFontSize: 14,
-  },
-}))
+  } as LayoutNode
+  return {
+    root,
+    activeGroupId: 'group-1',
+    preferences: {
+      rightVisible: false,
+      rightWidth: 320,
+      rightTab: 'properties',
+      theme: 'river',
+      contrast: 'normal',
+      density: 'comfortable',
+      fontSize: 14,
+      leftVisible: true,
+      leftWidth: 260,
+      editorLayout: 'stacked',
+      editorFontSize: 14,
+    },
+  }
+})
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -85,7 +89,7 @@ vi.mock('@tanstack/react-query', () => ({
       content_type: 'text/markdown',
     })),
   }),
-  keepPreviousData: (v: unknown) => v,
+  keepPreviousData: <T,>(v: T) => v,
 }))
 
 vi.mock('@tanstack/react-router', () => ({

@@ -100,14 +100,11 @@ describe('ConflictRecoveryNotice', () => {
       />,
     )
     expect(
-      (screen.getByRole('button', { name: 'Use local draft as next revision' }) as HTMLButtonElement)
-        .disabled,
+      screen.getByRole('button', { name: 'Use local draft as next revision' }).hasAttribute('disabled'),
     ).toBe(true)
-    expect((screen.getByRole('button', { name: 'Discard local draft…' }) as HTMLButtonElement).disabled).toBe(
-      true,
+    expect(screen.getByRole('button', { name: 'Discard local draft…' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Retry loading server head' }).hasAttribute('disabled')).toBe(
+      false,
     )
-    expect(
-      (screen.getByRole('button', { name: 'Retry loading server head' }) as HTMLButtonElement).disabled,
-    ).toBe(false)
   })
 })

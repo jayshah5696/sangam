@@ -38,17 +38,40 @@ const mutationCapabilities = new Set<Capability>([
   'publish',
 ])
 
-const sensitiveCapabilityDescriptions: Partial<Record<Capability, string>> = {
+export type TokenPreset = {
+  label: string
+  description: string
+  capabilities: Capability[]
+  prefixes: ScopePrefixes
+}
+
+export interface SensitiveCapabilityMap {
+  restore?: string
+  delete?: string
+  publish?: string
+  inference?: string
+  read?: string
+  search?: string
+  create?: string
+  update?: string
+  move?: string
+  tag?: string
+}
+
+const sensitiveCapabilityDescriptions: SensitiveCapabilityMap = {
   restore: 'Restore can replace the current document content with an earlier revision.',
   delete: 'Delete can move documents out of the active workspace and into trash.',
   publish: 'Publish can expose document content through a shareable publication.',
   inference: 'Inference can spend the server operator’s external model budget.',
 }
 
-export const tokenPresets: Record<
-  TokenPresetId,
-  { label: string; description: string; capabilities: Capability[]; prefixes: ScopePrefixes }
-> = {
+export interface PresetMap {
+  'read-only': TokenPreset
+  'scoped-writer': TokenPreset
+  assistant: TokenPreset
+}
+
+export const tokenPresets: PresetMap = {
   'read-only': {
     label: 'Read only',
     description: 'Read and search only under /agents/**.',
@@ -314,8 +337,9 @@ export function AgentAccessSettings() {
           <fieldset className="agent-token-presets">
             <legend>Start with a safe preset</legend>
             <div>
-              {(Object.entries(tokenPresets) as [TokenPresetId, (typeof tokenPresets)[TokenPresetId]][]).map(
-                ([presetId, preset]) => (
+              {(['read-only', 'scoped-writer', 'assistant'] as const).map((presetId) => {
+                const preset = tokenPresets[presetId]
+                return (
                   <button
                     key={presetId}
                     type="button"
@@ -326,8 +350,8 @@ export function AgentAccessSettings() {
                     <strong>{preset.label}</strong>
                     <small>{preset.description}</small>
                   </button>
-                ),
-              )}
+                )
+              })}
             </div>
           </fieldset>
 
@@ -590,7 +614,7 @@ function AgentTokenEditor({
 
   useEffect(() => {
     const dialog = dialogRef.current
-    if (dialog && typeof dialog.showModal === 'function') dialog.showModal()
+    if (dialog && !dialog.open && dialog.showModal) dialog.showModal()
   }, [])
 
   return (

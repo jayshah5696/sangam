@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 export type CitationTarget = {
   documentId: string
   revisionId?: string
@@ -8,28 +10,34 @@ export type CitationTarget = {
 
 export const CITATION_NAVIGATION_EVENT = 'sangam:citation-navigation'
 
-function optionalString(value: unknown, maxLength = 200): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed && trimmed.length <= maxLength ? trimmed : undefined
-}
+const citationDataSchema = z.object({
+  document_id: z.string().trim().min(1).max(200).optional(),
+  revision_id: z.string().trim().min(1).max(200).optional(),
+  page_number: z
+    .union([
+      z.number().int().positive(),
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((val) => Number.parseInt(val, 10)),
+    ])
+    .optional(),
+  annotation_id: z.string().trim().min(1).max(200).optional(),
+  title: z.string().trim().min(1).max(500).optional(),
+})
 
-export function citationTargetFromData(data: Record<string, unknown> | undefined): CitationTarget | null {
-  const documentId = optionalString(data?.document_id)
-  if (!documentId) return null
-  const rawPage = data?.page_number
-  const pageNumber =
-    typeof rawPage === 'number' && Number.isInteger(rawPage) && rawPage > 0
-      ? rawPage
-      : typeof rawPage === 'string' && /^\d+$/.test(rawPage) && Number(rawPage) > 0
-        ? Number(rawPage)
-        : undefined
+export type CitationDataPayload = z.input<typeof citationDataSchema>
+
+export function citationTargetFromData(data: CitationDataPayload | undefined): CitationTarget | null {
+  if (!data) return null
+  const parsed = citationDataSchema.safeParse(data)
+  if (!parsed.success || !parsed.data.document_id) return null
   return {
-    documentId,
-    revisionId: optionalString(data?.revision_id),
-    pageNumber,
-    annotationId: optionalString(data?.annotation_id),
-    title: optionalString(data?.title, 500),
+    documentId: parsed.data.document_id,
+    revisionId: parsed.data.revision_id,
+    pageNumber: parsed.data.page_number,
+    annotationId: parsed.data.annotation_id,
+    title: parsed.data.title,
   }
 }
 

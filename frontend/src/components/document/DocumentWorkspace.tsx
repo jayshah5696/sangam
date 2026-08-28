@@ -100,8 +100,9 @@ export function DocumentWorkspace({
   )
   useEffect(() => {
     const receiveCitation = (event: Event) => {
+      // SAFETY: CITATION_NAVIGATION_EVENT dispatches CustomEvent with detail: CitationTarget
       const target = (event as CustomEvent<CitationTarget>).detail
-      if (target.documentId === documentId) setCitationTarget(target)
+      if (target?.documentId === documentId) setCitationTarget(target)
     }
     window.addEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
     return () => window.removeEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)

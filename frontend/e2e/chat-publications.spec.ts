@@ -15,6 +15,7 @@ async function createPublication(request: import('@playwright/test').APIRequestC
     },
   })
   expect(document.ok(), await document.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/documents returns document entity with document_id
   const createdDocument = (await document.json()) as { document_id: string }
   const publication = await request.post('/api/v1/publications', {
     headers: { 'Idempotency-Key': randomUUID() },
@@ -25,6 +26,7 @@ async function createPublication(request: import('@playwright/test').APIRequestC
     },
   })
   expect(publication.ok(), await publication.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/publications returns publication entity with publication_id
   return (await publication.json()) as { publication_id: string; document_id: string }
 }
 
@@ -43,6 +45,7 @@ async function createChatThread(request: import('@playwright/test').APIRequestCo
     headers: { 'X-Sangam-Workspace-Context': '1' },
   })
   expect(response.ok(), await response.text()).toBeTruthy()
+  // SAFETY: ChatKit SSE event stream yields JSON payloads with type and thread
   const events = (await response.text())
     .split('\n')
     .filter((line) => line.startsWith('data: '))
@@ -57,6 +60,7 @@ test('workspace chat opens without a document and reports transport setup truthf
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
   const runtime = await page.request.get('/api/v1/chat/config')
   expect(runtime.ok(), await runtime.text()).toBeTruthy()
+  // SAFETY: GET /api/v1/chat/config returns ChatConfig response
   const config = (await runtime.json()) as { transport_status: 'ready' | 'misconfigured' }
   if (config.transport_status === 'misconfigured') {
     await expect(page.getByRole('alert')).toContainText('ChatKit browser transport needs setup')
@@ -244,12 +248,13 @@ test('durable effect review restores exact pending and completed state', async (
     decided_at: null,
     completed_at: null,
   } as const
-  let visibleEffect: Record<string, unknown> | null = { ...baseEffect }
-  let decisionBody: Record<string, unknown> | null = null
+  let visibleEffect: typeof baseEffect | null = { ...baseEffect }
+  let decisionBody: { decision?: string; reason?: string } | null = null
   await page.route('**/api/v1/chat/effects**', async (route) => {
     const request = route.request()
     if (request.method() === 'POST') {
-      decisionBody = request.postDataJSON() as Record<string, unknown>
+      // SAFETY: Chat effect decision POST body contains JSON payload
+      decisionBody = request.postDataJSON() as { decision?: string; reason?: string }
       const denied = {
         ...baseEffect,
         status: 'denied',

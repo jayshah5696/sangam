@@ -21,6 +21,7 @@ export const test = base.extend<{ seededWorkspace: SeededWorkspace }>({
       },
     })
     expect(document.ok(), await document.text()).toBeTruthy()
+    // SAFETY: POST /api/v1/documents returns document entity containing document_id
     const payload = (await document.json()) as { document_id: string }
 
     await provide({ documentId: payload.document_id, documentTitle })
