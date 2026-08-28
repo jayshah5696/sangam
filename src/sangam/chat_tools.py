@@ -13,9 +13,11 @@ from chatkit.types import CustomTask
 
 from sangam.access import WorkspaceAccessService
 from sangam.chat_capabilities import (
+    ApplyOrganizationPlanInput,
     ChatCapability,
     ChatCapabilityRegistry,
     CreateDocumentInput,
+    InspectOrganizationInput,
     ProposeUpdateInput,
     PublishDocumentInput,
     ReadDocumentInput,
@@ -52,6 +54,26 @@ class ChatToolset:
 
     def as_agent_tools(self, capabilities: tuple[ChatCapability, ...] | None = None) -> list[Any]:
         tools = [
+            function_tool(
+                self.inspect_workspace_organization,
+                description_override=(
+                    "Inspect workspace folders, documents, and tags. Use to discover "
+                    "current paths, revision IDs, metadata versions, and tag assignments "
+                    "before proposing an organization plan. Paginated: pass offset to "
+                    "page past the first limit results."
+                ),
+            ),
+            function_tool(
+                self.apply_workspace_organization_plan,
+                description_override=(
+                    "Execute an exact workspace organization plan. Each operation must "
+                    "include observed preconditions (revision IDs, metadata versions, "
+                    "source paths). Supported operation kinds: move_document, move_folder, "
+                    "create_folder, update_document_metadata, update_folder_metadata. "
+                    "The plan is shown to the user for one approval before execution. "
+                    "Never claim changes were made before approval."
+                ),
+            ),
             function_tool(
                 self.get_editor_selection,
                 description_override="Read selected text from the active Sangam editor.",
@@ -335,6 +357,176 @@ class ChatToolset:
             capability=self.policies["publish_document"],
             arguments=arguments,
             preview={**arguments, "document_title": document.title},
+        )
+
+    async def inspect_workspace_organization(
+        self,
+        ctx: ToolContext,
+        path_prefix: str | None = None,
+        document_ids: list[str] | None = None,
+        folder_ids: list[str] | None = None,
+        tag_ids: list[str] | None = None,
+        include_documents: bool = True,
+        include_folders: bool = True,
+        include_tags: bool = True,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> str:
+        validated = InspectOrganizationInput.model_validate(
+            {
+                "path_prefix": path_prefix,
+                "document_ids": document_ids or [],
+                "folder_ids": folder_ids or [],
+                "tag_ids": tag_ids or [],
+                "include_documents": include_documents,
+                "include_folders": include_folders,
+                "include_tags": include_tags,
+                "offset": offset,
+                "limit": limit,
+            }
+        )
+
+        def operation() -> dict[str, Any]:
+            principal = ctx.context.request_context.principal
+            all_documents = self.workspace.search_documents(
+                principal,
+                query="",
+                tag_id=None,
+                category=None,
+                actor_id=None,
+                sort="path",
+                limit=10000,
+                offset=0,
+            )
+            all_folders = self.workspace.list_folders(principal)
+            all_tags = self.workspace.list_tags(principal)
+
+            # Filter documents
+            docs = [d for d in all_documents if not d.deleted]
+            if validated.path_prefix:
+                prefix = validated.path_prefix.rstrip("/") + "/"
+                docs = [d for d in docs if d.path and d.path.startswith(prefix)]
+            if validated.document_ids:
+                id_set = set(validated.document_ids)
+                docs = [d for d in docs if d.document_id in id_set]
+
+            # Filter folders
+            folders = list(all_folders)
+            if validated.path_prefix:
+                prefix = validated.path_prefix.rstrip("/")
+                folders = [
+                    f for f in folders if f.path == prefix or f.path.startswith(prefix + "/")
+                ]
+            if validated.folder_ids:
+                id_set = set(validated.folder_ids)
+                folders = [f for f in folders if f.folder_id in id_set]
+
+            # Filter tags
+            tags = list(all_tags)
+            if validated.tag_ids:
+                id_set = set(validated.tag_ids)
+                tags = [t for t in tags if t.tag_id in id_set]
+
+            total_documents = len(docs)
+            total_folders = len(folders)
+            total_tags = len(tags)
+
+            # Paginate documents
+            paged_docs = docs[validated.offset : validated.offset + validated.limit]
+
+            result_docs = (
+                [
+                    {
+                        "document_id": d.document_id,
+                        "title": d.title,
+                        "content_type": d.content_type,
+                        "path": d.path,
+                        "current_revision_id": d.current_revision_id,
+                        "metadata_version": d.metadata_version,
+                        "category": d.category,
+                        "tag_ids": [t.tag_id for t in d.tags],
+                        "deleted": d.deleted,
+                    }
+                    for d in paged_docs
+                ]
+                if validated.include_documents
+                else []
+            )
+
+            result_folders = (
+                [
+                    {
+                        "folder_id": f.folder_id,
+                        "path": f.path,
+                        "metadata_version": f.metadata_version,
+                        "category": f.category,
+                        "tag_ids": [t.tag_id for t in f.tags],
+                        "document_count": f.document_count,
+                    }
+                    for f in folders
+                ]
+                if validated.include_folders
+                else []
+            )
+
+            result_tags = (
+                [{"tag_id": t.tag_id, "name": t.name, "color": t.color} for t in tags]
+                if validated.include_tags
+                else []
+            )
+
+            truncated = validated.offset + validated.limit < total_documents
+            return {
+                "documents": result_docs,
+                "folders": result_folders,
+                "tags": result_tags,
+                "total_documents": total_documents,
+                "total_folders": total_folders,
+                "total_tags": total_tags,
+                "offset": validated.offset,
+                "limit": validated.limit,
+                "truncated": truncated,
+            }
+
+        detail = f"prefix={validated.path_prefix or '*'} offset={validated.offset}"
+        return await self._run_tool(
+            ctx, self.policies["inspect_workspace_organization"], detail, operation
+        )
+
+    async def apply_workspace_organization_plan(
+        self,
+        ctx: ToolContext,
+        operations_json: str,
+        summary: str,
+    ) -> None:
+        """Accept a JSON-encoded list of operations and validate it."""
+        try:
+            operations = json.loads(operations_json)
+        except (json.JSONDecodeError, TypeError) as error:
+            raise ValidationError(
+                "operations_json must be valid JSON", details={"error": str(error)}
+            ) from error
+        if not isinstance(operations, list):
+            raise ValidationError("operations_json must encode a JSON array")
+        validated = ApplyOrganizationPlanInput.model_validate(
+            {"operations": operations, "summary": summary}
+        )
+        arguments = validated.model_dump(mode="json")
+        # Build a human-readable preview of the plan
+        preview_ops = []
+        for op in validated.operations:
+            entry = op.model_dump(mode="json")
+            preview_ops.append(entry)
+        preview: dict[str, object] = {
+            "operations": preview_ops,
+            "summary": validated.summary,
+            "operation_count": len(validated.operations),
+        }
+        await self._request_effect(
+            ctx,
+            capability=self.policies["apply_workspace_organization_plan"],
+            arguments=arguments,
+            preview=preview,
         )
 
     async def _request_effect(

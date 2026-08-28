@@ -265,6 +265,8 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
     assert local_config["transport_message"] == "ChatKit browser transport is ready."
 
     assert {tool.name for tool in client.app.state.services.chat.tools} == {
+        "inspect_workspace_organization",
+        "apply_workspace_organization_plan",
         "get_editor_selection",
         "search_workspace",
         "read_document",

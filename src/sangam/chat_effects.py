@@ -54,7 +54,11 @@ class ChatEffectService:
         arguments: dict[str, object],
         preview: dict[str, object],
     ) -> ChatEffect:
-        if capability.capability_id not in {"create_document", "publish_document"}:
+        if capability.capability_id not in {
+            "create_document",
+            "publish_document",
+            "apply_workspace_organization_plan",
+        }:
             raise ValidationError("That chat capability does not use durable effects")
         normalized = capability.input_schema.model_validate(arguments).model_dump(mode="json")
         hidden_arguments = [
@@ -318,6 +322,25 @@ class ChatEffectService:
                 }
                 resource_type = "publication"
                 resource_id = publication.publication_id
+            elif capability_id == "apply_workspace_organization_plan":
+                plan_results = self._execute_organization_plan(principal, arguments, operation_key)
+                statuses = [r["status"] for r in plan_results]
+                if all(s in ("completed", "skipped") for s in statuses):
+                    plan_status = "completed"
+                elif all(s in ("failed", "conflicted") for s in statuses):
+                    plan_status = "failed"
+                else:
+                    plan_status = "partial"
+                client_result = {
+                    "approved": True,
+                    "plan_id": effect_id,
+                    "status": plan_status,
+                    "results": plan_results,
+                    "summary": arguments.get("summary", ""),
+                }
+                stored_result = dict(client_result)
+                resource_type = "organization_plan"
+                resource_id = effect_id
             else:
                 raise ValidationError("Unsupported durable chat effect capability")
         except SangamError as error:
@@ -344,6 +367,135 @@ class ChatEffectService:
         )
         effect = self.get(principal, effect_id)
         return EffectExecution(effect=effect, client_result=client_result)
+
+    def _execute_organization_plan(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        operation_key: str,
+    ) -> list[dict[str, object]]:
+        """Execute each operation in an approved organization plan sequentially."""
+        operations = arguments.get("operations", [])
+        if not isinstance(operations, list):
+            raise ValidationError("Organization plan operations must be a list")
+
+        results: list[dict[str, object]] = []
+        for index, op in enumerate(operations):
+            kind = op.get("kind", "")
+            item_key = f"{operation_key}:op:{index}"
+            try:
+                if kind == "move_document":
+                    moved = self.workspace.move_document(
+                        principal,
+                        document_id=op["document_id"],
+                        expected_revision_id=op["expected_revision_id"],
+                        path=op["destination_path"],
+                        summary=f"Organization plan: moved to {op['destination_path']}",
+                        idempotency_key=item_key,
+                    )
+                    results.append(
+                        {
+                            "index": index,
+                            "kind": kind,
+                            "status": "completed",
+                            "resource_id": moved.document_id,
+                            "path": moved.path,
+                        }
+                    )
+                elif kind == "move_folder":
+                    moved_folder = self.workspace.move_folder(
+                        principal,
+                        folder_id=op["folder_id"],
+                        destination_path=op["destination_path"],
+                        idempotency_key=item_key,
+                    )
+                    results.append(
+                        {
+                            "index": index,
+                            "kind": kind,
+                            "status": "completed",
+                            "resource_id": moved_folder.folder_id,
+                            "path": moved_folder.path,
+                        }
+                    )
+                elif kind == "create_folder":
+                    created = self.workspace.create_folder(
+                        principal,
+                        path=op["path"],
+                        category=op.get("category"),
+                        tag_ids=op.get("tag_ids", []),
+                        idempotency_key=item_key,
+                    )
+                    results.append(
+                        {
+                            "index": index,
+                            "kind": kind,
+                            "status": "completed",
+                            "resource_id": created.folder_id,
+                            "path": created.path,
+                        }
+                    )
+                elif kind == "update_document_metadata":
+                    add_ids = set(op.get("add_tag_ids", []))
+                    remove_ids = set(op.get("remove_tag_ids", []))
+                    doc = self.workspace.get_document(principal, op["document_id"])
+                    current_ids = {t.tag_id for t in doc.tags}
+                    resulting_ids = sorted((current_ids | add_ids) - remove_ids)
+                    updated = self.workspace.update_document_metadata(
+                        principal,
+                        document_id=op["document_id"],
+                        expected_metadata_version=op["expected_metadata_version"],
+                        category=op.get("category"),
+                        tag_ids=resulting_ids,
+                        idempotency_key=item_key,
+                    )
+                    results.append(
+                        {
+                            "index": index,
+                            "kind": kind,
+                            "status": "completed",
+                            "resource_id": updated.document_id,
+                            "path": updated.path,
+                        }
+                    )
+                elif kind == "update_folder_metadata":
+                    updated_folder = self.workspace.update_folder_metadata(
+                        principal,
+                        folder_id=op["folder_id"],
+                        expected_metadata_version=op["expected_metadata_version"],
+                        category=op.get("category"),
+                        tag_ids=op.get("tag_ids", []),
+                        idempotency_key=item_key,
+                    )
+                    results.append(
+                        {
+                            "index": index,
+                            "kind": kind,
+                            "status": "completed",
+                            "resource_id": updated_folder.folder_id,
+                            "path": updated_folder.path,
+                        }
+                    )
+                else:
+                    results.append(
+                        {
+                            "index": index,
+                            "kind": kind,
+                            "status": "failed",
+                            "message": f"Unsupported operation kind: {kind}",
+                        }
+                    )
+            except SangamError as error:
+                status = "conflicted" if isinstance(error, ConflictError) else "failed"
+                results.append(
+                    {
+                        "index": index,
+                        "kind": kind,
+                        "status": status,
+                        "message": error.message,
+                    }
+                )
+        return results
 
     def _operation_was_recorded(
         self, *, actor_id: str, operation_key: str, capability_id: str

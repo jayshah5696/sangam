@@ -4,9 +4,9 @@ import hashlib
 import json
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
@@ -33,6 +33,170 @@ class ApprovalPolicy(StrEnum):
 
 
 ChatEntryPoint = Literal["workspace", "document"]
+
+
+# --- Organization inspection and planning ---
+
+
+class InspectOrganizationInput(StrictCapabilityModel):
+    """Bounded query to inspect workspace folders, documents, and tags."""
+
+    path_prefix: str | None = Field(default=None, max_length=500)
+    document_ids: list[str] = Field(default_factory=list, max_length=50)
+    folder_ids: list[str] = Field(default_factory=list, max_length=50)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+    include_documents: bool = True
+    include_folders: bool = True
+    include_tags: bool = True
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class OrganizationDocumentEntry(StrictCapabilityModel):
+    document_id: str = Field(max_length=200)
+    title: str = Field(max_length=500)
+    content_type: str = Field(max_length=100)
+    path: str | None = Field(default=None, max_length=1000)
+    current_revision_id: str = Field(max_length=200)
+    metadata_version: int = Field(ge=0)
+    category: str | None = Field(default=None, max_length=200)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+    deleted: bool = False
+
+
+class OrganizationFolderEntry(StrictCapabilityModel):
+    folder_id: str = Field(max_length=200)
+    path: str = Field(max_length=1000)
+    metadata_version: int = Field(ge=0)
+    category: str | None = Field(default=None, max_length=200)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+    document_count: int = Field(ge=0)
+
+
+class OrganizationTagEntry(StrictCapabilityModel):
+    tag_id: str = Field(max_length=200)
+    name: str = Field(max_length=200)
+    color: str = Field(max_length=20)
+
+
+class InspectOrganizationResult(StrictCapabilityModel):
+    documents: list[OrganizationDocumentEntry] = Field(default_factory=list, max_length=100)
+    folders: list[OrganizationFolderEntry] = Field(default_factory=list, max_length=100)
+    tags: list[OrganizationTagEntry] = Field(default_factory=list, max_length=200)
+    total_documents: int = Field(ge=0)
+    total_folders: int = Field(ge=0)
+    total_tags: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    truncated: bool
+
+
+# --- Organization plan operations ---
+
+
+class PlanDocumentMove(StrictCapabilityModel):
+    kind: Literal["move_document"] = "move_document"
+    document_id: str = Field(min_length=1, max_length=200)
+    expected_revision_id: str = Field(min_length=1, max_length=200)
+    expected_source_path: str = Field(min_length=1, max_length=500)
+    destination_path: str = Field(min_length=1, max_length=500)
+
+
+class PlanFolderMove(StrictCapabilityModel):
+    kind: Literal["move_folder"] = "move_folder"
+    folder_id: str = Field(min_length=1, max_length=200)
+    expected_source_path: str = Field(min_length=1, max_length=500)
+    destination_path: str = Field(min_length=1, max_length=500)
+
+
+class PlanFolderCreate(StrictCapabilityModel):
+    kind: Literal["create_folder"] = "create_folder"
+    path: str = Field(min_length=1, max_length=500)
+    category: str | None = Field(default=None, max_length=200)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class PlanDocumentMetadata(StrictCapabilityModel):
+    kind: Literal["update_document_metadata"] = "update_document_metadata"
+    document_id: str = Field(min_length=1, max_length=200)
+    expected_metadata_version: int = Field(ge=0)
+    category: str | None = Field(default=None, max_length=200)
+    add_tag_ids: list[str] = Field(default_factory=list, max_length=50)
+    remove_tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class PlanFolderMetadata(StrictCapabilityModel):
+    kind: Literal["update_folder_metadata"] = "update_folder_metadata"
+    folder_id: str = Field(min_length=1, max_length=200)
+    expected_metadata_version: int = Field(ge=0)
+    category: str | None = Field(default=None, max_length=200)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+OrganizationOperation = Annotated[
+    Annotated[PlanDocumentMove, Tag("move_document")]
+    | Annotated[PlanFolderMove, Tag("move_folder")]
+    | Annotated[PlanFolderCreate, Tag("create_folder")]
+    | Annotated[PlanDocumentMetadata, Tag("update_document_metadata")]
+    | Annotated[PlanFolderMetadata, Tag("update_folder_metadata")],
+    Discriminator("kind"),
+]
+
+
+class ApplyOrganizationPlanInput(StrictCapabilityModel):
+    """A bounded ordered set of workspace organization operations."""
+
+    operations: list[OrganizationOperation] = Field(min_length=1, max_length=50)
+    summary: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_no_duplicates(self) -> ApplyOrganizationPlanInput:
+        seen_doc_moves: set[str] = set()
+        seen_folder_moves: set[str] = set()
+        seen_doc_meta: set[str] = set()
+        seen_folder_meta: set[str] = set()
+        seen_folder_creates: set[str] = set()
+        for op in self.operations:
+            if op.kind == "move_document":
+                if op.document_id in seen_doc_moves:
+                    raise ValueError(f"Duplicate move for document {op.document_id}")
+                seen_doc_moves.add(op.document_id)
+            elif op.kind == "move_folder":
+                if op.folder_id in seen_folder_moves:
+                    raise ValueError(f"Duplicate move for folder {op.folder_id}")
+                seen_folder_moves.add(op.folder_id)
+            elif op.kind == "create_folder":
+                if op.path in seen_folder_creates:
+                    raise ValueError(f"Duplicate folder creation for path {op.path}")
+                seen_folder_creates.add(op.path)
+            elif op.kind == "update_document_metadata":
+                if op.document_id in seen_doc_meta:
+                    raise ValueError(f"Duplicate metadata update for document {op.document_id}")
+                seen_doc_meta.add(op.document_id)
+            elif op.kind == "update_folder_metadata":
+                if op.folder_id in seen_folder_meta:
+                    raise ValueError(f"Duplicate metadata update for folder {op.folder_id}")
+                seen_folder_meta.add(op.folder_id)
+        return self
+
+
+class OrganizationPlanOperationResult(StrictCapabilityModel):
+    index: int = Field(ge=0)
+    kind: str = Field(max_length=50)
+    status: Literal["completed", "skipped", "conflicted", "failed"] = "completed"
+    resource_id: str | None = Field(default=None, max_length=200)
+    path: str | None = Field(default=None, max_length=500)
+    message: str | None = Field(default=None, max_length=500)
+
+
+class ApplyOrganizationPlanResult(StrictCapabilityModel):
+    plan_id: str = Field(max_length=200)
+    status: Literal["completed", "partial", "failed"]
+    results: list[OrganizationPlanOperationResult] = Field(max_length=50)
+    summary: str = Field(max_length=500)
+
+
+# --- Editor selection and standard tools ---
 
 
 class EditorSelectionInput(StrictCapabilityModel):
@@ -205,6 +369,42 @@ class ChatCapability:
 
 
 CAPABILITIES: tuple[ChatCapability, ...] = (
+    ChatCapability(
+        "inspect_workspace_organization",
+        1,
+        "Inspect organization",
+        "Inspect workspace folders, documents, tags, and metadata for organization planning.",
+        InspectOrganizationInput,
+        InspectOrganizationResult,
+        EffectClass.READ,
+        ApprovalPolicy.NONE,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        60_000,
+        10.0,
+        "inspect_workspace_organization",
+        None,
+        requires_global_scope=True,
+    ),
+    ChatCapability(
+        "apply_workspace_organization_plan",
+        1,
+        "Apply organization plan",
+        "Execute a reviewed workspace organization plan (moves, metadata, folder creation).",
+        ApplyOrganizationPlanInput,
+        EffectRequestResult,
+        EffectClass.WRITE,
+        ApprovalPolicy.EXACT_EFFECT,
+        (Capability.MOVE, Capability.TAG, Capability.CREATE),
+        ("workspace",),
+        (),
+        20_000,
+        30.0,
+        "apply_workspace_organization_plan",
+        "organization_plan",
+        requires_global_scope=True,
+    ),
     ChatCapability(
         "get_editor_selection",
         1,
