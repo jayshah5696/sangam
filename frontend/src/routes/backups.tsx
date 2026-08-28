@@ -18,7 +18,6 @@ function BackupsPage() {
     <section className="utility-page">
       <header className="utility-header">
         <div>
-          <p className="eyebrow">Operational recovery</p>
           <h1>Backups</h1>
           <p>
             Each set contains an online SQLite snapshot, a workspace archive, checksums, and a verification

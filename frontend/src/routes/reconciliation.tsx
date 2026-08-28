@@ -20,7 +20,6 @@ function ReconciliationPage() {
     <section className="utility-page">
       <header className="utility-header">
         <div>
-          <p className="eyebrow">Workspace integrity</p>
           <h1>Reconciliation</h1>
           <p>
             Review disk changes explicitly. Sangam never guesses when the database and workspace disagree.

@@ -20,13 +20,64 @@
   font-family: var(--font-mono);
 }
 
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: var(--leading-tight);
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--shadow) 20%, transparent);
+}
+
+@keyframes ui-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: ui-spin 1s linear infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+
+.skeleton-shimmer {
+  background: color-mix(in srgb, var(--surface-soft) 85%, var(--line));
+  border-radius: var(--radius-control);
+  animation: skeleton-shimmer 1.8s var(--ease-ui-in-out) infinite;
+}
+
 small {
   font-size: var(--text-meta);
   line-height: var(--leading-ui);
 }
 
 :where(button, input, select, textarea, a) {
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+:where(button, a.button, .panel-button, .secondary-action, .primary-button):active:not(:disabled):not([aria-disabled="true"]) {
+  transform: translateY(0.5px) scale(0.985);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -322,9 +373,10 @@ textarea::placeholder {
   align-items: start;
   gap: var(--space-3);
   padding: var(--space-5);
-  border: 1px dashed var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius-panel);
-  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, var(--app-bg));
+  box-shadow: var(--shadow-panel-inset), var(--shadow-panel);
   color: var(--muted);
   transition: background var(--motion-control) var(--ease-ui-out),
     border-color var(--motion-control) var(--ease-ui-out),

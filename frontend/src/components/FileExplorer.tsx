@@ -66,8 +66,8 @@ const expandedStorageKey = 'sangam.explorer.expanded.v2'
 
 function sortLabel(sort: ExplorerSort) {
   if (sort === 'modified') return 'Last modified'
-  if (sort === 'name-asc') return 'Name A–Z'
-  return 'Name Z–A'
+  if (sort === 'name-asc') return 'Name A-Z'
+  return 'Name Z-A'
 }
 
 export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
@@ -588,18 +588,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
               if (window.confirm(`Move “${document.title}” to trash?`)) remove.mutate(document)
             }}
           />
-        )}
-        {!documents.isLoading && adapter.paths.length === 0 && (
-          <div className="explorer-empty">
-            <p className="sidebar-message">No documents yet.</p>
-            <button
-              type="button"
-              className="secondary-action explorer-empty-action"
-              onClick={() => setCreateMode({ kind: 'file', parentPath: '' })}
-            >
-              <FilePlus2 size="var(--icon-inline)" /> New document
-            </button>
-          </div>
         )}
       </div>
     </div>

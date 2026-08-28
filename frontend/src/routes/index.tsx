@@ -52,7 +52,6 @@ function Welcome() {
   const matchingDocuments = trimmedSearch ? (searchResults.data ?? []) : (documents.data ?? [])
   return (
     <section className="welcome">
-      <p className="eyebrow">Your workspace</p>
       <h1>{isEmpty ? 'Your workspace is empty' : 'Files with memory.'}</h1>
       <p>
         {isEmpty
@@ -79,7 +78,7 @@ function Welcome() {
           }}
           placeholder={
             isEmpty
-              ? 'Nothing to search yet — create a document first'
+              ? 'Nothing to search yet. Create a document first.'
               : 'Search documents and press Enter to open the top result…'
           }
           aria-label="Quick search documents"
