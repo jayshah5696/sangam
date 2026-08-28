@@ -461,22 +461,17 @@ export function ChatPanel({
             <CreatedFromChat document={createdDocument} onDismiss={() => setCreatedDocument(null)} />
           )}
           {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
-          {(effectsQuery.data ?? [])
-            .filter(
+          <CollapsedEffectList
+            effects={(effectsQuery.data ?? []).filter(
               (effect) =>
                 effect.status !== 'pending_approval' &&
                 effect.resource_id !== createdDocument?.document_id &&
                 effect.resource_id !== published?.publication_id,
-            )
-            .map((effect) => (
-              <DurableEffectStatus
-                key={effect.effect_id}
-                effect={effect}
-                resuming={resumingEffectId === effect.effect_id}
-                resumeFailed={resumeErrorIds.has(effect.effect_id)}
-                onResume={() => void resumeEffect(effect)}
-              />
-            ))}
+            )}
+            resumingEffectId={resumingEffectId}
+            resumeErrorIds={resumeErrorIds}
+            onResume={resumeEffect}
+          />
           {script.status === 'loading' && <StateMessage kind="loading" title="Loading chat interface" />}
           {script.status === 'error' && (
             <StateMessage
@@ -643,6 +638,70 @@ function PublishedFromChat({ result, onDismiss }: { result: IssuedPublication; o
       href={href}
       onDismiss={onDismiss}
     />
+  )
+}
+
+/** Collapse completed effects when there are many, showing only the last 2 directly. */
+function CollapsedEffectList({
+  effects,
+  resumingEffectId,
+  resumeErrorIds,
+  onResume,
+}: {
+  effects: ChatEffect[]
+  resumingEffectId: string | null
+  resumeErrorIds: Set<string>
+  onResume: (effect: ChatEffect) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const COLLAPSE_THRESHOLD = 3
+
+  if (effects.length === 0) return null
+
+  // Separate actionable (failed/interrupted) from completed
+  const actionable = effects.filter(
+    (e) => e.status === 'failed' || e.status === 'approved' || e.status === 'executing',
+  )
+  const completed = effects.filter(
+    (e) => e.status === 'completed',
+  )
+
+  // Always show actionable effects individually
+  const showDirectly = expanded || completed.length < COLLAPSE_THRESHOLD
+
+  return (
+    <>
+      {actionable.map((effect) => (
+        <DurableEffectStatus
+          key={effect.effect_id}
+          effect={effect}
+          resuming={resumingEffectId === effect.effect_id}
+          resumeFailed={resumeErrorIds.has(effect.effect_id)}
+          onResume={() => void onResume(effect)}
+        />
+      ))}
+      {showDirectly ? (
+        completed.map((effect) => (
+          <DurableEffectStatus
+            key={effect.effect_id}
+            effect={effect}
+            resuming={resumingEffectId === effect.effect_id}
+            resumeFailed={resumeErrorIds.has(effect.effect_id)}
+            onResume={() => void onResume(effect)}
+          />
+        ))
+      ) : (
+        <div className="chat-effects-collapsed" role="status">
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => setExpanded(true)}
+          >
+            {completed.length} completed effects · Show all
+          </button>
+        </div>
+      )}
+    </>
   )
 }
 

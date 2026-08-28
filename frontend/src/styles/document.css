@@ -272,6 +272,8 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-effect-complete { flex-wrap: wrap; }
 .chat-effect-complete-copy { min-width: 0; flex: 1; display: grid; gap: var(--space-1); }
 .chat-effect-complete-copy strong { font-size: var(--text-control); }
+.chat-effects-collapsed { padding: var(--space-2) var(--space-3); text-align: center; }
+.chat-effects-collapsed .secondary-action { font-size: var(--text-meta); color: var(--muted); }
 .chat-effect-complete-copy span { overflow-wrap: anywhere; color: var(--muted); font-size: var(--text-meta); }
 .chat-effect-complete-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .chat-effect-complete-actions .secondary-action { text-decoration: none; }
