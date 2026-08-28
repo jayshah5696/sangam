@@ -158,10 +158,13 @@
 .explorer-bulk-actions button { min-width: 0; min-height: var(--control-compact); display: inline-flex; align-items: center; gap: var(--space-1); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-text); font-size: var(--text-meta); }
 .explorer-bulk-actions button.danger { color: color-mix(in srgb, var(--danger) 70%, white); }
 .explorer-empty { position: absolute; left: var(--space-2); bottom: var(--space-2); }
-.explorer-error, .explorer-notice { margin: var(--space-1) var(--space-1) var(--space-2); display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--danger) 60%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--danger) 18%, var(--sidebar)); color: var(--sidebar-text); font-size: var(--text-meta); line-height: 1.4; }
-.explorer-notice { border-color: color-mix(in srgb, var(--success) 55%, transparent); background: color-mix(in srgb, var(--success) 15%, var(--sidebar)); }
-.explorer-error span, .explorer-notice span { min-width: 0; flex: 1; }
-.explorer-error button, .explorer-notice button { min-width: var(--control-compact); min-height: var(--control-compact); display: grid; place-items: center; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; }
+.explorer-error { margin: var(--space-1) var(--space-1) var(--space-2); display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--danger) 60%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--danger) 18%, var(--sidebar)); color: var(--sidebar-text); font-size: var(--text-meta); line-height: 1.4; }
+.explorer-status { margin: 0; padding: var(--space-1) var(--space-2); color: var(--sidebar-muted); font-size: var(--text-meta); cursor: pointer; animation: explorer-status-fade 3.5s ease-out forwards; }
+@keyframes explorer-status-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.explorer-create-scope { all: unset; cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+.explorer-create-scope:hover { text-decoration-style: solid; }
+.explorer-error span { min-width: 0; flex: 1; }
+.explorer-error button { min-width: var(--control-compact); min-height: var(--control-compact); display: grid; place-items: center; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; }
 .organization-dialog { width: min(36rem, calc(100vw - var(--space-5) * 2)); max-height: calc(100vh - var(--space-5) * 2); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: var(--shadow-panel); }
 .organization-dialog::backdrop { background: rgba(0,0,0,.68); backdrop-filter: blur(2px); }
 .organization-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); border-bottom: 1px solid var(--line); }

@@ -143,6 +143,11 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const [createName, setCreateName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), 3500)
+    return () => clearTimeout(timer)
+  }, [notice])
   const [moveRequest, setMoveRequest] = useState<DialogRequest | null>(null)
   const [tagRequest, setTagRequest] = useState<DialogRequest | null>(null)
   const pendingFocusDocumentIdRef = useRef<string | null>(null)
@@ -641,7 +646,20 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
             if (createName.trim()) create.mutate({ mode: createMode, name: createName.trim() })
           }}
         >
-          <span>{createMode.parentPath || 'workspace'} /</span>
+          <span>
+            {createMode.parentPath ? (
+              <>
+                <button
+                  type="button"
+                  className="explorer-create-scope"
+                  aria-label="Create in workspace root instead"
+                  title="Click to create in workspace root"
+                  onClick={() => setCreateMode({ ...createMode, parentPath: '' })}
+                >
+                  {createMode.parentPath} ×
+                </button>{' /'}              </>
+            ) : 'workspace /'}
+          </span>
           <input
             autoFocus
             aria-label={`New ${createMode.kind} name`}
@@ -705,12 +723,9 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         </div>
       )}
       {notice && (
-        <div className="explorer-notice" role="status">
-          <span>{notice}</span>
-          <button aria-label="Dismiss message" onClick={() => setNotice(null)}>
-            <X size="var(--icon-inline)" />
-          </button>
-        </div>
+        <p className="explorer-status" role="status" onClick={() => setNotice(null)}>
+          {notice}
+        </p>
       )}
       {error && (
         <div className="explorer-error" role="alert">
