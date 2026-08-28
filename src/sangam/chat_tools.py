@@ -324,7 +324,7 @@ class ChatToolset:
 
     async def create_document(
         self, ctx: ToolContext, title: str, content: str, content_type: str
-    ) -> None:
+    ) -> str | None:
         normalized_title = " ".join(title.strip().split())
         arguments = CreateDocumentInput.model_validate(
             {
@@ -333,7 +333,7 @@ class ChatToolset:
                 "content_type": content_type,
             }
         ).model_dump(mode="json")
-        await self._request_effect(
+        return await self._request_effect(
             ctx,
             capability=self.policies["create_document"],
             arguments=arguments,
@@ -342,7 +342,7 @@ class ChatToolset:
 
     async def publish_document(
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
-    ) -> None:
+    ) -> str | None:
         document = self.workspace.get_document(ctx.context.request_context.principal, document_id)
         if document.content_type == "application/pdf":
             raise ValidationError("PDF documents cannot be published")
@@ -354,7 +354,7 @@ class ChatToolset:
                 "access_policy": access_policy,
             }
         ).model_dump(mode="json")
-        await self._request_effect(
+        return await self._request_effect(
             ctx,
             capability=self.policies["publish_document"],
             arguments=arguments,
@@ -500,7 +500,7 @@ class ChatToolset:
         ctx: ToolContext,
         operations_json: str,
         summary: str,
-    ) -> None:
+    ) -> str | None:
         """Accept a JSON-encoded list of operations and validate it."""
         try:
             operations = json.loads(operations_json)
@@ -524,7 +524,7 @@ class ChatToolset:
             "summary": validated.summary,
             "operation_count": len(validated.operations),
         }
-        await self._request_effect(
+        return await self._request_effect(
             ctx,
             capability=self.policies["apply_workspace_organization_plan"],
             arguments=arguments,
@@ -538,7 +538,7 @@ class ChatToolset:
         capability: ChatCapability,
         arguments: dict[str, object],
         preview: dict[str, object],
-    ) -> None:
+    ) -> str | None:
         request_context = ctx.context.request_context
         if not request_context.run_id:
             raise RuntimeError("Durable chat effects require a persisted run")
@@ -563,6 +563,7 @@ class ChatToolset:
                 argument_digest=effect.argument_digest,
                 reason="Auto-approved (YOLO mode)",
             )
+            result_json = json.dumps(result.client_result)
             self.evidence.record_tool(
                 run_id=request_context.run_id,
                 tool_call_id=tool_call_id,
@@ -572,11 +573,11 @@ class ChatToolset:
                 approval_policy=capability.approval,
                 outcome="auto_approved",
                 duration_ms=0,
-                result_bytes=len(json.dumps(result.client_result)),
+                result_bytes=len(result_json),
                 citation_count=0,
                 error_class=None,
             )
-            return
+            return result_json
         self.evidence.record_tool(
             run_id=request_context.run_id,
             tool_call_id=tool_call_id,
