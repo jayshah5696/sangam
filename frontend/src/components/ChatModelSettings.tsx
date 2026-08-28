@@ -15,6 +15,7 @@ function settingsSignature(data: ChatModelSettingsData): string {
     enabled: data.enabled_models,
     default: data.default_model,
     on: data.workspace_enabled,
+    yolo: data.auto_approve_effects ?? false,
     overrides: data.catalog.filter((model) => model.operator_override).map((model) => model.id),
   })
 }
@@ -38,6 +39,7 @@ export function ChatModelSettings() {
   const [overrides, setOverrides] = useState<Set<string>>(new Set())
   const [defaultModel, setDefaultModel] = useState('')
   const [workspaceEnabled, setWorkspaceEnabled] = useState(true)
+  const [autoApproveEffects, setAutoApproveEffects] = useState(false)
   const [search, setSearch] = useState('')
   const [manualConnection, setManualConnection] = useState('openrouter')
   const [manualModel, setManualModel] = useState('')
@@ -53,6 +55,7 @@ export function ChatModelSettings() {
     )
     setDefaultModel(models.data.default_model)
     setWorkspaceEnabled(models.data.workspace_enabled)
+    setAutoApproveEffects(models.data.auto_approve_effects ?? false)
   }, [models.data])
 
   const selectedManualConnection = connections.data?.some(
@@ -88,6 +91,7 @@ export function ChatModelSettings() {
         default_model: defaultModel,
         enabled_models: [...enabled],
         unknown_model_overrides: [...overrides],
+        auto_approve_effects: autoApproveEffects,
       }),
     onSuccess: invalidate,
   })
@@ -190,6 +194,7 @@ export function ChatModelSettings() {
     enabled: [...enabled],
     default: defaultModel,
     on: workspaceEnabled,
+    yolo: autoApproveEffects,
     overrides: [...overrides],
   })
   const dirty = settingsSignature(models.data) !== draftSignature
@@ -220,6 +225,24 @@ export function ChatModelSettings() {
               onChange={(event) => setWorkspaceEnabled(event.target.checked)}
             />
             <span>{workspaceEnabled ? 'On' : 'Off'}</span>
+          </label>
+        </div>
+
+        <div className="setting-row">
+          <div>
+            <strong>YOLO mode</strong>
+            <small>
+              Skip approval prompts for all chat effects (create, move, publish). Actions execute
+              immediately without review.
+            </small>
+          </div>
+          <label className="compact-switch">
+            <input
+              type="checkbox"
+              checked={autoApproveEffects}
+              onChange={(event) => setAutoApproveEffects(event.target.checked)}
+            />
+            <span>{autoApproveEffects ? 'On' : 'Off'}</span>
           </label>
         </div>
 

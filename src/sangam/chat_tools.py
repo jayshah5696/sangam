@@ -43,6 +43,7 @@ class ChatToolset:
         effects: ChatEffectService,
         evidence: ChatEvidenceRepository,
         max_result_bytes: int,
+        auto_approve_check: Callable[[], bool] | None = None,
     ) -> None:
         self.workspace = workspace
         self.proposals = proposals
@@ -51,6 +52,7 @@ class ChatToolset:
         self.evidence = evidence
         self.max_result_bytes = max_result_bytes
         self.policies = registry.by_id
+        self._auto_approve_check = auto_approve_check or (lambda: False)
 
     def as_agent_tools(self, capabilities: tuple[ChatCapability, ...] | None = None) -> list[Any]:
         tools = [
@@ -552,6 +554,29 @@ class ChatToolset:
             arguments=arguments,
             preview=preview,
         )
+        # YOLO mode: auto-approve and execute without user review
+        if self._auto_approve_check():
+            result = self.effects.decide(
+                request_context.principal,
+                effect_id=effect.effect_id,
+                verdict="approve",
+                argument_digest=effect.argument_digest,
+                reason="Auto-approved (YOLO mode)",
+            )
+            self.evidence.record_tool(
+                run_id=request_context.run_id,
+                tool_call_id=tool_call_id,
+                capability_id=capability.capability_id,
+                capability_version=capability.version,
+                effect_class=capability.effect,
+                approval_policy=capability.approval,
+                outcome="auto_approved",
+                duration_ms=0,
+                result_bytes=len(json.dumps(result.client_result)),
+                citation_count=0,
+                error_class=None,
+            )
+            return
         self.evidence.record_tool(
             run_id=request_context.run_id,
             tool_call_id=tool_call_id,

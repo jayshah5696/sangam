@@ -66,6 +66,7 @@ class ModelSettingsState:
     catalog: tuple[CatalogModel, ...]
     catalog_fetched_at: str | None
     version: int
+    auto_approve_effects: bool = False
 
 
 def _curated_openrouter_catalog() -> tuple[CatalogModel, ...]:
@@ -156,6 +157,7 @@ class ChatModelSettingsRepository:
         unknown_model_overrides: list[str],
         connection_protocols: dict[str, Literal["openai_responses", "openai_chat_completions"]]
         | None = None,
+        auto_approve_effects: bool | None = None,
     ) -> ModelSettingsState:
         current = self.get()
         if current.version != expected_version:
@@ -208,6 +210,7 @@ class ChatModelSettingsRepository:
             catalog=tuple(catalog.values()),
             catalog_fetched_at=current.catalog_fetched_at,
             version=current.version + 1,
+            auto_approve_effects=auto_approve_effects if auto_approve_effects is not None else current.auto_approve_effects,
         )
         self._compare_and_write(state, expected_version=expected_version)
         return state
@@ -242,8 +245,9 @@ class ChatModelSettingsRepository:
             """
             INSERT INTO chat_model_settings(
                 id, openrouter_enabled, default_model, enabled_models_json,
-                catalog_json, catalog_fetched_at, updated_at, version
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                catalog_json, catalog_fetched_at, updated_at, version,
+                auto_approve_effects
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             _state_values(state),
         )
@@ -254,7 +258,8 @@ class ChatModelSettingsRepository:
                 """
                 UPDATE chat_model_settings SET
                     openrouter_enabled = ?, default_model = ?, enabled_models_json = ?,
-                    catalog_json = ?, catalog_fetched_at = ?, updated_at = ?, version = ?
+                    catalog_json = ?, catalog_fetched_at = ?, updated_at = ?, version = ?,
+                    auto_approve_effects = ?
                 WHERE id = 1 AND version = ?
                 """,
                 (*_state_values(state), expected_version),
@@ -323,6 +328,7 @@ class ChatModelCatalog:
             ],
             catalog_fetched_at=state.catalog_fetched_at,
             version=state.version,
+            auto_approve_effects=state.auto_approve_effects,
         )
 
     def update(
@@ -333,6 +339,7 @@ class ChatModelCatalog:
         default_model: str,
         enabled_models: list[str],
         unknown_model_overrides: list[str],
+        auto_approve_effects: bool | None = None,
     ) -> ChatModelSettings:
         connections = {item.connection_id: item for item in self.connections.list()}
         selected_connection_ids = {
@@ -352,6 +359,7 @@ class ChatModelCatalog:
                 connection_id: connection.protocol
                 for connection_id, connection in connections.items()
             },
+            auto_approve_effects=auto_approve_effects,
         )
         return self.as_schema()
 
@@ -397,6 +405,7 @@ def _state_from_row(row) -> ModelSettingsState:
         catalog=catalog,
         catalog_fetched_at=row["catalog_fetched_at"],
         version=row["version"],
+        auto_approve_effects=bool(row["auto_approve_effects"]) if "auto_approve_effects" in row.keys() else False,
     )
 
 
@@ -441,6 +450,7 @@ def _state_values(state: ModelSettingsState) -> tuple[object, ...]:
         state.catalog_fetched_at,
         utc_now(),
         state.version,
+        1 if state.auto_approve_effects else 0,
     )
 
 

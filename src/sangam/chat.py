@@ -113,6 +113,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             effects=self.effects,
             evidence=self.evidence,
             max_result_bytes=config.max_tool_result_bytes,
+            auto_approve_check=lambda: self.model_catalog.state().auto_approve_effects,
         )
         self.tools = self.toolset.as_agent_tools()
         self.item_converter = SangamThreadItemConverter()
@@ -166,6 +167,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             default_model=state.default_model,
             available_models=available,
             reasoning_effort=self.config.reasoning_effort,
+            auto_approve_effects=state.auto_approve_effects,
         )
 
     async def respond(

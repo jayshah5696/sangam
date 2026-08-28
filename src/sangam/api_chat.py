@@ -68,6 +68,7 @@ def create_chat_router(
             default_model=body.default_model,
             enabled_models=body.enabled_models,
             unknown_model_overrides=body.unknown_model_overrides,
+            auto_approve_effects=body.auto_approve_effects,
         )
 
     @router.post("/chat/models/refresh", response_model=ChatModelSettings)

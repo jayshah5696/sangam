@@ -564,6 +564,7 @@ class ChatRuntimeConfig(BaseModel):
     default_model: str
     available_models: list[ChatModelInfo]
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"]
+    auto_approve_effects: bool = False
 
 
 class ChatModelInfo(BaseModel):
@@ -588,6 +589,7 @@ class ChatModelSettings(BaseModel):
     catalog: list[ChatModelInfo]
     catalog_fetched_at: str | None
     version: int
+    auto_approve_effects: bool = False
 
 
 class ChatModelSelectionUpdate(BaseModel):
@@ -598,6 +600,7 @@ class ChatModelSelectionUpdate(BaseModel):
     default_model: str = Field(min_length=1, max_length=320)
     enabled_models: list[str] = Field(min_length=1, max_length=100)
     unknown_model_overrides: list[str] = Field(default_factory=list, max_length=100)
+    auto_approve_effects: bool | None = None
 
 
 class ProviderConnection(BaseModel):

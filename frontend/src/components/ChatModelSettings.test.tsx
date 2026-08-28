@@ -126,6 +126,7 @@ describe('ChatModelSettings', () => {
         'openrouter::openai/gpt-5.4',
       ],
       unknown_model_overrides: [],
+      auto_approve_effects: false,
     })
   })
 

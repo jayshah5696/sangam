@@ -416,6 +416,7 @@ export const chatModelSettingsSchema = z.object({
   catalog: z.array(chatModelInfoSchema),
   catalog_fetched_at: z.string().nullable(),
   version: z.number(),
+  auto_approve_effects: z.boolean().optional().default(false),
 })
 
 export type ChatModelInfo = z.infer<typeof chatModelInfoSchema>
@@ -427,6 +428,7 @@ export type ChatModelSelectionUpdate = {
   default_model: string
   enabled_models: string[]
   unknown_model_overrides: string[]
+  auto_approve_effects?: boolean
 }
 
 export const providerConnectionSchema = z.object({
