@@ -74,9 +74,11 @@ test.describe('Issue Verification Real Screenshots', () => {
     await expect(contextMenu).toBeVisible()
     await expect(contextMenu.getByRole('menuitem')).toHaveText([
       'Open in split',
+      'Move to…',
+      'Edit tags…',
       'Rename',
       'Duplicate',
-      'Move to trash',
+      'Move to Trash',
     ])
     const sidebarBox = await page.locator('.primary-sidebar').boundingBox()
     const menuBox = await contextMenu.boundingBox()

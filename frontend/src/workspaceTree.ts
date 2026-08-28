@@ -28,8 +28,9 @@ export function buildWorkspaceTreeAdapter(
     const path = normalizeWorkspacePath(folder.path)
     if (!path) continue
     occupiedRootNames.add(path.split('/')[0]!)
-    folderByTreePath.set(path, folder)
-    paths.push(`${path}/`)
+    const treePath = toTreeDirectoryPath(path)
+    folderByTreePath.set(treePath, folder)
+    paths.push(treePath)
   }
 
   const drafts = documents.filter((document) => !document.path)
@@ -42,11 +43,12 @@ export function buildWorkspaceTreeAdapter(
     paths.push(path)
   }
 
-  const draftsRootPath = drafts.length ? availableDraftsRoot(occupiedRootNames) : null
-  if (draftsRootPath) {
+  const draftsRootName = drafts.length ? availableDraftsRoot(occupiedRootNames) : null
+  const draftsRootPath = draftsRootName ? toTreeDirectoryPath(draftsRootName) : null
+  if (draftsRootName) {
     const usedDraftPaths = new Set<string>()
     for (const document of drafts) {
-      const path = uniqueDraftPath(draftsRootPath, document.title, usedDraftPaths)
+      const path = uniqueDraftPath(draftsRootName, document.title, usedDraftPaths)
       usedDraftPaths.add(path)
       documentByTreePath.set(path, document)
       treePathByDocumentId.set(document.document_id, path)
@@ -61,6 +63,15 @@ export function buildWorkspaceTreeAdapter(
     treePathByDocumentId,
     draftsRootPath,
   }
+}
+
+export function workspacePathFromTreePath(path: string | null) {
+  return path ? normalizeWorkspacePath(path) : ''
+}
+
+export function toTreeDirectoryPath(path: string) {
+  const normalized = normalizeWorkspacePath(path)
+  return normalized ? `${normalized}/` : ''
 }
 
 export function joinWorkspacePath(parent: string, child: string) {

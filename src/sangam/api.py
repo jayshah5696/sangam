@@ -39,6 +39,10 @@ from sangam.schemas import (
     AgentToken,
     BackupSet,
     BackupVerification,
+    BulkMoveDocuments,
+    BulkOrganizationResult,
+    BulkTagDocuments,
+    BulkTrashDocuments,
     CreateAgentToken,
     CreateDocument,
     CreateFolder,
@@ -745,6 +749,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             principal,
             folder_id=folder_id,
             path=body.path,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/organization/documents/move", response_model=BulkOrganizationResult)
+    def bulk_move_documents(
+        body: BulkMoveDocuments,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> BulkOrganizationResult:
+        return workspace.bulk_move_documents(
+            principal,
+            items=body.documents,
+            destination_folder_path=body.destination_folder_path,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/organization/documents/tag", response_model=BulkOrganizationResult)
+    def bulk_tag_documents(
+        body: BulkTagDocuments,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> BulkOrganizationResult:
+        return workspace.bulk_tag_documents(
+            principal,
+            items=body.documents,
+            add_tag_ids=body.add_tag_ids,
+            remove_tag_ids=body.remove_tag_ids,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/organization/documents/trash", response_model=BulkOrganizationResult)
+    def bulk_trash_documents(
+        body: BulkTrashDocuments,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> BulkOrganizationResult:
+        return workspace.bulk_trash_documents(
+            principal,
+            items=body.documents,
             idempotency_key=idempotency_key,
         )
 

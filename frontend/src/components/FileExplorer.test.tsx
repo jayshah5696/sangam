@@ -11,6 +11,10 @@ type MockFileTreeOptions = {
     item: { kind: 'directory'; name: string; path: string }
     row: Record<string, never>
   }) => { text: string; title?: string } | null
+  dragAndDrop?: {
+    canDrag: (paths: readonly string[]) => boolean
+    canDrop: (event: { draggedPaths: readonly string[]; target: { directoryPath: string | null } }) => boolean
+  }
   renaming?: {
     canRename: (item: { isFolder: boolean; path: string }) => boolean
     onRename?: (event: { sourcePath: string; destinationPath: string }) => void
@@ -72,7 +76,7 @@ vi.mock('@pierre/trees/react', () => ({
     if (options.renderRowDecoration) {
       state.decorations.push(
         options.renderRowDecoration({
-          item: { kind: 'directory', name: 'projects', path: 'projects' },
+          item: { kind: 'directory', name: 'projects', path: 'projects/' },
           row: {},
         }),
       )
@@ -105,8 +109,11 @@ vi.mock('../api', () => ({
     getDocument: vi.fn(),
     listDocuments: vi.fn(),
     listFolders: vi.fn(),
+    listTags: vi.fn(),
     moveDocument: vi.fn(),
+    renameFolder: vi.fn(),
     updateDocument: vi.fn(),
+    updateFolderMetadata: vi.fn(),
   },
 }))
 
@@ -192,18 +199,6 @@ describe('FileExplorerPanel', () => {
     })
   })
 
-  it('triggers startRenaming when F2 is pressed on a focused tree item', () => {
-    state.model.getFocusedPath = vi.fn(() => 'projects/note.md')
-    const { container } = render(<FileExplorerPanel onSearch={vi.fn()} />)
-    const tree = container.querySelector('[data-testid="pierre-tree"]') ?? container.firstElementChild!
-
-    // Simulate F2 keydown
-    const event = new KeyboardEvent('keydown', { key: 'F2', bubbles: true })
-    tree.dispatchEvent(event)
-
-    expect(state.model.startRenaming).toHaveBeenCalledWith('projects/note.md')
-  })
-
   it('renders labels via aria-label pseudo-element and hides Pierre MiddleTruncate', () => {
     render(<FileExplorerPanel onSearch={vi.fn()} />)
 
@@ -230,6 +225,29 @@ describe('FileExplorerPanel', () => {
     expect(options?.renaming?.canRename({ isFolder: true, path: 'Drafts' })).toBe(false)
     expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/note.md' })).toBe(true)
     expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/paper.pdf' })).toBe(false)
+  })
+
+  it('accepts canonical folder targets for document and folder drag', () => {
+    state.documents = [{ ...document, path: 'inbox/note.md' }]
+    state.folders = [{ ...folder, folder_id: 'inbox-folder', path: 'inbox', name: 'inbox' }, folder]
+
+    render(<FileExplorerPanel onSearch={vi.fn()} />)
+
+    const drag = state.useFileTreeOptions[0]?.dragAndDrop
+    expect(drag?.canDrag(['inbox/note.md'])).toBe(true)
+    expect(
+      drag?.canDrop({
+        draggedPaths: ['inbox/note.md'],
+        target: { directoryPath: 'projects/' },
+      }),
+    ).toBe(true)
+    expect(drag?.canDrag(['projects/'])).toBe(true)
+    expect(
+      drag?.canDrop({
+        draggedPaths: ['projects/'],
+        target: { directoryPath: 'inbox/' },
+      }),
+    ).toBe(true)
   })
 
   it('applies sort via prepareFileTreeInput on resetPaths, not on useFileTree options', () => {

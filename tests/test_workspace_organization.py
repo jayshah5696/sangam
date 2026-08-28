@@ -134,6 +134,139 @@ def test_folder_metadata_concurrency_and_path_validation(client: TestClient) -> 
         assert response.status_code == 422
 
 
+def test_bulk_document_organization_preflights_and_reports_results(client: TestClient) -> None:
+    tag = client.post(
+        "/api/v1/tags",
+        json={"name": "Launch", "color": "#327a62"},
+        headers=headers("bulk-launch-tag"),
+    ).json()
+    for path in ("inbox", "projects/launch"):
+        response = client.post(
+            "/api/v1/folders",
+            json={"path": path},
+            headers=headers(f"bulk-folder-{path}"),
+        )
+        assert response.status_code == 201
+
+    documents = []
+    for index in range(2):
+        response = client.post(
+            "/api/v1/documents",
+            json={
+                "title": f"Launch note {index}",
+                "content": f"# Launch note {index}",
+                "path": f"inbox/launch-{index}.md",
+            },
+            headers=headers(f"bulk-document-{index}"),
+        )
+        assert response.status_code == 201
+        documents.append(response.json())
+
+    tagged = client.post(
+        "/api/v1/organization/documents/tag",
+        json={
+            "documents": [
+                {
+                    "document_id": document["document_id"],
+                    "expected_metadata_version": document["metadata_version"],
+                }
+                for document in documents
+            ],
+            "add_tag_ids": [tag["tag_id"]],
+            "remove_tag_ids": [],
+        },
+        headers=headers("bulk-tag-documents"),
+    )
+    assert tagged.status_code == 200
+    assert tagged.json()["status"] == "completed"
+    assert [result["status"] for result in tagged.json()["results"]] == ["completed", "completed"]
+
+    refreshed = [
+        client.get(f"/api/v1/documents/{document['document_id']}").json() for document in documents
+    ]
+    moved = client.post(
+        "/api/v1/organization/documents/move",
+        json={
+            "documents": [
+                {
+                    "document_id": document["document_id"],
+                    "expected_revision_id": document["current_revision_id"],
+                    "expected_source_path": document["path"],
+                }
+                for document in refreshed
+            ],
+            "destination_folder_path": "projects/launch",
+        },
+        headers=headers("bulk-move-documents"),
+    )
+    assert moved.status_code == 200
+    assert moved.json()["status"] == "completed"
+    assert [result["path"] for result in moved.json()["results"]] == [
+        "projects/launch/launch-0.md",
+        "projects/launch/launch-1.md",
+    ]
+
+    moved_documents = [
+        client.get(f"/api/v1/documents/{document['document_id']}").json() for document in documents
+    ]
+    trashed = client.post(
+        "/api/v1/organization/documents/trash",
+        json={
+            "documents": [
+                {
+                    "document_id": document["document_id"],
+                    "expected_revision_id": document["current_revision_id"],
+                }
+                for document in moved_documents
+            ]
+        },
+        headers=headers("bulk-trash-documents"),
+    )
+    assert trashed.status_code == 200
+    assert trashed.json()["status"] == "completed"
+    deleted = client.get("/api/v1/documents", params={"include_deleted": True}).json()
+    deleted_by_id = {document["document_id"]: document for document in deleted}
+    assert all(deleted_by_id[document["document_id"]]["deleted"] for document in documents)
+
+
+def test_bulk_move_rejects_stale_selection_before_moving_any_document(client: TestClient) -> None:
+    client.post("/api/v1/folders", json={"path": "archive"}, headers=headers("bulk-stale-folder"))
+    documents = [
+        client.post(
+            "/api/v1/documents",
+            json={"title": name, "content": f"# {name}", "path": f"{name}.md"},
+            headers=headers(f"bulk-stale-{name}"),
+        ).json()
+        for name in ("alpha", "beta")
+    ]
+    response = client.post(
+        "/api/v1/organization/documents/move",
+        json={
+            "documents": [
+                {
+                    "document_id": documents[0]["document_id"],
+                    "expected_revision_id": documents[0]["current_revision_id"],
+                    "expected_source_path": documents[0]["path"],
+                },
+                {
+                    "document_id": documents[1]["document_id"],
+                    "expected_revision_id": "stale-revision",
+                    "expected_source_path": documents[1]["path"],
+                },
+            ],
+            "destination_folder_path": "archive",
+        },
+        headers=headers("bulk-stale-move"),
+    )
+    assert response.status_code == 409
+    assert (
+        client.get(f"/api/v1/documents/{documents[0]['document_id']}").json()["path"] == "alpha.md"
+    )
+    assert (
+        client.get(f"/api/v1/documents/{documents[1]['document_id']}").json()["path"] == "beta.md"
+    )
+
+
 def test_tag_and_folder_mutation_retries_are_idempotent(client: TestClient) -> None:
     tag_headers = headers("retry-tag")
     first_tag = client.post(

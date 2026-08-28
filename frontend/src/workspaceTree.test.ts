@@ -8,6 +8,8 @@ import {
   ensureMarkdownExtension,
   joinWorkspacePath,
   parentWorkspacePath,
+  toTreeDirectoryPath,
+  workspacePathFromTreePath,
 } from './workspaceTree'
 
 const materializedDocument: DocumentSummary = {
@@ -57,7 +59,7 @@ describe('Pierre workspace tree adapter', () => {
     expect(adapter.paths).toEqual(['projects/', 'projects/plan.md'])
     expect(adapter.documentByTreePath.get('projects/plan.md')?.document_id).toBe('doc-1')
     expect(adapter.treePathByDocumentId.get('doc-1')).toBe('projects/plan.md')
-    expect(adapter.folderByTreePath.get('projects')?.folder_id).toBe('folder-1')
+    expect(adapter.folderByTreePath.get('projects/')?.folder_id).toBe('folder-1')
   })
 
   it('places unmaterialized documents under a collision-safe virtual Drafts path', () => {
@@ -66,7 +68,7 @@ describe('Pierre workspace tree adapter', () => {
     const realDraftsFolder = { ...folder, folder_id: 'folder-2', path: 'Drafts', name: 'Drafts' }
     const adapter = buildWorkspaceTreeAdapter([draft, duplicate], [realDraftsFolder])
 
-    expect(adapter.draftsRootPath).toBe('Drafts (Sangam 2)')
+    expect(adapter.draftsRootPath).toBe('Drafts (Sangam 2)/')
     expect(adapter.treePathByDocumentId.get('draft-1')).toBe('Drafts (Sangam 2)/Notes／Ideas')
     expect(adapter.treePathByDocumentId.get('draft-2')).toBe('Drafts (Sangam 2)/Notes／Ideas (2)')
   })
@@ -76,6 +78,9 @@ describe('Pierre workspace tree adapter', () => {
     expect(parentWorkspacePath('projects/research/notes.md')).toBe('projects/research')
     expect(ensureMarkdownExtension('notes')).toBe('notes.md')
     expect(ensureMarkdownExtension('notes.MD')).toBe('notes.MD')
+    expect(toTreeDirectoryPath('/projects/')).toBe('projects/')
+    expect(workspacePathFromTreePath('projects/')).toBe('projects')
+    expect(workspacePathFromTreePath(null)).toBe('')
   })
 })
 
