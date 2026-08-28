@@ -98,7 +98,7 @@ class PlanDocumentMove(StrictCapabilityModel):
     kind: Literal["move_document"] = "move_document"
     document_id: str = Field(min_length=1, max_length=200)
     expected_revision_id: str = Field(min_length=1, max_length=200)
-    expected_source_path: str = Field(min_length=1, max_length=500)
+    expected_source_path: str | None = Field(default=None, max_length=500)
     destination_path: str = Field(min_length=1, max_length=500)
 
 
@@ -397,7 +397,7 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         EffectClass.WRITE,
         ApprovalPolicy.EXACT_EFFECT,
         (Capability.MOVE, Capability.TAG, Capability.CREATE),
-        ("workspace",),
+        ("workspace", "document"),
         (),
         20_000,
         30.0,

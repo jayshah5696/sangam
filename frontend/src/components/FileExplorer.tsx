@@ -701,16 +701,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       </div>
       {selectedTarget && selectedTarget.documents.length > 1 && (
         <div className="explorer-bulk-actions" role="toolbar" aria-label="Selected document actions">
-          <strong>{selectedTarget.documents.length} selected</strong>
+          <strong>{selectedTarget.documents.length}<span className="bulk-label"> selected</span></strong>
           <button type="button" aria-label="Move selected documents" onClick={() => openMove(selectedTarget)}>
-            <FileInput size="var(--icon-inline)" /> Move
+            <FileInput size="var(--icon-inline)" /><span className="bulk-label"> Move</span>
           </button>
           <button
             type="button"
             aria-label="Edit tags for selected documents"
             onClick={() => openTags(selectedTarget)}
           >
-            <Tags size="var(--icon-inline)" /> Tags
+            <Tags size="var(--icon-inline)" /><span className="bulk-label"> Tags</span>
           </button>
           <button
             className="danger"
@@ -718,7 +718,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
             aria-label="Move selected documents to Trash"
             onClick={() => trashTarget(selectedTarget)}
           >
-            <Trash2 size="var(--icon-inline)" /> Trash
+            <Trash2 size="var(--icon-inline)" /><span className="bulk-label"> Trash</span>
           </button>
         </div>
       )}
