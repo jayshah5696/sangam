@@ -17,3 +17,14 @@
   desktop, narrow-desktop, true touch-mobile, affected-breakpoint, and visual
   evidence gates.
 - Run `just format`, `just test`, and `just test-e2e` before updating verified screenshots.
+
+## Anti-slop and TypeScript evidence rules
+
+- Reject low-evidence TypeScript and JavaScript patterns:
+  - Do not use chained type assertions (`as unknown as T`).
+  - Do not use non-const type assertions (`as T`) without a preceding `// SAFETY: <justification>` comment explaining why the invariant holds.
+  - Do not widen known values to open dictionary or generic object types when precise inference or `satisfies` is available.
+  - Parse and validate external or untrusted payloads at I/O boundaries (e.g. using Zod schemas) rather than using unconstrained dictionary types (`Record<string, unknown>`), loose runtime `typeof` branches, or functions exposing `unknown` parameters/returns.
+  - Do not use conditional empty object spread (`...(condition ? { key: value } : {})`) or module mocking in application code.
+- Run `just anti-slop` (or `just lint`) to verify all TypeScript and JavaScript files comply with the anti-slop Oxlint rules.
+

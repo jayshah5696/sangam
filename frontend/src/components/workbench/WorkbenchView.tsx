@@ -113,7 +113,8 @@ function EditorGroupView({ group }: { group: GroupNode }) {
   const showInspector = group.id === workbench.activeGroupId && groups.length === 1
   const activeDocumentQuery = useQuery({
     queryKey: ['document', activeDocumentId],
-    queryFn: () => api.getDocument(activeDocumentId as string),
+    queryFn: () =>
+      activeDocumentId ? api.getDocument(activeDocumentId) : Promise.reject(new Error('No active document')),
     enabled: Boolean(activeDocumentId),
   })
   const isPdf = activeDocumentQuery.data?.content_type === 'application/pdf'

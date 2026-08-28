@@ -116,7 +116,12 @@ function Welcome() {
           Format
           <select
             value={contentType}
-            onChange={(event) => setContentType(event.target.value as typeof contentType)}
+            onChange={(event) => {
+              const val = event.target.value
+              if (val === 'text/markdown' || val === 'text/html') {
+                setContentType(val)
+              }
+            }}
           >
             <option value="text/markdown">Markdown</option>
             <option value="text/html">HTML</option>

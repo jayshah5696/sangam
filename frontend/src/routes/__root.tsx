@@ -417,7 +417,15 @@ function SearchPanel() {
       </label>
       <label className="sidebar-sort">
         Sort
-        <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
+        <select
+          value={sort}
+          onChange={(event) => {
+            const val = event.target.value
+            if (val === 'relevance' || val === 'updated' || val === 'title' || val === 'path') {
+              setSort(val)
+            }
+          }}
+        >
           <option value="relevance">Relevance</option>
           <option value="updated">Updated</option>
           <option value="title">Title</option>

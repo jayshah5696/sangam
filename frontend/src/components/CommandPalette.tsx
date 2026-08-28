@@ -206,7 +206,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
   const selectedCommand = results[effectiveSelectedIndex]
 
   const openPalette = () => {
-    returnFocusRef.current = document.activeElement as HTMLElement | null
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setOpen(true)
   }
   const closePalette = () => {

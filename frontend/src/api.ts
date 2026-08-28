@@ -459,6 +459,10 @@ export const chatTurnContextSchema = z.object({
   created_at: z.string(),
 })
 
+export const jsonScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()])
+export type JsonScalar = z.infer<typeof jsonScalarSchema>
+export type JsonPayload = JsonScalar | JsonPayload[] | { [key: string]: JsonPayload }
+
 export const chatEffectSchema = z.object({
   effect_id: z.string(),
   thread_id: z.string(),
@@ -466,7 +470,7 @@ export const chatEffectSchema = z.object({
   capability_id: z.enum(['create_document', 'publish_document']),
   capability_version: z.number(),
   argument_digest: z.string(),
-  preview: z.record(z.string(), z.unknown()),
+  preview: z.record(z.string(), jsonScalarSchema),
   effect_class: z.enum(['write', 'external']),
   risk: z.enum(['workspace', 'external']),
   status: z.enum([
@@ -483,8 +487,8 @@ export const chatEffectSchema = z.object({
   expires_at: z.string(),
   resource_type: z.string().nullable(),
   resource_id: z.string().nullable(),
-  result: z.record(z.string(), z.unknown()).nullable(),
-  failure: z.record(z.string(), z.unknown()).nullable(),
+  result: z.record(z.string(), jsonScalarSchema).nullable(),
+  failure: z.record(z.string(), jsonScalarSchema).nullable(),
   created_at: z.string(),
   decided_at: z.string().nullable(),
   completed_at: z.string().nullable(),
@@ -504,16 +508,16 @@ const errorSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
-    details: z.record(z.string(), z.unknown()),
+    details: z.record(z.string(), z.string().or(z.number()).or(z.boolean()).or(z.null())),
   }),
 })
 
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
-  readonly details: Record<string, unknown>
+  readonly details: Record<string, JsonScalar>
 
-  constructor(status: number, code: string, message: string, details: Record<string, unknown>) {
+  constructor(status: number, code: string, message: string, details: Record<string, JsonScalar>) {
     super(message)
     this.status = status
     this.code = code
@@ -521,14 +525,15 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path: string, init?: RequestInit): Promise<unknown> {
+async function request(path: string, init?: RequestInit): Promise<JsonPayload> {
   const headers = new Headers(init?.headers)
   if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (init?.method && init.method !== 'GET' && !headers.has('Idempotency-Key')) {
     headers.set('Idempotency-Key', crypto.randomUUID())
   }
   const response = await fetch(`/api/v1${path}`, { ...init, headers })
-  const payload: unknown = response.status === 204 ? undefined : await response.json()
+  // SAFETY: response.json() produces valid parsed JSON or null for empty 204
+  const payload = (response.status === 204 ? null : await response.json()) as JsonPayload
   if (!response.ok) {
     const parsed = errorSchema.safeParse(payload)
     if (parsed.success) {
@@ -660,18 +665,23 @@ export const api = {
     effect: ChatEffect,
     verdict: 'approve' | 'deny',
     reason?: string,
-  ): Promise<{ effect: ChatEffect; client_result: Record<string, unknown> }> {
-    return z.object({ effect: chatEffectSchema, client_result: z.record(z.string(), z.unknown()) }).parse(
-      await request(`/chat/effects/${effect.effect_id}/decision`, {
-        method: 'POST',
-        headers: { 'Idempotency-Key': `chat-effect:${effect.effect_id}:${verdict}` },
-        body: JSON.stringify({
-          verdict,
-          argument_digest: effect.argument_digest,
-          reason: reason?.trim() || null,
+  ): Promise<{ effect: ChatEffect; client_result: Record<string, JsonScalar> }> {
+    return z
+      .object({
+        effect: chatEffectSchema,
+        client_result: z.record(z.string(), z.string().or(z.number()).or(z.boolean()).or(z.null())),
+      })
+      .parse(
+        await request(`/chat/effects/${effect.effect_id}/decision`, {
+          method: 'POST',
+          headers: { 'Idempotency-Key': `chat-effect:${effect.effect_id}:${verdict}` },
+          body: JSON.stringify({
+            verdict,
+            argument_digest: effect.argument_digest,
+            reason: reason?.trim() || null,
+          }),
         }),
-      }),
-    )
+      )
   },
   async karakeepHealth(): Promise<z.infer<typeof karakeepConnectionSchema>> {
     return karakeepConnectionSchema.parse(await request('/karakeep/health'))
@@ -1160,6 +1170,12 @@ export const api = {
     await request(`/backups/${backupId}`, { method: 'DELETE' })
   },
   async health(): Promise<{ status: string; version: string; karakeep_configured?: boolean }> {
-    return (await request('/health')) as { status: string; version: string; karakeep_configured?: boolean }
+    return z
+      .object({
+        status: z.string(),
+        version: z.string(),
+        karakeep_configured: z.boolean().optional(),
+      })
+      .parse(await request('/health'))
   },
 }

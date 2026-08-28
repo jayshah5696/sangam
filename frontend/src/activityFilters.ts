@@ -1,10 +1,15 @@
 export type ActivityRangePreset = 'all' | 'today' | '7d' | '30d' | 'custom'
 
+export interface ActivityDateRange {
+  since?: string
+  until?: string
+}
+
 export function activityRange(
   preset: ActivityRangePreset,
   now = new Date(),
   custom: { since: string; until: string } = { since: '', until: '' },
-): { since?: string; until?: string } {
+): ActivityDateRange {
   if (preset === 'all') return {}
   if (preset === 'custom') {
     return {

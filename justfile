@@ -64,7 +64,11 @@ test-e2e:
 update-screenshots:
     npm --prefix frontend run update:screenshots
 
-# Check Python and frontend code style and linting.
+# Run oxlint with anti-slop rules to reject low-evidence TypeScript and JavaScript patterns.
+anti-slop:
+    npm --prefix frontend run anti-slop
+
+# Check Python and frontend code style, anti-slop rules, and linting.
 lint:
     uv run ruff check .
     npm --prefix frontend run lint

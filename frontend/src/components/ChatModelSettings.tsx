@@ -273,12 +273,12 @@ export function ChatModelSettings() {
               API protocol
               <select
                 value={newConnection.protocol}
-                onChange={(event) =>
-                  setNewConnection((value) => ({
-                    ...value,
-                    protocol: event.target.value as ProviderConnection['protocol'],
-                  }))
-                }
+                onChange={(event) => {
+                  const val = event.target.value
+                  if (val === 'openai_responses' || val === 'openai_chat_completions') {
+                    setNewConnection((value) => ({ ...value, protocol: val }))
+                  }
+                }}
               >
                 <option value="openai_responses">Responses API</option>
                 <option value="openai_chat_completions">Chat Completions API</option>
@@ -309,7 +309,11 @@ export function ChatModelSettings() {
               {createConnection.isPending ? 'Adding…' : 'Add connection'}
             </button>
             {createConnection.isError && (
-              <p className="error-text">{(createConnection.error as Error).message}</p>
+              <p className="error-text">
+                {createConnection.error instanceof Error
+                  ? createConnection.error.message
+                  : 'Failed to create connection'}
+              </p>
             )}
           </form>
         </details>
@@ -480,12 +484,12 @@ function ConnectionCard({
           Protocol
           <select
             value={draft.protocol}
-            onChange={(event) =>
-              setDraft((value) => ({
-                ...value,
-                protocol: event.target.value as ProviderConnection['protocol'],
-              }))
-            }
+            onChange={(event) => {
+              const val = event.target.value
+              if (val === 'openai_responses' || val === 'openai_chat_completions') {
+                setDraft((value) => ({ ...value, protocol: val }))
+              }
+            }}
           >
             <option value="openai_responses">Responses API</option>
             <option value="openai_chat_completions">Chat Completions API</option>

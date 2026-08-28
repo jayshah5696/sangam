@@ -64,17 +64,23 @@ const runtime = {
   reasoning_effort: 'low' as const,
 }
 
-const updateChatModels = vi.fn(async (selection: unknown) => {
-  void selection
-  return snapshot
-})
+const updateChatModels = vi.fn(
+  async (selection: { default_model?: string; available_models?: string[]; reasoning_effort?: string }) => {
+    void selection
+    return snapshot
+  },
+)
 vi.mock('../api', () => ({
   ApiError: class ApiError extends Error {},
   api: {
     chatModels: async () => snapshot,
     chatConnections: async () => [connection],
     chatConfig: async () => runtime,
-    updateChatModels: (selection: unknown) => updateChatModels(selection),
+    updateChatModels: (selection: {
+      default_model?: string
+      available_models?: string[]
+      reasoning_effort?: string
+    }) => updateChatModels(selection),
     updateChatConnection: async () => connection,
     createChatConnection: async () => connection,
     testChatConnection: async () => ({ message: 'Connected', discovered_models: 3 }),

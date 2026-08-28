@@ -13,6 +13,7 @@ async function issueToken(request: import('@playwright/test').APIRequestContext)
     },
   })
   expect(response.ok(), await response.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/agent-tokens returns issued token object with token_id and token secret
   return (await response.json()) as { token_id: string; token: string }
 }
 

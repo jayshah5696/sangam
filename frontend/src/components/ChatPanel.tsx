@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import type { TypographyOption } from '@openai/chatkit'
@@ -12,12 +13,14 @@ import {
   type ChatProposal,
   type Document,
   type IssuedPublication,
+  type JsonScalar,
   type Publication,
 } from '../api'
 import {
   announceCitationNavigation,
   citationHref,
   citationTargetFromData,
+  type CitationDataPayload,
   type CitationTarget,
 } from '../citationNavigation'
 import { uiFonts, useTheme } from '../theme'
@@ -80,8 +83,8 @@ export function ChatPanel({
   const [openedCitation, setOpenedCitation] = useState<CitationTarget | null>(null)
   const [resumingEffectId, setResumingEffectId] = useState<string | null>(null)
   const [resumeErrorIds, setResumeErrorIds] = useState<Set<string>>(() => new Set())
-  const publishResolver = useRef<((result: Record<string, unknown>) => void) | null>(null)
-  const createResolver = useRef<((result: Record<string, unknown>) => void) | null>(null)
+  const publishResolver = useRef<((result: Record<string, JsonScalar>) => void) | null>(null)
+  const createResolver = useRef<((result: Record<string, JsonScalar>) => void) | null>(null)
   const [settledEffectIds, setSettledEffectIds] = useState<Set<string>>(() => new Set())
   const configQuery = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
   const script = useChatKitScript(configQuery.isSuccess)
@@ -138,15 +141,15 @@ export function ChatPanel({
     return true
   }, [])
   const requestEffectReview = useCallback(
-    async (params: Record<string, unknown>) => {
-      const effectId = typeof params.effect_id === 'string' ? params.effect_id : ''
-      const digest = typeof params.argument_digest === 'string' ? params.argument_digest : ''
+    async (params: { effect_id?: string; argument_digest?: string }) => {
+      const effectId = params.effect_id ?? ''
+      const digest = params.argument_digest ?? ''
       if (!effectId || !digest) return { approved: false, error: 'Invalid effect review request' }
       const effect = await api.getChatEffect(effectId)
       if (effect.argument_digest !== digest || !showPendingEffect(effect)) {
         return { approved: false, error: 'Effect review request no longer matches' }
       }
-      return new Promise<Record<string, unknown>>((resolve) => {
+      return new Promise<Record<string, JsonScalar>>((resolve) => {
         if (effect.capability_id === 'publish_document') publishResolver.current = resolve
         else createResolver.current = resolve
       })
@@ -209,7 +212,7 @@ export function ChatPanel({
   )
   const handleResponseEnd = useCallback(() => void liveRef.current.refreshProposals(), [])
   const handleCitationDeeplink = useCallback(
-    ({ name, data }: { name: string; data?: Record<string, unknown> }) => {
+    ({ name, data }: { name: string; data?: CitationDataPayload }) => {
       if (name !== 'document') return
       const target = citationTargetFromData(data)
       if (!target) return
@@ -536,25 +539,32 @@ export function ChatPanel({
   )
 }
 
-export function parsePublishConfirmation(params: Record<string, unknown>): PublishConfirmationRequest | null {
-  const documentId = typeof params.document_id === 'string' ? params.document_id.trim() : ''
-  const documentTitle = typeof params.document_title === 'string' ? params.document_title.trim() : ''
-  const slug = typeof params.slug === 'string' ? params.slug.trim() : ''
-  const accessPolicy = params.access_policy
-  if (
-    !documentId ||
-    documentId.length > 200 ||
-    !slug ||
-    slug.length > 200 ||
-    !['private', 'unlisted', 'public'].includes(String(accessPolicy))
-  ) {
+export type PublishConfirmationInput = {
+  document_id?: string
+  document_title?: string
+  slug?: string
+  access_policy?: string
+}
+
+const publishConfirmationParamsSchema = z.object({
+  document_id: z.string().trim().min(1).max(200),
+  document_title: z.string().trim().optional(),
+  slug: z.string().trim().min(1).max(200),
+  access_policy: z.enum(['private', 'unlisted', 'public']),
+})
+
+export function parsePublishConfirmation(
+  params: PublishConfirmationInput | null | undefined,
+): PublishConfirmationRequest | null {
+  const result = publishConfirmationParamsSchema.safeParse(params)
+  if (!result.success) {
     return null
   }
   return {
-    documentId,
-    documentTitle: documentTitle || 'Untitled document',
-    slug,
-    accessPolicy: accessPolicy as Publication['access_policy'],
+    documentId: result.data.document_id,
+    documentTitle: result.data.document_title || 'Untitled document',
+    slug: result.data.slug,
+    accessPolicy: result.data.access_policy,
   }
 }
 
@@ -603,7 +613,13 @@ export function PublishConfirmationCard({
   )
 }
 
-export function CreatedFromChat({ document, onDismiss }: { document: Document; onDismiss: () => void }) {
+export function CreatedFromChat({
+  document,
+  onDismiss,
+}: {
+  document: Pick<Document, 'document_id' | 'title'>
+  onDismiss: () => void
+}) {
   const navigate = useNavigate()
   return (
     <CompletionRow
@@ -657,17 +673,16 @@ export function DurableEffectStatus({
   resumeFailed: boolean
   onResume: () => void
 }) {
-  const result = effect.result ?? {}
+  const effectResultSchema = z.object({ url: z.string().optional() })
   const failed = effect.status === 'failed'
   const retrySafe = effect.failure?.retry_safe === true
   const interrupted = effect.status === 'approved' || effect.status === 'executing'
   const canResume = interrupted || (failed && retrySafe)
   const href =
-    typeof result.url === 'string'
-      ? result.url
-      : effect.capability_id === 'create_document' && effect.resource_id
-        ? `/documents/${effect.resource_id}`
-        : undefined
+    effectResultSchema.safeParse(effect.result).data?.url ??
+    (effect.capability_id === 'create_document' && effect.resource_id
+      ? `/documents/${effect.resource_id}`
+      : undefined)
   return (
     <div
       className={`chat-effect-complete ${failed || interrupted ? 'is-failed' : ''}`}
@@ -757,7 +772,7 @@ export function CitationNavigationStatus({
   onClose,
 }: {
   target: CitationTarget
-  currentDocument: Document | null
+  currentDocument: (Pick<Document, 'document_id'> & Partial<Pick<Document, 'current_revision_id'>>) | null
   onClose: () => void
 }) {
   const atDocument = currentDocument?.document_id === target.documentId
@@ -986,14 +1001,22 @@ type LiveChatContext = {
   selectedText: string
   refreshProposals: () => void
   navigate: ReturnType<typeof useNavigate>
-  requestEffectReview: (params: Record<string, unknown>) => Promise<Record<string, unknown>>
+  requestEffectReview: (params: {
+    effect_id?: string
+    argument_digest?: string
+  }) => Promise<Record<string, JsonScalar>>
 }
 
-export function chatRequestNeedsTurnContext(body: BodyInit | null | undefined) {
-  if (typeof body !== 'string') return false
+const chatTurnRequestSchema = z.object({
+  type: z.enum(['threads.create', 'threads.add_user_message']),
+})
+
+export function chatRequestNeedsTurnContext(body: BodyInit | null | undefined): boolean {
+  if (!body || Object.prototype.toString.call(body) !== '[object String]') return false
   try {
-    const request = JSON.parse(body) as { type?: unknown }
-    return request.type === 'threads.create' || request.type === 'threads.add_user_message'
+    // SAFETY: body string representation verified via Object.prototype.toString
+    const request = JSON.parse(body as string)
+    return chatTurnRequestSchema.safeParse(request).success
   } catch {
     return false
   }
@@ -1065,7 +1088,7 @@ function WorkspaceChatSurface({
   onResponseEnd: () => void
   hasDocument: boolean
   hasSelection: boolean
-  onCitationDeeplink: (event: { name: string; data?: Record<string, unknown> }) => void
+  onCitationDeeplink: (event: { name: string; data?: CitationDataPayload }) => void
   onReset: () => void
   compact: boolean
 }) {

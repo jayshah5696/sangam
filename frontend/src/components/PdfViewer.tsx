@@ -498,6 +498,7 @@ function PdfPage({
               className={`pdf-annotation-mark ${annotation.annotation_type}`}
               key={`${annotation.annotation_id}:${index}`}
               aria-label={`Open ${annotationTypeLabel(annotation.annotation_type)} annotation`}
+              // SAFETY: CSS custom variable in inline style object
               style={
                 {
                   left: `${rect.x * 100}%`,
@@ -540,6 +541,7 @@ function PdfPage({
               key={annotation.annotation_id}
               data-annotation-id={annotation.annotation_id}
               aria-label={`Open ${annotationTypeLabel(annotation.annotation_type)} annotation`}
+              // SAFETY: CSS custom variable in inline style object
               style={{ '--annotation-color': annotation.color } as CSSProperties}
               onMouseEnter={(event) => setPreview({ annotation, anchor: event.currentTarget })}
               onFocus={(event) => setPreview({ annotation, anchor: event.currentTarget })}

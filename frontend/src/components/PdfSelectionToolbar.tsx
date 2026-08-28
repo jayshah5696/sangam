@@ -52,7 +52,7 @@ export function PdfSelectionToolbar({
       if (event.key === 'Escape') onDismiss()
     }
     const dismissFromPointer = (event: PointerEvent) => {
-      if (!toolbarRef.current?.contains(event.target as Node)) onDismiss()
+      if (event.target instanceof Node && !toolbarRef.current?.contains(event.target)) onDismiss()
     }
     window.addEventListener('keydown', dismissFromKeyboard)
     window.addEventListener('pointerdown', dismissFromPointer, true)
@@ -87,6 +87,7 @@ export function PdfSelectionToolbar({
             aria-label={`Highlight color ${index + 1}`}
             title={`Highlight color ${index + 1}`}
             disabled={pending}
+            // SAFETY: CSS custom variable in inline style object
             style={{ '--annotation-color': color } as React.CSSProperties}
             onClick={() => onHighlight(color)}
           />

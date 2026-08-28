@@ -513,7 +513,12 @@ function PublicationEditor({
         <span>Access</span>
         <select
           value={accessPolicy}
-          onChange={(event) => setAccessPolicy(event.target.value as Publication['access_policy'])}
+          onChange={(event) => {
+            const val = event.target.value
+            if (val === 'private' || val === 'unlisted' || val === 'public') {
+              setAccessPolicy(val)
+            }
+          }}
         >
           <option value="private">Private</option>
           <option value="unlisted">Unlisted</option>

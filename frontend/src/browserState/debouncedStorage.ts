@@ -4,7 +4,7 @@ export class DebouncedStorageWriter<T> {
   private lastWritten: string | undefined
 
   constructor(
-    private readonly storage: Storage,
+    private readonly storage: Pick<Storage, 'setItem'>,
     private readonly key: string,
     private readonly delay = 120,
   ) {}

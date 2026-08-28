@@ -49,6 +49,7 @@ export function PdfAnnotationPreview({
       ref={cardRef}
       className="pdf-annotation-preview"
       aria-label={`${annotationTypeLabel(annotation.annotation_type)} annotation preview`}
+      // SAFETY: CSS custom variable in inline style object
       style={
         {
           left: position.left,

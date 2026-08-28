@@ -53,7 +53,18 @@ function AgentActivity() {
           <span>Outcome</span>
           <select
             value={outcome}
-            onChange={(event) => setOutcome(event.target.value as OperationEvent['outcome'] | '')}
+            onChange={(event) => {
+              const val = event.target.value
+              if (
+                val === '' ||
+                val === 'accepted' ||
+                val === 'denied' ||
+                val === 'conflict' ||
+                val === 'failed'
+              ) {
+                setOutcome(val)
+              }
+            }}
           >
             <option value="">All outcomes</option>
             <option value="accepted">Accepted</option>
@@ -67,7 +78,12 @@ function AgentActivity() {
           <select
             aria-label="Activity date range"
             value={rangePreset}
-            onChange={(event) => setRangePreset(event.target.value as ActivityRangePreset)}
+            onChange={(event) => {
+              const val = event.target.value
+              if (val === 'all' || val === 'today' || val === '7d' || val === '30d' || val === 'custom') {
+                setRangePreset(val)
+              }
+            }}
           >
             <option value="all">All time</option>
             <option value="today">Today</option>

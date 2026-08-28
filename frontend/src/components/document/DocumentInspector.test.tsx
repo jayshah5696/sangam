@@ -5,11 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Document } from '../../api'
 import { DocumentInspector } from './DocumentInspector'
 
-const state = vi.hoisted(() => ({
-  queries: [] as Array<{ queryKey: unknown[]; enabled?: boolean }>,
-  rightTab: 'properties',
-  navigate: vi.fn(),
-}))
+const state = vi.hoisted(() => {
+  // SAFETY: test query tracking state
+  const queries = [] as Array<{ queryKey: unknown[]; enabled?: boolean }>
+  return {
+    queries,
+    rightTab: 'properties',
+    navigate: vi.fn(),
+  }
+})
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutate: vi.fn() }),
@@ -45,7 +49,7 @@ vi.mock('../HtmlPreview', () => ({ HtmlPreview: () => null }))
 vi.mock('../MarkdownPreview', () => ({ MarkdownPreview: () => null }))
 vi.mock('../OneTimeSecret', () => ({ OneTimeSecret: () => null }))
 
-const testDocument = {
+const testDocument: Document = {
   document_id: 'document-1',
   title: 'Document',
   content_type: 'text/markdown',
@@ -53,11 +57,26 @@ const testDocument = {
   current_revision_id: 'revision-1',
   content: '# Heading',
   content_hash: 'hash',
+  size_bytes: 9,
+  materialization_state: 'clean',
+  file_hash: null,
+  deleted: false,
+  created_by: 'user-1',
+  created_at: '2026-08-20T12:00:00Z',
+  updated_at: '2026-08-20T12:00:00Z',
+  updated_by: 'user-1',
+  updated_by_name: 'User One',
+  revision_summary: null,
   tags: [],
   category: null,
   metadata_version: 1,
   trust_level: 'untrusted',
-} as unknown as Document
+  trust_version: 1,
+  pdf_page_count: null,
+  pdf_extraction_status: null,
+  pdf_extraction_error: null,
+  supersedes_document_id: null,
+}
 
 beforeEach(() => {
   state.queries = []

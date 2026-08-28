@@ -178,7 +178,12 @@ export class DocumentSessionStore {
     try {
       draft = await this.options.storage.get(documentId)
     } catch (error) {
-      this.failDraftPersistence(documentId, generation, 'read', error)
+      this.failDraftPersistence(
+        documentId,
+        generation,
+        'read',
+        error instanceof Error ? error : String(error),
+      )
       return
     }
     if (runtime.persistenceGeneration !== generation) return
@@ -405,7 +410,14 @@ export class DocumentSessionStore {
             draftPersistenceError: undefined,
           })
         })
-        .catch((error: unknown) => this.failDraftPersistence(documentId, generation, 'write', error))
+        .catch((error) =>
+          this.failDraftPersistence(
+            documentId,
+            generation,
+            'write',
+            error instanceof Error ? error : String(error),
+          ),
+        )
     }, delay)
   }
 
@@ -434,23 +446,31 @@ export class DocumentSessionStore {
           draftPersistenceError: undefined,
         })
       })
-      .catch((error: unknown) => this.failDraftPersistence(documentId, generation, 'delete', error))
+      .catch((error) =>
+        this.failDraftPersistence(
+          documentId,
+          generation,
+          'delete',
+          error instanceof Error ? error : String(error),
+        ),
+      )
   }
 
   private failDraftPersistence(
     documentId: string,
     generation: number,
     operation: DraftPersistenceOperation,
-    error: unknown,
+    error: Error | string | null | undefined,
   ) {
     const runtime = this.runtimes.get(documentId)
     if (!runtime || runtime.persistenceGeneration !== generation) return
     const current = this.getSession(documentId)
+    const errorMessage = error instanceof Error ? error.message : error || 'Browser draft storage failed.'
     this.setSession(documentId, {
       ...current,
       draftPersistenceState: 'failed',
       draftPersistenceOperation: operation,
-      draftPersistenceError: error instanceof Error ? error.message : 'Browser draft storage failed.',
+      draftPersistenceError: errorMessage,
     })
   }
 }

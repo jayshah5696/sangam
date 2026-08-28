@@ -3,7 +3,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Document } from '../api'
 
 const state = vi.hoisted(() => ({ navigate: vi.fn() }))
 
@@ -23,7 +22,7 @@ describe('CreatedFromChat', () => {
     const document = {
       document_id: 'doc-created-12345678',
       title: 'Created note',
-    } as Document
+    }
 
     render(
       <QueryClientProvider client={queryClient}>

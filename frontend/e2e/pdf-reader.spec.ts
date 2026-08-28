@@ -18,13 +18,21 @@ async function importSamplePdf(
     },
   )
   expect(response.ok(), await response.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/documents returns document entity with document_id
   return (await response.json()) as { document_id: string }
 }
 
 async function createAnnotation(
   request: import('@playwright/test').APIRequestContext,
   documentId: string,
-  input: Record<string, unknown>,
+  input: {
+    page_number: number
+    annotation_type: string
+    note?: string
+    geometry?: Array<{ x: number; y: number; width: number; height: number }>
+    tags?: string[]
+    color?: string
+  },
 ) {
   const response = await request.post(`/api/v1/pdfs/${documentId}/annotations`, {
     headers: { 'Idempotency-Key': randomUUID() },
@@ -95,7 +103,9 @@ test('PDF selection toolbar creates highlights and annotation pins expose action
       configurable: true,
       value: {
         writeText: (value: string) => {
-          ;(window as typeof window & { __copiedText?: string }).__copiedText = value
+          // SAFETY: test spy sets __copiedText property on global window
+          const targetWindow = window as typeof window & { __copiedText?: string }
+          targetWindow.__copiedText = value
           return Promise.resolve()
         },
       },
@@ -126,6 +136,7 @@ test('PDF selection toolbar creates highlights and annotation pins expose action
   await expect(toolbar).toBeVisible()
   await expect(page.getByRole('button', { name: /^Highlight color/ })).toHaveCount(5)
   await page.getByRole('button', { name: 'Copy Markdown citation' }).click()
+  // SAFETY: test spy sets __copiedText property on global window
   await expect
     .poll(() => page.evaluate(() => (window as typeof window & { __copiedText?: string }).__copiedText))
     .toContain('[PDF reader evidence, p. 1]')
@@ -151,6 +162,7 @@ test('PDF selection toolbar creates highlights and annotation pins expose action
   await expect(preview).toContainText('Check this premise')
   await expect(preview).toContainText('review')
   await preview.getByRole('button', { name: 'Copy annotation link' }).click()
+  // SAFETY: test spy sets __copiedText property on global window
   await expect
     .poll(() => page.evaluate(() => (window as typeof window & { __copiedText?: string }).__copiedText))
     .toContain(`annotation=${await pin.getAttribute('data-annotation-id')}`)

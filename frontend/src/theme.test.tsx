@@ -96,6 +96,7 @@ describe('workspace typography preferences', () => {
     })
     expect(document.documentElement.dataset.uiFont).toBe('serif')
     expect(document.documentElement.dataset.uiDensity).toBe('compact')
+    // SAFETY: JSON.parse of stored preferences payload in localStorage produces key-value map
     const stored = JSON.parse(
       window.localStorage.getItem('sangam.workspace-preferences.v1') ?? '{}',
     ) as Record<string, string>
