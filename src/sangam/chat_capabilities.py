@@ -172,6 +172,7 @@ class CreateDocumentInput(StrictCapabilityModel):
     title: str = Field(min_length=1, max_length=240)
     content: str = Field(max_length=2_000_000)
     content_type: Literal["text/markdown", "text/html"]
+    path: str | None = Field(default=None, max_length=500)
 
 
 class PublishDocumentInput(StrictCapabilityModel):
@@ -335,9 +336,9 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
     ),
     ChatCapability(
         "create_document",
-        2,
+        3,
         "Create document",
-        "Request one exact Markdown or HTML document creation.",
+        "Request one exact Markdown or HTML document creation, optionally at a workspace path.",
         CreateDocumentInput,
         EffectRequestResult,
         EffectClass.WRITE,

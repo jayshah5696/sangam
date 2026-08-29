@@ -73,6 +73,36 @@ def test_plan_moves_documents_and_duplicate_delivery_returns_original_result(
     )
 
 
+def test_plan_materializes_an_unmaterialized_document(client: TestClient) -> None:
+    draft_response = client.post(
+        "/api/v1/documents",
+        headers=headers("draft-document"),
+        json={"title": "Sample 2", "content": "# Sample 2", "path": None},
+    )
+    assert draft_response.status_code == 201
+    draft = draft_response.json()
+
+    response = client.post(
+        "/api/v1/organization/plans",
+        headers=headers("materialize-draft-plan"),
+        json={
+            "operations": [
+                {
+                    "kind": "materialize_document",
+                    "document_id": draft["document_id"],
+                    "expected_revision_id": draft["current_revision_id"],
+                    "destination_path": "projects/sample-2.md",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed"
+    current = client.get(f"/api/v1/documents/{draft['document_id']}").json()
+    assert current["path"] == "projects/sample-2.md"
+
+
 def test_plan_preflight_rejects_stale_revision_before_any_write(client: TestClient) -> None:
     first = create_document(client, title="First", path="inbox/first.md", key="stale-first")
     second = create_document(client, title="Second", path="inbox/second.md", key="stale-second")

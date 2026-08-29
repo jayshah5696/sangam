@@ -43,7 +43,7 @@ import {
   type WorkspaceTreeAdapter,
 } from '../workspaceTree'
 
-type CreateMode = { kind: 'file' | 'folder'; parentPath: string } | null
+type CreateMode = { kind: 'file' | 'folder' } | null
 
 type TreeCallbacks = {
   onSelectionChange: (paths: readonly string[]) => void
@@ -82,7 +82,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const [movePickerOpen, setMovePickerOpen] = useState(false)
   const [metadataPickerOpen, setMetadataPickerOpen] = useState(false)
   const [createMode, setCreateMode] = useState<CreateMode>(null)
-  const [createName, setCreateName] = useState('')
+  const [createPath, setCreatePath] = useState('')
   const [error, setError] = useState<string | null>(null)
   const pendingFocusDocumentIdRef = useRef<string | null>(null)
   const pendingSelectionRef = useRef<{ documentIds: string[]; folderIds: string[] } | null>(null)
@@ -116,16 +116,15 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   }
 
   const create = useMutation({
-    mutationFn: async ({ mode, name }: { mode: Exclude<CreateMode, null>; name: string }) => {
-      if (mode.kind === 'folder')
-        return { folder: await api.createFolder(joinWorkspacePath(mode.parentPath, name)) }
-      const filename = ensureMarkdownExtension(name)
-      const title = name.replace(/\.md$/i, '').trim() || 'Untitled document'
-      return { document: await api.createDocument(title, joinWorkspacePath(mode.parentPath, filename)) }
+    mutationFn: async ({ mode, path }: { mode: Exclude<CreateMode, null>; path: string }) => {
+      if (mode.kind === 'folder') return { folder: await api.createFolder(path) }
+      const documentPath = ensureMarkdownExtension(path)
+      const title = workspaceBasename(documentPath).replace(/\.md$/i, '').trim() || 'Untitled document'
+      return { document: await api.createDocument(title, documentPath) }
     },
     onSuccess: async (result) => {
       setCreateMode(null)
-      setCreateName('')
+      setCreatePath('')
       setError(null)
       await refresh()
       if (result.document) {
@@ -505,6 +504,29 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         : ''
     : ''
 
+  useEffect(() => {
+    if (selectedTreePaths.length <= 1) return
+    const collapseBulkSelection = () => {
+      suppressOpenRef.current = true
+      for (const path of model.getSelectedPaths()) model.getItem(path)?.deselect()
+      if (activeTreePath) model.getItem(activeTreePath)?.select()
+      suppressOpenRef.current = false
+      setSelectedTreePaths(activeTreePath ? [workspacePathFromTreePath(activeTreePath)] : [])
+    }
+    const dismissBulkSelection = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return
+      if (
+        event.target.closest(
+          '[role="treeitem"], .explorer-selection-actions, .move-destination-dialog, .tree-context-menu',
+        )
+      )
+        return
+      collapseBulkSelection()
+    }
+    globalThis.document.addEventListener('pointerdown', dismissBulkSelection)
+    return () => globalThis.document.removeEventListener('pointerdown', dismissBulkSelection)
+  }, [activeTreePath, model, selectedTreePaths.length])
+
   const commandTargets = (itemPath: string) => {
     const normalizedPath = workspacePathFromTreePath(itemPath)
     return effectiveSelectedTreePaths.includes(normalizedPath) ? effectiveSelectedTreePaths : [normalizedPath]
@@ -588,13 +610,23 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   return (
     <div className="sidebar-content file-explorer-panel">
       <div className="sidebar-actions">
-        <button onClick={() => setCreateMode({ kind: 'file', parentPath: selectedFolderPath })}>
+        <button
+          onClick={() => {
+            const initialPath = selectedFolderPath ? `${selectedFolderPath}/` : ''
+            setCreateMode({ kind: 'file' })
+            setCreatePath(initialPath)
+          }}
+        >
           <FilePlus2 size="var(--icon-inline)" /> New file
         </button>
         <button
           aria-label="New folder"
           title="New folder"
-          onClick={() => setCreateMode({ kind: 'folder', parentPath: selectedFolderPath })}
+          onClick={() => {
+            const initialPath = selectedFolderPath ? `${selectedFolderPath}/` : ''
+            setCreateMode({ kind: 'folder' })
+            setCreatePath(initialPath)
+          }}
         >
           <FolderPlus size="var(--icon-page)" />
         </button>
@@ -604,16 +636,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           className="sidebar-inline-form explorer-create"
           onSubmit={(event) => {
             event.preventDefault()
-            if (createName.trim()) create.mutate({ mode: createMode, name: createName.trim() })
+            if (createPath.trim()) create.mutate({ mode: createMode, path: createPath.trim() })
           }}
         >
-          <span>{createMode.parentPath || 'workspace'} /</span>
           <input
             autoFocus
-            aria-label={`New ${createMode.kind} name`}
-            placeholder={createMode.kind === 'file' ? 'note.md' : 'folder'}
-            value={createName}
-            onChange={(event) => setCreateName(event.target.value)}
+            aria-label={`New ${createMode.kind} path`}
+            title="Workspace-relative path. Edit or remove the folder prefix to create at the workspace root."
+            placeholder={createMode.kind === 'file' ? 'notes/note.md' : 'notes/archive'}
+            value={createPath}
+            onChange={(event) => setCreatePath(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Escape') setCreateMode(null)
             }}
@@ -655,18 +687,34 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           </button>
         </div>
       )}
-      {effectiveSelectedTreePaths.length > 0 && (
+      {effectiveSelectedTreePaths.length > 1 && (
         <div className="explorer-selection-actions" aria-label="Selected item actions">
           <span>{effectiveSelectedTreePaths.length} selected</span>
-          <button type="button" onClick={() => openMoveFor(effectiveSelectedTreePaths)}>
-            <FolderInput size="var(--icon-inline)" /> Move to…
+          <button
+            type="button"
+            aria-label="Move selected items"
+            title="Move selected items"
+            onClick={() => openMoveFor(effectiveSelectedTreePaths)}
+          >
+            <FolderInput size="var(--icon-control)" />
           </button>
-          <button type="button" onClick={() => openMetadataFor(effectiveSelectedTreePaths)}>
-            <TagIcon size="var(--icon-inline)" /> Tags
+          <button
+            type="button"
+            aria-label="Edit selected tags and category"
+            title="Edit selected tags and category"
+            onClick={() => openMetadataFor(effectiveSelectedTreePaths)}
+          >
+            <TagIcon size="var(--icon-control)" />
           </button>
           {trashOperationsForPaths(effectiveSelectedTreePaths, adapter).length > 0 && (
-            <button type="button" className="danger" onClick={() => moveToTrash(effectiveSelectedTreePaths)}>
-              <Trash2 size="var(--icon-inline)" /> Trash
+            <button
+              type="button"
+              className="danger"
+              aria-label="Move selected items to Trash"
+              title="Move selected items to Trash"
+              onClick={() => moveToTrash(effectiveSelectedTreePaths)}
+            >
+              <Trash2 size="var(--icon-control)" />
             </button>
           )}
         </div>
@@ -685,7 +733,11 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
               context={context}
               item={item}
               onClose={() => context.close()}
-              onCreate={(kind, parentPath) => setCreateMode({ kind, parentPath })}
+              onCreate={(kind, parentPath) => {
+                const initialPath = parentPath ? `${parentPath}/` : ''
+                setCreateMode({ kind })
+                setCreatePath(initialPath)
+              }}
               onDuplicate={(document) => duplicate.mutate(document)}
               onOpenToSide={(document) => void openDocument(document, true)}
               onMove={() => openMoveFor(commandTargets(item.path))}
@@ -745,7 +797,17 @@ function moveOperationsForPaths(
   )
   return roots.flatMap((path): OrganizationOperation[] => {
     const document = adapter.documentByTreePath.get(path)
-    if (document?.path && document.content_type !== 'application/pdf') {
+    if (document && document.content_type !== 'application/pdf') {
+      if (!document.path) {
+        return [
+          {
+            kind: 'materialize_document',
+            document_id: document.document_id,
+            expected_revision_id: document.current_revision_id,
+            destination_path: joinWorkspacePath(destinationFolder, draftFilename(document)),
+          },
+        ]
+      }
       return [
         {
           kind: 'move_document',
@@ -768,6 +830,14 @@ function moveOperationsForPaths(
       },
     ]
   })
+}
+
+function draftFilename(document: DocumentSummary) {
+  const basename = workspaceBasename(document.title).trim() || 'Untitled document'
+  if (document.content_type === 'text/html') {
+    return /\.html?$/i.test(basename) ? basename : `${basename}.html`
+  }
+  return ensureMarkdownExtension(basename)
 }
 
 function selectionIdentityForPaths(paths: readonly string[], adapter: WorkspaceTreeAdapter) {
@@ -1176,7 +1246,7 @@ function ExplorerContextMenu({
       <button type="button" role="menuitem" onClick={() => run(() => onOpenToSide(selectedDocument))}>
         <PanelRightOpen size="var(--icon-inline)" /> Open in split
       </button>
-      {selectedDocument.path && selectedDocument.content_type !== 'application/pdf' && (
+      {selectedDocument.content_type !== 'application/pdf' && (
         <button type="button" role="menuitem" onClick={() => run(onMove)}>
           <FolderInput size="var(--icon-inline)" /> Move to…
         </button>
@@ -1192,9 +1262,11 @@ function ExplorerContextMenu({
           <button type="button" role="menuitem" onClick={() => run(onEditMetadata)}>
             <TagIcon size="var(--icon-inline)" /> Edit tags and category…
           </button>
-          <button className="danger" type="button" role="menuitem" onClick={() => run(onTrash)}>
-            <Trash2 size="var(--icon-inline)" /> Move to trash
-          </button>
+          {selectedDocument.path && (
+            <button className="danger" type="button" role="menuitem" onClick={() => run(onTrash)}>
+              <Trash2 size="var(--icon-inline)" /> Move to trash
+            </button>
+          )}
         </>
       )}
     </>

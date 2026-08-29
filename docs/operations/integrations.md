@@ -42,7 +42,7 @@ Configuration:
 
 Manage models directly from **Settings → Operations & AI → AI & models** (custom slugs and connections supported) or via environment variables.
 
-Permission mode is stored in SQLite beside model selection. **Review every effect** is the safe default. **YOLO · private workspace only** is bounded to trusted-administrator document creation and organization; it does not auto-approve publication.
+Permission mode is stored in SQLite beside model selection. **Review every effect** is the default. **YOLO · run without approval** executes every authorized effect immediately, including publication. Actor capabilities and path scopes still apply.
 
 ### ChatKit domain registration
 

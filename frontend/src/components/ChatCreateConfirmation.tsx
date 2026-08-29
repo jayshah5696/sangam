@@ -7,6 +7,7 @@ export type CreateConfirmationRequest = {
   title: string
   content: string
   contentType: DocumentContentType
+  path: string | null
 }
 
 export type CreateConfirmationInput = Record<string, JsonPayload>
@@ -20,6 +21,7 @@ const createConfirmationSchema = z.object({
   title: z.string().trim().min(1).max(240),
   content: z.string().max(2_000_000),
   content_type: z.enum(['text/markdown', 'text/html']).optional().default('text/markdown'),
+  path: z.string().trim().min(1).max(500).nullable().optional().default(null),
 })
 
 export function parseCreateConfirmation(
@@ -31,6 +33,7 @@ export function parseCreateConfirmation(
     title: result.data.title,
     content: result.data.content,
     contentType: result.data.content_type,
+    path: result.data.path,
   }
 }
 
@@ -57,7 +60,14 @@ export function ChatCreateConfirmation({
         </strong>
         <span>
           The assistant prepared a new {formatName} document with {request.content.length.toLocaleString()}{' '}
-          characters. Review the complete source before approval.
+          characters
+          {request.path ? (
+            <>
+              {' '}
+              at <code>{request.path}</code>
+            </>
+          ) : null}
+          . Review the complete source before approval.
         </span>
         <pre className="chat-create-preview" aria-label="Document content to create">
           <code>{request.content}</code>

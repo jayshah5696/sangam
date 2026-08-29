@@ -748,6 +748,7 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
         "title": "Research note",
         "content": "# Evidence",
         "content_type": "text/markdown",
+        "path": None,
     }
     assert client.get("/api/v1/documents").json() == []
     create_tool = next(

@@ -239,9 +239,17 @@ class ChatEvidenceRepository:
         with self.database.transaction() as connection:
             row = connection.execute(
                 """
-                SELECT run_id FROM chat_runs
-                WHERE thread_id = ? AND actor_id = ? AND status = 'running'
-                ORDER BY started_at DESC LIMIT 1
+                SELECT r.run_id FROM chat_runs r
+                WHERE r.thread_id = ? AND r.actor_id = ?
+                  AND (
+                    r.status = 'running'
+                    OR EXISTS (
+                      SELECT 1 FROM chat_effects e
+                      WHERE e.run_id = r.run_id
+                        AND e.status IN ('proposed', 'pending_approval', 'approved')
+                    )
+                  )
+                ORDER BY r.started_at DESC LIMIT 1
                 """,
                 (thread_id, principal.actor_id),
             ).fetchone()

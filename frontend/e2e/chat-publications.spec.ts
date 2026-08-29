@@ -402,7 +402,7 @@ test('completed effects stay grouped and organization review shows exact operati
   await expect(review.getByText('Create folder archive')).toBeVisible()
   await expect(review.getByText('inbox/review.md → archive/review.md', { exact: false })).toBeVisible()
   await expect(review.getByRole('button', { name: 'Approve exact plan' })).toBeVisible()
-  await expect(review.getByRole('button', { name: 'Deny' })).toBeVisible()
+  await expect(review.getByRole('button', { name: 'Cancel task' })).toBeVisible()
 
   const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
   if (evidenceDir) {

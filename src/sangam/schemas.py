@@ -199,6 +199,13 @@ class OrganizationMoveDocument(MutationRequest):
     destination_path: str = Field(min_length=1, max_length=500)
 
 
+class OrganizationMaterializeDocument(MutationRequest):
+    kind: Literal["materialize_document"]
+    document_id: str = Field(min_length=1, max_length=200)
+    expected_revision_id: str = Field(min_length=1, max_length=200)
+    destination_path: str = Field(min_length=1, max_length=500)
+
+
 class OrganizationTrashDocument(MutationRequest):
     kind: Literal["trash_document"]
     document_id: str = Field(min_length=1, max_length=200)
@@ -237,6 +244,7 @@ class OrganizationUpdateFolderMetadata(MutationRequest):
 OrganizationOperation = Annotated[
     OrganizationCreateFolder
     | OrganizationMoveDocument
+    | OrganizationMaterializeDocument
     | OrganizationTrashDocument
     | OrganizationMoveFolder
     | OrganizationUpdateDocumentMetadata
@@ -256,12 +264,13 @@ class ApplyOrganizationPlan(MutationRequest):
                 key = (operation.kind, operation.path)
             elif operation.kind in {
                 "move_document",
+                "materialize_document",
                 "trash_document",
                 "update_document_metadata",
             }:
                 key = (
                     "document_path"
-                    if operation.kind in {"move_document", "trash_document"}
+                    if operation.kind in {"move_document", "materialize_document", "trash_document"}
                     else "document_metadata",
                     operation.document_id,
                 )

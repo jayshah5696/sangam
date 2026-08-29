@@ -14,7 +14,7 @@ describe('ChatCreateConfirmation', () => {
 
   it('parses Markdown content type', () => {
     const result = parseCreateConfirmation({ title: 'Note', content: '# Hi', content_type: 'text/markdown' })
-    expect(result).toEqual({ title: 'Note', content: '# Hi', contentType: 'text/markdown' })
+    expect(result).toEqual({ title: 'Note', content: '# Hi', contentType: 'text/markdown', path: null })
   })
 
   it('parses HTML content type', () => {
@@ -23,12 +23,12 @@ describe('ChatCreateConfirmation', () => {
       content: '<h1>Hi</h1>',
       content_type: 'text/html',
     })
-    expect(result).toEqual({ title: 'Page', content: '<h1>Hi</h1>', contentType: 'text/html' })
+    expect(result).toEqual({ title: 'Page', content: '<h1>Hi</h1>', contentType: 'text/html', path: null })
   })
 
   it('falls back to Markdown when content_type is absent (v1 compat)', () => {
     const result = parseCreateConfirmation({ title: 'Legacy', content: '# Old' })
-    expect(result).toEqual({ title: 'Legacy', content: '# Old', contentType: 'text/markdown' })
+    expect(result).toEqual({ title: 'Legacy', content: '# Old', contentType: 'text/markdown', path: null })
   })
 
   it('rejects unsupported content types', () => {
@@ -43,7 +43,7 @@ describe('ChatCreateConfirmation', () => {
     const onCancel = vi.fn()
     render(
       <ChatCreateConfirmation
-        request={{ title: 'Research note', content: '# Evidence', contentType: 'text/markdown' }}
+        request={{ title: 'Research note', content: '# Evidence', contentType: 'text/markdown', path: null }}
         pending={false}
         error={false}
         onApprove={onApprove}
@@ -63,7 +63,12 @@ describe('ChatCreateConfirmation', () => {
     const onApprove = vi.fn()
     render(
       <ChatCreateConfirmation
-        request={{ title: 'Landing page', content: '<h1>Hello</h1>', contentType: 'text/html' }}
+        request={{
+          title: 'Landing page',
+          content: '<h1>Hello</h1>',
+          contentType: 'text/html',
+          path: 'sites/landing.html',
+        }}
         pending={false}
         error={false}
         onApprove={onApprove}
@@ -73,6 +78,7 @@ describe('ChatCreateConfirmation', () => {
 
     expect(screen.getByRole('alertdialog').textContent).toContain('HTML document')
     expect(screen.getByRole('alertdialog').textContent).toContain('Create HTML document "Landing page"')
+    expect(screen.getByRole('alertdialog').textContent).toContain('sites/landing.html')
     fireEvent.click(screen.getByRole('button', { name: 'Approve HTML document creation' }))
     expect(onApprove).toHaveBeenCalledOnce()
   })

@@ -10,9 +10,9 @@ just eval-chat-yolo
 just eval-chat-policy
 ```
 
-`just eval-chat` runs GPT-5.6 Sol with medium reasoning and exact review. `just eval-chat-yolo` runs the same cases with bounded private-workspace autonomy and verifies the resulting files and metadata. Both commands write JSON under `test-results/` and need `SANGAM_OPENROUTER_API_KEY` in the environment or a local `.env`.
+`just eval-chat` runs GPT-5.6 Sol with medium reasoning and exact review. `just eval-chat-yolo` runs the same cases in no-prompt YOLO mode and verifies the resulting files, metadata, and publications. Both commands write JSON under `test-results/` and need `SANGAM_OPENROUTER_API_KEY` in the environment or a local `.env`.
 
-`just eval-chat-policy` is credential-free. It verifies capability scopes, exact approval, digest binding, stale state, duplicate delivery, cancellation, YOLO limits, external-effect review, and organization-plan recovery.
+`just eval-chat-policy` is credential-free. It verifies capability scopes, exact approval, digest binding, stale state, duplicate delivery, cancellation, no-prompt YOLO execution, materialized chat creation, and organization-plan recovery.
 
 To compare against another checkout, for example to show what a harness change improved on `main`:
 
@@ -70,7 +70,7 @@ Treat single runs as noisy: frontier models vary between runs, so a one-item swi
 | `--output PATH` | Write full JSON results to this path. |
 | `--model ID` | OpenRouter model under test (default `openai/gpt-5.6-sol`). |
 | `--reasoning-effort PRESET` | Reasoning effort under test (default `medium`). |
-| `--autonomy-mode MODE` | `review` or bounded private `workspace` mode. |
+| `--autonomy-mode MODE` | Exact `review` or no-prompt `workspace` YOLO mode. |
 | `--limit N` | Run only the first N items; useful for smoke tests. |
 | `--timeout SECS` | Per-item timeout. |
 | `--dataset PATH` | Use an alternative dataset file. |

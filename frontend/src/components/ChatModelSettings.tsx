@@ -234,9 +234,8 @@ export function ChatModelSettings() {
               <ShieldAlert size="var(--icon-inline)" /> Agent permission mode
             </strong>
             <small>
-              Review requires exact approval. YOLO auto-approves only private document creation and
-              organization effects, capped at 25 effects per run and 25 operations per plan. Publication and
-              other external effects always require review.
+              Review pauses every effect for an exact decision. YOLO runs every authorized effect immediately,
+              including publication. Normal actor and path permissions still apply.
             </small>
           </div>
           <select
@@ -245,7 +244,7 @@ export function ChatModelSettings() {
             onChange={(event) => setAutonomyMode(event.target.value === 'workspace' ? 'workspace' : 'review')}
           >
             <option value="review">Review every effect</option>
-            <option value="workspace">YOLO · private workspace only</option>
+            <option value="workspace">YOLO · run without approval</option>
           </select>
         </div>
 

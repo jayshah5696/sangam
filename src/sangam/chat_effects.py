@@ -114,52 +114,23 @@ class ChatEffectService:
                 ),
             )
         effect = self.get(principal, effect_id)
-        if self._autonomy_allows(
-            principal,
-            run_id=run_id,
-            capability_id=capability.capability_id,
-            normalized_arguments=normalized,
-        ):
+        if self._autonomy_allows():
             return self.decide(
                 principal,
                 effect_id=effect.effect_id,
                 verdict="approve",
                 argument_digest=effect.argument_digest,
-                reason="Bounded workspace autonomy policy",
+                reason="YOLO autonomy mode",
             ).effect
         return effect
 
-    def _autonomy_allows(
-        self,
-        principal: Principal,
-        *,
-        run_id: str,
-        capability_id: str,
-        normalized_arguments: dict[str, object],
-    ) -> bool:
-        """Allow only bounded private effects under the administrator's YOLO policy."""
-        if not principal.administrator:
-            return False
-        if capability_id not in {"create_document", "apply_workspace_organization_plan"}:
-            return False
-        operations = normalized_arguments.get("operations")
-        if isinstance(operations, list) and len(operations) > 25:
-            return False
+    def _autonomy_allows(self) -> bool:
+        """Run every authorized effect immediately when the operator enables YOLO."""
         with self.database.connection() as connection:
             settings = connection.execute(
                 "SELECT autonomy_mode FROM chat_model_settings WHERE id = 1"
             ).fetchone()
-            if settings is None or settings["autonomy_mode"] != "workspace":
-                return False
-            effect_count = connection.execute(
-                """
-                SELECT count(*) FROM chat_effects
-                WHERE run_id = ? AND risk = 'workspace'
-                  AND status IN ('approved', 'executing', 'completed')
-                """,
-                (run_id,),
-            ).fetchone()[0]
-        return effect_count < 25
+        return settings is not None and settings["autonomy_mode"] == "workspace"
 
     def get(self, principal: Principal, effect_id: str) -> ChatEffect:
         with self.database.connection() as connection:
@@ -327,7 +298,7 @@ class ChatEffectService:
                     principal,
                     title=arguments["title"],
                     content=arguments["content"],
-                    path=None,
+                    path=arguments["path"],
                     content_type=arguments["content_type"],
                     idempotency_key=operation_key,
                 )

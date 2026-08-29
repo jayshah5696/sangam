@@ -58,15 +58,15 @@ Publication approval binds the document ID, exact revision, slug, and access pol
 
 `inspect_workspace_organization` returns at most 100 authorized documents, folders, or tags per page. It includes stable IDs, current revision or metadata versions, exact paths, tags, categories, and folder descendant counts. It never returns document content.
 
-`apply_workspace_organization_plan` accepts at most 100 exact operations. Plans can create folders, move documents or folders, replace document or folder metadata, and move documents to Trash. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
+`apply_workspace_organization_plan` accepts at most 100 exact operations. Plans can create folders, save unmaterialized drafts at workspace paths, move documents or folders, replace document or folder metadata, and move documents to Trash. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
 
 The explorer, command palette, raw API, and chat all call this service through `WorkspaceAccessService`. A partial result is explicit and never displayed as complete.
 
-### Review and bounded workspace autonomy
+### Review and YOLO autonomy
 
-The default permission mode is **Review every effect**. Operators can select **YOLO · private workspace only** in AI settings. That mode may auto-approve only document creation and organization plans for the trusted workspace administrator. One plan is capped at 25 operations, and one run is capped at 25 completed private effects. Publication and every other external effect always require exact review. Scoped agents never inherit the administrator's autonomy.
+The default permission mode is **Review every effect**. It pauses every durable effect for an exact decision. Operators can select **YOLO · run without approval** in AI settings. YOLO executes every effect immediately, including publication. The normal capability and path checks still run, so YOLO removes approval prompts without granting new authority.
 
-The chat panel shows the active mode. Pending organization plans use a dedicated renderer that lists every operation and its before-and-after state. Completed effects collapse into one expandable summary. **Stop** persists run cancellation, cancels effects that have not started, and aborts the active browser stream.
+The chat panel shows the active mode. Pending organization plans use a dedicated renderer that lists every operation and its before-and-after state. Completed effects collapse into one expandable summary. **Stop** persists run cancellation, cancels effects that have not started, and aborts the active browser stream. Starting another thread cancels the current run and clears its pending card.
 
 ## Add a capability
 

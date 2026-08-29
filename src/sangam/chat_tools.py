@@ -102,8 +102,9 @@ class ChatToolset:
                     "When the user explicitly requests a new document, call this tool "
                     "immediately with the complete title, content, and content_type. "
                     "Set content_type to 'text/markdown' for Markdown or 'text/html' "
-                    "for HTML. The tool opens Sangam's browser confirmation UI. Never "
-                    "ask for confirmation in prose before calling it."
+                    "for HTML. Sangam pauses it for exact review in Review mode and "
+                    "runs it without a prompt in YOLO mode. Never ask for confirmation "
+                    "in prose before calling it."
                 ),
             ),
             function_tool(
@@ -111,16 +112,16 @@ class ChatToolset:
                 description_override=(
                     "After inspecting exact resources, call this tool for the user's requested "
                     "folder, move, category, or existing-tag changes. Include every observed "
-                    "precondition and exact before/after path or metadata value. The tool opens "
-                    "Sangam's review UI unless bounded workspace autonomy is enabled."
+                    "precondition and exact before/after path or metadata value. Sangam pauses "
+                    "it for exact review in Review mode and runs it without a prompt in YOLO mode."
                 ),
             ),
             function_tool(
                 self.publish_document,
                 description_override=(
                     "When the user explicitly requests publication, call this tool immediately. "
-                    "The tool opens Sangam's browser confirmation UI and never publishes without "
-                    "approval, so never ask for confirmation in prose before calling it."
+                    "Sangam pauses it for exact review in Review mode and runs it without a prompt "
+                    "in YOLO mode, so never ask for confirmation in prose before calling it."
                 ),
             ),
         ]
@@ -352,7 +353,12 @@ class ChatToolset:
         )
 
     async def create_document(
-        self, ctx: ToolContext, title: str, content: str, content_type: str
+        self,
+        ctx: ToolContext,
+        title: str,
+        content: str,
+        content_type: str,
+        path: str | None = None,
     ) -> None:
         normalized_title = " ".join(title.strip().split())
         arguments = CreateDocumentInput.model_validate(
@@ -360,6 +366,7 @@ class ChatToolset:
                 "title": normalized_title,
                 "content": content,
                 "content_type": content_type,
+                "path": path,
             }
         ).model_dump(mode="json")
         await self._request_effect(

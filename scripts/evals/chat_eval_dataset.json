@@ -106,6 +106,7 @@
       "expected_tools": ["publish_document"],
       "checks": [
         "tool_called:publish_document",
+        "effect_status_by_mode:publish_document",
         "no_proposal"
       ]
     },
@@ -113,10 +114,12 @@
       "id": "create_html_document",
       "kind": "create",
       "document": null,
-      "question": "Create an HTML document titled \"Landing Page\" with an H1 heading that says \"Welcome\" and a paragraph that says \"This is the landing page.\" Make it a proper HTML document.",
+      "question": "Create an HTML document titled \"Landing Page\" at sites/landing.html with an H1 heading that says \"Welcome\" and a paragraph that says \"This is the landing page.\" Make it a proper HTML document.",
       "expected_tools": ["create_document"],
       "checks": [
-        "tool_called:create_document"
+        "tool_called:create_document",
+        "effect_status_by_mode:create_document",
+        "effect_preview_path:create_document:sites/landing.html"
       ]
     },
     {

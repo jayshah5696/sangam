@@ -138,6 +138,12 @@ export const organizationOperationSchema = z.discriminatedUnion('kind', [
     destination_path: z.string(),
   }),
   z.object({
+    kind: z.literal('materialize_document'),
+    document_id: z.string(),
+    expected_revision_id: z.string(),
+    destination_path: z.string(),
+  }),
+  z.object({
     kind: z.literal('trash_document'),
     document_id: z.string(),
     expected_revision_id: z.string(),

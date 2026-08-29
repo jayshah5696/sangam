@@ -673,6 +673,12 @@ def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
                 effect["capability_id"] == capability and effect["status"] == expected
                 for effect in effects
             )
+        elif check.startswith("effect_preview_path:"):
+            _, capability, path = check.split(":", 2)
+            passed = any(
+                effect["capability_id"] == capability and effect["preview"].get("path") == path
+                for effect in effects
+            )
         elif check.startswith("organization_kind:"):
             kind = check.split(":", 1)[1]
             passed = any(
@@ -871,7 +877,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--autonomy-mode",
         choices=("review", "workspace"),
         default="review",
-        help="Exact review or bounded private-workspace YOLO policy",
+        help="Exact review or no-prompt YOLO policy",
     )
     parser.add_argument(
         "--timeout", type=float, default=ITEM_TIMEOUT_SECONDS, help="Per-item timeout seconds"

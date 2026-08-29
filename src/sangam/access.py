@@ -26,6 +26,7 @@ from sangam.schemas import (
     OrganizationCreateFolder,
     OrganizationDocumentSnapshot,
     OrganizationFolderSnapshot,
+    OrganizationMaterializeDocument,
     OrganizationMoveDocument,
     OrganizationMoveFolder,
     OrganizationPlanItemResult,
@@ -1186,10 +1187,11 @@ class WorkspaceAccessService:
                 data["expected_source_path"] = self.organization.normalize_folder_path(
                     operation.expected_source_path
                 )
-            if isinstance(operation, OrganizationMoveDocument):
-                data["expected_source_path"] = canonicalize_document_path(
-                    operation.expected_source_path
-                )
+            if isinstance(operation, (OrganizationMoveDocument, OrganizationMaterializeDocument)):
+                if isinstance(operation, OrganizationMoveDocument):
+                    data["expected_source_path"] = canonicalize_document_path(
+                        operation.expected_source_path
+                    )
                 data["destination_path"] = canonicalize_document_path(operation.destination_path)
             if isinstance(operation, OrganizationTrashDocument):
                 data["expected_source_path"] = canonicalize_document_path(
@@ -1251,6 +1253,36 @@ class WorkspaceAccessService:
                 if document.content_type == "application/pdf":
                     raise ValidationError("PDF path changes are not supported")
                 self.policy.require(principal, Capability.MOVE, document.path)
+                self.policy.require(principal, Capability.MOVE, operation.destination_path)
+                owner = existing_document_paths.get(operation.destination_path)
+                if owner is not None and owner != operation.document_id:
+                    raise ConflictError(
+                        f"Destination document already exists: {operation.destination_path}"
+                    )
+                destination = operation.destination_path
+            elif isinstance(operation, OrganizationMaterializeDocument):
+                document = documents.get(operation.document_id)
+                if document is None or document.deleted:
+                    raise ConflictError(f"Document no longer exists: {operation.document_id}")
+                if document.path is not None:
+                    raise ConflictError(
+                        "Document is already materialized",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_path": document.path,
+                        },
+                    )
+                if document.current_revision_id != operation.expected_revision_id:
+                    raise ConflictError(
+                        "Document revision changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_revision_id": document.current_revision_id,
+                        },
+                    )
+                if document.content_type == "application/pdf":
+                    raise ValidationError("PDFs are materialized when they are imported")
+                self.policy.require(principal, Capability.MOVE, None)
                 self.policy.require(principal, Capability.MOVE, operation.destination_path)
                 owner = existing_document_paths.get(operation.destination_path)
                 if owner is not None and owner != operation.document_id:
@@ -1368,6 +1400,7 @@ class WorkspaceAccessService:
         *,
         operation: OrganizationCreateFolder
         | OrganizationMoveDocument
+        | OrganizationMaterializeDocument
         | OrganizationTrashDocument
         | OrganizationMoveFolder
         | OrganizationUpdateDocumentMetadata
@@ -1389,6 +1422,15 @@ class WorkspaceAccessService:
                 expected_revision_id=operation.expected_revision_id,
                 path=operation.destination_path,
                 summary="Applied workspace organization plan",
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationMaterializeDocument):
+            return self.materialize_document(
+                principal,
+                document_id=operation.document_id,
+                expected_revision_id=operation.expected_revision_id,
+                path=operation.destination_path,
+                summary="Saved draft through workspace organization plan",
                 idempotency_key=idempotency_key,
             )
         if isinstance(operation, OrganizationTrashDocument):
