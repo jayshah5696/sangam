@@ -28,7 +28,8 @@ from openai.types.responses import (
 )
 from pydantic import ValidationError as PydanticValidationError
 
-from sangam.chat_capabilities import ProposeUpdateInput, WorkspaceSearchInput
+from sangam.chat import _AGENT_INSTRUCTIONS, _durable_effect_tool_behavior
+from sangam.chat_capabilities import CAPABILITIES, ProposeUpdateInput, WorkspaceSearchInput
 from sangam.chat_context import ChatRequestContext
 from sangam.config import Settings
 from sangam.errors import ValidationError
@@ -37,6 +38,19 @@ from sangam.security import Principal
 
 def chatkit_request(client: TestClient, body: dict, **request_headers: str):
     return client.post("/api/v1/chatkit", json=body, headers=request_headers)
+
+
+def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() -> None:
+    behavior = _durable_effect_tool_behavior(CAPABILITIES)
+
+    assert behavior == {
+        "stop_at_tool_names": [
+            "create_document",
+            "apply_workspace_organization_plan",
+            "publish_document",
+        ]
+    }
+    assert "Do not narrate submission, pending review, or a\nmissing result" in _AGENT_INSTRUCTIONS
 
 
 def create_thread(

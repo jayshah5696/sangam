@@ -48,7 +48,7 @@ Document creation, workspace organization, and publication follow this sequence:
 7. Execute through `WorkspaceAccessService` with the reserved operation key.
 8. Store the resulting resource ID or a safe failure record.
 
-The browser never performs the domain mutation. Reloading the browser restores pending, completed, and failed effect state from SQLite. Repeating a completed approval returns the original result. If the domain mutation commits before the effect completion write, a retry uses the same operation key and converges on the same resource.
+The browser never performs the domain mutation. The model run stops at the first durable effect and resumes only after the browser returns its stored result. This keeps multi-effect requests sequential, prevents duplicate pending cards, and prevents the assistant from narrating a missing result while approval or YOLO execution is still resolving. Reloading the browser restores pending, completed, and failed effect state from SQLite. Repeating a completed approval returns the original result. If the domain mutation commits before the effect completion write, a retry uses the same operation key and converges on the same resource.
 
 An effect left in `approved` or `executing` state after an interruption is also restored. The UI offers a resume action bound to the stored approval and operation key. Before retrying publication, the server checks whether that operation key already committed: a committed publication is recovered even if the document later changed, while an uncommitted request still has to match the approved revision.
 

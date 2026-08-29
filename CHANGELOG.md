@@ -16,6 +16,7 @@ See the generated notes attached to each GitHub Release.
 ### Changed
 
 - Completed chat effects collapse into one expandable summary, active runs provide a persistent **Stop** control, and replies follow the language of the latest user request (#167).
+- Durable chat effects stop and resume sequentially, so multi-create review cannot leave duplicate approval cards and YOLO does not emit an interim missing-result message (#167).
 
 ### Upgrade notes
 

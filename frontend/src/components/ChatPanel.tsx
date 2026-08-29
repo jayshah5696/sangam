@@ -176,6 +176,26 @@ export function ChatPanel({
     },
     [],
   )
+  const discardThreadReviews = useCallback(
+    (discardedThreadId: string | null) => {
+      if (discardedThreadId) {
+        const queryKey = ['chat-effects', discardedThreadId] as const
+        const effects = queryClient.getQueryData<ChatEffect[]>(queryKey) ?? []
+        const discardedIds = effects
+          .filter((effect) => effect.status === 'pending_approval')
+          .map((effect) => effect.effect_id)
+        if (discardedIds.length > 0) {
+          setSettledEffectIds((effectIds) => new Set([...effectIds, ...discardedIds]))
+          queryClient.setQueryData<ChatEffect[]>(
+            queryKey,
+            effects.filter((effect) => effect.status !== 'pending_approval'),
+          )
+        }
+      }
+      clearPendingReview()
+    },
+    [clearPendingReview, queryClient],
+  )
   const requestEffectReview = useCallback(
     async (params: { effect_id?: string; argument_digest?: string }) => {
       const effectId = params.effect_id ?? ''
@@ -257,7 +277,7 @@ export function ChatPanel({
     ({ threadId: nextThreadId }: { threadId: string | null }) => {
       const previousThreadId = threadIdRef.current
       if (previousThreadId !== nextThreadId) {
-        clearPendingReview()
+        discardThreadReviews(previousThreadId)
         if (previousThreadId) {
           void api
             .cancelChatRun(previousThreadId)
@@ -269,7 +289,7 @@ export function ChatPanel({
       if (nextThreadId) localStorage.setItem(threadStorageKey, nextThreadId)
       else localStorage.removeItem(threadStorageKey)
     },
-    [clearPendingReview, queryClient, threadStorageKey],
+    [discardThreadReviews, queryClient, threadStorageKey],
   )
   const handleResponseEnd = useCallback(() => void liveRef.current.refreshProposals(), [])
   const handleCitationDeeplink = useCallback(
@@ -290,12 +310,12 @@ export function ChatPanel({
   const resetChatSurface = useCallback(() => {
     const currentThreadId = threadIdRef.current
     if (currentThreadId) void api.cancelChatRun(currentThreadId)
-    clearPendingReview()
+    discardThreadReviews(currentThreadId)
     localStorage.removeItem(threadStorageKey)
     threadIdRef.current = null
     setThreadId(null)
     setChatEpoch((epoch) => epoch + 1)
-  }, [clearPendingReview, threadStorageKey])
+  }, [discardThreadReviews, threadStorageKey])
   const models = useMemo(
     () =>
       (configQuery.data?.available_models ?? []).map((model) => ({
