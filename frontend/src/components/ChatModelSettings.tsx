@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Cpu, Plus, RefreshCw, ServerCog, TestTube2 } from 'lucide-react'
+import { Check, Cpu, Plus, RefreshCw, ServerCog, ShieldAlert, TestTube2 } from 'lucide-react'
 import {
   ApiError,
   api,
@@ -15,6 +15,7 @@ function settingsSignature(data: ChatModelSettingsData): string {
     enabled: data.enabled_models,
     default: data.default_model,
     on: data.workspace_enabled,
+    autonomy: data.autonomy_mode,
     overrides: data.catalog.filter((model) => model.operator_override).map((model) => model.id),
   })
 }
@@ -38,6 +39,7 @@ export function ChatModelSettings() {
   const [overrides, setOverrides] = useState<Set<string>>(new Set())
   const [defaultModel, setDefaultModel] = useState('')
   const [workspaceEnabled, setWorkspaceEnabled] = useState(true)
+  const [autonomyMode, setAutonomyMode] = useState<'review' | 'workspace'>('review')
   const [search, setSearch] = useState('')
   const [manualConnection, setManualConnection] = useState('openrouter')
   const [manualModel, setManualModel] = useState('')
@@ -53,6 +55,7 @@ export function ChatModelSettings() {
     )
     setDefaultModel(models.data.default_model)
     setWorkspaceEnabled(models.data.workspace_enabled)
+    setAutonomyMode(models.data.autonomy_mode)
   }, [models.data])
 
   const selectedManualConnection = connections.data?.some(
@@ -85,6 +88,7 @@ export function ChatModelSettings() {
       api.updateChatModels({
         expected_version: models.data?.version ?? 0,
         workspace_enabled: workspaceEnabled,
+        autonomy_mode: autonomyMode,
         default_model: defaultModel,
         enabled_models: [...enabled],
         unknown_model_overrides: [...overrides],
@@ -190,6 +194,7 @@ export function ChatModelSettings() {
     enabled: [...enabled],
     default: defaultModel,
     on: workspaceEnabled,
+    autonomy: autonomyMode,
     overrides: [...overrides],
   })
   const dirty = settingsSignature(models.data) !== draftSignature
@@ -221,6 +226,26 @@ export function ChatModelSettings() {
             />
             <span>{workspaceEnabled ? 'On' : 'Off'}</span>
           </label>
+        </div>
+
+        <div className={`setting-row chat-autonomy-setting mode-${autonomyMode}`}>
+          <div>
+            <strong>
+              <ShieldAlert size="var(--icon-inline)" /> Agent permission mode
+            </strong>
+            <small>
+              Review pauses every effect for an exact decision. YOLO runs every authorized effect immediately,
+              including publication. Normal actor and path permissions still apply.
+            </small>
+          </div>
+          <select
+            aria-label="Agent permission mode"
+            value={autonomyMode}
+            onChange={(event) => setAutonomyMode(event.target.value === 'workspace' ? 'workspace' : 'review')}
+          >
+            <option value="review">Review every effect</option>
+            <option value="workspace">YOLO · run without approval</option>
+          </select>
         </div>
 
         <div className="setting-row chat-transport-setting">

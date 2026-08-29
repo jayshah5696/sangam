@@ -24,6 +24,7 @@ function model(modelId: string, name: string, enabled: boolean): ChatModelInfo {
 
 const snapshot: ChatModelSettingsData = {
   workspace_enabled: true,
+  autonomy_mode: 'review',
   default_model: 'openrouter::openai/gpt-5.4-mini',
   enabled_models: ['openrouter::openai/gpt-5.4-mini', 'openrouter::openai/gpt-5.4-nano'],
   catalog: [
@@ -131,6 +132,7 @@ describe('ChatModelSettings', () => {
         'openrouter::openai/gpt-5.4-nano',
         'openrouter::openai/gpt-5.4',
       ],
+      autonomy_mode: 'review',
       unknown_model_overrides: [],
     })
   })

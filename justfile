@@ -46,15 +46,24 @@ test-frontend:
     npm --prefix frontend run lint
     npm --prefix frontend run test
 
-# Run the 10-item chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
-eval-chat output="test-results/chat-evals.json":
+# Run the review-mode chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
+eval-chat model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-review.json":
     mkdir -p test-results
-    uv run python scripts/run_chat_evals.py --output "{{ output }}"
+    uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
+
+# Run the same live evals under bounded private-workspace YOLO policy.
+eval-chat-yolo model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-yolo.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode workspace --output "{{ output }}"
+
+# Verify deterministic approval, permission, cancellation, replay, and plan policy.
+eval-chat-policy:
+    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py
 
 # Run the chat eval suite against another checkout's code for before/after comparison.
-eval-chat-against source output="test-results/chat-evals-baseline.json":
+eval-chat-against source model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-baseline.json":
     mkdir -p test-results
-    cd "{{ source }}" && uv run python "{{ justfile_directory() }}/scripts/run_chat_evals.py" --output "{{ output }}"
+    cd "{{ source }}" && uv run python "{{ justfile_directory() }}/scripts/run_chat_evals.py" --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
 
 # Exercise desktop and narrow browser interactions against isolated data.
 test-e2e:
@@ -89,11 +98,12 @@ test-docs:
     npm --prefix frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
 
 # Serve the API and frontend development server with live reload.
-serve:
+serve backend_port="8000" frontend_port="5173":
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    uv run uvicorn sangam.main:app --reload &
+    export SANGAM_DEV_BACKEND_URL="http://127.0.0.1:{{ backend_port }}"
+    uv run uvicorn sangam.main:app --reload --port "{{ backend_port }}" &
     backend_pid=$!
 
     cleanup() {
@@ -102,7 +112,7 @@ serve:
     }
     trap cleanup EXIT INT TERM
 
-    npm --prefix frontend run dev -- --host 127.0.0.1
+    npm --prefix frontend run dev -- --host 127.0.0.1 --port "{{ frontend_port }}" --strictPort
 
 # Build the production Docker image.
 docker-build:

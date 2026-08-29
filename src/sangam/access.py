@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+import uuid
 from collections.abc import Callable, Iterator
 from typing import TypeVar
 
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
+from sangam.db import utc_now
 from sangam.errors import AuthorizationError, ConflictError, SangamError, ValidationError
+from sangam.idempotency import request_hash
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
 from sangam.publication import PublicationService
@@ -14,10 +18,24 @@ from sangam.schemas import (
     Annotation,
     AnnotationEvent,
     AnnotationType,
+    ApplyOrganizationPlan,
     Document,
     DocumentSummary,
     Folder,
     IssuedPublication,
+    OrganizationCreateFolder,
+    OrganizationDocumentSnapshot,
+    OrganizationFolderSnapshot,
+    OrganizationMaterializeDocument,
+    OrganizationMoveDocument,
+    OrganizationMoveFolder,
+    OrganizationPlanItemResult,
+    OrganizationPlanResult,
+    OrganizationSnapshotPage,
+    OrganizationTagSnapshot,
+    OrganizationTrashDocument,
+    OrganizationUpdateDocumentMetadata,
+    OrganizationUpdateFolderMetadata,
     PdfPage,
     PdfRect,
     PdfSearchResult,
@@ -27,7 +45,7 @@ from sangam.schemas import (
     RevisionDiff,
     Tag,
 )
-from sangam.security import Principal
+from sangam.security import Principal, path_matches
 from sangam.service import DocumentService
 from sangam.workspace import canonicalize_document_path
 
@@ -763,6 +781,280 @@ class WorkspaceAccessService:
             ),
         )
 
+    def inspect_workspace_organization(
+        self,
+        principal: Principal,
+        *,
+        item_type: str | None,
+        path_prefix: str | None,
+        offset: int,
+        limit: int,
+    ) -> OrganizationSnapshotPage:
+        """Return a bounded, path-authorized organization snapshot."""
+        if item_type not in {None, "document", "folder", "tag"}:
+            raise ValidationError("Unknown organization item type")
+        normalized_prefix = (
+            self.organization.normalize_folder_path(path_prefix) if path_prefix else None
+        )
+        allowed = self.policy.allowed_prefixes(principal, Capability.READ)
+        items: list[
+            OrganizationDocumentSnapshot | OrganizationFolderSnapshot | OrganizationTagSnapshot
+        ] = []
+        source_limit = offset + limit + 1
+        if item_type in {None, "document"}:
+            documents = self.documents.list_document_summaries(
+                include_deleted=False,
+                path_prefixes=allowed,
+                limit=source_limit,
+                offset=0,
+            )
+            items.extend(
+                OrganizationDocumentSnapshot(
+                    document_id=document.document_id,
+                    title=document.title,
+                    content_type=document.content_type,
+                    path=document.path,
+                    current_revision_id=document.current_revision_id,
+                    metadata_version=document.metadata_version,
+                    category=document.category,
+                    tags=document.tags,
+                    deleted=document.deleted,
+                )
+                for document in documents
+                if normalized_prefix is None or path_matches(normalized_prefix, document.path)
+            )
+        if item_type in {None, "folder"}:
+            for folder in self.organization.list_folders(limit=source_limit):
+                if allowed == () or (
+                    allowed is not None
+                    and not any(
+                        path_matches(prefix, folder.path) or path_matches(folder.path, prefix)
+                        for prefix in allowed
+                    )
+                ):
+                    continue
+                if normalized_prefix is not None and not path_matches(
+                    normalized_prefix, folder.path
+                ):
+                    continue
+                items.append(
+                    OrganizationFolderSnapshot(
+                        folder_id=folder.folder_id,
+                        path=folder.path,
+                        metadata_version=folder.metadata_version,
+                        category=folder.category,
+                        tags=folder.tags,
+                        descendant_document_count=folder.document_count,
+                    )
+                )
+        if item_type in {None, "tag"} and allowed != ():
+            items.extend(
+                OrganizationTagSnapshot(tag_id=tag.tag_id, name=tag.name, color=tag.color)
+                for tag in self.organization.list_tags(limit=source_limit)
+            )
+        items.sort(key=lambda item: (item.kind, getattr(item, "path", ""), repr(item)))
+        page = items[offset : offset + limit]
+        return OrganizationSnapshotPage(
+            items=page,
+            offset=offset,
+            limit=limit,
+            next_offset=offset + limit if offset + limit < len(items) else None,
+        )
+
+    def apply_workspace_organization_plan(
+        self,
+        principal: Principal,
+        *,
+        plan: ApplyOrganizationPlan,
+        idempotency_key: str,
+    ) -> OrganizationPlanResult:
+        """Preflight and execute a resumable, bounded organization plan."""
+        normalized = self._normalize_organization_plan(plan)
+        payload = normalized.model_dump(mode="json")
+        digest = request_hash(payload)
+        database = self.organization.database
+        next_operation = 0
+        results: list[OrganizationPlanItemResult] = []
+        with database.transaction() as connection:
+            existing = connection.execute(
+                """
+                SELECT argument_digest, result_json, status, next_operation
+                FROM organization_plan_executions
+                WHERE actor_id = ? AND idempotency_key = ?
+                """,
+                (principal.actor_id, idempotency_key),
+            ).fetchone()
+            if existing:
+                if existing["argument_digest"] != digest:
+                    raise ConflictError(
+                        "The organization idempotency key was used for a different plan"
+                    )
+                if existing["result_json"] and existing["status"] != "running":
+                    return OrganizationPlanResult.model_validate_json(existing["result_json"])
+                if existing["result_json"]:
+                    partial = OrganizationPlanResult.model_validate_json(existing["result_json"])
+                    results = list(partial.items)
+                next_operation = existing["next_operation"]
+            else:
+                self._preflight_organization_plan(principal, normalized)
+                now = utc_now()
+                connection.execute(
+                    """
+                    INSERT INTO organization_plan_executions(
+                        execution_id, actor_id, idempotency_key, argument_digest,
+                        normalized_plan_json, status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?)
+                    """,
+                    (
+                        f"org_{uuid.uuid4().hex}",
+                        principal.actor_id,
+                        idempotency_key,
+                        digest,
+                        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                        now,
+                        now,
+                    ),
+                )
+
+        for index, operation in enumerate(
+            normalized.operations[next_operation:], start=next_operation
+        ):
+            child_key = f"{idempotency_key}:{index}"
+            try:
+                if not self._organization_operation_recorded(principal.actor_id, child_key):
+                    self._preflight_organization_plan(
+                        principal,
+                        ApplyOrganizationPlan(operations=[operation]),
+                    )
+                result = self._execute_organization_operation(
+                    principal, operation=operation, idempotency_key=child_key
+                )
+            except SangamError as error:
+                status = "conflicted" if isinstance(error, ConflictError) else "failed"
+                results.append(
+                    OrganizationPlanItemResult(
+                        index=index,
+                        kind=operation.kind,
+                        status=status,
+                        resource_type=("document" if "document" in operation.kind else "folder"),
+                        resource_id=getattr(
+                            operation, "document_id", getattr(operation, "folder_id", None)
+                        ),
+                        operation_key=child_key,
+                        message=error.message,
+                    )
+                )
+                for skipped_index, skipped in enumerate(
+                    normalized.operations[index + 1 :], start=index + 1
+                ):
+                    results.append(
+                        OrganizationPlanItemResult(
+                            index=skipped_index,
+                            kind=skipped.kind,
+                            status="skipped",
+                            resource_type=("document" if "document" in skipped.kind else "folder"),
+                            resource_id=getattr(
+                                skipped,
+                                "document_id",
+                                getattr(skipped, "folder_id", None),
+                            ),
+                            operation_key=f"{idempotency_key}:{skipped_index}",
+                            message="Not attempted after an earlier operation failed",
+                        )
+                    )
+                break
+            results.append(
+                OrganizationPlanItemResult(
+                    index=index,
+                    kind=operation.kind,
+                    status="completed",
+                    resource_type="document" if "document" in operation.kind else "folder",
+                    resource_id=result.document_id
+                    if isinstance(result, Document)
+                    else result.folder_id,
+                    path=result.path,
+                    operation_key=child_key,
+                    message="Completed",
+                )
+            )
+            progress = OrganizationPlanResult(
+                status="partial",
+                argument_digest=digest,
+                completed=len(results),
+                skipped=0,
+                conflicted=0,
+                failed=0,
+                items=results,
+            )
+            with database.transaction() as connection:
+                connection.execute(
+                    """
+                    UPDATE organization_plan_executions
+                    SET result_json = ?, next_operation = ?, updated_at = ?
+                    WHERE actor_id = ? AND idempotency_key = ?
+                    """,
+                    (
+                        progress.model_dump_json(),
+                        index + 1,
+                        utc_now(),
+                        principal.actor_id,
+                        idempotency_key,
+                    ),
+                )
+        completed = sum(item.status == "completed" for item in results)
+        conflicted = sum(item.status == "conflicted" for item in results)
+        failed = sum(item.status == "failed" for item in results)
+        skipped = sum(item.status == "skipped" for item in results)
+        status = (
+            "completed"
+            if completed == len(normalized.operations)
+            else "partial"
+            if completed
+            else "failed"
+        )
+        response = OrganizationPlanResult(
+            status=status,
+            argument_digest=digest,
+            completed=completed,
+            skipped=skipped,
+            conflicted=conflicted,
+            failed=failed,
+            items=results,
+        )
+        with database.transaction() as connection:
+            connection.execute(
+                """
+                UPDATE organization_plan_executions
+                SET status = ?, result_json = ?, next_operation = ?, updated_at = ?
+                WHERE actor_id = ? AND idempotency_key = ?
+                """,
+                (
+                    status,
+                    response.model_dump_json(),
+                    completed,
+                    utc_now(),
+                    principal.actor_id,
+                    idempotency_key,
+                ),
+            )
+        return response
+
+    def _organization_operation_recorded(self, actor_id: str, operation_key: str) -> bool:
+        """Detect a child commit before replaying after an interrupted response."""
+        with self.organization.database.connection() as connection:
+            document = connection.execute(
+                "SELECT 1 FROM idempotency_keys WHERE actor_id = ? AND idempotency_key = ?",
+                (actor_id, operation_key),
+            ).fetchone()
+            organization = connection.execute(
+                """
+                SELECT 1 FROM mutation_idempotency_keys
+                WHERE actor_id = ? AND idempotency_key = ? AND completed_at IS NOT NULL
+                """,
+                (actor_id, operation_key),
+            ).fetchone()
+        return document is not None or organization is not None
+
     def list_tags(self, principal: Principal) -> list[Tag]:
         def operation() -> list[Tag]:
             self._require_global_read(principal)
@@ -772,8 +1064,20 @@ class WorkspaceAccessService:
 
     def list_folders(self, principal: Principal) -> list[Folder]:
         def operation() -> list[Folder]:
-            self._require_global_read(principal)
-            return self.organization.list_folders()
+            allowed = self.policy.allowed_prefixes(principal, Capability.READ)
+            if allowed == ():
+                return []
+            folders = self.organization.list_folders()
+            if allowed is None:
+                return folders
+            return [
+                folder
+                for folder in folders
+                if any(
+                    path_matches(prefix, folder.path) or path_matches(folder.path, prefix)
+                    for prefix in allowed
+                )
+            ]
 
         return self._run(principal, "list_folders", "folder", operation)
 
@@ -801,9 +1105,10 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Folder:
         def operation() -> Folder:
-            self.policy.require_administrator(principal)
+            normalized_path = self.organization.normalize_folder_path(path)
+            self.policy.require(principal, Capability.CREATE, normalized_path)
             return self.organization.create_folder(
-                path=path,
+                path=normalized_path,
                 category=category,
                 tag_ids=tag_ids,
                 actor_id=principal.actor_id,
@@ -823,7 +1128,13 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Folder:
         def operation() -> Folder:
-            self.policy.require_administrator(principal)
+            folder = next(
+                (item for item in self.organization.list_folders() if item.folder_id == folder_id),
+                None,
+            )
+            if folder is None:
+                raise ConflictError(f"Folder no longer exists: {folder_id}")
+            self.policy.require(principal, Capability.TAG, folder.path)
             return self.organization.update_folder_metadata(
                 folder_id=folder_id,
                 expected_metadata_version=expected_metadata_version,
@@ -844,15 +1155,316 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Folder:
         def operation() -> Folder:
-            self.policy.require_administrator(principal)
+            folder = next(
+                (item for item in self.organization.list_folders() if item.folder_id == folder_id),
+                None,
+            )
+            if folder is None:
+                raise ConflictError(f"Folder no longer exists: {folder_id}")
+            destination = self.organization.normalize_folder_path(path)
+            self.policy.require(principal, Capability.MOVE, folder.path)
+            self.policy.require(principal, Capability.MOVE, destination)
             return self.organization.rename_folder(
                 folder_id=folder_id,
-                destination_path=path,
+                destination_path=destination,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             )
 
         return self._run(principal, "move", "folder", operation, resource_id=folder_id, path=path)
+
+    def _normalize_organization_plan(self, plan: ApplyOrganizationPlan) -> ApplyOrganizationPlan:
+        operations: list[dict[str, object]] = []
+        for operation in plan.operations:
+            data = operation.model_dump(mode="json")
+            if isinstance(
+                operation,
+                (OrganizationCreateFolder, OrganizationMoveFolder),
+            ):
+                path_key = "path" if operation.kind == "create_folder" else "destination_path"
+                data[path_key] = self.organization.normalize_folder_path(str(data[path_key]))
+            if isinstance(operation, OrganizationMoveFolder):
+                data["expected_source_path"] = self.organization.normalize_folder_path(
+                    operation.expected_source_path
+                )
+            if isinstance(operation, (OrganizationMoveDocument, OrganizationMaterializeDocument)):
+                if isinstance(operation, OrganizationMoveDocument):
+                    data["expected_source_path"] = canonicalize_document_path(
+                        operation.expected_source_path
+                    )
+                data["destination_path"] = canonicalize_document_path(operation.destination_path)
+            if isinstance(operation, OrganizationTrashDocument):
+                data["expected_source_path"] = canonicalize_document_path(
+                    operation.expected_source_path
+                )
+            if "tag_ids" in data:
+                data["tag_ids"] = sorted(set(data["tag_ids"]))
+            if "expected_tag_ids" in data:
+                data["expected_tag_ids"] = sorted(set(data["expected_tag_ids"]))
+            if "category" in data:
+                category = data["category"]
+                data["category"] = (
+                    str(category).strip() if category and str(category).strip() else None
+                )
+            operations.append(data)
+        return ApplyOrganizationPlan.model_validate({"operations": operations})
+
+    def _preflight_organization_plan(
+        self, principal: Principal, plan: ApplyOrganizationPlan
+    ) -> None:
+        documents = {item.document_id: item for item in self.documents.list_documents()}
+        folders = {item.folder_id: item for item in self.organization.list_folders()}
+        tag_ids = {item.tag_id for item in self.organization.list_tags()}
+        existing_document_paths = {
+            item.path: item.document_id
+            for item in documents.values()
+            if item.path and not item.deleted
+        }
+        existing_folder_paths = {item.path: item.folder_id for item in folders.values()}
+        planned_destinations: set[str] = set()
+        for operation in plan.operations:
+            if isinstance(operation, OrganizationCreateFolder):
+                self.policy.require(principal, Capability.CREATE, operation.path)
+                if operation.path in existing_folder_paths:
+                    raise ConflictError(f"Destination folder already exists: {operation.path}")
+                destination = operation.path
+            elif isinstance(operation, OrganizationMoveDocument):
+                document = documents.get(operation.document_id)
+                if document is None:
+                    raise ConflictError(f"Document no longer exists: {operation.document_id}")
+                if document.path != operation.expected_source_path:
+                    raise ConflictError(
+                        "Document source path changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_path": document.path,
+                        },
+                    )
+                if document.current_revision_id != operation.expected_revision_id:
+                    raise ConflictError(
+                        "Document revision changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_revision_id": document.current_revision_id,
+                        },
+                    )
+                if operation.destination_path == document.path:
+                    raise ValidationError("An organization plan cannot contain a no-op move")
+                if document.content_type == "application/pdf":
+                    raise ValidationError("PDF path changes are not supported")
+                self.policy.require(principal, Capability.MOVE, document.path)
+                self.policy.require(principal, Capability.MOVE, operation.destination_path)
+                owner = existing_document_paths.get(operation.destination_path)
+                if owner is not None and owner != operation.document_id:
+                    raise ConflictError(
+                        f"Destination document already exists: {operation.destination_path}"
+                    )
+                destination = operation.destination_path
+            elif isinstance(operation, OrganizationMaterializeDocument):
+                document = documents.get(operation.document_id)
+                if document is None or document.deleted:
+                    raise ConflictError(f"Document no longer exists: {operation.document_id}")
+                if document.path is not None:
+                    raise ConflictError(
+                        "Document is already materialized",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_path": document.path,
+                        },
+                    )
+                if document.current_revision_id != operation.expected_revision_id:
+                    raise ConflictError(
+                        "Document revision changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_revision_id": document.current_revision_id,
+                        },
+                    )
+                if document.content_type == "application/pdf":
+                    raise ValidationError("PDFs are materialized when they are imported")
+                self.policy.require(principal, Capability.MOVE, None)
+                self.policy.require(principal, Capability.MOVE, operation.destination_path)
+                owner = existing_document_paths.get(operation.destination_path)
+                if owner is not None and owner != operation.document_id:
+                    raise ConflictError(
+                        f"Destination document already exists: {operation.destination_path}"
+                    )
+                destination = operation.destination_path
+            elif isinstance(operation, OrganizationTrashDocument):
+                document = documents.get(operation.document_id)
+                if document is None or document.deleted:
+                    raise ConflictError(f"Document no longer exists: {operation.document_id}")
+                if document.path != operation.expected_source_path:
+                    raise ConflictError(
+                        "Document source path changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_path": document.path,
+                        },
+                    )
+                if document.current_revision_id != operation.expected_revision_id:
+                    raise ConflictError(
+                        "Document revision changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_revision_id": document.current_revision_id,
+                        },
+                    )
+                self.policy.require(principal, Capability.DELETE, document.path)
+                destination = ""
+            elif isinstance(operation, OrganizationMoveFolder):
+                folder = folders.get(operation.folder_id)
+                if folder is None:
+                    raise ConflictError(f"Folder no longer exists: {operation.folder_id}")
+                if folder.path != operation.expected_source_path:
+                    raise ConflictError(
+                        "Folder source path changed",
+                        details={"folder_id": operation.folder_id, "current_path": folder.path},
+                    )
+                if folder.document_count != operation.expected_descendant_documents:
+                    raise ConflictError(
+                        "Folder contents changed",
+                        details={
+                            "folder_id": operation.folder_id,
+                            "current_descendant_documents": folder.document_count,
+                        },
+                    )
+                if operation.destination_path == folder.path:
+                    raise ValidationError("An organization plan cannot contain a no-op move")
+                if path_matches(folder.path, operation.destination_path):
+                    raise ValidationError("A folder cannot be moved inside itself")
+                self.policy.require(principal, Capability.MOVE, folder.path)
+                self.policy.require(principal, Capability.MOVE, operation.destination_path)
+                owner = existing_folder_paths.get(operation.destination_path)
+                if owner is not None and owner != operation.folder_id:
+                    raise ConflictError(
+                        f"Destination folder already exists: {operation.destination_path}"
+                    )
+                destination = operation.destination_path
+            elif isinstance(operation, OrganizationUpdateDocumentMetadata):
+                document = documents.get(operation.document_id)
+                if document is None:
+                    raise ConflictError(f"Document no longer exists: {operation.document_id}")
+                if document.metadata_version != operation.expected_metadata_version:
+                    raise ConflictError("Document metadata changed")
+                if (
+                    document.category != operation.expected_category
+                    or sorted(tag.tag_id for tag in document.tags) != operation.expected_tag_ids
+                ):
+                    raise ConflictError("Document metadata no longer matches the reviewed plan")
+                if (
+                    operation.category == operation.expected_category
+                    and operation.tag_ids == operation.expected_tag_ids
+                ):
+                    raise ValidationError(
+                        "An organization plan cannot contain a no-op metadata update"
+                    )
+                self.policy.require(principal, Capability.TAG, document.path)
+                destination = ""
+            elif isinstance(operation, OrganizationUpdateFolderMetadata):
+                folder = folders.get(operation.folder_id)
+                if folder is None:
+                    raise ConflictError(f"Folder no longer exists: {operation.folder_id}")
+                if folder.metadata_version != operation.expected_metadata_version:
+                    raise ConflictError("Folder metadata changed")
+                if (
+                    folder.category != operation.expected_category
+                    or sorted(tag.tag_id for tag in folder.tags) != operation.expected_tag_ids
+                ):
+                    raise ConflictError("Folder metadata no longer matches the reviewed plan")
+                if (
+                    operation.category == operation.expected_category
+                    and operation.tag_ids == operation.expected_tag_ids
+                ):
+                    raise ValidationError(
+                        "An organization plan cannot contain a no-op metadata update"
+                    )
+                self.policy.require(principal, Capability.TAG, folder.path)
+                destination = ""
+            else:
+                raise ValidationError("Unsupported organization operation")
+            operation_tags = getattr(operation, "tag_ids", [])
+            missing_tags = [tag_id for tag_id in operation_tags if tag_id not in tag_ids]
+            if missing_tags:
+                raise ValidationError(
+                    "One or more tags do not exist", details={"tag_ids": missing_tags}
+                )
+            if destination:
+                if destination in planned_destinations:
+                    raise ConflictError(f"Two operations target the same path: {destination}")
+                planned_destinations.add(destination)
+
+    def _execute_organization_operation(
+        self,
+        principal: Principal,
+        *,
+        operation: OrganizationCreateFolder
+        | OrganizationMoveDocument
+        | OrganizationMaterializeDocument
+        | OrganizationTrashDocument
+        | OrganizationMoveFolder
+        | OrganizationUpdateDocumentMetadata
+        | OrganizationUpdateFolderMetadata,
+        idempotency_key: str,
+    ) -> Document | Folder:
+        if isinstance(operation, OrganizationCreateFolder):
+            return self.create_folder(
+                principal,
+                path=operation.path,
+                category=operation.category,
+                tag_ids=operation.tag_ids,
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationMoveDocument):
+            return self.move_document(
+                principal,
+                document_id=operation.document_id,
+                expected_revision_id=operation.expected_revision_id,
+                path=operation.destination_path,
+                summary="Applied workspace organization plan",
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationMaterializeDocument):
+            return self.materialize_document(
+                principal,
+                document_id=operation.document_id,
+                expected_revision_id=operation.expected_revision_id,
+                path=operation.destination_path,
+                summary="Saved draft through workspace organization plan",
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationTrashDocument):
+            return self.delete_document(
+                principal,
+                document_id=operation.document_id,
+                expected_revision_id=operation.expected_revision_id,
+                summary="Moved to trash by workspace organization plan",
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationMoveFolder):
+            return self.move_folder(
+                principal,
+                folder_id=operation.folder_id,
+                path=operation.destination_path,
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationUpdateDocumentMetadata):
+            return self.update_document_metadata(
+                principal,
+                document_id=operation.document_id,
+                expected_metadata_version=operation.expected_metadata_version,
+                category=operation.category,
+                tag_ids=operation.tag_ids,
+                idempotency_key=idempotency_key,
+            )
+        return self.update_folder_metadata(
+            principal,
+            folder_id=operation.folder_id,
+            expected_metadata_version=operation.expected_metadata_version,
+            category=operation.category,
+            tag_ids=operation.tag_ids,
+            idempotency_key=idempotency_key,
+        )
 
     def _document_operation(
         self,

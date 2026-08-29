@@ -65,6 +65,7 @@ def create_chat_router(
         return chat.model_catalog.update(
             expected_version=body.expected_version,
             workspace_enabled=body.workspace_enabled,
+            autonomy_mode=body.autonomy_mode,
             default_model=body.default_model,
             enabled_models=body.enabled_models,
             unknown_model_overrides=body.unknown_model_overrides,
@@ -217,6 +218,14 @@ def create_chat_router(
         principal: Principal = principal_dependency,
     ) -> list[ChatEffect]:
         return chat.effects.list(principal, thread_id=thread_id, statuses=tuple(status or ()))
+
+    @router.post("/chat/threads/{thread_id}/cancel")
+    def cancel_active_run(
+        thread_id: str,
+        principal: Principal = principal_dependency,
+    ) -> dict[str, str | bool | None]:
+        run_id = chat.evidence.request_cancel(principal, thread_id=thread_id)
+        return {"cancelled": run_id is not None, "run_id": run_id}
 
     @router.get("/chat/effects/{effect_id}", response_model=ChatEffect)
     def get_effect(

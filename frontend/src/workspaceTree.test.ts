@@ -8,6 +8,8 @@ import {
   ensureMarkdownExtension,
   joinWorkspacePath,
   parentWorkspacePath,
+  treePathForWorkspaceFolder,
+  workspacePathFromTreePath,
 } from './workspaceTree'
 
 const materializedDocument: DocumentSummary = {
@@ -76,6 +78,9 @@ describe('Pierre workspace tree adapter', () => {
     expect(parentWorkspacePath('projects/research/notes.md')).toBe('projects/research')
     expect(ensureMarkdownExtension('notes')).toBe('notes.md')
     expect(ensureMarkdownExtension('notes.MD')).toBe('notes.MD')
+    expect(workspacePathFromTreePath('projects/research/')).toBe('projects/research')
+    expect(workspacePathFromTreePath(null)).toBe('')
+    expect(treePathForWorkspaceFolder('/projects/research/')).toBe('projects/research/')
   })
 })
 

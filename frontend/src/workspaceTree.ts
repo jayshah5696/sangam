@@ -67,6 +67,17 @@ export function joinWorkspacePath(parent: string, child: string) {
   return [normalizeWorkspacePath(parent), normalizeWorkspacePath(child)].filter(Boolean).join('/')
 }
 
+/** Convert Pierre's canonical directory paths to Sangam workspace paths. */
+export function workspacePathFromTreePath(path: string | null) {
+  return path === null ? '' : normalizeWorkspacePath(path)
+}
+
+/** Convert a Sangam folder path to Pierre's canonical trailing-slash form. */
+export function treePathForWorkspaceFolder(path: string) {
+  const normalized = normalizeWorkspacePath(path)
+  return normalized ? `${normalized}/` : ''
+}
+
 export function parentWorkspacePath(path: string) {
   const normalized = normalizeWorkspacePath(path)
   return normalized.includes('/') ? normalized.slice(0, normalized.lastIndexOf('/')) : ''

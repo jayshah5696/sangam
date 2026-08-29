@@ -7,6 +7,21 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+### Added
+
+- The workspace explorer now supports canonical folder selection, file and folder drag-and-drop, full Pierre multi-selection, a searchable **Move to…** dialog, supported pointer and keyboard row actions, bulk tags/category updates, and bulk Trash. The command palette exposes the same organization actions (#162).
+- Chat can inspect bounded organization metadata and prepare exact plans for folder creation, draft materialization, document and folder moves, metadata updates, and Trash. Plans use stable IDs, stale-state checks, resumable idempotent execution, and dedicated review cards (#163).
+- AI settings now default to GPT-5.6 Sol with medium reasoning and offer Review or YOLO modes. Review pauses every effect for a decision. YOLO runs every authorized effect immediately, including publication. Deterministic policy tests and 17 live provider evals cover both modes (#163).
+
+### Changed
+
+- Completed chat effects collapse into one expandable summary, active runs provide a persistent **Stop** control, and replies follow the language of the latest user request (#167).
+- Durable chat effects stop and resume sequentially, so multi-create review cannot leave duplicate approval cards and YOLO does not emit an interim missing-result message (#167).
+
+### Upgrade notes
+
+- Database migration `019_organization_plans_and_chat_autonomy.sql` stores organization execution recovery, chat permission mode, and run cancellation state. Existing installations start in review mode.
+
 ## [0.10.1] - 2026-08-25
 
 ### Added

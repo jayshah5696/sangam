@@ -61,9 +61,9 @@ every variable.
 | `SANGAM_OPENROUTER_HTTP_REFERER` | Public origin sent to OpenRouter (required in production) |
 | `SANGAM_OPENROUTER_APP_TITLE` | App title sent to OpenRouter (default "Sangam") |
 | `SANGAM_CHATKIT_DOMAIN_KEY` | ChatKit key for your origin; `local-dev` only works on localhost |
-| `SANGAM_CHAT_DEFAULT_MODEL` | Must appear in available models |
+| `SANGAM_CHAT_DEFAULT_MODEL` | Must appear in available models; defaults to `openai/gpt-5.6-sol` |
 | `SANGAM_CHAT_AVAILABLE_MODELS` | JSON list of model slugs |
-| `SANGAM_CHAT_REASONING_EFFORT` | Reasoning preset |
+| `SANGAM_CHAT_REASONING_EFFORT` | Reasoning preset; defaults to `medium` |
 | `SANGAM_CHAT_TIMEOUT_SECONDS` | Per-run timeout |
 | `SANGAM_CHAT_MAX_TOOL_ROUNDS` | Tool-use budget (default 24) |
 | `SANGAM_CHAT_MAX_TOOL_RESULT_BYTES` | Tool result byte cap |

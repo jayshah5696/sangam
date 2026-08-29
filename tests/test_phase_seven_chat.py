@@ -28,7 +28,8 @@ from openai.types.responses import (
 )
 from pydantic import ValidationError as PydanticValidationError
 
-from sangam.chat_capabilities import ProposeUpdateInput, WorkspaceSearchInput
+from sangam.chat import _AGENT_INSTRUCTIONS, _durable_effect_tool_behavior
+from sangam.chat_capabilities import CAPABILITIES, ProposeUpdateInput, WorkspaceSearchInput
 from sangam.chat_context import ChatRequestContext
 from sangam.config import Settings
 from sangam.errors import ValidationError
@@ -37,6 +38,19 @@ from sangam.security import Principal
 
 def chatkit_request(client: TestClient, body: dict, **request_headers: str):
     return client.post("/api/v1/chatkit", json=body, headers=request_headers)
+
+
+def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() -> None:
+    behavior = _durable_effect_tool_behavior(CAPABILITIES)
+
+    assert behavior == {
+        "stop_at_tool_names": [
+            "create_document",
+            "apply_workspace_organization_plan",
+            "publish_document",
+        ]
+    }
+    assert "Do not narrate submission, pending review, or a\nmissing result" in _AGENT_INSTRUCTIONS
 
 
 def create_thread(
@@ -248,14 +262,16 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
     assert config["transport_status"] == "misconfigured"
     assert config["chat_enabled"] is False
     assert config["domain_key"] == "local-dev"
-    assert config["default_model"] == "openrouter::openai/gpt-5.6-luna"
+    assert config["default_model"] == "openrouter::openai/gpt-5.6-sol"
+    assert config["autonomy_mode"] == "review"
     assert {item["id"] for item in config["available_models"]} == {
+        "openrouter::openai/gpt-5.6-sol",
         "openrouter::openai/gpt-5.6-luna",
         "openrouter::openai/gpt-5.4-mini",
         "openrouter::openai/gpt-5.4-nano",
         "openrouter::openai/gpt-5.6-terra",
     }
-    assert config["reasoning_effort"] == "low"
+    assert config["reasoning_effort"] == "medium"
     assert "api_key" not in response.text
 
     local_config = client.get(
@@ -272,6 +288,8 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "propose_update",
         "create_document",
         "publish_document",
+        "inspect_workspace_organization",
+        "apply_workspace_organization_plan",
     }
     create_thread(client)
 
@@ -744,6 +762,7 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
         "title": "Research note",
         "content": "# Evidence",
         "content_type": "text/markdown",
+        "path": None,
     }
     assert client.get("/api/v1/documents").json() == []
     create_tool = next(

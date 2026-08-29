@@ -66,6 +66,7 @@ def prepare_effect(
         selected_text="",
     )
     capability = chat.capabilities.get(capability_id)
+    normalized_arguments = capability.input_schema.model_validate(arguments).model_dump(mode="json")
     manifest = (capability.manifest_item(),)
     turn = chat.evidence.attach_turn_context(
         principal,
@@ -91,7 +92,7 @@ def prepare_effect(
         tool_call_id=tool_call_id,
         capability=capability,
         arguments=arguments,
-        preview=preview or arguments,
+        preview=preview or normalized_arguments,
     )
     return SimpleNamespace(
         chat=chat,
@@ -101,6 +102,22 @@ def prepare_effect(
         effect=effect,
         capability=capability,
     )
+
+
+def set_chat_autonomy(client: TestClient, mode: str) -> None:
+    current = client.get("/api/v1/chat/models").json()
+    response = client.put(
+        "/api/v1/chat/models",
+        json={
+            "expected_version": current["version"],
+            "workspace_enabled": current["workspace_enabled"],
+            "default_model": current["default_model"],
+            "enabled_models": current["enabled_models"],
+            "unknown_model_overrides": [],
+            "autonomy_mode": mode,
+        },
+    )
+    assert response.status_code == 200, response.text
 
 
 def test_turn_context_captures_selection_and_run_manifest(client: TestClient) -> None:
@@ -229,6 +246,7 @@ def test_registry_filters_authority_and_rejects_extra_tool_arguments(client: Tes
     assert {capability.capability_id for capability in resolved} == {
         "get_editor_selection",
         "search_workspace",
+        "inspect_workspace_organization",
         "read_document",
     }
     with pytest.raises(PydanticValidationError):
@@ -281,6 +299,7 @@ def test_effect_preview_cannot_hide_or_change_material_arguments(client: TestCli
         "title": "Changed",
         "content": "Exact",
         "content_type": "text/markdown",
+        "path": None,
     }
     changed = prepared.chat.effects.propose(
         prepared.principal,
@@ -316,7 +335,12 @@ def test_effect_approval_is_digest_bound_idempotent_and_reloadable(client: TestC
             "content": "# Durable",
             "content_type": "text/markdown",
         },
-        preview={"title": "Approved note", "content": "# Durable", "content_type": "text/markdown"},
+        preview={
+            "title": "Approved note",
+            "content": "# Durable",
+            "content_type": "text/markdown",
+            "path": None,
+        },
     )
     assert duplicate.effect_id == prepared.effect.effect_id
 
@@ -374,6 +398,139 @@ def test_denied_effect_has_no_side_effect(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["effect"]["status"] == "denied"
     assert client.get("/api/v1/documents").json() == []
+
+
+def test_workspace_autonomy_executes_every_effect_without_review(client: TestClient) -> None:
+    set_chat_autonomy(client, "workspace")
+    created = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={
+            "title": "Autonomous private note",
+            "content": "# Private",
+            "content_type": "text/markdown",
+        },
+        tool_call_id="call_yolo_create",
+    )
+    assert created.effect.status == "completed"
+    assert len(client.get("/api/v1/documents").json()) == 1
+
+    document = client.post(
+        "/api/v1/documents",
+        headers=headers("publish-source"),
+        json={"title": "Publish source", "path": "publish-source.md", "content": "# Source"},
+    ).json()
+    publication = prepare_effect(
+        client,
+        capability_id="publish_document",
+        arguments={
+            "document_id": document["document_id"],
+            "revision_id": document["current_revision_id"],
+            "slug": "publish-source",
+            "access_policy": "public",
+        },
+        tool_call_id="call_yolo_publish",
+    )
+    assert publication.effect.status == "completed"
+    assert (
+        client.get(f"/api/v1/publications/by-document/{document['document_id']}").json()["slug"]
+        == "publish-source"
+    )
+
+    oversized = prepare_effect(
+        client,
+        capability_id="apply_workspace_organization_plan",
+        arguments={
+            "operations": [
+                {
+                    "kind": "create_folder",
+                    "path": f"batch/folder-{index}",
+                    "category": None,
+                    "tag_ids": [],
+                }
+                for index in range(26)
+            ]
+        },
+        tool_call_id="call_yolo_oversized",
+    )
+    assert oversized.effect.status == "completed"
+    folder_paths = {folder["path"] for folder in client.get("/api/v1/folders").json()}
+    assert {f"batch/folder-{index}" for index in range(26)} <= folder_paths
+
+
+def test_yolo_materializes_chat_created_document_at_requested_path(client: TestClient) -> None:
+    set_chat_autonomy(client, "workspace")
+    created = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={
+            "title": "Sample 2",
+            "content": "# Sample 2",
+            "content_type": "text/markdown",
+            "path": "drafts/testing/sample-2.md",
+        },
+        tool_call_id="call_yolo_materialized_create",
+    )
+
+    assert created.effect.status == "completed"
+    document = client.get(f"/api/v1/documents/{created.effect.resource_id}").json()
+    assert document["path"] == "drafts/testing/sample-2.md"
+
+
+def test_cancelling_a_run_cancels_pending_effects_and_blocks_approval(
+    client: TestClient,
+) -> None:
+    prepared = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={"title": "Cancelled", "content": "No", "content_type": "text/markdown"},
+        tool_call_id="call_cancelled",
+    )
+
+    cancelled = client.post(f"/api/v1/chat/threads/{prepared.thread_id}/cancel")
+    approval = client.post(
+        f"/api/v1/chat/effects/{prepared.effect.effect_id}/decision",
+        json={
+            "verdict": "approve",
+            "argument_digest": prepared.effect.argument_digest,
+            "reason": None,
+        },
+    )
+
+    assert cancelled.status_code == 200
+    assert cancelled.json() == {"cancelled": True, "run_id": prepared.run_id}
+    assert prepared.chat.evidence.cancel_requested(prepared.run_id) is True
+    assert (
+        prepared.chat.effects.get(prepared.principal, prepared.effect.effect_id).status
+        == "cancelled"
+    )
+    assert approval.status_code == 409
+    assert client.get("/api/v1/documents").json() == []
+
+
+def test_cancelling_a_thread_clears_a_pending_effect_after_the_run_ended(
+    client: TestClient,
+) -> None:
+    prepared = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={
+            "title": "Stale review",
+            "content": "No",
+            "content_type": "text/markdown",
+        },
+        tool_call_id="call_stale_review",
+    )
+    prepared.chat.evidence.complete_run(prepared.run_id, status="completed")
+
+    cancelled = client.post(f"/api/v1/chat/threads/{prepared.thread_id}/cancel")
+
+    assert cancelled.status_code == 200
+    assert cancelled.json() == {"cancelled": True, "run_id": prepared.run_id}
+    assert (
+        prepared.chat.effects.get(prepared.principal, prepared.effect.effect_id).status
+        == "cancelled"
+    )
 
 
 def test_expired_and_cross_actor_decisions_execute_nothing(client: TestClient) -> None:
@@ -577,7 +734,7 @@ def test_html_document_creation_lifecycle(client: TestClient) -> None:
             "content_type": "text/html",
         },
     )
-    assert prepared.effect.capability_version == 2
+    assert prepared.effect.capability_version == 3
 
     decision = client.post(
         f"/api/v1/chat/effects/{prepared.effect.effect_id}/decision",

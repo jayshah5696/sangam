@@ -17,7 +17,7 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.idempotency import request_hash
-from sangam.schemas import ChatEffect
+from sangam.schemas import ApplyOrganizationPlan, ChatEffect
 from sangam.security import Principal
 
 
@@ -54,7 +54,11 @@ class ChatEffectService:
         arguments: dict[str, object],
         preview: dict[str, object],
     ) -> ChatEffect:
-        if capability.capability_id not in {"create_document", "publish_document"}:
+        if capability.capability_id not in {
+            "create_document",
+            "publish_document",
+            "apply_workspace_organization_plan",
+        }:
             raise ValidationError("That chat capability does not use durable effects")
         normalized = capability.input_schema.model_validate(arguments).model_dump(mode="json")
         hidden_arguments = [
@@ -109,7 +113,24 @@ class ChatEffectService:
                     now.isoformat(timespec="microseconds"),
                 ),
             )
-        return self.get(principal, effect_id)
+        effect = self.get(principal, effect_id)
+        if self._autonomy_allows():
+            return self.decide(
+                principal,
+                effect_id=effect.effect_id,
+                verdict="approve",
+                argument_digest=effect.argument_digest,
+                reason="YOLO autonomy mode",
+            ).effect
+        return effect
+
+    def _autonomy_allows(self) -> bool:
+        """Run every authorized effect immediately when the operator enables YOLO."""
+        with self.database.connection() as connection:
+            settings = connection.execute(
+                "SELECT autonomy_mode FROM chat_model_settings WHERE id = 1"
+            ).fetchone()
+        return settings is not None and settings["autonomy_mode"] == "workspace"
 
     def get(self, principal: Principal, effect_id: str) -> ChatEffect:
         with self.database.connection() as connection:
@@ -277,7 +298,7 @@ class ChatEffectService:
                     principal,
                     title=arguments["title"],
                     content=arguments["content"],
-                    path=None,
+                    path=arguments["path"],
                     content_type=arguments["content_type"],
                     idempotency_key=operation_key,
                 )
@@ -318,6 +339,25 @@ class ChatEffectService:
                 }
                 resource_type = "publication"
                 resource_id = publication.publication_id
+            elif capability_id == "apply_workspace_organization_plan":
+                plan = ApplyOrganizationPlan.model_validate(arguments)
+                plan_result = self.workspace.apply_workspace_organization_plan(
+                    principal,
+                    plan=plan,
+                    idempotency_key=operation_key,
+                )
+                if plan_result.status != "completed":
+                    raise ConflictError(
+                        "The organization plan stopped before every operation completed",
+                        details=plan_result.model_dump(mode="json"),
+                    )
+                client_result = {
+                    **plan_result.model_dump(mode="json"),
+                    "approved": True,
+                }
+                stored_result = dict(client_result)
+                resource_type = "organization_plan"
+                resource_id = effect_id
             else:
                 raise ValidationError("Unsupported durable chat effect capability")
         except SangamError as error:
@@ -363,6 +403,14 @@ class ChatEffectService:
                     SELECT 1 FROM mutation_idempotency_keys
                     WHERE actor_id = ? AND idempotency_key = ?
                       AND operation = 'publish' AND completed_at IS NOT NULL
+                    """,
+                    (actor_id, operation_key),
+                ).fetchone()
+            elif capability_id == "apply_workspace_organization_plan":
+                row = connection.execute(
+                    """
+                    SELECT 1 FROM organization_plan_executions
+                    WHERE actor_id = ? AND idempotency_key = ?
                     """,
                     (actor_id, operation_key),
                 ).fetchone()

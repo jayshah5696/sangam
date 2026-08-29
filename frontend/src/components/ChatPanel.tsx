@@ -4,16 +4,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import type { TypographyOption } from '@openai/chatkit'
 import { ChatKit, useChatKit } from '@openai/chatkit-react'
-import { ExternalLink, FileText, History, Plus, X } from 'lucide-react'
+import { ChevronDown, ExternalLink, FileText, FolderInput, History, Plus, Square, X } from 'lucide-react'
 import {
   api,
   documentSchema,
   issuedPublicationSchema,
+  organizationOperationSchema,
   type ChatEffect,
   type ChatProposal,
   type Document,
   type IssuedPublication,
-  type JsonScalar,
+  type JsonPayload,
+  type OrganizationOperation,
   type Publication,
 } from '../api'
 import {
@@ -76,6 +78,7 @@ export function ChatPanel({
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState<IssuedPublication | null>(null)
   const [pendingCreate, setPendingCreate] = useState<CreateConfirmationRequest | null>(null)
+  const [pendingOrganization, setPendingOrganization] = useState<OrganizationOperation[] | null>(null)
   const [pendingEffect, setPendingEffect] = useState<ChatEffect | null>(null)
   const [createError, setCreateError] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -83,10 +86,16 @@ export function ChatPanel({
   const [openedCitation, setOpenedCitation] = useState<CitationTarget | null>(null)
   const [resumingEffectId, setResumingEffectId] = useState<string | null>(null)
   const [resumeErrorIds, setResumeErrorIds] = useState<Set<string>>(() => new Set())
-  const publishResolver = useRef<((result: Record<string, JsonScalar>) => void) | null>(null)
-  const createResolver = useRef<((result: Record<string, JsonScalar>) => void) | null>(null)
+  const publishResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
+  const createResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
+  const organizationResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
   const [settledEffectIds, setSettledEffectIds] = useState<Set<string>>(() => new Set())
+  const threadIdRef = useRef(threadId)
   const configQuery = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
+  const autonomyModeRef = useRef(configQuery.data?.autonomy_mode ?? 'review')
+  useEffect(() => {
+    autonomyModeRef.current = configQuery.data?.autonomy_mode ?? 'review'
+  }, [configQuery.data?.autonomy_mode])
   const script = useChatKitScript(configQuery.isSuccess)
   const proposalsQuery = useQuery({
     queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
@@ -129,29 +138,83 @@ export function ChatPanel({
       setPendingCreate(null)
       setPublishError(false)
       setPublished(null)
-    } else {
+      setPendingOrganization(null)
+    } else if (effect.capability_id === 'create_document') {
       const request = parseCreateConfirmation(effect.preview)
       if (!request) return false
       setPendingCreate(request)
       setPendingPublication(null)
       setCreateError(false)
       setCreatedDocument(null)
+      setPendingOrganization(null)
+    } else {
+      const parsed = z.array(organizationOperationSchema).safeParse(effect.preview.operations)
+      if (!parsed.success) return false
+      setPendingOrganization(parsed.data)
+      setPendingPublication(null)
+      setPendingCreate(null)
     }
     setPendingEffect(effect)
     return true
   }, [])
+  const clearPendingReview = useCallback(
+    (result: Record<string, JsonPayload> = { approved: false, status: 'cancelled' }) => {
+      publishResolver.current?.(result)
+      createResolver.current?.(result)
+      organizationResolver.current?.(result)
+      publishResolver.current = null
+      createResolver.current = null
+      organizationResolver.current = null
+      setPendingPublication(null)
+      setPendingCreate(null)
+      setPendingOrganization(null)
+      setPendingEffect(null)
+      setPublishError(false)
+      setCreateError(false)
+      setPublishing(false)
+      setCreating(false)
+    },
+    [],
+  )
+  const discardThreadReviews = useCallback(
+    (discardedThreadId: string | null) => {
+      if (discardedThreadId) {
+        const queryKey = ['chat-effects', discardedThreadId] as const
+        const effects = queryClient.getQueryData<ChatEffect[]>(queryKey) ?? []
+        const discardedIds = effects
+          .filter((effect) => effect.status === 'pending_approval')
+          .map((effect) => effect.effect_id)
+        if (discardedIds.length > 0) {
+          setSettledEffectIds((effectIds) => new Set([...effectIds, ...discardedIds]))
+          queryClient.setQueryData<ChatEffect[]>(
+            queryKey,
+            effects.filter((effect) => effect.status !== 'pending_approval'),
+          )
+        }
+      }
+      clearPendingReview()
+    },
+    [clearPendingReview, queryClient],
+  )
   const requestEffectReview = useCallback(
     async (params: { effect_id?: string; argument_digest?: string }) => {
       const effectId = params.effect_id ?? ''
       const digest = params.argument_digest ?? ''
       if (!effectId || !digest) return { approved: false, error: 'Invalid effect review request' }
       const effect = await api.getChatEffect(effectId)
-      if (effect.argument_digest !== digest || !showPendingEffect(effect)) {
+      if (effect.argument_digest !== digest) {
         return { approved: false, error: 'Effect review request no longer matches' }
       }
-      return new Promise<Record<string, JsonScalar>>((resolve) => {
+      if (effect.status === 'completed') return { ...effect.result, approved: true }
+      if (autonomyModeRef.current === 'workspace' && effect.status === 'pending_approval') {
+        const decision = await api.decideChatEffect(effect, 'approve', 'YOLO autonomy mode')
+        return decision.client_result
+      }
+      if (!showPendingEffect(effect)) return { approved: false, error: `Effect is ${effect.status}` }
+      return new Promise<Record<string, JsonPayload>>((resolve) => {
         if (effect.capability_id === 'publish_document') publishResolver.current = resolve
-        else createResolver.current = resolve
+        else if (effect.capability_id === 'create_document') createResolver.current = resolve
+        else organizationResolver.current = resolve
       })
     },
     [showPendingEffect],
@@ -160,6 +223,7 @@ export function ChatPanel({
     () => () => {
       publishResolver.current = null
       createResolver.current = null
+      organizationResolver.current = null
     },
     [],
   )
@@ -194,6 +258,13 @@ export function ChatPanel({
       (effect) => effect.status === 'pending_approval' && !settledEffectIds.has(effect.effect_id),
     )
     if (pendingEffect || !pending) return
+    if (autonomyModeRef.current === 'workspace') {
+      void api
+        .decideChatEffect(pending, 'approve', 'YOLO autonomy mode')
+        .catch(() => undefined)
+        .finally(() => queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] }))
+      return
+    }
     let active = true
     queueMicrotask(() => {
       if (active && !settledEffectIds.has(pending.effect_id)) showPendingEffect(pending)
@@ -201,14 +272,24 @@ export function ChatPanel({
     return () => {
       active = false
     }
-  }, [effectsQuery.data, pendingEffect, settledEffectIds, showPendingEffect])
+  }, [effectsQuery.data, pendingEffect, queryClient, settledEffectIds, showPendingEffect, threadId])
   const handleThreadChange = useCallback(
     ({ threadId: nextThreadId }: { threadId: string | null }) => {
+      const previousThreadId = threadIdRef.current
+      if (previousThreadId !== nextThreadId) {
+        discardThreadReviews(previousThreadId)
+        if (previousThreadId) {
+          void api
+            .cancelChatRun(previousThreadId)
+            .finally(() => queryClient.invalidateQueries({ queryKey: ['chat-effects', previousThreadId] }))
+        }
+      }
+      threadIdRef.current = nextThreadId
       setThreadId(nextThreadId)
       if (nextThreadId) localStorage.setItem(threadStorageKey, nextThreadId)
       else localStorage.removeItem(threadStorageKey)
     },
-    [threadStorageKey],
+    [discardThreadReviews, queryClient, threadStorageKey],
   )
   const handleResponseEnd = useCallback(() => void liveRef.current.refreshProposals(), [])
   const handleCitationDeeplink = useCallback(
@@ -227,10 +308,14 @@ export function ChatPanel({
   // clearing the stored thread also protects against server-side resets that
   // would otherwise leave the frame blank with no visible error.
   const resetChatSurface = useCallback(() => {
+    const currentThreadId = threadIdRef.current
+    if (currentThreadId) void api.cancelChatRun(currentThreadId)
+    discardThreadReviews(currentThreadId)
     localStorage.removeItem(threadStorageKey)
+    threadIdRef.current = null
     setThreadId(null)
     setChatEpoch((epoch) => epoch + 1)
-  }, [threadStorageKey])
+  }, [discardThreadReviews, threadStorageKey])
   const models = useMemo(
     () =>
       (configQuery.data?.available_models ?? []).map((model) => ({
@@ -257,6 +342,25 @@ export function ChatPanel({
           : 'normal',
     [preferences.uiDensity],
   )
+  const reconcileEffectAfterDecisionFailure = useCallback(
+    async (effect: ChatEffect) => {
+      try {
+        const current = await api.getChatEffect(effect.effect_id)
+        if (current.status === 'pending_approval') return false
+        setSettledEffectIds((effectIds) => new Set(effectIds).add(effect.effect_id))
+        clearPendingReview({
+          ...current.result,
+          approved: current.status === 'completed',
+          status: current.status,
+        })
+        await queryClient.invalidateQueries({ queryKey: ['chat-effects', current.thread_id] })
+        return true
+      } catch {
+        return false
+      }
+    },
+    [clearPendingReview, queryClient],
+  )
   const cancelPublication = async () => {
     if (!pendingEffect || publishing) return
     setPublishing(true)
@@ -271,7 +375,7 @@ export function ChatPanel({
       setPublishError(false)
       await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
     } catch {
-      setPublishError(true)
+      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setPublishError(true)
     } finally {
       setPublishing(false)
     }
@@ -293,7 +397,7 @@ export function ChatPanel({
       setPendingEffect(null)
       await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
     } catch {
-      setPublishError(true)
+      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setPublishError(true)
     } finally {
       setPublishing(false)
     }
@@ -312,7 +416,7 @@ export function ChatPanel({
       setCreateError(false)
       await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
     } catch {
-      setCreateError(true)
+      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setCreateError(true)
     } finally {
       setCreating(false)
     }
@@ -334,7 +438,30 @@ export function ChatPanel({
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
       await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
     } catch {
-      setCreateError(true)
+      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setCreateError(true)
+    } finally {
+      setCreating(false)
+    }
+  }
+  const decideOrganization = async (verdict: 'approve' | 'deny') => {
+    if (!pendingEffect || !pendingOrganization || creating) return
+    setCreating(true)
+    setCreateError(false)
+    try {
+      const decision = await api.decideChatEffect(pendingEffect, verdict)
+      setSettledEffectIds((effectIds) => new Set(effectIds).add(pendingEffect.effect_id))
+      organizationResolver.current?.(decision.client_result)
+      organizationResolver.current = null
+      removeEffectFromPendingCache(pendingEffect.effect_id)
+      setPendingOrganization(null)
+      setPendingEffect(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['documents'] }),
+        queryClient.invalidateQueries({ queryKey: ['folders'] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] }),
+      ])
+    } catch {
+      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setCreateError(true)
     } finally {
       setCreating(false)
     }
@@ -352,10 +479,15 @@ export function ChatPanel({
       if (effect.capability_id === 'create_document') {
         setCreatedDocument(documentSchema.parse(decision.client_result))
         await queryClient.invalidateQueries({ queryKey: ['documents'] })
-      } else {
+      } else if (effect.capability_id === 'publish_document') {
         const result = issuedPublicationSchema.parse(decision.client_result)
         setPublished(result)
         await queryClient.invalidateQueries({ queryKey: ['publication', effect.preview.document_id] })
+      } else {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['documents'] }),
+          queryClient.invalidateQueries({ queryKey: ['folders'] }),
+        ])
       }
       removeEffectFromPendingCache(effect.effect_id)
     } catch {
@@ -434,6 +566,12 @@ export function ChatPanel({
               <span>{configQuery.data.message} History and proposal review remain available.</span>
             </div>
           )}
+          {configQuery.data.autonomy_mode === 'workspace' && (
+            <div className="chat-autonomy-banner" role="status">
+              <strong>YOLO · no approval prompts</strong>
+              <span>Every authorized effect runs immediately, including publication.</span>
+            </div>
+          )}
           {!compact && <SelectionChip selectedText={activeSelectedText} />}
           {openedCitation && (
             <CitationNavigationStatus
@@ -460,26 +598,31 @@ export function ChatPanel({
               onCancel={() => void cancelCreate()}
             />
           )}
+          {pendingOrganization && pendingEffect && !settledEffectIds.has(pendingEffect.effect_id) && (
+            <OrganizationPlanConfirmation
+              effect={pendingEffect}
+              operations={pendingOrganization}
+              pending={creating}
+              error={createError}
+              onApprove={() => void decideOrganization('approve')}
+              onCancel={() => void decideOrganization('deny')}
+            />
+          )}
           {createdDocument && (
             <CreatedFromChat document={createdDocument} onDismiss={() => setCreatedDocument(null)} />
           )}
           {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
-          {(effectsQuery.data ?? [])
-            .filter(
+          <DurableEffectsSummary
+            effects={(effectsQuery.data ?? []).filter(
               (effect) =>
                 effect.status !== 'pending_approval' &&
                 effect.resource_id !== createdDocument?.document_id &&
                 effect.resource_id !== published?.publication_id,
-            )
-            .map((effect) => (
-              <DurableEffectStatus
-                key={effect.effect_id}
-                effect={effect}
-                resuming={resumingEffectId === effect.effect_id}
-                resumeFailed={resumeErrorIds.has(effect.effect_id)}
-                onResume={() => void resumeEffect(effect)}
-              />
-            ))}
+            )}
+            resumingEffectId={resumingEffectId}
+            resumeErrorIds={resumeErrorIds}
+            onResume={(effect) => void resumeEffect(effect)}
+          />
           {script.status === 'loading' && <StateMessage kind="loading" title="Loading chat interface" />}
           {script.status === 'error' && (
             <StateMessage
@@ -504,6 +647,7 @@ export function ChatPanel({
               inferenceEnabled={configQuery.data.inference_enabled}
               models={models}
               initialThreadId={threadId}
+              activeThreadId={threadId}
               onThreadChange={handleThreadChange}
               onResponseEnd={handleResponseEnd}
               hasDocument={Boolean(activeDocument)}
@@ -678,6 +822,12 @@ export function DurableEffectStatus({
   const retrySafe = effect.failure?.retry_safe === true
   const interrupted = effect.status === 'approved' || effect.status === 'executing'
   const canResume = interrupted || (failed && retrySafe)
+  const noun =
+    effect.capability_id === 'publish_document'
+      ? 'Publication'
+      : effect.capability_id === 'apply_workspace_organization_plan'
+        ? 'Organization plan'
+        : 'Document creation'
   const href =
     effectResultSchema.safeParse(effect.result).data?.url ??
     (effect.capability_id === 'create_document' && effect.resource_id
@@ -690,15 +840,7 @@ export function DurableEffectStatus({
     >
       <div className="chat-effect-complete-copy">
         <strong>
-          {interrupted
-            ? 'Approved effect ready to resume'
-            : failed
-              ? effect.capability_id === 'publish_document'
-                ? 'Publication failed'
-                : 'Document creation failed'
-              : effect.capability_id === 'publish_document'
-                ? 'Publication completed'
-                : 'Document creation completed'}
+          {interrupted ? 'Approved effect ready to resume' : failed ? `${noun} failed` : `${noun} completed`}
         </strong>
         <span>
           {resumeFailed
@@ -720,6 +862,160 @@ export function DurableEffectStatus({
           <ExternalLink size="var(--icon-inline)" />
           Open result
         </a>
+      )}
+    </div>
+  )
+}
+
+function OrganizationPlanConfirmation({
+  effect,
+  operations,
+  pending,
+  error,
+  onApprove,
+  onCancel,
+}: {
+  effect: ChatEffect
+  operations: OrganizationOperation[]
+  pending: boolean
+  error: boolean
+  onApprove: () => void
+  onCancel: () => void
+}) {
+  const expires = new Date(effect.expires_at).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+  return (
+    <section
+      className="chat-effect-confirmation organization-plan-review"
+      role="alertdialog"
+      aria-labelledby="organization-plan-title"
+    >
+      <header>
+        <p className="eyebrow">Workspace effect</p>
+        <h3 id="organization-plan-title">
+          Review {operations.length} organization change{operations.length === 1 ? '' : 's'}
+        </h3>
+        <p>
+          Requested by {effect.requested_by} · expires at {expires}
+        </p>
+      </header>
+      <details open={operations.length <= 6}>
+        <summary>
+          <FolderInput size="var(--icon-inline)" /> Inspect exact plan
+          <ChevronDown size="var(--icon-inline)" />
+        </summary>
+        <ol className="organization-plan-operations">
+          {operations.map((operation, index) => (
+            <li key={`${operation.kind}-${index}`}>
+              <strong>{organizationOperationTitle(operation)}</strong>
+              <span>{organizationOperationDetail(operation)}</span>
+            </li>
+          ))}
+        </ol>
+      </details>
+      {error && (
+        <p className="error-text" role="alert">
+          The decision could not be completed. Refresh the plan before trying again.
+        </p>
+      )}
+      <div className="chat-effect-actions">
+        <button type="button" className="secondary-action" disabled={pending} onClick={onCancel}>
+          Cancel task
+        </button>
+        <button type="button" className="primary-button" disabled={pending} onClick={onApprove}>
+          {pending ? 'Applying…' : 'Approve exact plan'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function organizationOperationTitle(operation: OrganizationOperation) {
+  if (operation.kind === 'create_folder') return `Create folder ${operation.path}`
+  if (operation.kind === 'materialize_document')
+    return `Save draft ${shortId(operation.document_id)} to workspace`
+  if (operation.kind === 'move_document') return `Move document ${shortId(operation.document_id)}`
+  if (operation.kind === 'trash_document') return `Move document ${shortId(operation.document_id)} to Trash`
+  if (operation.kind === 'move_folder') return `Move folder ${operation.expected_source_path}`
+  if (operation.kind === 'update_document_metadata')
+    return `Update document ${shortId(operation.document_id)} metadata`
+  return `Update folder ${shortId(operation.folder_id)} metadata`
+}
+
+function organizationOperationDetail(operation: OrganizationOperation) {
+  if (operation.kind === 'create_folder')
+    return `New path: ${operation.path} · category ${operation.category ?? 'none'} · ${operation.tag_ids.length} tags`
+  if (operation.kind === 'materialize_document')
+    return `New path: ${operation.destination_path} · revision ${shortId(operation.expected_revision_id)}`
+  if (operation.kind === 'move_document')
+    return `${operation.expected_source_path} → ${operation.destination_path} · revision ${shortId(operation.expected_revision_id)}`
+  if (operation.kind === 'trash_document')
+    return `${operation.expected_source_path} → Trash · revision ${shortId(operation.expected_revision_id)}`
+  if (operation.kind === 'move_folder')
+    return `${operation.expected_source_path} → ${operation.destination_path} · ${operation.expected_descendant_documents} descendant documents`
+  return `Category ${operation.expected_category ?? 'none'} → ${operation.category ?? 'none'} · tags ${operation.expected_tag_ids.length ? operation.expected_tag_ids.join(', ') : 'none'} → ${operation.tag_ids.length ? operation.tag_ids.join(', ') : 'none'} · metadata version ${operation.expected_metadata_version}`
+}
+
+function DurableEffectsSummary({
+  effects,
+  resumingEffectId,
+  resumeErrorIds,
+  onResume,
+}: {
+  effects: ChatEffect[]
+  resumingEffectId: string | null
+  resumeErrorIds: Set<string>
+  onResume: (effect: ChatEffect) => void
+}) {
+  if (!effects.length) return null
+  const settled = effects.filter((effect) => effect.status === 'completed')
+  const needsAttention = effects.filter((effect) => effect.status !== 'completed')
+  const creations = settled.filter((effect) => effect.capability_id === 'create_document').length
+  const publications = settled.filter((effect) => effect.capability_id === 'publish_document').length
+  const plans = settled.filter(
+    (effect) => effect.capability_id === 'apply_workspace_organization_plan',
+  ).length
+  const summary = [
+    creations ? `${creations} document${creations === 1 ? '' : 's'} created` : '',
+    publications ? `${publications} publication${publications === 1 ? '' : 's'} completed` : '',
+    plans ? `${plans} organization plan${plans === 1 ? '' : 's'} applied` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <div className="chat-effect-history">
+      {needsAttention.map((effect) => (
+        <DurableEffectStatus
+          key={effect.effect_id}
+          effect={effect}
+          resuming={resumingEffectId === effect.effect_id}
+          resumeFailed={resumeErrorIds.has(effect.effect_id)}
+          onResume={() => onResume(effect)}
+        />
+      ))}
+      {settled.length > 0 && (
+        <details className="chat-effect-stack">
+          <summary>
+            <span>
+              <strong>{summary}</strong>
+              <small>Completed effects are collapsed to keep the conversation visible.</small>
+            </span>
+            <ChevronDown size="var(--icon-inline)" />
+          </summary>
+          <div>
+            {settled.map((effect) => (
+              <DurableEffectStatus
+                key={effect.effect_id}
+                effect={effect}
+                resuming={false}
+                resumeFailed={false}
+                onResume={() => onResume(effect)}
+              />
+            ))}
+          </div>
+        </details>
       )}
     </div>
   )
@@ -1004,7 +1300,7 @@ type LiveChatContext = {
   requestEffectReview: (params: {
     effect_id?: string
     argument_digest?: string
-  }) => Promise<Record<string, JsonScalar>>
+  }) => Promise<Record<string, JsonPayload>>
 }
 
 const chatTurnRequestSchema = z.object({
@@ -1068,6 +1364,7 @@ function WorkspaceChatSurface({
   inferenceEnabled,
   models,
   initialThreadId,
+  activeThreadId,
   onThreadChange,
   onResponseEnd,
   hasDocument,
@@ -1084,6 +1381,7 @@ function WorkspaceChatSurface({
   inferenceEnabled: boolean
   models: Array<{ id: string; label: string; description: string; default?: boolean }>
   initialThreadId: string | null
+  activeThreadId: string | null
   onThreadChange: (thread: { threadId: string | null }) => void
   onResponseEnd: () => void
   hasDocument: boolean
@@ -1093,6 +1391,8 @@ function WorkspaceChatSurface({
   compact: boolean
 }) {
   const [phase, setPhase] = useState<ChatFramePhase>('connecting')
+  const [isResponding, setIsResponding] = useState(false)
+  const responseAbortRef = useRef<AbortController | null>(null)
   useEffect(() => {
     // ChatKit can fail silently (blocked CDN subresource, stale thread id after a
     // server reset). If the frame never reports ready, surface a recoverable
@@ -1117,7 +1417,8 @@ function WorkspaceChatSurface({
         headers.set('X-Sangam-Workspace-Context', '1')
       }
       headers.set('X-Sangam-Chat-Entry', liveRef.current.documentId ? 'document' : 'workspace')
-      if (chatRequestNeedsTurnContext(init?.body)) {
+      const startsTurn = chatRequestNeedsTurnContext(init?.body)
+      if (startsTurn) {
         const snapshot = await api.createChatTurnContext({
           entry_point: liveRef.current.documentId ? 'document' : 'workspace',
           document_id: liveRef.current.documentId,
@@ -1130,7 +1431,14 @@ function WorkspaceChatSurface({
       } else {
         headers.delete('X-Sangam-Context-ID')
       }
-      return fetch(input, { ...init, headers })
+      const controller = startsTurn ? new AbortController() : null
+      if (controller) {
+        responseAbortRef.current = controller
+        setIsResponding(true)
+        if (init?.signal?.aborted) controller.abort()
+        else init?.signal?.addEventListener('abort', () => controller.abort(), { once: true })
+      }
+      return fetch(input, { ...init, headers, signal: controller?.signal ?? init?.signal })
     },
     [liveRef],
   )
@@ -1196,7 +1504,11 @@ function WorkspaceChatSurface({
       return { error: 'Unknown client tool' }
     },
     onThreadChange,
-    onResponseEnd,
+    onResponseEnd: () => {
+      responseAbortRef.current = null
+      setIsResponding(false)
+      onResponseEnd()
+    },
     onDeeplink: onCitationDeeplink,
   })
   const chatkitHostRef = useRef<HTMLElement | null>(null)
@@ -1232,6 +1544,23 @@ function WorkspaceChatSurface({
           }}
           onShowHistory={() => void chatkit.showHistory()}
         />
+      )}
+      {isResponding && (
+        <div className="chat-run-control" role="status">
+          <span>Agent is working</span>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => {
+              responseAbortRef.current?.abort()
+              responseAbortRef.current = null
+              setIsResponding(false)
+              if (activeThreadId) void api.cancelChatRun(activeThreadId)
+            }}
+          >
+            <Square size="var(--icon-inline)" /> Stop
+          </button>
+        </div>
       )}
       <div className={`chatkit-shell phase-${phase}`}>
         <ChatKit

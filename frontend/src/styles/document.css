@@ -216,6 +216,10 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   width: 100%;
 }
 .chat-panel-compact .chatkit-frame, .chat-panel-compact .chatkit-state-overlay { border: 0; border-radius: 0; }
+.chat-run-control { flex: none; min-height: var(--control-height); display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--muted); font-size: var(--text-meta); }
+.chat-run-control .secondary-action { display: inline-flex; align-items: center; gap: var(--space-1); }
+.chat-autonomy-banner { flex: none; display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-3); border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--line)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--warning) 10%, var(--surface)); font-size: var(--text-control); }
+.chat-autonomy-banner span { color: var(--muted); font-size: var(--text-meta); }
 .chat-compact-controls { flex: none; display: flex; justify-content: flex-end; gap: var(--space-1); padding: 0 var(--space-2); }
 .chatkit-shell { position: relative; min-height: 0; flex: 1; display: flex; }
 .chatkit-frame { display: block; min-height: 30rem; flex: 1 0 30rem; width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
@@ -277,6 +281,22 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-effect-complete-copy span { overflow-wrap: anywhere; color: var(--muted); font-size: var(--text-meta); }
 .chat-effect-complete-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .chat-effect-complete-actions .secondary-action { text-decoration: none; }
+.chat-effect-history { flex: none; display: grid; gap: var(--space-2); }
+.chat-effect-stack { border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+.chat-effect-stack > summary { min-height: var(--control-height); display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); cursor: pointer; list-style: none; }
+.chat-effect-stack > summary::-webkit-details-marker { display: none; }
+.chat-effect-stack > summary > span { min-width: 0; display: grid; gap: var(--space-1); }
+.chat-effect-stack > summary small { color: var(--muted); font-size: var(--text-meta); font-weight: 400; }
+.chat-effect-stack[open] > summary > svg, .organization-plan-review details[open] summary > svg { transform: rotate(180deg); }
+.chat-effect-stack > div { max-height: min(40dvh, 24rem); padding: 0 var(--space-2) var(--space-2); overflow: auto; display: grid; gap: var(--space-2); }
+.organization-plan-review details { border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); }
+.organization-plan-review summary { min-height: var(--control-height); display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); cursor: pointer; list-style: none; }
+.organization-plan-review summary::-webkit-details-marker { display: none; }
+.organization-plan-review summary > svg:last-child { margin-left: auto; transition: transform var(--motion-control) var(--ease-ui-out); }
+.organization-plan-operations { max-height: min(40dvh, 24rem); margin: 0; padding: 0 var(--space-3) var(--space-3) calc(var(--space-5) + var(--space-2)); overflow: auto; display: grid; gap: var(--space-2); }
+.organization-plan-operations li { padding: var(--space-2); border-left: 2px solid var(--accent); background: var(--surface); }
+.organization-plan-operations li strong, .organization-plan-operations li span { display: block; overflow-wrap: anywhere; }
+.organization-plan-operations li span { margin-top: var(--space-1); color: var(--muted); font-size: var(--text-meta); }
 .chat-citation-status > div { min-width: 0; display: grid; gap: var(--space-1); }
 .chat-citation-status small { overflow-wrap: anywhere; font-family: var(--font-mono); }
 .chat-citation-status.stale { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }

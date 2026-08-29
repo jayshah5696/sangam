@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
 from sangam.errors import ValidationError
-from sangam.schemas import Document
+from sangam.schemas import Document, OrganizationOperation, OrganizationSnapshotItem
 from sangam.security import Principal
 
 
@@ -51,7 +51,7 @@ class EditorSelectionResult(StrictCapabilityModel):
 class WorkspaceSearchInput(StrictCapabilityModel):
     query: str = Field(min_length=1, max_length=500)
     limit: int = Field(default=5, ge=1, le=25)
-    offset: int = Field(default=0, ge=0)
+    offset: int = Field(default=0, ge=0, le=10_000)
 
 
 class CitationSource(StrictCapabilityModel):
@@ -67,6 +67,31 @@ class CitationSource(StrictCapabilityModel):
 
 class WorkspaceSearchResult(StrictCapabilityModel):
     results: list[CitationSource] = Field(max_length=25)
+
+
+class InspectWorkspaceOrganizationInput(StrictCapabilityModel):
+    item_type: Literal["document", "folder", "tag"] | None = None
+    path_prefix: str | None = Field(default=None, max_length=500)
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class InspectWorkspaceOrganizationResult(StrictCapabilityModel):
+    items: list[OrganizationSnapshotItem] = Field(max_length=100)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    next_offset: int | None = Field(default=None, ge=0)
+
+
+class ApplyWorkspaceOrganizationPlanInput(StrictCapabilityModel):
+    operations: list[OrganizationOperation] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_plan(self) -> ApplyWorkspaceOrganizationPlanInput:
+        from sangam.schemas import ApplyOrganizationPlan
+
+        ApplyOrganizationPlan.model_validate(self.model_dump(mode="json"))
+        return self
 
 
 class ReadDocumentInput(StrictCapabilityModel):
@@ -147,6 +172,7 @@ class CreateDocumentInput(StrictCapabilityModel):
     title: str = Field(min_length=1, max_length=240)
     content: str = Field(max_length=2_000_000)
     content_type: Literal["text/markdown", "text/html"]
+    path: str | None = Field(default=None, max_length=500)
 
 
 class PublishDocumentInput(StrictCapabilityModel):
@@ -182,6 +208,7 @@ class ChatCapability:
     renderer: str | None
     telemetry_redaction: Literal["metadata_only"] = "metadata_only"
     requires_global_scope: bool = False
+    required_any_authority: tuple[Capability, ...] = ()
 
     @property
     def name(self) -> str:
@@ -240,6 +267,23 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         None,
     ),
     ChatCapability(
+        "inspect_workspace_organization",
+        1,
+        "Inspect workspace organization",
+        "List bounded authorized document, folder, and tag metadata with stable IDs and versions.",
+        InspectWorkspaceOrganizationInput,
+        InspectWorkspaceOrganizationResult,
+        EffectClass.READ,
+        ApprovalPolicy.NONE,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        60_000,
+        10.0,
+        "inspect_workspace_organization",
+        None,
+    ),
+    ChatCapability(
         "read_document",
         1,
         "Read document",
@@ -292,9 +336,9 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
     ),
     ChatCapability(
         "create_document",
-        2,
+        3,
         "Create document",
-        "Request one exact Markdown or HTML document creation.",
+        "Request one exact Markdown or HTML document creation, optionally at a workspace path.",
         CreateDocumentInput,
         EffectRequestResult,
         EffectClass.WRITE,
@@ -307,6 +351,24 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         "create_document",
         "document_create",
         requires_global_scope=True,
+    ),
+    ChatCapability(
+        "apply_workspace_organization_plan",
+        1,
+        "Apply workspace organization plan",
+        "Request one exact bounded plan for folder, path, category, and existing-tag changes.",
+        ApplyWorkspaceOrganizationPlanInput,
+        EffectRequestResult,
+        EffectClass.WRITE,
+        ApprovalPolicy.EXACT_EFFECT,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        20_000,
+        20.0,
+        "apply_workspace_organization_plan",
+        "workspace_organization_plan",
+        required_any_authority=(Capability.CREATE, Capability.MOVE, Capability.TAG),
     ),
     ChatCapability(
         "publish_document",
@@ -375,6 +437,17 @@ class ChatCapabilityRegistry:
                 capability.required_authority,
                 path,
                 requires_global_scope=capability.requires_global_scope,
+            ):
+                continue
+            if capability.required_any_authority and not any(
+                self._allows(
+                    principal,
+                    policy,
+                    (authority,),
+                    path,
+                    requires_global_scope=False,
+                )
+                for authority in capability.required_any_authority
             ):
                 continue
             resolved.append(capability)

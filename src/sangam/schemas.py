@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sangam.capabilities import Capability
 
@@ -182,6 +182,171 @@ class UpdateFolderMetadata(MutationRequest):
 
 class MoveFolder(MutationRequest):
     path: str
+
+
+class OrganizationCreateFolder(MutationRequest):
+    kind: Literal["create_folder"]
+    path: str = Field(min_length=1, max_length=500)
+    category: str | None = Field(default=None, max_length=120)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class OrganizationMoveDocument(MutationRequest):
+    kind: Literal["move_document"]
+    document_id: str = Field(min_length=1, max_length=200)
+    expected_revision_id: str = Field(min_length=1, max_length=200)
+    expected_source_path: str = Field(min_length=1, max_length=500)
+    destination_path: str = Field(min_length=1, max_length=500)
+
+
+class OrganizationMaterializeDocument(MutationRequest):
+    kind: Literal["materialize_document"]
+    document_id: str = Field(min_length=1, max_length=200)
+    expected_revision_id: str = Field(min_length=1, max_length=200)
+    destination_path: str = Field(min_length=1, max_length=500)
+
+
+class OrganizationTrashDocument(MutationRequest):
+    kind: Literal["trash_document"]
+    document_id: str = Field(min_length=1, max_length=200)
+    expected_revision_id: str = Field(min_length=1, max_length=200)
+    expected_source_path: str = Field(min_length=1, max_length=500)
+
+
+class OrganizationMoveFolder(MutationRequest):
+    kind: Literal["move_folder"]
+    folder_id: str = Field(min_length=1, max_length=200)
+    expected_source_path: str = Field(min_length=1, max_length=500)
+    destination_path: str = Field(min_length=1, max_length=500)
+    expected_descendant_documents: int = Field(ge=0, le=100_000)
+
+
+class OrganizationUpdateDocumentMetadata(MutationRequest):
+    kind: Literal["update_document_metadata"]
+    document_id: str = Field(min_length=1, max_length=200)
+    expected_metadata_version: int = Field(ge=0)
+    expected_category: str | None = Field(default=None, max_length=120)
+    expected_tag_ids: list[str] = Field(default_factory=list, max_length=50)
+    category: str | None = Field(default=None, max_length=120)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class OrganizationUpdateFolderMetadata(MutationRequest):
+    kind: Literal["update_folder_metadata"]
+    folder_id: str = Field(min_length=1, max_length=200)
+    expected_metadata_version: int = Field(ge=0)
+    expected_category: str | None = Field(default=None, max_length=120)
+    expected_tag_ids: list[str] = Field(default_factory=list, max_length=50)
+    category: str | None = Field(default=None, max_length=120)
+    tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+OrganizationOperation = Annotated[
+    OrganizationCreateFolder
+    | OrganizationMoveDocument
+    | OrganizationMaterializeDocument
+    | OrganizationTrashDocument
+    | OrganizationMoveFolder
+    | OrganizationUpdateDocumentMetadata
+    | OrganizationUpdateFolderMetadata,
+    Field(discriminator="kind"),
+]
+
+
+class ApplyOrganizationPlan(MutationRequest):
+    operations: list[OrganizationOperation] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def reject_duplicate_state_changes(self) -> ApplyOrganizationPlan:
+        seen: set[tuple[str, str]] = set()
+        for operation in self.operations:
+            if operation.kind == "create_folder":
+                key = (operation.kind, operation.path)
+            elif operation.kind in {
+                "move_document",
+                "materialize_document",
+                "trash_document",
+                "update_document_metadata",
+            }:
+                key = (
+                    "document_path"
+                    if operation.kind in {"move_document", "materialize_document", "trash_document"}
+                    else "document_metadata",
+                    operation.document_id,
+                )
+            else:
+                key = (
+                    "folder_path" if operation.kind == "move_folder" else "folder_metadata",
+                    operation.folder_id,
+                )
+            if key in seen:
+                raise ValueError("A plan cannot change the same resource state more than once")
+            seen.add(key)
+        return self
+
+
+class OrganizationPlanItemResult(BaseModel):
+    index: int = Field(ge=0)
+    kind: str
+    status: Literal["completed", "skipped", "conflicted", "failed"]
+    resource_type: Literal["document", "folder"]
+    resource_id: str | None = None
+    path: str | None = None
+    operation_key: str | None = None
+    message: str
+
+
+class OrganizationPlanResult(BaseModel):
+    status: Literal["completed", "partial", "failed"]
+    argument_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    completed: int = Field(ge=0)
+    skipped: int = Field(ge=0)
+    conflicted: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    items: list[OrganizationPlanItemResult] = Field(max_length=100)
+
+
+class OrganizationDocumentSnapshot(BaseModel):
+    kind: Literal["document"] = "document"
+    document_id: str
+    title: str
+    content_type: Literal["text/markdown", "text/html", "application/pdf"]
+    path: str | None
+    current_revision_id: str
+    metadata_version: int
+    category: str | None
+    tags: list[Tag]
+    deleted: bool
+
+
+class OrganizationFolderSnapshot(BaseModel):
+    kind: Literal["folder"] = "folder"
+    folder_id: str
+    path: str
+    metadata_version: int
+    category: str | None
+    tags: list[Tag]
+    descendant_document_count: int = Field(ge=0)
+
+
+class OrganizationTagSnapshot(BaseModel):
+    kind: Literal["tag"] = "tag"
+    tag_id: str
+    name: str
+    color: str
+
+
+OrganizationSnapshotItem = Annotated[
+    OrganizationDocumentSnapshot | OrganizationFolderSnapshot | OrganizationTagSnapshot,
+    Field(discriminator="kind"),
+]
+
+
+class OrganizationSnapshotPage(BaseModel):
+    items: list[OrganizationSnapshotItem] = Field(max_length=100)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    next_offset: int | None = Field(default=None, ge=0)
 
 
 class UpdateDocument(MutationRequest):
@@ -517,6 +682,7 @@ class ChatRuntimeConfig(BaseModel):
     default_model: str
     available_models: list[ChatModelInfo]
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"]
+    autonomy_mode: Literal["review", "workspace"]
 
 
 class ChatModelInfo(BaseModel):
@@ -536,6 +702,7 @@ class ChatModelInfo(BaseModel):
 
 class ChatModelSettings(BaseModel):
     workspace_enabled: bool
+    autonomy_mode: Literal["review", "workspace"]
     default_model: str
     enabled_models: list[str]
     catalog: list[ChatModelInfo]
@@ -548,6 +715,7 @@ class ChatModelSelectionUpdate(BaseModel):
 
     expected_version: int = Field(ge=1)
     workspace_enabled: bool
+    autonomy_mode: Literal["review", "workspace"] = "review"
     default_model: str = Field(min_length=1, max_length=320)
     enabled_models: list[str] = Field(min_length=1, max_length=100)
     unknown_model_overrides: list[str] = Field(default_factory=list, max_length=100)
@@ -648,7 +816,9 @@ class ChatEffect(BaseModel):
     effect_id: str
     thread_id: str
     requested_by: str
-    capability_id: Literal["create_document", "publish_document"]
+    capability_id: Literal[
+        "create_document", "publish_document", "apply_workspace_organization_plan"
+    ]
     capability_version: int
     argument_digest: str
     preview: dict[str, object]

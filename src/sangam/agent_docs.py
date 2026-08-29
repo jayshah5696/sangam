@@ -196,6 +196,21 @@ def agent_skill(base_url: str) -> str:
         {{"expected_metadata_version":1,"category":"research","tag_ids":["..."]}}
         ```
 
+        Inspect organization metadata before preparing a multi-resource change. The response is paginated and includes stable IDs and observed versions, not document content:
+
+        ```text
+        GET /api/v1/organization?item_type=document&offset=0&limit=50
+        ```
+
+        Submit one bounded, idempotent plan instead of unrelated request loops:
+
+        ```text
+        POST /api/v1/organization/plans
+        {{"operations":[{{"kind":"move_document","document_id":"...","expected_revision_id":"...","expected_source_path":"agents/note.md","destination_path":"archive/note.md"}}]}}
+        ```
+
+        Plans support folder creation, document and folder moves, exact metadata replacement, and document Trash. Sangam validates the complete plan before its first write and returns explicit completed, skipped, conflicted, and failed items.
+
         Restoring creates a new current revision. Deleting moves a document to Sangam's trash. Use either only after explicit user intent:
 
         ```text

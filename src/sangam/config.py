@@ -56,14 +56,15 @@ class Settings(BaseSettings):
     openrouter_http_referer: str | None = None
     openrouter_app_title: str = "Sangam"
     chatkit_domain_key: str = "local-dev"
-    chat_default_model: str = Field(default="openai/gpt-5.6-luna", min_length=1, max_length=160)
+    chat_default_model: str = Field(default="openai/gpt-5.6-sol", min_length=1, max_length=160)
     chat_available_models: tuple[str, ...] = (
+        "openai/gpt-5.6-sol",
         "openai/gpt-5.6-luna",
         "openai/gpt-5.4-mini",
         "openai/gpt-5.4-nano",
         "openai/gpt-5.6-terra",
     )
-    chat_reasoning_effort: ChatReasoningEffort = "low"
+    chat_reasoning_effort: ChatReasoningEffort = "medium"
     chat_timeout_seconds: float = Field(default=120.0, ge=5.0, le=600.0)
     chat_max_tool_rounds: int = Field(default=24, ge=1, le=48)
     chat_max_tool_result_bytes: int = Field(default=40_000, ge=1_024, le=500_000)

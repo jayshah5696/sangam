@@ -61,6 +61,7 @@ _CATALOG_ADAPTER = TypeAdapter(list[_CatalogEntry])
 @dataclass(frozen=True)
 class ModelSettingsState:
     workspace_enabled: bool
+    autonomy_mode: Literal["review", "workspace"]
     default_model: str
     enabled_models: tuple[str, ...]
     catalog: tuple[CatalogModel, ...]
@@ -70,6 +71,7 @@ class ModelSettingsState:
 
 def _curated_openrouter_catalog() -> tuple[CatalogModel, ...]:
     entries = (
+        ("openai/gpt-5.6-sol", "GPT-5.6 Sol", "openai", True),
         ("openai/gpt-5.6-luna", "GPT-5.6 Luna", "openai", True),
         ("openai/gpt-5.4-mini", "GPT-5.4 Mini", "openai", True),
         ("openai/gpt-5.4-nano", "GPT-5.4 Nano", "openai", True),
@@ -136,6 +138,7 @@ class ChatModelSettingsRepository:
             if row is None:
                 state = ModelSettingsState(
                     workspace_enabled=True,
+                    autonomy_mode="review",
                     default_model=self._seed_default_model,
                     enabled_models=self._seed_enabled_models,
                     catalog=self._seed_catalog(),
@@ -151,6 +154,7 @@ class ChatModelSettingsRepository:
         *,
         expected_version: int,
         workspace_enabled: bool,
+        autonomy_mode: Literal["review", "workspace"],
         default_model: str,
         enabled_models: list[str],
         unknown_model_overrides: list[str],
@@ -203,6 +207,7 @@ class ChatModelSettingsRepository:
             raise ValidationError("The default model must be one of the enabled models")
         state = ModelSettingsState(
             workspace_enabled=workspace_enabled,
+            autonomy_mode=autonomy_mode,
             default_model=normalized_default,
             enabled_models=tuple(deduped),
             catalog=tuple(catalog.values()),
@@ -227,6 +232,7 @@ class ChatModelSettingsRepository:
                 catalog[ref] = old
         state = ModelSettingsState(
             workspace_enabled=current.workspace_enabled,
+            autonomy_mode=current.autonomy_mode,
             default_model=current.default_model,
             enabled_models=current.enabled_models,
             catalog=tuple(catalog.values()),
@@ -242,8 +248,8 @@ class ChatModelSettingsRepository:
             """
             INSERT INTO chat_model_settings(
                 id, openrouter_enabled, default_model, enabled_models_json,
-                catalog_json, catalog_fetched_at, updated_at, version
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                catalog_json, catalog_fetched_at, updated_at, version, autonomy_mode
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             _state_values(state),
         )
@@ -254,7 +260,8 @@ class ChatModelSettingsRepository:
                 """
                 UPDATE chat_model_settings SET
                     openrouter_enabled = ?, default_model = ?, enabled_models_json = ?,
-                    catalog_json = ?, catalog_fetched_at = ?, updated_at = ?, version = ?
+                    catalog_json = ?, catalog_fetched_at = ?, updated_at = ?, version = ?,
+                    autonomy_mode = ?
                 WHERE id = 1 AND version = ?
                 """,
                 (*_state_values(state), expected_version),
@@ -298,6 +305,7 @@ class ChatModelCatalog:
         connections = {item.connection_id: item for item in self.connections.list()}
         return ChatModelSettings(
             workspace_enabled=state.workspace_enabled,
+            autonomy_mode=state.autonomy_mode,
             default_model=state.default_model,
             enabled_models=list(state.enabled_models),
             catalog=[
@@ -330,6 +338,7 @@ class ChatModelCatalog:
         *,
         expected_version: int,
         workspace_enabled: bool,
+        autonomy_mode: Literal["review", "workspace"],
         default_model: str,
         enabled_models: list[str],
         unknown_model_overrides: list[str],
@@ -345,6 +354,7 @@ class ChatModelCatalog:
         self.repository.update(
             expected_version=expected_version,
             workspace_enabled=workspace_enabled,
+            autonomy_mode=autonomy_mode,
             default_model=default_model,
             enabled_models=enabled_models,
             unknown_model_overrides=unknown_model_overrides,
@@ -392,6 +402,7 @@ def _state_from_row(row) -> ModelSettingsState:
         raise IntegrationError("Stored chat model settings are invalid") from error
     return ModelSettingsState(
         workspace_enabled=bool(row["openrouter_enabled"]),
+        autonomy_mode=row["autonomy_mode"],
         default_model=_normalize_ref(row["default_model"]),
         enabled_models=enabled,
         catalog=catalog,
@@ -441,6 +452,7 @@ def _state_values(state: ModelSettingsState) -> tuple[object, ...]:
         state.catalog_fetched_at,
         utc_now(),
         state.version,
+        state.autonomy_mode,
     )
 
 

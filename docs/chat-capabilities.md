@@ -37,7 +37,7 @@ The context record intentionally excludes provider credentials. Run evidence sto
 
 ## Durable effect contract
 
-Document creation and publication follow this sequence:
+Document creation, workspace organization, and publication follow this sequence:
 
 1. Validate model arguments with the capability input schema.
 2. Normalize the arguments and calculate a stable digest.
@@ -48,11 +48,25 @@ Document creation and publication follow this sequence:
 7. Execute through `WorkspaceAccessService` with the reserved operation key.
 8. Store the resulting resource ID or a safe failure record.
 
-The browser never performs the domain mutation. Reloading the browser restores pending, completed, and failed effect state from SQLite. Repeating a completed approval returns the original result. If the domain mutation commits before the effect completion write, a retry uses the same operation key and converges on the same resource.
+The browser never performs the domain mutation. The model run stops at the first durable effect and resumes only after the browser returns its stored result. This keeps multi-effect requests sequential, prevents duplicate pending cards, and prevents the assistant from narrating a missing result while approval or YOLO execution is still resolving. Reloading the browser restores pending, completed, and failed effect state from SQLite. Repeating a completed approval returns the original result. If the domain mutation commits before the effect completion write, a retry uses the same operation key and converges on the same resource.
 
 An effect left in `approved` or `executing` state after an interruption is also restored. The UI offers a resume action bound to the stored approval and operation key. Before retrying publication, the server checks whether that operation key already committed: a committed publication is recovered even if the document later changed, while an uncommitted request still has to match the approved revision.
 
 Publication approval binds the document ID, exact revision, slug, and access policy. If the document revision changes, execution fails and requires a new effect. Unlisted publication tokens are returned once to the approving browser and are not stored in the chat effect result.
+
+### Workspace organization
+
+`inspect_workspace_organization` returns at most 100 authorized documents, folders, or tags per page. It includes stable IDs, current revision or metadata versions, exact paths, tags, categories, and folder descendant counts. It never returns document content.
+
+`apply_workspace_organization_plan` accepts at most 100 exact operations. Plans can create folders, save unmaterialized drafts at workspace paths, move documents or folders, replace document or folder metadata, and move documents to Trash. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
+
+The explorer, command palette, raw API, and chat all call this service through `WorkspaceAccessService`. A partial result is explicit and never displayed as complete.
+
+### Review and YOLO autonomy
+
+The default permission mode is **Review every effect**. It pauses every durable effect for an exact decision. Operators can select **YOLO · run without approval** in AI settings. YOLO executes every effect immediately, including publication. The normal capability and path checks still run, so YOLO removes approval prompts without granting new authority.
+
+The chat panel shows the active mode. Pending organization plans use a dedicated renderer that lists every operation and its before-and-after state. Completed effects collapse into one expandable summary. **Stop** persists run cancellation, cancels effects that have not started, and aborts the active browser stream. Starting another thread cancels the current run and clears its pending card.
 
 ## Add a capability
 

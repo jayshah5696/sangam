@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 import { expect, test } from './fixtures'
+import { documentSchema, type ChatEffect } from '../src/api'
 
 async function createPublication(request: import('@playwright/test').APIRequestContext) {
   const suffix = randomUUID().slice(0, 8)
@@ -114,11 +115,40 @@ test('compact chat exposes shared new-chat and history controls', async ({
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop inspector only')
   const threadId = await createChatThread(request)
+  const staleReview: ChatEffect = {
+    effect_id: 'effect-stale-after-new-chat',
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: 'create_document',
+    capability_version: 3,
+    argument_digest: 'e'.repeat(64),
+    preview: {
+      title: 'Stale review',
+      content: '# This card must disappear',
+      content_type: 'text/markdown',
+      path: 'stale-review.md',
+    },
+    effect_class: 'write',
+    risk: 'workspace',
+    status: 'pending_approval',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: null,
+    resource_id: null,
+    result: null,
+    failure: null,
+    created_at: '2026-08-23T12:00:00Z',
+    decided_at: null,
+    completed_at: null,
+  }
+  await page.route('**/api/v1/chat/effects**', async (route) => {
+    await route.fulfill({ json: [staleReview] })
+  })
   await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
   await page.goto(`/documents/${seededWorkspace.documentId}`)
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
 
   const compact = page.locator('.inspector-chat-surface')
+  await expect(compact.getByRole('alertdialog', { name: /Create Markdown document/ })).toBeVisible()
   const newChat = compact.getByRole('button', { name: 'New chat' })
   const history = compact.getByRole('button', { name: 'Chat history' })
   await expect(newChat).toBeVisible()
@@ -146,6 +176,13 @@ test('compact chat exposes shared new-chat and history controls', async ({
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem('sangam.chat-thread.workspace')))
     .toBeNull()
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      }),
+  )
+  await expect(compact.getByRole('alertdialog')).toHaveCount(0)
   await history.click()
   await expect(compact).toBeVisible()
 
@@ -300,12 +337,229 @@ test('durable effect review restores exact pending and completed state', async (
     completed_at: '2026-08-23T12:01:01Z',
   }
   await page.reload()
+  await expect(page.getByText('1 document created', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText('Completed effects are collapsed to keep the conversation visible.'),
+  ).toBeVisible()
+  await page.getByText('1 document created', { exact: true }).click()
   await expect(page.getByText('Document creation completed', { exact: true })).toBeVisible()
   await expect(page.getByText('Recorded effect effect-b', { exact: false })).toBeVisible()
   const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
   if (evidenceDir) {
     await page.locator('.chat-panel').screenshot({
       path: path.join(evidenceDir, `issue-110-durable-effect-${testInfo.project.name}.png`),
+    })
+  }
+})
+
+test('sequential creation approvals clear permanently after both effects complete', async ({
+  page,
+  request,
+}) => {
+  const threadId = await createChatThread(request)
+  const firstResponse = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: 'Sequential alpha',
+      content: '<h1>Alpha</h1>',
+      content_type: 'text/html',
+      path: `sequential-review-${randomUUID()}/alpha.html`,
+    },
+  })
+  expect(firstResponse.ok(), await firstResponse.text()).toBeTruthy()
+  const secondResponse = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: 'Sequential beta',
+      content: '<h1>Beta</h1>',
+      content_type: 'text/html',
+      path: `sequential-review-${randomUUID()}/beta.html`,
+    },
+  })
+  expect(secondResponse.ok(), await secondResponse.text()).toBeTruthy()
+  const firstDocument = documentSchema.parse(await firstResponse.json())
+  const secondDocument = documentSchema.parse(await secondResponse.json())
+  const effects: ChatEffect[] = [
+    {
+      effect_id: 'effect-sequential-alpha',
+      thread_id: threadId,
+      requested_by: 'human:jay',
+      capability_id: 'create_document',
+      capability_version: 3,
+      argument_digest: 'c'.repeat(64),
+      preview: {
+        title: 'Sequential alpha',
+        content: '<h1>Alpha</h1>',
+        content_type: 'text/html',
+        path: 'sequential/alpha.html',
+      },
+      effect_class: 'write',
+      risk: 'workspace',
+      status: 'pending_approval',
+      expires_at: '2099-08-23T12:00:00Z',
+      resource_type: null,
+      resource_id: null,
+      result: null,
+      failure: null,
+      created_at: '2026-08-23T12:00:00Z',
+      decided_at: null,
+      completed_at: null,
+    },
+    {
+      effect_id: 'effect-sequential-beta',
+      thread_id: threadId,
+      requested_by: 'human:jay',
+      capability_id: 'create_document',
+      capability_version: 3,
+      argument_digest: 'd'.repeat(64),
+      preview: {
+        title: 'Sequential beta',
+        content: '<h1>Beta</h1>',
+        content_type: 'text/html',
+        path: 'sequential/beta.html',
+      },
+      effect_class: 'write',
+      risk: 'workspace',
+      status: 'pending_approval',
+      expires_at: '2099-08-23T12:00:01Z',
+      resource_type: null,
+      resource_id: null,
+      result: null,
+      failure: null,
+      created_at: '2026-08-23T12:00:01Z',
+      decided_at: null,
+      completed_at: null,
+    },
+  ]
+  const results = new Map([
+    ['effect-sequential-alpha', firstDocument],
+    ['effect-sequential-beta', secondDocument],
+  ])
+  await page.route('**/api/v1/chat/effects**', async (route) => {
+    const effectId = new URL(route.request().url()).pathname.split('/').at(-2)
+    if (route.request().method() === 'POST' && effectId) {
+      const effect = effects.find((item) => item.effect_id === effectId)!
+      const result = results.get(effectId)!
+      effect.status = 'completed'
+      effect.resource_type = 'document'
+      effect.resource_id = result.document_id
+      effect.result = result
+      effect.decided_at = '2026-08-23T12:01:00Z'
+      effect.completed_at = '2026-08-23T12:01:01Z'
+      await route.fulfill({ json: { effect, client_result: result } })
+      return
+    }
+    await route.fulfill({ json: effects })
+  })
+  await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
+  await page.goto('/chat')
+
+  const firstReview = page.getByRole('alertdialog', { name: 'Create HTML document "Sequential alpha"?' })
+  await expect(firstReview).toBeVisible()
+  await firstReview.getByRole('button', { name: 'Approve HTML document creation' }).click()
+  const secondReview = page.getByRole('alertdialog', { name: 'Create HTML document "Sequential beta"?' })
+  await expect(secondReview).toBeVisible()
+  await secondReview.getByRole('button', { name: 'Approve HTML document creation' }).click()
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+
+  await page.reload()
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  await expect(page.getByText('2 documents created', { exact: true })).toBeVisible()
+})
+
+test('completed effects stay grouped and organization review shows exact operations', async ({
+  page,
+  request,
+}, testInfo) => {
+  const threadId = await createChatThread(request)
+  const completed = Array.from({ length: 14 }, (_, index) => ({
+    effect_id: `effect-grouped-${index}`,
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: 'create_document',
+    capability_version: 2,
+    argument_digest: String(index).padStart(64, 'a').slice(-64),
+    preview: {
+      title: `Grouped document ${index + 1}`,
+      content: '# Exact source',
+      content_type: 'text/markdown',
+    },
+    effect_class: 'write',
+    risk: 'workspace',
+    status: 'completed',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: 'document',
+    resource_id: `document-grouped-${index}`,
+    result: { document_id: `document-grouped-${index}`, title: `Grouped document ${index + 1}` },
+    failure: null,
+    created_at: '2026-08-23T12:00:00Z',
+    decided_at: '2026-08-23T12:01:00Z',
+    completed_at: '2026-08-23T12:01:01Z',
+  }))
+  const organization = {
+    effect_id: 'effect-organization-review',
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: 'apply_workspace_organization_plan',
+    capability_version: 1,
+    argument_digest: 'b'.repeat(64),
+    preview: {
+      operations: [
+        {
+          kind: 'create_folder',
+          path: 'archive',
+          category: null,
+          tag_ids: [],
+        },
+        {
+          kind: 'move_document',
+          document_id: 'document-review',
+          expected_revision_id: 'revision-review',
+          expected_source_path: 'inbox/review.md',
+          destination_path: 'archive/review.md',
+        },
+      ],
+      summary: '1 create folder, 1 move document',
+    },
+    effect_class: 'write',
+    risk: 'workspace',
+    status: 'pending_approval',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: null,
+    resource_id: null,
+    result: null,
+    failure: null,
+    created_at: '2026-08-23T12:00:00Z',
+    decided_at: null,
+    completed_at: null,
+  }
+  await page.route('**/api/v1/chat/effects**', async (route) => {
+    await route.fulfill({ json: [...completed, organization] })
+  })
+  await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
+  await page.goto('/chat')
+
+  const stack = page.locator('.chat-effect-stack')
+  await expect(stack).toHaveCount(1)
+  await expect(stack.getByText('14 documents created', { exact: true })).toBeVisible()
+  await expect(stack.locator('.chat-effect-complete')).toHaveCount(14)
+  await expect(stack.locator('.chat-effect-complete').first()).toBeHidden()
+  const stackBounds = await stack.boundingBox()
+  expect(stackBounds).not.toBeNull()
+  expect(stackBounds!.height).toBeLessThan(100)
+
+  const review = page.getByRole('alertdialog', { name: 'Review 2 organization changes' })
+  await expect(review).toBeVisible()
+  await expect(review.getByText('Inspect exact plan')).toBeVisible()
+  await expect(review.getByText('Create folder archive')).toBeVisible()
+  await expect(review.getByText('inbox/review.md → archive/review.md', { exact: false })).toBeVisible()
+  await expect(review.getByRole('button', { name: 'Approve exact plan' })).toBeVisible()
+  await expect(review.getByRole('button', { name: 'Cancel task' })).toBeVisible()
+
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir) {
+    await page.locator('.chat-panel').screenshot({
+      path: path.join(evidenceDir, `grouped-effects-and-organization-${testInfo.project.name}.png`),
     })
   }
 })
