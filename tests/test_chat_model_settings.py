@@ -25,7 +25,8 @@ def test_chat_models_are_connection_scoped_and_seeded_from_defaults(
 ) -> None:
     body = client.get("/api/v1/chat/models").json()
     assert body["workspace_enabled"] is True
-    assert body["default_model"] == "openrouter::openai/gpt-5.6-luna"
+    assert body["default_model"] == "openrouter::openai/gpt-5.6-sol"
+    assert body["autonomy_mode"] == "review"
     assert all(item.startswith("openrouter::") for item in body["enabled_models"])
     catalog_ids = {model["id"] for model in body["catalog"]}
     assert set(body["enabled_models"]).issubset(catalog_ids)

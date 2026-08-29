@@ -234,6 +234,41 @@ class ChatEvidenceRepository:
                 ),
             )
 
+    def request_cancel(self, principal: Principal, *, thread_id: str) -> str | None:
+        """Persist cancellation for the newest run owned by this principal."""
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                """
+                SELECT run_id FROM chat_runs
+                WHERE thread_id = ? AND actor_id = ? AND status = 'running'
+                ORDER BY started_at DESC LIMIT 1
+                """,
+                (thread_id, principal.actor_id),
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                "UPDATE chat_runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?) "
+                "WHERE run_id = ?",
+                (utc_now(), row["run_id"]),
+            )
+            connection.execute(
+                """
+                UPDATE chat_effects
+                SET status = 'cancelled', completed_at = ?
+                WHERE run_id = ? AND status IN ('proposed', 'pending_approval', 'approved')
+                """,
+                (utc_now(), row["run_id"]),
+            )
+            return row["run_id"]
+
+    def cancel_requested(self, run_id: str) -> bool:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT cancel_requested_at FROM chat_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        return row is not None and row["cancel_requested_at"] is not None
+
     def record_tool(
         self,
         *,

@@ -73,9 +73,14 @@ class WorkspaceOrganizationService:
             raise ValidationError("One or more tags do not exist", details={"tag_ids": missing})
         return unique_ids
 
-    def list_tags(self) -> list[Tag]:
+    def list_tags(self, *, limit: int | None = None, offset: int = 0) -> list[Tag]:
         with self.database.connection() as connection:
-            rows = connection.execute("SELECT * FROM tags ORDER BY name COLLATE NOCASE").fetchall()
+            query = "SELECT * FROM tags ORDER BY name COLLATE NOCASE"
+            parameters: tuple[object, ...] = ()
+            if limit is not None:
+                query += " LIMIT ? OFFSET ?"
+                parameters = (limit, offset)
+            rows = connection.execute(query, parameters).fetchall()
         return [Tag.model_validate(dict(row)) for row in rows]
 
     def create_tag(self, *, name: str, color: str, actor_id: str, idempotency_key: str) -> Tag:
@@ -137,11 +142,14 @@ class WorkspaceOrganizationService:
                 raise RuntimeError("Idempotent tag result could not be reloaded")
             return Tag.model_validate(dict(row))
 
-    def list_folders(self) -> list[Folder]:
+    def list_folders(self, *, limit: int | None = None, offset: int = 0) -> list[Folder]:
         with self.database.connection() as connection:
-            rows = connection.execute(
-                "SELECT * FROM folders ORDER BY path COLLATE NOCASE"
-            ).fetchall()
+            query = "SELECT * FROM folders ORDER BY path COLLATE NOCASE"
+            parameters: tuple[object, ...] = ()
+            if limit is not None:
+                query += " LIMIT ? OFFSET ?"
+                parameters = (limit, offset)
+            rows = connection.execute(query, parameters).fetchall()
             return [self._folder_from_row(connection, row) for row in rows]
 
     def create_folder(

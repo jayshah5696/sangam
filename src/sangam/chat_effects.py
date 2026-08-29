@@ -17,7 +17,7 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.idempotency import request_hash
-from sangam.schemas import ChatEffect
+from sangam.schemas import ApplyOrganizationPlan, ChatEffect
 from sangam.security import Principal
 
 
@@ -54,7 +54,11 @@ class ChatEffectService:
         arguments: dict[str, object],
         preview: dict[str, object],
     ) -> ChatEffect:
-        if capability.capability_id not in {"create_document", "publish_document"}:
+        if capability.capability_id not in {
+            "create_document",
+            "publish_document",
+            "apply_workspace_organization_plan",
+        }:
             raise ValidationError("That chat capability does not use durable effects")
         normalized = capability.input_schema.model_validate(arguments).model_dump(mode="json")
         hidden_arguments = [
@@ -109,7 +113,53 @@ class ChatEffectService:
                     now.isoformat(timespec="microseconds"),
                 ),
             )
-        return self.get(principal, effect_id)
+        effect = self.get(principal, effect_id)
+        if self._autonomy_allows(
+            principal,
+            run_id=run_id,
+            capability_id=capability.capability_id,
+            normalized_arguments=normalized,
+        ):
+            return self.decide(
+                principal,
+                effect_id=effect.effect_id,
+                verdict="approve",
+                argument_digest=effect.argument_digest,
+                reason="Bounded workspace autonomy policy",
+            ).effect
+        return effect
+
+    def _autonomy_allows(
+        self,
+        principal: Principal,
+        *,
+        run_id: str,
+        capability_id: str,
+        normalized_arguments: dict[str, object],
+    ) -> bool:
+        """Allow only bounded private effects under the administrator's YOLO policy."""
+        if not principal.administrator:
+            return False
+        if capability_id not in {"create_document", "apply_workspace_organization_plan"}:
+            return False
+        operations = normalized_arguments.get("operations")
+        if isinstance(operations, list) and len(operations) > 25:
+            return False
+        with self.database.connection() as connection:
+            settings = connection.execute(
+                "SELECT autonomy_mode FROM chat_model_settings WHERE id = 1"
+            ).fetchone()
+            if settings is None or settings["autonomy_mode"] != "workspace":
+                return False
+            effect_count = connection.execute(
+                """
+                SELECT count(*) FROM chat_effects
+                WHERE run_id = ? AND risk = 'workspace'
+                  AND status IN ('approved', 'executing', 'completed')
+                """,
+                (run_id,),
+            ).fetchone()[0]
+        return effect_count < 25
 
     def get(self, principal: Principal, effect_id: str) -> ChatEffect:
         with self.database.connection() as connection:
@@ -318,6 +368,25 @@ class ChatEffectService:
                 }
                 resource_type = "publication"
                 resource_id = publication.publication_id
+            elif capability_id == "apply_workspace_organization_plan":
+                plan = ApplyOrganizationPlan.model_validate(arguments)
+                plan_result = self.workspace.apply_workspace_organization_plan(
+                    principal,
+                    plan=plan,
+                    idempotency_key=operation_key,
+                )
+                if plan_result.status != "completed":
+                    raise ConflictError(
+                        "The organization plan stopped before every operation completed",
+                        details=plan_result.model_dump(mode="json"),
+                    )
+                client_result = {
+                    **plan_result.model_dump(mode="json"),
+                    "approved": True,
+                }
+                stored_result = dict(client_result)
+                resource_type = "organization_plan"
+                resource_id = effect_id
             else:
                 raise ValidationError("Unsupported durable chat effect capability")
         except SangamError as error:
@@ -363,6 +432,14 @@ class ChatEffectService:
                     SELECT 1 FROM mutation_idempotency_keys
                     WHERE actor_id = ? AND idempotency_key = ?
                       AND operation = 'publish' AND completed_at IS NOT NULL
+                    """,
+                    (actor_id, operation_key),
+                ).fetchone()
+            elif capability_id == "apply_workspace_organization_plan":
+                row = connection.execute(
+                    """
+                    SELECT 1 FROM organization_plan_executions
+                    WHERE actor_id = ? AND idempotency_key = ?
                     """,
                     (actor_id, operation_key),
                 ).fetchone()

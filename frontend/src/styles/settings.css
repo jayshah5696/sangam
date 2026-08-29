@@ -278,3 +278,6 @@
 @media (prefers-reduced-motion: reduce) {
   .settings-destination-pulse { animation: none; box-shadow: inset 2px 0 var(--accent); }
 }
+.chat-autonomy-setting strong { display: inline-flex; align-items: center; gap: var(--space-1); }
+.chat-autonomy-setting.mode-workspace { border-color: color-mix(in srgb, var(--warning) 55%, var(--line)); background: color-mix(in srgb, var(--warning) 7%, var(--surface)); }
+.chat-autonomy-setting select { min-height: var(--control-height); max-width: 18rem; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); padding-inline: var(--space-2); }

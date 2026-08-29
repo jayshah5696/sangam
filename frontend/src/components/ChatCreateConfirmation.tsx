@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { JsonScalar } from '../api'
+import type { JsonPayload } from '../api'
 
 export type DocumentContentType = 'text/markdown' | 'text/html'
 
@@ -9,7 +9,7 @@ export type CreateConfirmationRequest = {
   contentType: DocumentContentType
 }
 
-export type CreateConfirmationInput = Record<string, JsonScalar>
+export type CreateConfirmationInput = Record<string, JsonPayload>
 
 const FORMAT_LABEL = {
   'text/markdown': 'Markdown',

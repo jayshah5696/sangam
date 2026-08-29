@@ -33,14 +33,16 @@ Configuration:
 | `SANGAM_OPENROUTER_API_KEY` | None | Provider API key |
 | `SANGAM_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL |
 | `SANGAM_CHATKIT_DOMAIN_KEY` | `local-dev` | Domain key registered for your origin |
-| `SANGAM_CHAT_DEFAULT_MODEL` | `openai/gpt-5.6-luna` | Default model slug |
+| `SANGAM_CHAT_DEFAULT_MODEL` | `openai/gpt-5.6-sol` | Default model slug |
 | `SANGAM_CHAT_AVAILABLE_MODELS` | Seed list | JSON list of selectable model slugs |
-| `SANGAM_CHAT_REASONING_EFFORT` | `low` | Reasoning effort preset |
+| `SANGAM_CHAT_REASONING_EFFORT` | `medium` | Reasoning effort preset |
 | `SANGAM_CHAT_TIMEOUT_SECONDS` | `120` | Per-run timeout |
 | `SANGAM_CHAT_MAX_TOOL_ROUNDS` | `8` | Tool-use round budget |
 | `SANGAM_CHAT_MAX_CONCURRENT_RUNS` | `4` | Concurrent chat runs |
 
 Manage models directly from **Settings → Operations & AI → AI & models** (custom slugs and connections supported) or via environment variables.
+
+Permission mode is stored in SQLite beside model selection. **Review every effect** is the safe default. **YOLO · private workspace only** is bounded to trusted-administrator document creation and organization; it does not auto-approve publication.
 
 ### ChatKit domain registration
 

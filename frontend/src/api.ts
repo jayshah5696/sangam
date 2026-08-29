@@ -123,6 +123,78 @@ export const folderSchema = z.object({
 
 export type Folder = z.infer<typeof folderSchema>
 
+export const organizationOperationSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('create_folder'),
+    path: z.string(),
+    category: z.string().nullable(),
+    tag_ids: z.array(z.string()),
+  }),
+  z.object({
+    kind: z.literal('move_document'),
+    document_id: z.string(),
+    expected_revision_id: z.string(),
+    expected_source_path: z.string(),
+    destination_path: z.string(),
+  }),
+  z.object({
+    kind: z.literal('trash_document'),
+    document_id: z.string(),
+    expected_revision_id: z.string(),
+    expected_source_path: z.string(),
+  }),
+  z.object({
+    kind: z.literal('move_folder'),
+    folder_id: z.string(),
+    expected_source_path: z.string(),
+    destination_path: z.string(),
+    expected_descendant_documents: z.number(),
+  }),
+  z.object({
+    kind: z.literal('update_document_metadata'),
+    document_id: z.string(),
+    expected_metadata_version: z.number(),
+    expected_category: z.string().nullable(),
+    expected_tag_ids: z.array(z.string()),
+    category: z.string().nullable(),
+    tag_ids: z.array(z.string()),
+  }),
+  z.object({
+    kind: z.literal('update_folder_metadata'),
+    folder_id: z.string(),
+    expected_metadata_version: z.number(),
+    expected_category: z.string().nullable(),
+    expected_tag_ids: z.array(z.string()),
+    category: z.string().nullable(),
+    tag_ids: z.array(z.string()),
+  }),
+])
+
+export type OrganizationOperation = z.infer<typeof organizationOperationSchema>
+
+export const organizationPlanResultSchema = z.object({
+  status: z.enum(['completed', 'partial', 'failed']),
+  argument_digest: z.string(),
+  completed: z.number(),
+  skipped: z.number(),
+  conflicted: z.number(),
+  failed: z.number(),
+  items: z.array(
+    z.object({
+      index: z.number(),
+      kind: z.string(),
+      status: z.enum(['completed', 'skipped', 'conflicted', 'failed']),
+      resource_type: z.enum(['document', 'folder']),
+      resource_id: z.string().nullable(),
+      path: z.string().nullable(),
+      operation_key: z.string().nullable(),
+      message: z.string(),
+    }),
+  ),
+})
+
+export type OrganizationPlanResult = z.infer<typeof organizationPlanResultSchema>
+
 export const revisionSchema = z.object({
   revision_id: z.string(),
   document_id: z.string(),
@@ -372,6 +444,7 @@ export const chatRuntimeConfigSchema = z.object({
   default_model: z.string(),
   available_models: z.array(z.lazy(() => chatModelInfoSchema)),
   reasoning_effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']),
+  autonomy_mode: z.enum(['review', 'workspace']),
 })
 
 export type ChatRuntimeConfig = z.infer<typeof chatRuntimeConfigSchema>
@@ -393,6 +466,7 @@ export const chatModelInfoSchema = z.object({
 
 export const chatModelSettingsSchema = z.object({
   workspace_enabled: z.boolean(),
+  autonomy_mode: z.enum(['review', 'workspace']),
   default_model: z.string(),
   enabled_models: z.array(z.string()),
   catalog: z.array(chatModelInfoSchema),
@@ -406,6 +480,7 @@ export type ChatModelSettings = z.infer<typeof chatModelSettingsSchema>
 export type ChatModelSelectionUpdate = {
   expected_version: number
   workspace_enabled: boolean
+  autonomy_mode: 'review' | 'workspace'
   default_model: string
   enabled_models: string[]
   unknown_model_overrides: string[]
@@ -467,10 +542,10 @@ export const chatEffectSchema = z.object({
   effect_id: z.string(),
   thread_id: z.string(),
   requested_by: z.string(),
-  capability_id: z.enum(['create_document', 'publish_document']),
+  capability_id: z.enum(['create_document', 'publish_document', 'apply_workspace_organization_plan']),
   capability_version: z.number(),
   argument_digest: z.string(),
-  preview: z.record(z.string(), jsonScalarSchema),
+  preview: z.record(z.string(), z.json()),
   effect_class: z.enum(['write', 'external']),
   risk: z.enum(['workspace', 'external']),
   status: z.enum([
@@ -487,8 +562,8 @@ export const chatEffectSchema = z.object({
   expires_at: z.string(),
   resource_type: z.string().nullable(),
   resource_id: z.string().nullable(),
-  result: z.record(z.string(), jsonScalarSchema).nullable(),
-  failure: z.record(z.string(), jsonScalarSchema).nullable(),
+  result: z.record(z.string(), z.json()).nullable(),
+  failure: z.record(z.string(), z.json()).nullable(),
   created_at: z.string(),
   decided_at: z.string().nullable(),
   completed_at: z.string().nullable(),
@@ -661,15 +736,20 @@ export const api = {
     statuses.forEach((status) => params.append('status', status))
     return z.array(chatEffectSchema).parse(await request(`/chat/effects?${params.toString()}`))
   },
+  async cancelChatRun(threadId: string): Promise<{ cancelled: boolean; run_id: string | null }> {
+    return z
+      .object({ cancelled: z.boolean(), run_id: z.string().nullable() })
+      .parse(await request(`/chat/threads/${threadId}/cancel`, { method: 'POST' }))
+  },
   async decideChatEffect(
     effect: ChatEffect,
     verdict: 'approve' | 'deny',
     reason?: string,
-  ): Promise<{ effect: ChatEffect; client_result: Record<string, JsonScalar> }> {
+  ): Promise<{ effect: ChatEffect; client_result: Record<string, JsonPayload> }> {
     return z
       .object({
         effect: chatEffectSchema,
-        client_result: z.record(z.string(), z.string().or(z.number()).or(z.boolean()).or(z.null())),
+        client_result: z.record(z.string(), z.json()),
       })
       .parse(
         await request(`/chat/effects/${effect.effect_id}/decision`, {
@@ -820,6 +900,14 @@ export const api = {
       await request(`/folders/${folder.folder_id}/move`, {
         method: 'POST',
         body: JSON.stringify({ path }),
+      }),
+    )
+  },
+  async applyOrganizationPlan(operations: OrganizationOperation[]): Promise<OrganizationPlanResult> {
+    return organizationPlanResultSchema.parse(
+      await request('/organization/plans', {
+        method: 'POST',
+        body: JSON.stringify({ operations }),
       }),
     )
   },

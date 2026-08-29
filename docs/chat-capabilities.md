@@ -37,7 +37,7 @@ The context record intentionally excludes provider credentials. Run evidence sto
 
 ## Durable effect contract
 
-Document creation and publication follow this sequence:
+Document creation, workspace organization, and publication follow this sequence:
 
 1. Validate model arguments with the capability input schema.
 2. Normalize the arguments and calculate a stable digest.
@@ -53,6 +53,20 @@ The browser never performs the domain mutation. Reloading the browser restores p
 An effect left in `approved` or `executing` state after an interruption is also restored. The UI offers a resume action bound to the stored approval and operation key. Before retrying publication, the server checks whether that operation key already committed: a committed publication is recovered even if the document later changed, while an uncommitted request still has to match the approved revision.
 
 Publication approval binds the document ID, exact revision, slug, and access policy. If the document revision changes, execution fails and requires a new effect. Unlisted publication tokens are returned once to the approving browser and are not stored in the chat effect result.
+
+### Workspace organization
+
+`inspect_workspace_organization` returns at most 100 authorized documents, folders, or tags per page. It includes stable IDs, current revision or metadata versions, exact paths, tags, categories, and folder descendant counts. It never returns document content.
+
+`apply_workspace_organization_plan` accepts at most 100 exact operations. Plans can create folders, move documents or folders, replace document or folder metadata, and move documents to Trash. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
+
+The explorer, command palette, raw API, and chat all call this service through `WorkspaceAccessService`. A partial result is explicit and never displayed as complete.
+
+### Review and bounded workspace autonomy
+
+The default permission mode is **Review every effect**. Operators can select **YOLO · private workspace only** in AI settings. That mode may auto-approve only document creation and organization plans for the trusted workspace administrator. One plan is capped at 25 operations, and one run is capped at 25 completed private effects. Publication and every other external effect always require exact review. Scoped agents never inherit the administrator's autonomy.
+
+The chat panel shows the active mode. Pending organization plans use a dedicated renderer that lists every operation and its before-and-after state. Completed effects collapse into one expandable summary. **Stop** persists run cancellation, cancels effects that have not started, and aborts the active browser stream.
 
 ## Add a capability
 

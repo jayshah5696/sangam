@@ -37,6 +37,7 @@ from sangam.errors import (
 from sangam.schemas import (
     Actor,
     AgentToken,
+    ApplyOrganizationPlan,
     BackupSet,
     BackupVerification,
     CreateAgentToken,
@@ -56,6 +57,8 @@ from sangam.schemas import (
     IssuedPublication,
     MoveFolder,
     OperationEvent,
+    OrganizationPlanResult,
+    OrganizationSnapshotPage,
     PathMutation,
     Publication,
     PublicationContent,
@@ -630,7 +633,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
         limit: int = Query(default=100, ge=1, le=200),
-        offset: int = Query(default=0, ge=0),
+        offset: int = Query(default=0, ge=0, le=10_000),
         _principal: Principal = admin_dependency,
     ) -> list[OperationEvent]:
         return activity.list_events(
@@ -745,6 +748,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             principal,
             folder_id=folder_id,
             path=body.path,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get("/api/v1/organization", response_model=OrganizationSnapshotPage)
+    def inspect_workspace_organization(
+        item_type: str | None = Query(default=None, pattern="^(document|folder|tag)$"),
+        path_prefix: str | None = Query(default=None, max_length=500),
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=100),
+        principal: Principal = principal_dependency,
+    ) -> OrganizationSnapshotPage:
+        return workspace.inspect_workspace_organization(
+            principal,
+            item_type=item_type,
+            path_prefix=path_prefix,
+            offset=offset,
+            limit=limit,
+        )
+
+    @app.post("/api/v1/organization/plans", response_model=OrganizationPlanResult)
+    def apply_workspace_organization_plan(
+        body: ApplyOrganizationPlan,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> OrganizationPlanResult:
+        return workspace.apply_workspace_organization_plan(
+            principal,
+            plan=body,
             idempotency_key=idempotency_key,
         )
 

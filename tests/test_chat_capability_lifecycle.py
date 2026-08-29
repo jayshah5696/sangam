@@ -103,6 +103,22 @@ def prepare_effect(
     )
 
 
+def set_chat_autonomy(client: TestClient, mode: str) -> None:
+    current = client.get("/api/v1/chat/models").json()
+    response = client.put(
+        "/api/v1/chat/models",
+        json={
+            "expected_version": current["version"],
+            "workspace_enabled": current["workspace_enabled"],
+            "default_model": current["default_model"],
+            "enabled_models": current["enabled_models"],
+            "unknown_model_overrides": [],
+            "autonomy_mode": mode,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_turn_context_captures_selection_and_run_manifest(client: TestClient) -> None:
     document = client.post(
         "/api/v1/documents",
@@ -229,6 +245,7 @@ def test_registry_filters_authority_and_rejects_extra_tool_arguments(client: Tes
     assert {capability.capability_id for capability in resolved} == {
         "get_editor_selection",
         "search_workspace",
+        "inspect_workspace_organization",
         "read_document",
     }
     with pytest.raises(PydanticValidationError):
@@ -373,6 +390,89 @@ def test_denied_effect_has_no_side_effect(client: TestClient) -> None:
     )
     assert response.status_code == 200
     assert response.json()["effect"]["status"] == "denied"
+    assert client.get("/api/v1/documents").json() == []
+
+
+def test_workspace_autonomy_is_bounded_to_private_effects(client: TestClient) -> None:
+    set_chat_autonomy(client, "workspace")
+    created = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={
+            "title": "Autonomous private note",
+            "content": "# Private",
+            "content_type": "text/markdown",
+        },
+        tool_call_id="call_yolo_create",
+    )
+    assert created.effect.status == "completed"
+    assert len(client.get("/api/v1/documents").json()) == 1
+
+    document = client.post(
+        "/api/v1/documents",
+        headers=headers("publish-source"),
+        json={"title": "Publish source", "path": "publish-source.md", "content": "# Source"},
+    ).json()
+    publication = prepare_effect(
+        client,
+        capability_id="publish_document",
+        arguments={
+            "document_id": document["document_id"],
+            "revision_id": document["current_revision_id"],
+            "slug": "publish-source",
+            "access_policy": "public",
+        },
+        tool_call_id="call_yolo_publish",
+    )
+    assert publication.effect.status == "pending_approval"
+
+    oversized = prepare_effect(
+        client,
+        capability_id="apply_workspace_organization_plan",
+        arguments={
+            "operations": [
+                {
+                    "kind": "create_folder",
+                    "path": f"batch/folder-{index}",
+                    "category": None,
+                    "tag_ids": [],
+                }
+                for index in range(26)
+            ]
+        },
+        tool_call_id="call_yolo_oversized",
+    )
+    assert oversized.effect.status == "pending_approval"
+
+
+def test_cancelling_a_run_cancels_pending_effects_and_blocks_approval(
+    client: TestClient,
+) -> None:
+    prepared = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={"title": "Cancelled", "content": "No", "content_type": "text/markdown"},
+        tool_call_id="call_cancelled",
+    )
+
+    cancelled = client.post(f"/api/v1/chat/threads/{prepared.thread_id}/cancel")
+    approval = client.post(
+        f"/api/v1/chat/effects/{prepared.effect.effect_id}/decision",
+        json={
+            "verdict": "approve",
+            "argument_digest": prepared.effect.argument_digest,
+            "reason": None,
+        },
+    )
+
+    assert cancelled.status_code == 200
+    assert cancelled.json() == {"cancelled": True, "run_id": prepared.run_id}
+    assert prepared.chat.evidence.cancel_requested(prepared.run_id) is True
+    assert (
+        prepared.chat.effects.get(prepared.principal, prepared.effect.effect_id).status
+        == "cancelled"
+    )
+    assert approval.status_code == 409
     assert client.get("/api/v1/documents").json() == []
 
 

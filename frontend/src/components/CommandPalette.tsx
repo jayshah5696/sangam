@@ -6,16 +6,20 @@ import {
   ArchiveRestore,
   Bookmark,
   Columns2,
+  Copy,
   FileText,
   FilePlus2,
   Files,
+  FolderInput,
   Globe2,
   MessageSquareText,
+  Pencil,
   RotateCcw,
   Rows2,
   Search,
   Settings,
   ShieldCheck,
+  Tag,
   Trash2,
 } from 'lucide-react'
 import { api } from '../api'
@@ -83,6 +87,46 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         icon: Search,
         group: 'Actions',
         run: onSearch,
+      },
+      {
+        id: 'organize.moveSelected',
+        label: 'Move selected item(s)…',
+        detail: 'Choose a workspace destination in Files',
+        icon: FolderInput,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand(onFiles, 'sangam:explorer-move-selection'),
+      },
+      {
+        id: 'organize.renameSelected',
+        label: 'Rename selected item',
+        detail: 'Rename one selected file or folder',
+        icon: Pencil,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand(onFiles, 'sangam:explorer-rename-selection'),
+      },
+      {
+        id: 'organize.duplicateSelected',
+        label: 'Duplicate selected document',
+        detail: 'Create a copy of one selected document',
+        icon: Copy,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand(onFiles, 'sangam:explorer-duplicate-selection'),
+      },
+      {
+        id: 'organize.editMetadata',
+        label: 'Edit tags for selected item(s)…',
+        detail: 'Apply exact existing tags and an optional category',
+        icon: Tag,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand(onFiles, 'sangam:explorer-edit-metadata'),
+      },
+      {
+        id: 'organize.trashSelected',
+        label: 'Move selected document(s) to Trash',
+        detail: 'Use one guarded bulk organization operation',
+        icon: Trash2,
+        group: 'Actions',
+        run: () => dispatchExplorerCommand(onFiles, 'sangam:explorer-trash-selection'),
       },
       {
         id: 'group.splitRight',
@@ -334,4 +378,9 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
       </section>
     </dialog>
   )
+}
+
+function dispatchExplorerCommand(openFiles: () => void, eventName: string) {
+  openFiles()
+  requestAnimationFrame(() => globalThis.dispatchEvent(new Event(eventName)))
 }

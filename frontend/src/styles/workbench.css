@@ -113,6 +113,11 @@
 
 .file-explorer-panel { padding-inline: 6px; }
 .explorer-create { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; color: var(--sidebar-muted); font-size: var(--text-control); }
+.explorer-selection-actions { min-height: var(--control-height); margin: var(--space-1) 0; padding: var(--space-1); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--accent) 13%, var(--sidebar)); color: var(--sidebar-text); }
+.explorer-selection-actions > span { min-width: 0; flex: 1; padding-inline: var(--space-1); color: var(--sidebar-muted); font-size: var(--text-meta); }
+.explorer-selection-actions > button { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-1); border: 0; border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-text); padding-inline: var(--space-2); }
+.explorer-selection-actions > button.danger { color: var(--danger); }
+.explorer-selection-actions .explorer-more-actions { width: var(--control-height); padding: 0; justify-content: center; }
 .pierre-tree-shell { min-height: 0; flex: 1; position: relative; overflow: hidden; }
 .sangam-file-tree {
   display: block;
@@ -156,6 +161,41 @@
 .explorer-error { margin: 3px 2px 6px; display: flex; align-items: flex-start; gap: 7px; padding: 7px 8px; border: 1px solid color-mix(in srgb, var(--danger) 60%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--danger) 18%, var(--sidebar)); color: var(--sidebar-text); font-size: var(--text-meta); line-height: 1.4; }
 .explorer-error span { min-width: 0; flex: 1; }
 .explorer-error button { border: 0; background: transparent; color: inherit; }
+.move-destination-dialog { position: fixed; inset: 0; width: min(34rem, calc(100vw - var(--space-5) * 2)); max-height: min(42rem, calc(100dvh - var(--space-5) * 2)); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: var(--shadow-panel); }
+.move-destination-dialog::backdrop { background: rgba(8,12,10,.58); backdrop-filter: blur(3px); }
+.move-destination-dialog > form { max-height: inherit; display: grid; grid-template-rows: auto auto minmax(10rem, 1fr) auto; }
+.move-destination-dialog header, .move-destination-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+.move-destination-dialog header { border-bottom: 1px solid var(--line); }
+.move-destination-dialog footer { justify-content: flex-end; border-top: 1px solid var(--line); }
+.move-destination-dialog h2, .move-destination-dialog p { margin: 0; }
+.move-destination-dialog header p { color: var(--muted); font-size: var(--text-meta); }
+.move-destination-dialog header > button { width: var(--control-height); min-height: var(--control-height); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); }
+.move-destination-dialog > form > label { display: grid; gap: var(--space-1); padding: var(--space-3) var(--space-4); color: var(--muted); font-size: var(--text-label); }
+.move-destination-dialog input { min-height: var(--control-height); padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); }
+.move-destination-list { min-height: 0; padding: 0 var(--space-3) var(--space-3); overflow: auto; display: grid; align-content: start; gap: var(--space-1); }
+.move-destination-list > button { min-height: var(--control-height); display: flex; align-items: center; gap: var(--space-2); padding-inline: var(--space-3); border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--text); text-align: left; }
+.move-destination-list > button:hover, .move-destination-list > button[aria-selected="true"] { border-color: var(--line); background: var(--surface-soft); }
+.move-destination-dialog footer button { min-height: var(--control-height); padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); }
+.move-destination-dialog footer button[type="submit"] { border-color: var(--accent); background: var(--accent); color: white; }
+.metadata-dialog > form { grid-template-rows: auto auto minmax(8rem, 1fr) auto auto auto; }
+.metadata-dialog-note { padding: var(--space-3) var(--space-4) 0; color: var(--muted); font-size: var(--text-meta); }
+.metadata-dialog fieldset { min-height: 0; margin: 0; padding: var(--space-3) var(--space-4); overflow: auto; border: 0; }
+.metadata-dialog legend { color: var(--muted); font-size: var(--text-label); }
+.metadata-tag-list { display: grid; gap: var(--space-1); }
+.metadata-tag-list > label { min-height: var(--control-height); display: flex; align-items: center; gap: var(--space-2); padding-inline: var(--space-2); border-radius: var(--radius-control); }
+.metadata-tag-list > label:hover { background: var(--surface-soft); }
+.metadata-tag-swatch { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-pill); }
+.metadata-category-toggle { display: flex !important; grid-template-columns: auto 1fr; align-items: center; }
+
+@media (pointer: coarse) {
+  .explorer-selection-actions > button,
+  .move-destination-dialog header > button,
+  .move-destination-list > button,
+  .move-destination-dialog footer button,
+  .metadata-tag-list > label {
+    min-height: var(--control-touch);
+  }
+}
 
 .search-panel { gap: 8px; }
 .sidebar-search-input { min-height: var(--control-height); display: flex; align-items: center; gap: 7px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--sidebar-text) 22%, transparent); border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-muted); }

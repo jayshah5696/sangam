@@ -13,9 +13,11 @@ from chatkit.types import CustomTask
 
 from sangam.access import WorkspaceAccessService
 from sangam.chat_capabilities import (
+    ApplyWorkspaceOrganizationPlanInput,
     ChatCapability,
     ChatCapabilityRegistry,
     CreateDocumentInput,
+    InspectWorkspaceOrganizationInput,
     ProposeUpdateInput,
     PublishDocumentInput,
     ReadDocumentInput,
@@ -27,6 +29,7 @@ from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_proposals import ChatProposalService
 from sangam.errors import NotFoundError, SangamError, ValidationError
+from sangam.schemas import OrganizationOperation
 
 
 class ChatToolset:
@@ -64,6 +67,13 @@ class ChatToolset:
                 ),
             ),
             function_tool(
+                self.inspect_workspace_organization,
+                description_override=(
+                    "Inspect bounded authorized workspace organization metadata before planning. "
+                    "Use stable IDs and observed revision or metadata versions from this result."
+                ),
+            ),
+            function_tool(
                 self.read_document,
                 description_override=(
                     "Read one authorized Markdown or HTML document. Long documents are "
@@ -94,6 +104,15 @@ class ChatToolset:
                     "Set content_type to 'text/markdown' for Markdown or 'text/html' "
                     "for HTML. The tool opens Sangam's browser confirmation UI. Never "
                     "ask for confirmation in prose before calling it."
+                ),
+            ),
+            function_tool(
+                self.apply_workspace_organization_plan,
+                description_override=(
+                    "After inspecting exact resources, call this tool for the user's requested "
+                    "folder, move, category, or existing-tag changes. Include every observed "
+                    "precondition and exact before/after path or metadata value. The tool opens "
+                    "Sangam's review UI unless bounded workspace autonomy is enabled."
                 ),
             ),
             function_tool(
@@ -158,6 +177,40 @@ class ChatToolset:
 
         return await self._run_tool(
             ctx, self.policies["search_workspace"], validated.query, operation
+        )
+
+    async def inspect_workspace_organization(
+        self,
+        ctx: ToolContext,
+        item_type: Literal["document", "folder", "tag"] | None = None,
+        path_prefix: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> str:
+        validated = InspectWorkspaceOrganizationInput.model_validate(
+            {
+                "item_type": item_type,
+                "path_prefix": path_prefix,
+                "offset": offset,
+                "limit": limit,
+            }
+        )
+
+        def operation() -> dict[str, Any]:
+            page = self.workspace.inspect_workspace_organization(
+                ctx.context.request_context.principal,
+                item_type=validated.item_type,
+                path_prefix=validated.path_prefix,
+                offset=validated.offset,
+                limit=validated.limit,
+            )
+            return page.model_dump(mode="json")
+
+        return await self._run_tool(
+            ctx,
+            self.policies["inspect_workspace_organization"],
+            validated.path_prefix or validated.item_type or "workspace",
+            operation,
         )
 
     async def read_document(
@@ -316,6 +369,24 @@ class ChatToolset:
             preview=arguments,
         )
 
+    async def apply_workspace_organization_plan(
+        self, ctx: ToolContext, operations: list[OrganizationOperation]
+    ) -> None:
+        validated = ApplyWorkspaceOrganizationPlanInput.model_validate({"operations": operations})
+        arguments = validated.model_dump(mode="json")
+        counts: dict[str, int] = {}
+        for operation in validated.operations:
+            counts[operation.kind] = counts.get(operation.kind, 0) + 1
+        summary = ", ".join(
+            f"{count} {kind.replace('_', ' ')}" for kind, count in sorted(counts.items())
+        )
+        await self._request_effect(
+            ctx,
+            capability=self.policies["apply_workspace_organization_plan"],
+            arguments=arguments,
+            preview={**arguments, "summary": summary},
+        )
+
     async def publish_document(
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
     ) -> None:
@@ -348,6 +419,8 @@ class ChatToolset:
         request_context = ctx.context.request_context
         if not request_context.run_id:
             raise RuntimeError("Durable chat effects require a persisted run")
+        if self.evidence.cancel_requested(request_context.run_id):
+            raise ValidationError("The chat run was cancelled before this effect was requested")
         tool_call_id = getattr(ctx, "tool_call_id", None)
         if not tool_call_id:
             raise RuntimeError("Durable chat effects require a tool call ID")
@@ -367,7 +440,7 @@ class ChatToolset:
             capability_version=capability.version,
             effect_class=capability.effect,
             approval_policy=capability.approval,
-            outcome="pending_approval",
+            outcome="accepted" if effect.status == "completed" else "pending_approval",
             duration_ms=0,
             result_bytes=0,
             citation_count=0,
@@ -402,6 +475,10 @@ class ChatToolset:
         started = time.monotonic()
         outcome = "accepted"
         try:
+            request_context = getattr(ctx.context, "request_context", None)
+            run_id = getattr(request_context, "run_id", None)
+            if run_id and self.evidence.cancel_requested(run_id):
+                raise ValidationError("The chat run was cancelled before this tool executed")
             payload = await asyncio.wait_for(
                 asyncio.to_thread(operation), timeout=policy.timeout_seconds
             )
