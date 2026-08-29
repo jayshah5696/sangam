@@ -111,13 +111,17 @@
 .primary-sidebar .file-link > small,
 .primary-sidebar .file-link > .search-snippet { grid-column: 2; }
 
-.file-explorer-panel { padding-inline: 6px; }
+.file-explorer-panel { container-type: inline-size; padding-inline: 6px; }
 .explorer-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; color: var(--sidebar-muted); font-size: var(--text-control); }
 .explorer-selection-actions { min-width: 0; min-height: var(--control-height); margin: var(--space-1) 0; padding: var(--space-1); display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: var(--space-1); overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--accent) 13%, var(--sidebar)); color: var(--sidebar-text); }
 .explorer-selection-actions > span { min-width: 0; flex: 1; padding-inline: var(--space-1); color: var(--sidebar-muted); font-size: var(--text-meta); }
-.explorer-selection-actions > button { width: var(--control-height); min-width: var(--control-height); min-height: var(--control-height); padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-text); }
+.explorer-selection-actions > button { min-width: var(--control-height); min-height: var(--control-height); padding: 0 var(--space-2); display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); border: 0; border-radius: var(--radius-control); background: var(--sidebar-raised); color: var(--sidebar-text); font-size: var(--text-control); white-space: nowrap; }
 .explorer-selection-actions > button.danger { color: var(--danger); }
 .explorer-selection-actions .explorer-more-actions { width: var(--control-height); padding: 0; justify-content: center; }
+@container (max-width: 17rem) {
+  .explorer-selection-actions > button { width: var(--control-height); padding: 0; }
+  .explorer-selection-actions > button > span { display: none; }
+}
 .pierre-tree-shell { min-height: 0; flex: 1; position: relative; overflow: hidden; }
 .sangam-file-tree {
   display: block;

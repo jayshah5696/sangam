@@ -139,4 +139,25 @@ describe('DocumentInspector', () => {
     })
     expect(screen.getByText('Document chat')).toBeTruthy()
   })
+
+  it('uses modal semantics and Escape dismissal when rendered as a narrow sheet', () => {
+    const onCollapse = vi.fn()
+    render(
+      <DocumentInspector
+        width={320}
+        document={testDocument}
+        content={testDocument.content}
+        selectedText=""
+        onCollapse={onCollapse}
+        onUpdated={vi.fn()}
+        onFocusEditor={vi.fn()}
+        modal
+      />,
+    )
+
+    const sheet = screen.getByRole('dialog', { name: 'Document inspector' })
+    expect(sheet.getAttribute('aria-modal')).toBe('true')
+    fireEvent.keyDown(sheet, { key: 'Escape' })
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+  })
 })

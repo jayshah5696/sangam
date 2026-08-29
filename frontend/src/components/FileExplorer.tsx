@@ -388,7 +388,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       contextMenu: {
         enabled: true,
         triggerMode: 'both',
-        buttonVisibility: 'always',
+        buttonVisibility: 'when-needed',
       },
     },
     dragAndDrop: {
@@ -697,6 +697,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
             onClick={() => openMoveFor(effectiveSelectedTreePaths)}
           >
             <FolderInput size="var(--icon-control)" />
+            <span>Move</span>
           </button>
           <button
             type="button"
@@ -705,6 +706,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
             onClick={() => openMetadataFor(effectiveSelectedTreePaths)}
           >
             <TagIcon size="var(--icon-control)" />
+            <span>Tags</span>
           </button>
           {trashOperationsForPaths(effectiveSelectedTreePaths, adapter).length > 0 && (
             <button
@@ -715,6 +717,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
               onClick={() => moveToTrash(effectiveSelectedTreePaths)}
             >
               <Trash2 size="var(--icon-control)" />
+              <span>Trash</span>
             </button>
           )}
         </div>

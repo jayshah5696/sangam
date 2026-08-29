@@ -323,7 +323,7 @@ export function DocumentWorkspace({
         )}
         {mode !== 'edit' && document.content_type === 'text/markdown' && (
           <Suspense fallback={<div className="markdown-preview muted">Preparing preview…</div>}>
-            <MarkdownPreview content={content} />
+            <MarkdownPreview content={content} readable />
           </Suspense>
         )}
         {mode !== 'edit' && document.content_type === 'text/html' && (

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type KeyboardEvent } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
@@ -20,6 +20,8 @@ import { StateMessage } from '../ui/StateMessage'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
+const inspectorFocusableSelector =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
 export function DocumentInspector({
   width,
@@ -30,6 +32,7 @@ export function DocumentInspector({
   onUpdated,
   onFocusEditor,
   onScrollToLine,
+  modal = false,
 }: {
   width: number
   document: Document
@@ -39,6 +42,7 @@ export function DocumentInspector({
   onUpdated: (document: Document, replaceContent?: boolean) => void
   onFocusEditor: () => void
   onScrollToLine?: (line: number) => void
+  modal?: boolean
 }) {
   const documentId = document.document_id
   const session = useDocumentSession(documentId)
@@ -122,10 +126,36 @@ export function DocumentInspector({
   const setComparison = (from: string, to: string) => {
     sessions.updateSession(documentId, { compareFrom: from, compareTo: to })
   }
+  const trapModalFocus = (event: KeyboardEvent<HTMLElement>) => {
+    if (!modal) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onCollapse()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(inspectorFocusableSelector),
+    )
+    const first = focusable[0]
+    const last = focusable.at(-1)
+    if (!first || !last) return
+    if (event.shiftKey && globalThis.document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && globalThis.document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
   return (
     <aside
       className={`history-panel document-inspector ui-rail ui-rail--surface ${tab === 'chat' ? 'mode-chat' : ''}`}
       style={{ width }}
+      role={modal ? 'dialog' : undefined}
+      aria-label={modal ? 'Document inspector' : undefined}
+      aria-modal={modal || undefined}
+      onKeyDown={trapModalFocus}
     >
       <div className="right-panel-header ui-rail-header">
         <strong>Inspector</strong>

@@ -11,41 +11,41 @@ vi.mock('@tanstack/react-router', () => ({ useNavigate: () => () => {} }))
 vi.mock('../theme', () => ({ useTheme: () => ({ preferences: { theme: 'river' } }) }))
 vi.mock('./RevisionMergeView', () => ({ RevisionMergeView: () => null }))
 
-import { ChatContextBanner, hasMountedChatInterface, SelectionChip } from './ChatPanel'
+import { ChatCompactContext, ChatContextBanner, hasMountedChatInterface, SelectionChip } from './ChatPanel'
 import type { Document } from '../api'
 
 afterEach(cleanup)
 
-describe('ChatContextBanner', () => {
-  const mockDocument: Document = {
-    document_id: 'doc-12345678-abcd',
-    title: 'Research Brief',
-    path: 'research/brief.md',
-    content: '# Content',
-    content_type: 'text/markdown',
-    current_revision_id: '8f2ac41d99999999',
-    content_hash: 'hash123',
-    size_bytes: 100,
-    materialization_state: 'clean',
-    file_hash: null,
-    deleted: false,
-    created_by: 'jay',
-    created_at: '2026-08-16T12:00:00Z',
-    updated_at: '2026-08-16T12:00:00Z',
-    updated_by: 'jay',
-    updated_by_name: 'Jay',
-    revision_summary: null,
-    category: null,
-    metadata_version: 1,
-    trust_level: 'untrusted',
-    trust_version: 1,
-    tags: [],
-    pdf_page_count: null,
-    pdf_extraction_status: null,
-    pdf_extraction_error: null,
-    supersedes_document_id: null,
-  }
+const mockDocument: Document = {
+  document_id: 'doc-12345678-abcd',
+  title: 'Research Brief',
+  path: 'research/brief.md',
+  content: '# Content',
+  content_type: 'text/markdown',
+  current_revision_id: '8f2ac41d99999999',
+  content_hash: 'hash123',
+  size_bytes: 100,
+  materialization_state: 'clean',
+  file_hash: null,
+  deleted: false,
+  created_by: 'jay',
+  created_at: '2026-08-16T12:00:00Z',
+  updated_at: '2026-08-16T12:00:00Z',
+  updated_by: 'jay',
+  updated_by_name: 'Jay',
+  revision_summary: null,
+  category: null,
+  metadata_version: 1,
+  trust_level: 'untrusted',
+  trust_version: 1,
+  tags: [],
+  pdf_page_count: null,
+  pdf_extraction_status: null,
+  pdf_extraction_error: null,
+  supersedes_document_id: null,
+}
 
+describe('ChatContextBanner', () => {
   it('renders document title and revision hash snippet', () => {
     render(<ChatContextBanner document={mockDocument} selectedText="" />)
     expect(screen.getByText('Research Brief')).toBeTruthy()
@@ -96,5 +96,27 @@ describe('SelectionChip', () => {
     const preview = document.querySelector('.chat-selection-chip-preview')
     expect(preview?.textContent?.length).toBe(20_000)
     expect(screen.getByText(/Only the first 20,000 characters are sent/)).toBeTruthy()
+  })
+})
+
+describe('ChatCompactContext', () => {
+  it('keeps document, revision, selection, and review policy visible in compact chat', () => {
+    render(
+      <ChatCompactContext
+        document={mockDocument}
+        selectedText="Selected text snippet"
+        autonomyMode="review"
+      />,
+    )
+    expect(screen.getByLabelText('Document chat context')).toBeTruthy()
+    expect(screen.getByText('Research Brief')).toBeTruthy()
+    expect(screen.getByText(/rev 8f2ac41d…9999/)).toBeTruthy()
+    expect(screen.getByText(/21 selected/)).toBeTruthy()
+    expect(screen.getByText('Review required')).toBeTruthy()
+  })
+
+  it('states when authorized effects run immediately', () => {
+    render(<ChatCompactContext document={mockDocument} selectedText="" autonomyMode="workspace" />)
+    expect(screen.getByText('Authorized effects run immediately')).toBeTruthy()
   })
 })

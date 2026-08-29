@@ -37,4 +37,12 @@ describe('MarkdownPreview', () => {
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
   })
+
+  it('applies the readable measure only when requested', () => {
+    const { container, rerender } = render(<MarkdownPreview content="# Readable" readable />)
+    expect(container.querySelector('.markdown-preview--readable')).toBeTruthy()
+
+    rerender(<MarkdownPreview content="# Evidence" />)
+    expect(container.querySelector('.markdown-preview--readable')).toBeNull()
+  })
 })
