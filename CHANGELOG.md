@@ -7,6 +7,8 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.11.0] - 2026-08-29
+
 ### Added
 
 - The workspace explorer now supports canonical folder selection, file and folder drag-and-drop, full Pierre multi-selection, a searchable **Move to…** dialog, supported pointer and keyboard row actions, bulk tags/category updates, and bulk Trash. The command palette exposes the same organization actions (#162).
@@ -283,7 +285,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.0
 [0.10.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.1
 [0.10.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.0
 [0.9.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.9.1
