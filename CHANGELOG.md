@@ -7,6 +7,21 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.11.1] - 2026-08-29
+
+### Added
+
+- Markdown preview and reading views now apply comfortable reading measure constraints and typography refinements for long-form documents (#173).
+- Added `just bundle-report` command and lightweight bundle analysis script to report initial Vite entry graphs and lazy chunks (#173).
+
+### Changed
+
+- Workspace inspector and workbench views refine document metadata headers, tags editing, selection chips, and drawer transitions (#173).
+
+### Upgrade notes
+
+- This release has no database migrations, security-specific changes, new required configuration, manual upgrade steps, or release-specific known limits. Replace the running container with the 0.11.1 image.
+
 ## [0.11.0] - 2026-08-29
 
 ### Added
@@ -285,7 +300,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.1
 [0.11.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.0
 [0.10.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.1
 [0.10.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.0
