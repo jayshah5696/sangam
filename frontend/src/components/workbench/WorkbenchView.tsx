@@ -233,6 +233,8 @@ function GroupInspector({ documentId }: { documentId: string }) {
   const { updateDocumentTitle } = useWorkbenchActions()
   const sessions = useDocumentSessions()
   const session = useDocumentSession(documentId)
+  const sheetWasOpenRef = useRef(false)
+  const sheetTriggerRef = useRef<HTMLElement | null>(null)
   const documentQuery = useQuery({
     queryKey: ['document', documentId],
     queryFn: () => api.getDocument(documentId),
@@ -241,6 +243,29 @@ function GroupInspector({ documentId }: { documentId: string }) {
     placeholderData: keepPreviousData,
   })
   const document = documentQuery.data
+
+  useEffect(() => {
+    if (!isNarrow) {
+      sheetWasOpenRef.current = false
+      return
+    }
+    if (preferences.rightVisible) {
+      if (sheetWasOpenRef.current) return
+      sheetWasOpenRef.current = true
+      sheetTriggerRef.current =
+        globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : null
+      requestAnimationFrame(() => {
+        globalThis.document
+          .querySelector<HTMLElement>('.document-inspector [role="tab"][aria-selected="true"]')
+          ?.focus()
+      })
+      return
+    }
+    if (!sheetWasOpenRef.current) return
+    sheetWasOpenRef.current = false
+    sheetTriggerRef.current?.focus()
+    sheetTriggerRef.current = null
+  }, [isNarrow, preferences.rightVisible])
   const pdfAnnotationsQuery = useQuery({
     queryKey: ['annotations', documentId, session.pdfAnnotationQuery ?? ''],
     queryFn: () => api.listAnnotations(documentId, session.pdfAnnotationQuery ?? ''),
@@ -281,7 +306,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
         <button
           className="icon-button"
           aria-label="Document properties"
-          title="Document properties"
+          data-tooltip="Document properties"
           onClick={() => openToTab('properties')}
         >
           <SlidersHorizontal size="var(--icon-control)" />
@@ -290,7 +315,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
           <button
             className="icon-button"
             aria-label="PDF research"
-            title="PDF research"
+            data-tooltip="PDF research"
             onClick={() => openToTab('research')}
           >
             <NotebookTabs size="var(--icon-control)" />
@@ -299,7 +324,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
         <button
           className="icon-button"
           aria-label="Document outline"
-          title="Document outline"
+          data-tooltip="Document outline"
           onClick={() => openToTab('outline')}
         >
           <ListTree size="var(--icon-control)" />
@@ -307,7 +332,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
         <button
           className="icon-button"
           aria-label="Revision history"
-          title="Revision history"
+          data-tooltip="Revision history"
           onClick={() => openToTab('history')}
         >
           <History size="var(--icon-control)" />
@@ -315,7 +340,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
         <button
           className="icon-button"
           aria-label="Ask about this document"
-          title="Ask about this document"
+          data-tooltip="Ask about this document"
           onClick={() => {
             if (!isNarrow) {
               openToTab('chat')
@@ -378,6 +403,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
           content={content}
           selectedText={selectedText}
           onCollapse={() => updatePreferences({ rightVisible: false })}
+          modal={isNarrow}
           onUpdated={updateCachedDocument}
           onFocusEditor={() => sessions.focusEditor(documentId)}
           onScrollToLine={(line) => sessions.scrollToLine(documentId, line)}

@@ -46,6 +46,11 @@ test-frontend:
     npm --prefix frontend run lint
     npm --prefix frontend run test
 
+# Report the initial Vite entry graph and lazy chunks without a visualization dependency.
+bundle-report:
+    npm --prefix frontend run build
+    npm --prefix frontend run bundle:report
+
 # Run the review-mode chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
 eval-chat model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-review.json":
     mkdir -p test-results

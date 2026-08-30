@@ -37,6 +37,7 @@ export default defineConfig({
   build: {
     // CodeMirror and the complete Mermaid renderer are optional lazy chunks.
     chunkSizeWarningLimit: 700,
+    manifest: true,
   },
   server: {
     proxy: {

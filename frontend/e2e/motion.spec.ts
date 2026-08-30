@@ -151,6 +151,9 @@ test.describe('Restrained motion language and workbench interactions', () => {
 
       const inspector = page.locator('.document-inspector')
       await expect(inspector).toBeVisible()
+      await expect(inspector).toHaveAttribute('role', 'dialog')
+      await expect(inspector).toHaveAttribute('aria-modal', 'true')
+      await expect(page.getByRole('tab', { name: 'properties' })).toBeFocused()
 
       // Check viewport containment
       const box = await inspector.boundingBox()
@@ -158,11 +161,35 @@ test.describe('Restrained motion language and workbench interactions', () => {
       expect(box!.width).toBeLessThanOrEqual(390)
       expect(box!.y).toBeGreaterThanOrEqual(0)
 
-      // Close via backdrop
+      // Escape returns focus to the invoking control.
+      await page.keyboard.press('Escape')
+      await expect(inspector).not.toBeVisible()
+      await expect(toggle).toBeFocused()
+
+      // The backdrop remains a reversible pointer path.
+      await toggle.click()
       const backdrop = page.locator('.inspector-backdrop')
       await expect(backdrop).toBeVisible()
       await backdrop.click({ position: { x: 10, y: 10 } })
       await expect(inspector).not.toBeVisible()
+    })
+
+    test('inspector changes from a desktop rail to a modal sheet at the 900px boundary', async ({
+      page,
+      seededWorkspace,
+    }) => {
+      await page.setViewportSize({ width: 901, height: 844 })
+      await page.goto(`/documents/${seededWorkspace.documentId}`)
+      const desktopInspector = page.locator('.document-inspector')
+      await expect(desktopInspector).toBeVisible()
+      await expect(desktopInspector).not.toHaveAttribute('role', 'dialog')
+
+      await page.setViewportSize({ width: 899, height: 844 })
+      const collapse = page.getByRole('button', { name: 'Collapse document inspector' })
+      await collapse.click()
+      const trigger = page.getByRole('button', { name: 'Open document inspector' })
+      await trigger.click()
+      await expect(page.getByRole('dialog', { name: 'Document inspector' })).toBeVisible()
     })
   })
 

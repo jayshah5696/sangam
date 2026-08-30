@@ -560,6 +560,13 @@ export function ChatPanel({
         />
       ) : (
         <>
+          {compact && (
+            <ChatCompactContext
+              document={activeDocument}
+              selectedText={activeSelectedText}
+              autonomyMode={configQuery.data.autonomy_mode}
+            />
+          )}
           {!configQuery.data.inference_enabled && (
             <div className={`chat-runtime-status status-${configQuery.data.status}`} role="status">
               <strong>{configQuery.data.status.replace('_', ' ')}</strong>
@@ -1126,6 +1133,35 @@ export function ChatContextBanner({
         </button>
       )}
     </div>
+  )
+}
+
+export function ChatCompactContext({
+  document,
+  selectedText,
+  autonomyMode,
+}: {
+  document: Document | null
+  selectedText: string
+  autonomyMode: 'review' | 'workspace'
+}) {
+  const contextMeta = document ? `rev ${shortId(document.current_revision_id)}` : 'Whole workspace'
+  const selectionMeta = selectedText ? `${selectedText.length.toLocaleString()} selected` : null
+  const permissionLabel =
+    autonomyMode === 'workspace' ? 'Authorized effects run immediately' : 'Review required'
+  return (
+    <section className="chat-compact-context" aria-label="Document chat context">
+      <div>
+        <strong>{document?.title ?? 'Whole workspace'}</strong>
+        <span>
+          <code>{contextMeta}</code>
+          {selectionMeta && ` · ${selectionMeta}`}
+        </span>
+      </div>
+      <span className={`scope-badge ${autonomyMode === 'workspace' ? 'workspace' : ''}`}>
+        {permissionLabel}
+      </span>
+    </section>
   )
 }
 

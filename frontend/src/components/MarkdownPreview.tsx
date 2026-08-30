@@ -44,9 +44,10 @@ markdown.validateLink = (url) => internalDocumentHref(url) !== null || defaultVa
 type MarkdownPreviewProps = {
   content: string
   resolveAsset?: (reference: string) => Promise<string>
+  readable?: boolean
 }
 
-export function MarkdownPreview({ content, resolveAsset }: MarkdownPreviewProps) {
+export function MarkdownPreview({ content, resolveAsset, readable = false }: MarkdownPreviewProps) {
   const previewRef = useRef<HTMLDivElement>(null)
   const safeHtml = useMemo(
     () =>
@@ -116,6 +117,10 @@ export function MarkdownPreview({ content, resolveAsset }: MarkdownPreviewProps)
   }, [safeHtml])
 
   return (
-    <article className="markdown-preview" ref={previewRef} dangerouslySetInnerHTML={{ __html: safeHtml }} />
+    <article
+      className={`markdown-preview${readable ? ' markdown-preview--readable' : ''}`}
+      ref={previewRef}
+      dangerouslySetInnerHTML={{ __html: safeHtml }}
+    />
   )
 }

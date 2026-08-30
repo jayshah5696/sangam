@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && tsc -b",
+    "bundle:report": "node scripts/report-bundle.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"playwright.config.ts\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"playwright.config.ts\"",
     "anti-slop": "oxlint",
