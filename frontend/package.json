@@ -2,6 +2,7 @@
   "name": "sangam-frontend",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.24.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build && tsc -b",
@@ -11,8 +12,8 @@
     "anti-slop": "oxlint",
     "lint": "oxlint && eslint . && node scripts/check-ui-system.mjs",
     "test": "vitest run src",
-    "test:e2e": "npm run build && playwright test",
-    "update:screenshots": "npm run build && SANGAM_UPDATE_SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts"
+    "test:e2e": "pnpm run build && playwright test",
+    "update:screenshots": "pnpm run build && SANGAM_UPDATE_SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.0",
@@ -21,9 +22,11 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.43.6",
+    "@openai/chatkit": "^1.5.1",
     "@openai/chatkit-react": "^1.5.1",
     "@pierre/diffs": "1.2.12",
     "@pierre/trees": "1.0.0-beta.5",
+    "@tanstack/history": "1.162.0",
     "@tanstack/react-query": "5.101.2",
     "@tanstack/react-router": "1.170.18",
     "dompurify": "^3.4.12",

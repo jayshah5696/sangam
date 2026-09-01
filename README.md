@@ -98,7 +98,7 @@ integrations.
 
 ```sh
 uv sync --all-groups
-npm --prefix frontend ci
+pnpm --dir frontend install
 just serve        # API on :8000, Vite on :5173
 just check        # lint, format, typecheck
 just test         # pytest + vitest

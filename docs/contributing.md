@@ -4,7 +4,7 @@
 
 ```sh
 uv sync --all-groups
-npm --prefix frontend ci
+pnpm --dir frontend install
 just serve   # API on 127.0.0.1:8000, Vite on 127.0.0.1:5173
 ```
 

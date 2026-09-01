@@ -15,10 +15,10 @@ test:
     just typecheck
     uv run python scripts/verify_openapi_contract.py
     uv run pytest
-    npm --prefix frontend run format:check
-    npm --prefix frontend run build
-    npm --prefix frontend run lint
-    npm --prefix frontend run test
+    pnpm --dir frontend run format:check
+    pnpm --dir frontend run build
+    pnpm --dir frontend run lint
+    pnpm --dir frontend run test
 
 # Run source, documentation, version, configuration, and distribution gates.
 check: test test-docs validate-compose
@@ -42,14 +42,14 @@ typecheck:
 
 # Run only the browser client build, lint, and unit tests.
 test-frontend:
-    npm --prefix frontend run build
-    npm --prefix frontend run lint
-    npm --prefix frontend run test
+    pnpm --dir frontend run build
+    pnpm --dir frontend run lint
+    pnpm --dir frontend run test
 
 # Report the initial Vite entry graph and lazy chunks without a visualization dependency.
 bundle-report:
-    npm --prefix frontend run build
-    npm --prefix frontend run bundle:report
+    pnpm --dir frontend run build
+    pnpm --dir frontend run bundle:report
 
 # Run the review-mode chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
 eval-chat model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-review.json":
@@ -72,20 +72,20 @@ eval-chat-against source model="openai/gpt-5.6-sol" reasoning="medium" output="t
 
 # Exercise desktop and narrow browser interactions against isolated data.
 test-e2e:
-    npm --prefix frontend run test:e2e
+    pnpm --dir frontend run test:e2e
 
 # Update verified Playwright screenshot baselines.
 update-screenshots:
-    npm --prefix frontend run update:screenshots
+    pnpm --dir frontend run update:screenshots
 
 # Run oxlint with anti-slop rules to reject low-evidence TypeScript and JavaScript patterns.
 anti-slop:
-    npm --prefix frontend run anti-slop
+    pnpm --dir frontend run anti-slop
 
 # Check Python and frontend code style, anti-slop rules, and linting.
 lint:
     uv run ruff check .
-    npm --prefix frontend run lint
+    pnpm --dir frontend run lint
 
 # Validate development and production Compose configurations.
 validate-compose:
@@ -94,13 +94,13 @@ validate-compose:
 # Format Python sources and tests.
 format:
     uv run ruff format .
-    npm --prefix frontend run format
+    pnpm --dir frontend run format
 
 # Verify documentation links, Markdown style, and Mermaid fences.
 test-docs:
     uv run python scripts/verify-docs.py
     node frontend/scripts/verify-mermaid.mjs
-    npm --prefix frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
+    pnpm --dir frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
 
 # Serve the API and frontend development server with live reload.
 serve backend_port="8000" frontend_port="5173":
@@ -117,7 +117,7 @@ serve backend_port="8000" frontend_port="5173":
     }
     trap cleanup EXIT INT TERM
 
-    npm --prefix frontend run dev -- --host 127.0.0.1 --port "{{ frontend_port }}" --strictPort
+    pnpm --dir frontend run dev -- --host 127.0.0.1 --port "{{ frontend_port }}" --strictPort
 
 # Build the production Docker image.
 docker-build:
