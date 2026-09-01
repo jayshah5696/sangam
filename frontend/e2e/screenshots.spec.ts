@@ -5,7 +5,7 @@ import path from 'node:path'
 import { expect, test } from './fixtures'
 
 test('capture the README workspace and settings screenshots', async ({ page, request, seededWorkspace }) => {
-  test.skip(!process.env.SANGAM_UPDATE_SCREENSHOTS, 'Run npm run update:screenshots to update docs assets')
+  test.skip(!process.env.SANGAM_UPDATE_SCREENSHOTS, 'Run just update-screenshots to update docs assets')
 
   const repositoryRoot = path.resolve(import.meta.dirname, '../..')
   const narrow = page.viewportSize()?.width === 390

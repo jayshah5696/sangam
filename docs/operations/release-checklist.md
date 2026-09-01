@@ -22,7 +22,7 @@ vulnerability scans. Trivy prints every HIGH/CRITICAL finding and blocks every
 HIGH/CRITICAL finding for which the distribution or package ecosystem publishes a
 fix. Unfixed findings remain visible in the job log and must be assessed as release
 risk; they do not make the release gate impossible to satisfy. Python runtime and
-npm dependency audits use their blocking production-dependency policies before the
+pnpm dependency audits use their blocking production-dependency policies before the
 container scan.
 
 ## Backup and upgrade proof

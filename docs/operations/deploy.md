@@ -6,7 +6,7 @@ Requirements: Python 3.13+, [uv](https://docs.astral.sh/uv/), Node (see `fronten
 
 ```sh
 uv sync --all-groups
-npm --prefix frontend ci
+pnpm --dir frontend install
 just serve
 ```
 

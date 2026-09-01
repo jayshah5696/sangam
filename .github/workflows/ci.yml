@@ -24,32 +24,36 @@ jobs:
           version: "0.11.16"
           python-version: "3.13"
           enable-cache: true
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          package_json_file: frontend/package.json
+          run_install: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
           package-manager-cache: false
       - run: uv sync --frozen
-      - run: npm ci --prefix frontend
+      - run: pnpm --dir frontend install --frozen-lockfile
       - name: Python and frontend gates
         run: |
           uv run ruff check .
           uv run ruff format --check .
           uv run pytest
-          npm --prefix frontend run format:check
-          npm --prefix frontend run build
-          npm --prefix frontend run lint
-          npm --prefix frontend run test
+          pnpm --dir frontend run format:check
+          pnpm --dir frontend run build
+          pnpm --dir frontend run lint
+          pnpm --dir frontend run test
       - name: Desktop and narrow browser gates
         run: |
-          ./frontend/node_modules/.bin/playwright install --with-deps chromium
-          npm --prefix frontend run test:e2e
+          pnpm --dir frontend exec playwright install --with-deps chromium
+          pnpm --dir frontend run test:e2e
       - name: Documentation gates
         run: |
           uv run python scripts/verify-docs.py
           node frontend/scripts/verify-mermaid.mjs
-          npm --prefix frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
+          pnpm --dir frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
       - run: uv run python scripts/verify-release-config.py
       - run: uv run python scripts/verify-version.py --frontend-dist
       - run: ./scripts/audit-dependencies.sh
