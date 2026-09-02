@@ -35,6 +35,9 @@ import {
   type CreateConfirmationRequest,
 } from './ChatCreateConfirmation'
 import { useChatKitScript } from './useChatKitScript'
+import { ChatEffectTray, DurableEffectStatus, shortId } from './ChatEffectTray'
+
+export { DurableEffectStatus, shortId }
 
 const SELECTION_LIMIT = 20_000
 // One workspace-scoped chat thread persists across document tabs; the active
@@ -114,6 +117,96 @@ export function ChatPanel({
       ]),
     enabled: configQuery.isSuccess && Boolean(threadId),
   })
+  const summaryQuery = useQuery({
+    queryKey: ['chat-effects-summary', threadId],
+    queryFn: async () => {
+      try {
+        return await api.getChatEffectsSummary(threadId!)
+      } catch {
+        return undefined
+      }
+    },
+    enabled: configQuery.isSuccess && Boolean(threadId),
+  })
+  const [historyCursor, setHistoryCursor] = useState<string | undefined>(undefined)
+  const [historyEffects, setHistoryEffects] = useState<ChatEffect[]>([])
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [historyOpened, setHistoryOpened] = useState(false)
+  const [dismissingEffectId, setDismissingEffectId] = useState<string | null>(null)
+  const [clearingResolved, setClearingResolved] = useState(false)
+
+  const [historyThreadId, setHistoryThreadId] = useState(threadId)
+  if (historyThreadId !== threadId) {
+    setHistoryThreadId(threadId)
+    setHistoryEffects([])
+    setHistoryCursor(undefined)
+    setHasMoreHistory(false)
+    setHistoryOpened(false)
+  }
+
+  const loadHistory = useCallback(
+    async (reset = false) => {
+      if (!threadId) return
+      try {
+        setLoadingHistory(true)
+        const cursor = reset ? undefined : historyCursor
+        const items = await api.listChatEffects(threadId, undefined, {
+          view: 'history',
+          limit: 20,
+          cursor,
+        })
+        if (reset) {
+          setHistoryEffects(items)
+        } else {
+          setHistoryEffects((prev) => [...prev, ...items])
+        }
+        const lastItem = items[items.length - 1]
+        if (items.length === 20 && lastItem) {
+          setHistoryCursor(lastItem.effect_id)
+          setHasMoreHistory(true)
+        } else {
+          setHasMoreHistory(false)
+        }
+      } finally {
+        setLoadingHistory(false)
+      }
+    },
+    [threadId, historyCursor],
+  )
+
+  const dismissEffect = useCallback(
+    async (effect: ChatEffect) => {
+      try {
+        setDismissingEffectId(effect.effect_id)
+        await api.acknowledgeChatEffects([effect.effect_id])
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] }),
+          queryClient.invalidateQueries({ queryKey: ['chat-effects-summary', threadId] }),
+        ])
+      } finally {
+        setDismissingEffectId(null)
+      }
+    },
+    [queryClient, threadId],
+  )
+
+  const clearResolvedFailures = useCallback(async () => {
+    const failedIds = (effectsQuery.data ?? [])
+      .filter((e) => e.status === 'failed' && !e.acknowledged_at)
+      .map((e) => e.effect_id)
+    if (!failedIds.length) return
+    try {
+      setClearingResolved(true)
+      await api.acknowledgeChatEffects(failedIds)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-effects-summary', threadId] }),
+      ])
+    } finally {
+      setClearingResolved(false)
+    }
+  }, [effectsQuery.data, queryClient, threadId])
   const removeEffectFromPendingCache = useCallback(
     (effectId: string) => {
       queryClient.setQueryData<ChatEffect[]>(['chat-effects', threadId], (effects) =>
@@ -348,12 +441,25 @@ export function ChatPanel({
         const current = await api.getChatEffect(effect.effect_id)
         if (current.status === 'pending_approval') return false
         setSettledEffectIds((effectIds) => new Set(effectIds).add(effect.effect_id))
-        clearPendingReview({
+        const payload = {
           ...current.result,
           approved: current.status === 'completed',
           status: current.status,
-        })
-        await queryClient.invalidateQueries({ queryKey: ['chat-effects', current.thread_id] })
+          failure:
+            current.failure ??
+            (current.status === 'failed'
+              ? {
+                  code: 'effect_failed',
+                  message: 'The effect could not be completed.',
+                  retry_safe: false,
+                }
+              : null),
+        } satisfies Record<string, JsonPayload>
+        clearPendingReview(payload)
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['chat-effects', current.thread_id] }),
+          queryClient.invalidateQueries({ queryKey: ['chat-effects-summary', current.thread_id] }),
+        ])
         return true
       } catch {
         return false
@@ -619,16 +725,31 @@ export function ChatPanel({
             <CreatedFromChat document={createdDocument} onDismiss={() => setCreatedDocument(null)} />
           )}
           {published && <PublishedFromChat result={published} onDismiss={() => setPublished(null)} />}
-          <DurableEffectsSummary
-            effects={(effectsQuery.data ?? []).filter(
+          <ChatEffectTray
+            attentionEffects={(effectsQuery.data ?? []).filter(
               (effect) =>
                 effect.status !== 'pending_approval' &&
                 effect.resource_id !== createdDocument?.document_id &&
                 effect.resource_id !== published?.publication_id,
             )}
+            summary={summaryQuery.data}
             resumingEffectId={resumingEffectId}
             resumeErrorIds={resumeErrorIds}
+            dismissingEffectId={dismissingEffectId}
             onResume={(effect) => void resumeEffect(effect)}
+            onDismiss={(effect) => void dismissEffect(effect)}
+            onClearResolved={() => void clearResolvedFailures()}
+            clearingResolved={clearingResolved}
+            historyEffects={historyEffects}
+            hasMoreHistory={hasMoreHistory}
+            loadingHistory={loadingHistory}
+            onLoadMoreHistory={() => void loadHistory(false)}
+            onOpenHistory={() => {
+              if (!historyOpened) {
+                setHistoryOpened(true)
+                void loadHistory(true)
+              }
+            }}
           />
           {script.status === 'loading' && <StateMessage kind="loading" title="Loading chat interface" />}
           {script.status === 'error' && (
@@ -813,67 +934,6 @@ function PublishedFromChat({ result, onDismiss }: { result: IssuedPublication; o
   )
 }
 
-export function DurableEffectStatus({
-  effect,
-  resuming,
-  resumeFailed,
-  onResume,
-}: {
-  effect: ChatEffect
-  resuming: boolean
-  resumeFailed: boolean
-  onResume: () => void
-}) {
-  const effectResultSchema = z.object({ url: z.string().optional() })
-  const failed = effect.status === 'failed'
-  const retrySafe = effect.failure?.retry_safe === true
-  const interrupted = effect.status === 'approved' || effect.status === 'executing'
-  const canResume = interrupted || (failed && retrySafe)
-  const noun =
-    effect.capability_id === 'publish_document'
-      ? 'Publication'
-      : effect.capability_id === 'apply_workspace_organization_plan'
-        ? 'Organization plan'
-        : 'Document creation'
-  const href =
-    effectResultSchema.safeParse(effect.result).data?.url ??
-    (effect.capability_id === 'create_document' && effect.resource_id
-      ? `/documents/${effect.resource_id}`
-      : undefined)
-  return (
-    <div
-      className={`chat-effect-complete ${failed || interrupted ? 'is-failed' : ''}`}
-      role={failed || resumeFailed ? 'alert' : 'status'}
-    >
-      <div className="chat-effect-complete-copy">
-        <strong>
-          {interrupted ? 'Approved effect ready to resume' : failed ? `${noun} failed` : `${noun} completed`}
-        </strong>
-        <span>
-          {resumeFailed
-            ? 'Resume failed. The stored operation key makes another attempt safe.'
-            : interrupted
-              ? 'The exact approval is stored. Resume with the original operation key.'
-              : failed
-                ? `${String(effect.failure?.message ?? 'The effect could not be completed.')} ${retrySafe ? 'Retry is safe.' : 'A new review is required.'}`
-                : `Recorded effect ${shortId(effect.effect_id)}`}
-        </span>
-      </div>
-      {canResume && (
-        <button type="button" className="secondary-action" disabled={resuming} onClick={onResume}>
-          {resuming ? 'Resuming…' : failed ? 'Retry safely' : 'Resume safely'}
-        </button>
-      )}
-      {href && (
-        <a className="secondary-action" href={href}>
-          <ExternalLink size="var(--icon-inline)" />
-          Open result
-        </a>
-      )}
-    </div>
-  )
-}
-
 function OrganizationPlanConfirmation({
   effect,
   operations,
@@ -965,69 +1025,6 @@ function organizationOperationDetail(operation: OrganizationOperation) {
   return `Category ${operation.expected_category ?? 'none'} → ${operation.category ?? 'none'} · tags ${operation.expected_tag_ids.length ? operation.expected_tag_ids.join(', ') : 'none'} → ${operation.tag_ids.length ? operation.tag_ids.join(', ') : 'none'} · metadata version ${operation.expected_metadata_version}`
 }
 
-function DurableEffectsSummary({
-  effects,
-  resumingEffectId,
-  resumeErrorIds,
-  onResume,
-}: {
-  effects: ChatEffect[]
-  resumingEffectId: string | null
-  resumeErrorIds: Set<string>
-  onResume: (effect: ChatEffect) => void
-}) {
-  if (!effects.length) return null
-  const settled = effects.filter((effect) => effect.status === 'completed')
-  const needsAttention = effects.filter((effect) => effect.status !== 'completed')
-  const creations = settled.filter((effect) => effect.capability_id === 'create_document').length
-  const publications = settled.filter((effect) => effect.capability_id === 'publish_document').length
-  const plans = settled.filter(
-    (effect) => effect.capability_id === 'apply_workspace_organization_plan',
-  ).length
-  const summary = [
-    creations ? `${creations} document${creations === 1 ? '' : 's'} created` : '',
-    publications ? `${publications} publication${publications === 1 ? '' : 's'} completed` : '',
-    plans ? `${plans} organization plan${plans === 1 ? '' : 's'} applied` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
-  return (
-    <div className="chat-effect-history">
-      {needsAttention.map((effect) => (
-        <DurableEffectStatus
-          key={effect.effect_id}
-          effect={effect}
-          resuming={resumingEffectId === effect.effect_id}
-          resumeFailed={resumeErrorIds.has(effect.effect_id)}
-          onResume={() => onResume(effect)}
-        />
-      ))}
-      {settled.length > 0 && (
-        <details className="chat-effect-stack">
-          <summary>
-            <span>
-              <strong>{summary}</strong>
-              <small>Completed effects are collapsed to keep the conversation visible.</small>
-            </span>
-            <ChevronDown size="var(--icon-inline)" />
-          </summary>
-          <div>
-            {settled.map((effect) => (
-              <DurableEffectStatus
-                key={effect.effect_id}
-                effect={effect}
-                resuming={false}
-                resumeFailed={false}
-                onResume={() => onResume(effect)}
-              />
-            ))}
-          </div>
-        </details>
-      )}
-    </div>
-  )
-}
-
 export function CompletionRow({
   label,
   detail,
@@ -1103,10 +1100,6 @@ export function CitationNavigationStatus({
       </button>
     </aside>
   )
-}
-
-function shortId(value: string) {
-  return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 
 export function ChatContextBanner({

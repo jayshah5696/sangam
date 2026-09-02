@@ -761,3 +761,333 @@ def test_create_document_rejects_missing_and_unsupported_content_type(
         CreateDocumentInput.model_validate(
             {"title": "Bad", "content": "x", "content_type": "text/plain"}
         )
+
+
+def test_retry_classification_safety() -> None:
+    from sangam.chat_effects import build_effect_failure_record, classify_effect_retry_safety
+    from sangam.errors import (
+        AuthenticationError,
+        AuthorizationError,
+        ConflictError,
+        CredentialConflictError,
+        IdempotencyError,
+        IntegrationError,
+        InvalidPathError,
+        MaterializationError,
+        NotFoundError,
+        ValidationError,
+    )
+
+    non_retryable = [
+        InvalidPathError("Invalid path: notes/topic"),
+        ValidationError("Invalid input"),
+        NotFoundError("Document not found"),
+        ConflictError("Document changed"),
+        CredentialConflictError("Credential conflict"),
+        IdempotencyError("Idempotency conflict"),
+        AuthenticationError("Unauthorized"),
+        AuthorizationError("Forbidden"),
+        MaterializationError("Materialization failed"),
+        RuntimeError("Unexpected error"),
+        ValueError("Value error"),
+    ]
+    for error in non_retryable:
+        assert classify_effect_retry_safety(error) is False
+        record = build_effect_failure_record(error)
+        assert record["retry_safe"] is False
+
+    retryable = IntegrationError("Provider temporary outage")
+    assert classify_effect_retry_safety(retryable) is True
+    record = build_effect_failure_record(retryable)
+    assert record["retry_safe"] is True
+
+
+def test_preflight_rejection_create_document(client: TestClient) -> None:
+    from sangam.errors import ConflictError, InvalidPathError, ValidationError
+
+    # Collision with existing document
+    client.post(
+        "/api/v1/documents",
+        headers=headers("create-existing"),
+        json={"title": "Existing", "path": "docs/existing.md", "content": "Existing"},
+    )
+
+    with pytest.raises(ConflictError):
+        prepare_effect(
+            client,
+            capability_id="create_document",
+            arguments={
+                "title": "Existing",
+                "path": "docs/existing.md",
+                "content": "Collision",
+                "content_type": "text/markdown",
+            },
+        )
+
+    # Invalid document path syntax raises InvalidPathError
+    with pytest.raises(InvalidPathError):
+        prepare_effect(
+            client,
+            capability_id="create_document",
+            arguments={
+                "title": "Wrong Extension",
+                "path": "docs/wrong.txt",
+                "content": "Hello",
+                "content_type": "text/markdown",
+            },
+        )
+
+    # Mismatched extension vs content type raises ValidationError
+    with pytest.raises(ValidationError):
+        prepare_effect(
+            client,
+            capability_id="create_document",
+            arguments={
+                "title": "Mismatched Extension",
+                "path": "docs/wrong.html",
+                "content": "# Hello",
+                "content_type": "text/markdown",
+            },
+        )
+
+
+def test_preflight_rejection_organization_plan(client: TestClient) -> None:
+    from sangam.errors import ConflictError, InvalidPathError
+
+    doc = client.post(
+        "/api/v1/documents",
+        headers=headers("org-preflight-doc"),
+        json={"title": "Doc", "path": "docs/test.md", "content": "Content"},
+    ).json()
+
+    # Destination lacking extension raises InvalidPathError during preflight
+    with pytest.raises(InvalidPathError):
+        prepare_effect(
+            client,
+            capability_id="apply_workspace_organization_plan",
+            arguments={
+                "operations": [
+                    {
+                        "kind": "move_document",
+                        "document_id": doc["document_id"],
+                        "expected_revision_id": doc["current_revision_id"],
+                        "expected_source_path": doc["path"],
+                        "destination_path": "notes/topic",
+                    }
+                ]
+            },
+        )
+
+    # Missing document raises ConflictError
+    with pytest.raises(ConflictError):
+        prepare_effect(
+            client,
+            capability_id="apply_workspace_organization_plan",
+            arguments={
+                "operations": [
+                    {
+                        "kind": "move_document",
+                        "document_id": "nonexistent-doc-id",
+                        "expected_revision_id": "rev-1",
+                        "expected_source_path": "old.md",
+                        "destination_path": "new.md",
+                    }
+                ]
+            },
+        )
+
+
+def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
+    from sangam.security import Principal
+
+    prepared = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={
+            "title": "Failed Doc",
+            "path": "docs/fail.md",
+            "content": "Fail content",
+            "content_type": "text/markdown",
+        },
+    )
+    effect_id = prepared.effect.effect_id
+
+    # Active effect cannot be acknowledged
+    ack_res = client.post(
+        "/api/v1/chat/effects/acknowledge",
+        json={"effect_ids": [effect_id]},
+    )
+    assert ack_res.status_code == 409
+
+    # Deny effect -> now eligible for acknowledgement
+    deny_res = client.post(
+        f"/api/v1/chat/effects/{effect_id}/decision",
+        json={
+            "verdict": "deny",
+            "argument_digest": prepared.effect.argument_digest,
+            "reason": "Test deny",
+        },
+    )
+    assert deny_res.status_code == 200
+
+    # Acknowledge the denied effect
+    ack_res = client.post(
+        "/api/v1/chat/effects/acknowledge",
+        json={"effect_ids": [effect_id]},
+    )
+    assert ack_res.status_code == 200
+    ack_data = ack_res.json()
+    assert ack_data["acknowledged_ids"] == [effect_id]
+    assert ack_data["effects"][0]["acknowledged_at"] is not None
+    assert ack_data["effects"][0]["acknowledged_by"] == "human:jay"
+
+    # Repeated acknowledgement is idempotent
+    ack_again = client.post(
+        "/api/v1/chat/effects/acknowledge",
+        json={"effect_ids": [effect_id]},
+    )
+    assert ack_again.status_code == 200
+
+    # Cross-owner acknowledgement is rejected
+    other_principal = Principal.trusted_human(
+        actor_id="human:other", display_name="Other", operation_id="other-op"
+    )
+    with pytest.raises(AuthorizationError):
+        prepared.chat.effects.acknowledge(other_principal, effect_ids=[effect_id])
+
+
+def test_attention_vs_history_queries_and_summary(client: TestClient) -> None:
+    # Create thread with 2 effects: 1 completed, 1 denied and acknowledged
+    client.post(
+        "/api/v1/documents",
+        headers=headers("thread-doc"),
+        json={"title": "Base", "content": "Base", "path": "docs/base.md"},
+    )
+
+    first = prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={
+            "title": "Doc 1",
+            "path": "docs/doc1.md",
+            "content": "Doc 1",
+            "content_type": "text/markdown",
+        },
+        tool_call_id="call_doc1",
+    )
+    thread_id = first.thread_id
+    client.post(
+        f"/api/v1/chat/effects/{first.effect.effect_id}/decision",
+        json={
+            "verdict": "approve",
+            "argument_digest": first.effect.argument_digest,
+            "reason": None,
+        },
+    )
+
+    # 2nd effect: denied and acknowledged
+    turn = first.chat.evidence.create_turn_context(
+        first.principal,
+        entry_point="workspace",
+        document_id=None,
+        revision_id=None,
+        selected_text="",
+    )
+    capability = first.chat.capabilities.get("create_document")
+    manifest = (capability.manifest_item(),)
+    turn = first.chat.evidence.attach_turn_context(
+        first.principal,
+        context_id=turn.context_id,
+        thread_id=thread_id,
+        user_item_id="item_doc2",
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+    run_id = first.chat.evidence.begin_run(
+        first.principal,
+        thread_id=thread_id,
+        user_item_id=turn.user_item_id,
+        context_id=turn.context_id,
+        connection_id="openrouter",
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+    second_effect = first.chat.effects.propose(
+        first.principal,
+        run_id=run_id,
+        thread_id=thread_id,
+        tool_call_id="call_doc2",
+        capability=capability,
+        arguments={
+            "title": "Doc 2",
+            "path": "docs/doc2.md",
+            "content": "Doc 2",
+            "content_type": "text/markdown",
+        },
+        preview={
+            "title": "Doc 2",
+            "path": "docs/doc2.md",
+            "content": "Doc 2",
+            "content_type": "text/markdown",
+        },
+    )
+    client.post(
+        f"/api/v1/chat/effects/{second_effect.effect_id}/decision",
+        json={
+            "verdict": "deny",
+            "argument_digest": second_effect.argument_digest,
+            "reason": "Denied",
+        },
+    )
+    client.post(
+        "/api/v1/chat/effects/acknowledge",
+        json={"effect_ids": [second_effect.effect_id]},
+    )
+
+    # 3rd effect: left in pending_approval (attention)
+    third_effect = first.chat.effects.propose(
+        first.principal,
+        run_id=run_id,
+        thread_id=thread_id,
+        tool_call_id="call_doc3",
+        capability=capability,
+        arguments={
+            "title": "Doc 3",
+            "path": "docs/doc3.md",
+            "content": "Doc 3",
+            "content_type": "text/markdown",
+        },
+        preview={
+            "title": "Doc 3",
+            "path": "docs/doc3.md",
+            "content": "Doc 3",
+            "content_type": "text/markdown",
+        },
+    )
+
+    # Query summary
+    summary = client.get(f"/api/v1/chat/effects/summary?thread_id={thread_id}").json()
+    assert summary["thread_id"] == thread_id
+    assert summary["total_attention"] == 1
+    assert summary["total_history"] == 2
+
+    # Query attention: returns third_effect
+    attention = client.get(f"/api/v1/chat/effects?thread_id={thread_id}&view=attention").json()
+    assert len(attention) == 1
+    assert attention[0]["effect_id"] == third_effect.effect_id
+
+    # Query history: returns first and second
+    history = client.get(f"/api/v1/chat/effects?thread_id={thread_id}&view=history").json()
+    assert len(history) == 2
+    history_ids = [h["effect_id"] for h in history]
+    assert first.effect.effect_id in history_ids
+    assert second_effect.effect_id in history_ids
+
+    # Query history with limit 1 and cursor
+    page1 = client.get(f"/api/v1/chat/effects?thread_id={thread_id}&view=history&limit=1").json()
+    assert len(page1) == 1
+    page2 = client.get(
+        f"/api/v1/chat/effects?thread_id={thread_id}&view=history&limit=1&cursor={page1[0]['effect_id']}"
+    ).json()
+    assert len(page2) == 1
+    assert page2[0]["effect_id"] != page1[0]["effect_id"]

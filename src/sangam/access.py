@@ -422,6 +422,58 @@ class WorkspaceAccessService:
             path=current.path,
         )
 
+    def preflight_create_document(
+        self,
+        principal: Principal,
+        *,
+        title: str,
+        content: str,
+        content_type: str,
+        path: str | None,
+    ) -> None:
+        self._authorize_destination_path(principal, capability=Capability.CREATE, path=path)
+        self.documents._validate_content_size(content)
+        normalized_path = self.documents._normalize_path(path) if path is not None else None
+        if content_type not in {"text/markdown", "text/html"}:
+            raise ValidationError("Unsupported text document content type")
+        self.documents._validate_path_type(normalized_path, content_type)
+        if normalized_path is not None:
+            with self.documents.database.connection() as connection:
+                row = connection.execute(
+                    "SELECT 1 FROM documents WHERE path = ? AND deleted = 0",
+                    (normalized_path,),
+                ).fetchone()
+                if row is not None:
+                    raise ConflictError(f"Destination document already exists: {normalized_path}")
+                folder_row = connection.execute(
+                    "SELECT 1 FROM folders WHERE path = ?",
+                    (normalized_path,),
+                ).fetchone()
+                if folder_row is not None:
+                    raise ConflictError(f"Destination folder already exists: {normalized_path}")
+
+    def preflight_publish_document(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        revision_id: str,
+        slug: str,
+        access_policy: str,
+    ) -> None:
+        current = self.documents.get_document(document_id)
+        if current.deleted:
+            raise ConflictError(f"Document no longer exists: {document_id}")
+        self.policy.require(principal, Capability.PUBLISH, current.path)
+        if current.content_type == "application/pdf":
+            raise ValidationError("PDF documents cannot be published")
+        if current.current_revision_id != revision_id:
+            raise ConflictError(
+                "The document changed before publication approval",
+                details={"current_revision_id": current.current_revision_id},
+            )
+        self.publications._normalize_slug(slug)
+
     def update_publication(
         self,
         principal: Principal,
@@ -1223,7 +1275,7 @@ class WorkspaceAccessService:
             operations.append(data)
         return ApplyOrganizationPlan.model_validate({"operations": operations})
 
-    def _preflight_organization_plan(
+    def preflight_organization_plan(
         self, principal: Principal, plan: ApplyOrganizationPlan
     ) -> None:
         documents = {item.document_id: item for item in self.documents.list_documents()}
@@ -1238,13 +1290,16 @@ class WorkspaceAccessService:
         planned_destinations: set[str] = set()
         for operation in plan.operations:
             if isinstance(operation, OrganizationCreateFolder):
-                self.policy.require(principal, Capability.CREATE, operation.path)
-                if operation.path in existing_folder_paths:
-                    raise ConflictError(f"Destination folder already exists: {operation.path}")
-                destination = operation.path
+                normalized_folder = self.organization.normalize_folder_path(operation.path)
+                self.policy.require(principal, Capability.CREATE, normalized_folder)
+                if normalized_folder in existing_folder_paths:
+                    raise ConflictError(f"Destination folder already exists: {normalized_folder}")
+                if normalized_folder in existing_document_paths:
+                    raise ConflictError(f"Destination document already exists: {normalized_folder}")
+                destination = normalized_folder
             elif isinstance(operation, OrganizationMoveDocument):
                 document = documents.get(operation.document_id)
-                if document is None:
+                if document is None or document.deleted:
                     raise ConflictError(f"Document no longer exists: {operation.document_id}")
                 if document.path != operation.expected_source_path:
                     raise ConflictError(
@@ -1262,19 +1317,24 @@ class WorkspaceAccessService:
                             "current_revision_id": document.current_revision_id,
                         },
                     )
-                if operation.destination_path == document.path:
-                    raise ValidationError("An organization plan cannot contain a no-op move")
-                self.documents._validate_path_type(
-                    operation.destination_path, document.content_type
+                normalized_destination = self.documents.normalize_document_path(
+                    operation.destination_path
                 )
+                if normalized_destination == document.path:
+                    raise ValidationError("An organization plan cannot contain a no-op move")
+                self.documents._validate_path_type(normalized_destination, document.content_type)
                 self.policy.require(principal, Capability.MOVE, document.path)
-                self.policy.require(principal, Capability.MOVE, operation.destination_path)
-                owner = existing_document_paths.get(operation.destination_path)
+                self.policy.require(principal, Capability.MOVE, normalized_destination)
+                owner = existing_document_paths.get(normalized_destination)
                 if owner is not None and owner != operation.document_id:
                     raise ConflictError(
-                        f"Destination document already exists: {operation.destination_path}"
+                        f"Destination document already exists: {normalized_destination}"
                     )
-                destination = operation.destination_path
+                if normalized_destination in existing_folder_paths:
+                    raise ConflictError(
+                        f"Destination folder already exists: {normalized_destination}"
+                    )
+                destination = normalized_destination
             elif isinstance(operation, OrganizationMaterializeDocument):
                 document = documents.get(operation.document_id)
                 if document is None or document.deleted:
@@ -1297,14 +1357,22 @@ class WorkspaceAccessService:
                     )
                 if document.content_type == "application/pdf":
                     raise ValidationError("PDFs are materialized when they are imported")
+                normalized_destination = self.documents.normalize_document_path(
+                    operation.destination_path
+                )
+                self.documents._validate_path_type(normalized_destination, document.content_type)
                 self.policy.require(principal, Capability.MOVE, None)
-                self.policy.require(principal, Capability.MOVE, operation.destination_path)
-                owner = existing_document_paths.get(operation.destination_path)
+                self.policy.require(principal, Capability.MOVE, normalized_destination)
+                owner = existing_document_paths.get(normalized_destination)
                 if owner is not None and owner != operation.document_id:
                     raise ConflictError(
-                        f"Destination document already exists: {operation.destination_path}"
+                        f"Destination document already exists: {normalized_destination}"
                     )
-                destination = operation.destination_path
+                if normalized_destination in existing_folder_paths:
+                    raise ConflictError(
+                        f"Destination folder already exists: {normalized_destination}"
+                    )
+                destination = normalized_destination
             elif isinstance(operation, OrganizationTrashDocument):
                 document = documents.get(operation.document_id)
                 if document is None or document.deleted:
@@ -1344,18 +1412,25 @@ class WorkspaceAccessService:
                             "current_descendant_documents": folder.document_count,
                         },
                     )
-                if operation.destination_path == folder.path:
+                normalized_destination = self.organization.normalize_folder_path(
+                    operation.destination_path
+                )
+                if normalized_destination == folder.path:
                     raise ValidationError("An organization plan cannot contain a no-op move")
-                if path_matches(folder.path, operation.destination_path):
+                if path_matches(folder.path, normalized_destination):
                     raise ValidationError("A folder cannot be moved inside itself")
                 self.policy.require(principal, Capability.MOVE, folder.path)
-                self.policy.require(principal, Capability.MOVE, operation.destination_path)
-                owner = existing_folder_paths.get(operation.destination_path)
+                self.policy.require(principal, Capability.MOVE, normalized_destination)
+                owner = existing_folder_paths.get(normalized_destination)
                 if owner is not None and owner != operation.folder_id:
                     raise ConflictError(
-                        f"Destination folder already exists: {operation.destination_path}"
+                        f"Destination folder already exists: {normalized_destination}"
                     )
-                destination = operation.destination_path
+                if normalized_destination in existing_document_paths:
+                    raise ConflictError(
+                        f"Destination document already exists: {normalized_destination}"
+                    )
+                destination = normalized_destination
             elif isinstance(operation, OrganizationUpdateDocumentMetadata):
                 document = documents.get(operation.document_id)
                 if document is None:
@@ -1408,6 +1483,8 @@ class WorkspaceAccessService:
                 if destination in planned_destinations:
                     raise ConflictError(f"Two operations target the same path: {destination}")
                 planned_destinations.add(destination)
+
+    _preflight_organization_plan = preflight_organization_plan
 
     def _execute_organization_operation(
         self,

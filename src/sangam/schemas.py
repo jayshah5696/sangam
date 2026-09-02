@@ -843,8 +843,29 @@ class ChatEffect(BaseModel):
     created_at: str
     decided_at: str | None
     completed_at: str | None
+    acknowledged_at: str | None = None
+    acknowledged_by: str | None = None
 
 
 class ChatEffectDecisionResult(BaseModel):
     effect: ChatEffect
     client_result: dict[str, object]
+
+
+class AcknowledgeChatEffectsRequest(BaseModel):
+    effect_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class ChatEffectsAcknowledgementResult(BaseModel):
+    acknowledged_ids: list[str]
+    acknowledged_at: str
+    effects: list[ChatEffect]
+
+
+class ChatEffectsSummary(BaseModel):
+    thread_id: str
+    total_attention: int
+    recovering_active: int
+    retryable_failures: int
+    terminal_failures: int
+    total_history: int

@@ -573,9 +573,30 @@ export const chatEffectSchema = z.object({
   created_at: z.string(),
   decided_at: z.string().nullable(),
   completed_at: z.string().nullable(),
+  acknowledged_at: z.string().nullable().optional(),
+  acknowledged_by: z.string().nullable().optional(),
 })
 
 export type ChatEffect = z.infer<typeof chatEffectSchema>
+
+export const chatEffectsAcknowledgementResultSchema = z.object({
+  acknowledged_ids: z.array(z.string()),
+  acknowledged_at: z.string(),
+  effects: z.array(chatEffectSchema),
+})
+
+export type ChatEffectsAcknowledgementResult = z.infer<typeof chatEffectsAcknowledgementResultSchema>
+
+export const chatEffectsSummarySchema = z.object({
+  thread_id: z.string(),
+  total_attention: z.number(),
+  recovering_active: z.number(),
+  retryable_failures: z.number(),
+  terminal_failures: z.number(),
+  total_history: z.number(),
+})
+
+export type ChatEffectsSummary = z.infer<typeof chatEffectsSummarySchema>
 
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
@@ -736,11 +757,34 @@ export const api = {
   async getChatEffect(effectId: string): Promise<ChatEffect> {
     return chatEffectSchema.parse(await request(`/chat/effects/${effectId}`))
   },
-  async listChatEffects(threadId?: string, statuses: ChatEffect['status'][] = []): Promise<ChatEffect[]> {
+  async listChatEffects(
+    threadId?: string,
+    statuses: ChatEffect['status'][] = [],
+    options?: {
+      view?: 'attention' | 'history'
+      limit?: number
+      cursor?: string
+    },
+  ): Promise<ChatEffect[]> {
     const params = new URLSearchParams()
     if (threadId) params.set('thread_id', threadId)
     statuses.forEach((status) => params.append('status', status))
+    if (options?.view) params.set('view', options.view)
+    if (options?.limit !== undefined) params.set('limit', String(options.limit))
+    if (options?.cursor) params.set('cursor', options.cursor)
     return z.array(chatEffectSchema).parse(await request(`/chat/effects?${params.toString()}`))
+  },
+  async getChatEffectsSummary(threadId: string): Promise<ChatEffectsSummary> {
+    const params = new URLSearchParams({ thread_id: threadId })
+    return chatEffectsSummarySchema.parse(await request(`/chat/effects/summary?${params.toString()}`))
+  },
+  async acknowledgeChatEffects(effectIds: string[]): Promise<ChatEffectsAcknowledgementResult> {
+    return chatEffectsAcknowledgementResultSchema.parse(
+      await request('/chat/effects/acknowledge', {
+        method: 'POST',
+        body: JSON.stringify({ effect_ids: effectIds }),
+      }),
+    )
   },
   async cancelChatRun(threadId: string): Promise<{ cancelled: boolean; run_id: string | null }> {
     return z
