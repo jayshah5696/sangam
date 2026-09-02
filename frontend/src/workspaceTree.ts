@@ -93,6 +93,19 @@ export function ensureMarkdownExtension(name: string) {
   return normalized.toLowerCase().endsWith('.md') ? normalized : `${normalized}.md`
 }
 
+export function ensureDocumentExtension(name: string, contentType: string) {
+  const normalized = name.trim()
+  if (contentType === 'application/pdf') {
+    return normalized.toLowerCase().endsWith('.pdf') ? normalized : `${normalized}.pdf`
+  }
+  if (contentType === 'text/html') {
+    return normalized.toLowerCase().endsWith('.html') || normalized.toLowerCase().endsWith('.htm')
+      ? normalized
+      : `${normalized}.html`
+  }
+  return normalized.toLowerCase().endsWith('.md') ? normalized : `${normalized}.md`
+}
+
 function normalizeWorkspacePath(path: string) {
   return path.replace(/^\/+|\/+$/g, '')
 }

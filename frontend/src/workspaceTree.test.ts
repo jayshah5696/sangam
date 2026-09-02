@@ -5,6 +5,7 @@ import {
   buildModifiedSortComparator,
   buildNameDescSortComparator,
   buildWorkspaceTreeAdapter,
+  ensureDocumentExtension,
   ensureMarkdownExtension,
   joinWorkspacePath,
   parentWorkspacePath,
@@ -78,6 +79,11 @@ describe('Pierre workspace tree adapter', () => {
     expect(parentWorkspacePath('projects/research/notes.md')).toBe('projects/research')
     expect(ensureMarkdownExtension('notes')).toBe('notes.md')
     expect(ensureMarkdownExtension('notes.MD')).toBe('notes.MD')
+    expect(ensureDocumentExtension('notes', 'text/markdown')).toBe('notes.md')
+    expect(ensureDocumentExtension('page', 'text/html')).toBe('page.html')
+    expect(ensureDocumentExtension('page.htm', 'text/html')).toBe('page.htm')
+    expect(ensureDocumentExtension('report', 'application/pdf')).toBe('report.pdf')
+    expect(ensureDocumentExtension('report.PDF', 'application/pdf')).toBe('report.PDF')
     expect(workspacePathFromTreePath('projects/research/')).toBe('projects/research')
     expect(workspacePathFromTreePath(null)).toBe('')
     expect(treePathForWorkspaceFolder('/projects/research/')).toBe('projects/research/')

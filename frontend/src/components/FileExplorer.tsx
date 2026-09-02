@@ -35,6 +35,7 @@ import {
   buildModifiedSortComparator,
   buildNameDescSortComparator,
   buildWorkspaceTreeAdapter,
+  ensureDocumentExtension,
   ensureMarkdownExtension,
   joinWorkspacePath,
   parentWorkspacePath,
@@ -149,7 +150,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     }) => {
       if (document.path) {
         const parent = parentWorkspacePath(destinationPath)
-        const filename = ensureMarkdownExtension(workspaceBasename(destinationPath))
+        const filename = ensureDocumentExtension(workspaceBasename(destinationPath), document.content_type)
         return api.moveDocument(document, joinWorkspacePath(parent, filename))
       }
       const current = await api.getDocument(document.document_id)
@@ -273,9 +274,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       )
       return roots.every((path) => {
         const document = adapterRef.current.documentByTreePath.get(path)
-        return document
-          ? Boolean(document.path) && document.content_type !== 'application/pdf'
-          : adapterRef.current.folderByTreePath.has(path)
+        return document ? Boolean(document.path) : adapterRef.current.folderByTreePath.has(path)
       })
     },
     canDrop: ({ draggedPaths, target }) => {
@@ -308,7 +307,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     canRename: ({ isFolder, path }) =>
       isFolder
         ? path !== adapterRef.current.draftsRootPath
-        : adapterRef.current.documentByTreePath.get(path)?.content_type !== 'application/pdf',
+        : Boolean(adapterRef.current.documentByTreePath.get(path)),
     onRename: ({ sourcePath, destinationPath }) => {
       const normalizedSource = workspacePathFromTreePath(sourcePath)
       const normalizedDestination = workspacePathFromTreePath(destinationPath)
@@ -573,8 +572,8 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     const duplicateSelected = () => {
       const path = effectiveSelectedTreePaths.length === 1 ? effectiveSelectedTreePaths[0] : null
       const document = path ? adapter.documentByTreePath.get(path) : undefined
-      if (document && document.content_type !== 'application/pdf') duplicate.mutate(document)
-      else setError('Select one editable document to duplicate.')
+      if (document) duplicate.mutate(document)
+      else setError('Select one document to duplicate.')
     }
     globalThis.addEventListener('sangam:explorer-move-selection', moveSelected)
     globalThis.addEventListener('sangam:explorer-edit-metadata', editSelectedMetadata)
@@ -800,7 +799,7 @@ function moveOperationsForPaths(
   )
   return roots.flatMap((path): OrganizationOperation[] => {
     const document = adapter.documentByTreePath.get(path)
-    if (document && document.content_type !== 'application/pdf') {
+    if (document) {
       if (!document.path) {
         return [
           {
@@ -905,7 +904,7 @@ function trashOperationsForPaths(
 ): OrganizationOperation[] {
   return [...new Set(paths.map(workspacePathFromTreePath))].flatMap((path): OrganizationOperation[] => {
     const document = adapter.documentByTreePath.get(path)
-    if (!document?.path || document.content_type === 'application/pdf') return []
+    if (!document?.path) return []
     return [
       {
         kind: 'trash_document',
@@ -1249,28 +1248,22 @@ function ExplorerContextMenu({
       <button type="button" role="menuitem" onClick={() => run(() => onOpenToSide(selectedDocument))}>
         <PanelRightOpen size="var(--icon-inline)" /> Open in split
       </button>
-      {selectedDocument.content_type !== 'application/pdf' && (
-        <button type="button" role="menuitem" onClick={() => run(onMove)}>
-          <FolderInput size="var(--icon-inline)" /> Move to…
+      <button type="button" role="menuitem" onClick={() => run(onMove)}>
+        <FolderInput size="var(--icon-inline)" /> Move to…
+      </button>
+      <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
+        <Pencil size="var(--icon-inline)" /> Rename
+      </button>
+      <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(selectedDocument))}>
+        <Copy size="var(--icon-inline)" /> Duplicate
+      </button>
+      <button type="button" role="menuitem" onClick={() => run(onEditMetadata)}>
+        <TagIcon size="var(--icon-inline)" /> Edit tags and category…
+      </button>
+      {selectedDocument.path && (
+        <button className="danger" type="button" role="menuitem" onClick={() => run(onTrash)}>
+          <Trash2 size="var(--icon-inline)" /> Move to trash
         </button>
-      )}
-      {selectedDocument.content_type !== 'application/pdf' && (
-        <>
-          <button type="button" role="menuitem" onClick={() => run(() => onRename(item.path), false)}>
-            <Pencil size="var(--icon-inline)" /> Rename
-          </button>
-          <button type="button" role="menuitem" onClick={() => run(() => onDuplicate(selectedDocument))}>
-            <Copy size="var(--icon-inline)" /> Duplicate
-          </button>
-          <button type="button" role="menuitem" onClick={() => run(onEditMetadata)}>
-            <TagIcon size="var(--icon-inline)" /> Edit tags and category…
-          </button>
-          {selectedDocument.path && (
-            <button className="danger" type="button" role="menuitem" onClick={() => run(onTrash)}>
-              <Trash2 size="var(--icon-inline)" /> Move to trash
-            </button>
-          )}
-        </>
       )}
     </>
   ) : null

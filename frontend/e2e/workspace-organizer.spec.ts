@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import fs from 'node:fs'
 import path from 'node:path'
 
 import { expect, test } from './fixtures'
@@ -8,6 +9,25 @@ type CreatedDocument = {
   path: string | null
   metadata_version: number
   tags: Array<{ name: string }>
+}
+
+async function importSamplePdf(
+  request: import('@playwright/test').APIRequestContext,
+  documentPath: string,
+  title: string,
+) {
+  const sourcePath = path.join(import.meta.dirname, 'assets/multipage.pdf')
+  const source = fs.readFileSync(sourcePath)
+  const response = await request.post(
+    `/api/v1/pdfs?title=${encodeURIComponent(title)}&path=${encodeURIComponent(documentPath)}`,
+    {
+      headers: { 'Content-Type': 'application/pdf', 'Idempotency-Key': randomUUID() },
+      data: source,
+    },
+  )
+  expect(response.ok(), await response.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/pdfs returns document entity with document_id
+  return (await response.json()) as CreatedDocument
 }
 
 async function createFolder(request: import('@playwright/test').APIRequestContext, folderPath: string) {
@@ -208,4 +228,112 @@ test('an unmaterialized chat draft can be moved into the workspace', async ({ pa
   // SAFETY: GET /api/v1/documents/{id} returns the validated document entity.
   const current = (await currentResponse.json()) as CreatedDocument
   expect(current.path).toBe(`${target}/Sample ${suffix}.md`)
+})
+
+test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, and trashed together', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name === 'chromium-touch-mobile', 'fine-pointer multi-selection')
+  page.on('dialog', (dialog) => void dialog.accept())
+  const suffix = randomUUID().slice(0, 7)
+  const source = `mixed-source-${suffix}`
+  const target = `mixed-target-${suffix}`
+  const mdName = `note-${suffix}.md`
+  const pdfName = `paper-${suffix}.pdf`
+
+  await createFolder(request, source)
+  await createFolder(request, target)
+  const mdDoc = await createDocument(request, `Note ${suffix}`, `${source}/${mdName}`)
+  const pdfDoc = await importSamplePdf(request, `${source}/${pdfName}`, `Paper ${suffix}`)
+
+  await page.goto(`/documents/${mdDoc.document_id}`)
+  await showFiles(page)
+  const tree = page.locator('.sangam-file-tree')
+  const mdRow = tree.getByRole('treeitem', { name: mdName, exact: true })
+  const pdfRow = tree.getByRole('treeitem', { name: pdfName, exact: true })
+
+  await expect(mdRow).toBeVisible()
+  await expect(pdfRow).toBeVisible()
+
+  // 1. Verify full action context menu on PDF document
+  await pdfRow.click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: `Actions for ${pdfName}` })
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Open in split' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Move to…' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Rename' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Duplicate' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Edit tags and category…' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Move to trash' })).toBeVisible()
+
+  // 2. Duplicate PDF via context menu
+  await menu.getByRole('menuitem', { name: 'Duplicate' }).click()
+  const dupName = `paper-${suffix} copy.pdf`
+  await expect(page.getByRole('tab', { name: `Paper ${suffix} copy` })).toBeVisible()
+  await showFiles(page)
+  const dupRow = tree.getByRole('treeitem', { name: dupName, exact: true })
+  await expect(dupRow).toBeVisible()
+
+  // Trash the duplicate to keep tree clean
+  await dupRow.focus()
+  await page.keyboard.press('Shift+F10')
+  const dupMenu = page.getByRole('menu', { name: `Actions for ${dupName}` })
+  await dupMenu.getByRole('menuitem', { name: 'Move to trash' }).click()
+  await expect(dupRow).toBeHidden()
+
+  // 3. Multi-selection of Markdown + PDF
+  await page.goto(`/documents/${mdDoc.document_id}`)
+  await showFiles(page)
+  await mdRow.click()
+  await pdfRow.click({ modifiers: ['ControlOrMeta'] })
+  const actions = page.getByLabel('Selected item actions')
+  await expect(actions).toContainText('2 selected')
+
+  // Move both to target folder
+  await actions.getByRole('button', { name: 'Move selected items', exact: true }).click()
+  const moveDialog = page.getByRole('dialog', { name: 'Move 2 items' })
+  await moveDialog.getByRole('option', { name: target, exact: true }).click()
+  await moveDialog.getByRole('button', { name: 'Move here' }).click()
+  await expect(moveDialog).toBeHidden()
+
+  // Verify paths on server
+  const currentMdResponse = await request.get(`/api/v1/documents/${mdDoc.document_id}`)
+  // SAFETY: GET /api/v1/documents/{id} returns the validated document entity.
+  const currentMd = (await currentMdResponse.json()) as CreatedDocument
+  expect(currentMd.path).toBe(`${target}/${mdName}`)
+
+  const currentPdfResponse = await request.get(`/api/v1/documents/${pdfDoc.document_id}`)
+  // SAFETY: GET /api/v1/documents/{id} returns the validated document entity.
+  const currentPdf = (await currentPdfResponse.json()) as CreatedDocument
+  expect(currentPdf.path).toBe(`${target}/${pdfName}`)
+
+  // 4. Trash and Restore PDF
+  await showFiles(page)
+  const movedPdfRow = tree.getByRole('treeitem', { name: pdfName, exact: true })
+  await movedPdfRow.focus()
+  await page.keyboard.press('Shift+F10')
+  const targetMenu = page.getByRole('menu', { name: `Actions for ${pdfName}` })
+  await targetMenu.getByRole('menuitem', { name: 'Move to trash' }).click()
+  await expect(movedPdfRow).toBeHidden()
+
+  // Go to /trash and restore
+  await page.goto('/trash')
+  const trashHeading = page.getByRole('heading', { name: 'Trash' })
+  await expect(trashHeading).toBeVisible()
+  const restoreBtn = page.getByRole('button', { name: 'Restore document' }).first()
+  await expect(restoreBtn).toBeVisible()
+  await restoreBtn.click()
+
+  // Verify navigation to restored document
+  await expect(page).toHaveURL(new RegExp(`/documents/${pdfDoc.document_id}`))
+  await showFiles(page)
+  await expect(tree.getByRole('treeitem', { name: pdfName, exact: true })).toBeVisible()
+
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir) {
+    await page.screenshot({
+      path: path.join(evidenceDir, `workspace-organizer-pdf-mixed-${testInfo.project.name}.png`),
+    })
+  }
 })
