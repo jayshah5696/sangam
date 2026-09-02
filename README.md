@@ -56,7 +56,7 @@ docker run --rm -p 127.0.0.1:8000:8000 \
   -v "$PWD/data/database:/data/database" \
   -v "$PWD/data/workspace:/data/workspace" \
   -v "$PWD/data/backups:/data/backups" \
-  ghcr.io/jayshah5696/sangam:0.11.1
+  ghcr.io/jayshah5696/sangam:0.12.0
 ```
 
 Then open <http://127.0.0.1:8000>.
