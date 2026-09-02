@@ -277,10 +277,10 @@ components remain synchronized with native Sangam controls.
 Run the fast UI gate while working:
 
 ```bash
-npm --prefix frontend run format:check
-npm --prefix frontend run lint
-npm --prefix frontend run build
-npm --prefix frontend run test
+pnpm --dir frontend run format:check
+pnpm --dir frontend run lint
+pnpm --dir frontend run build
+pnpm --dir frontend run test
 ```
 
 Before merging an interaction or layout change, run the browser suite. It starts
@@ -288,14 +288,14 @@ an isolated Sangam instance, seeds real API data, checks the primary routes with
 axe, and covers desktop and 390px layouts:
 
 ```bash
-npm --prefix frontend run test:e2e
+pnpm --dir frontend run test:e2e
 ```
 
 After those checks pass, refresh the verified README assets and inspect all three
 images before committing them:
 
 ```bash
-npm --prefix frontend run update:screenshots
+pnpm --dir frontend run update:screenshots
 ```
 
 This writes `docs/assets/crisp-workspace.png`, `crisp-chat.png`,
@@ -305,6 +305,6 @@ when the PDF fixture is available, `phase-5-pdf-research-narrow.png`. Do not
 hand-edit or crop these screenshots; they are browser output from an isolated
 local fixture.
 
-`npm --prefix frontend run lint` enforces the compact type, font-family, radius,
+`pnpm --dir frontend run lint` enforces the compact type, font-family, radius,
 and defined-custom-property rules so a new component cannot quietly introduce
 a parallel UI scale or reference a missing design token.
