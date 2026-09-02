@@ -166,6 +166,7 @@ def build_application_services(
         mutations=mutations,
         max_pdf_bytes=settings.max_pdf_bytes,
     )
+    documents.pdf_research = pdf_research
     pdf_research.recover_interrupted_extractions()
     karakeep_client = None
     if settings.karakeep_base_url and settings.karakeep_api_key:

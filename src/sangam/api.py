@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from urllib.parse import quote, urlsplit
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -1197,10 +1197,11 @@ else fetch('/api/v1/trusted-previews/content', {
     def duplicate_document(
         document_id: str,
         body: DuplicateDocument,
+        background_tasks: BackgroundTasks,
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.duplicate_document(
+        result = workspace.duplicate_document(
             principal,
             document_id=document_id,
             expected_revision_id=body.expected_revision_id,
@@ -1208,6 +1209,9 @@ else fetch('/api/v1/trusted-previews/content', {
             path=body.path,
             idempotency_key=idempotency_key,
         )
+        if result.content_type == "application/pdf":
+            background_tasks.add_task(pdf_research.extract_text, result.document_id)
+        return result
 
     @app.patch("/api/v1/documents/{document_id}/metadata", response_model=Document)
     def update_document_metadata(

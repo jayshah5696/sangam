@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 import uuid
+from pathlib import PurePosixPath
 
 from sangam.actors import ActorService
 from sangam.db import Database, utc_now
@@ -54,6 +55,7 @@ class DocumentService:
         self.search_index = search_index
         self.mutations = mutations
         self.max_document_bytes = max_document_bytes
+        self.pdf_research = None
 
     def _validate_content_size(self, content: str) -> None:
         size_bytes = len(content.encode("utf-8"))
@@ -738,8 +740,6 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         source = self.get_document(document_id)
-        if source.content_type == "application/pdf":
-            raise ValidationError("PDF copies must be imported as new immutable documents")
         if source.current_revision_id != expected_revision_id:
             raise ConflictError(
                 "The source document changed since it was read",
@@ -749,11 +749,79 @@ class DocumentService:
                     "current_revision_id": source.current_revision_id,
                 },
             )
+        if source.content_type == "application/pdf":
+            return self._duplicate_pdf_document(
+                source=source,
+                title=title,
+                path=path,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
         return self.create_document(
             title=title or f"{source.title} copy",
             content=source.content,
             path=path,
             content_type=source.content_type,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
+
+    def _duplicate_pdf_document(
+        self,
+        *,
+        source: Document,
+        title: str | None,
+        path: str | None,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        if not source.path:
+            raise ValidationError("Cannot duplicate an unmaterialized PDF")
+        source_bytes = self.workspace.read_binary(source.path)
+        actual_hash = hashlib.sha256(source_bytes).hexdigest()
+        if actual_hash != source.content_hash:
+            raise ConflictError(
+                "Source PDF content does not match stored content hash",
+                details={"expected_hash": source.content_hash, "actual_hash": actual_hash},
+            )
+        if path is not None:
+            destination_path = self._normalize_path(path)
+            self._validate_path_type(destination_path, "application/pdf")
+        else:
+            source_parts = PurePosixPath(source.path)
+            candidate_name = f"{source_parts.stem} copy{source_parts.suffix}"
+            destination_path = (
+                (source_parts.parent / candidate_name).as_posix()
+                if source_parts.parent != PurePosixPath(".")
+                else candidate_name
+            )
+        with self.database.connection() as connection:
+            if connection.execute(
+                "SELECT 1 FROM documents WHERE path = ? AND deleted = 0", (destination_path,)
+            ).fetchone():
+                raise ValidationError("A document already uses that path")
+        if self.workspace.is_document_file(destination_path):
+            raise ValidationError("A document already uses that path")
+        new_title = title.strip() if title and title.strip() else f"{source.title} copy"
+        pdf_research = getattr(self, "pdf_research", None)
+        if pdf_research is None:
+            from sangam.pdf_research import PdfResearchService
+
+            pdf_research = PdfResearchService(
+                database=self.database,
+                workspace=self.workspace,
+                documents=self,
+                idempotency=self.idempotency,
+                actors=self.actors,
+                search_index=self.search_index,
+                mutations=self.mutations,
+                max_pdf_bytes=self.max_document_bytes * 10,
+            )
+        return pdf_research.import_pdf(
+            title=new_title,
+            path=destination_path,
+            content=source_bytes,
+            supersedes_document_id=None,
             actor_id=actor_id,
             idempotency_key=idempotency_key,
         )
@@ -798,11 +866,18 @@ class DocumentService:
     ) -> Document:
         normalized_path = self._normalize_path(path)
         current = self.get_document(document_id)
-        if current.content_type == "application/pdf":
-            raise ValidationError("PDF path changes are deferred; import a replacement if needed")
         self._validate_path_type(normalized_path, current.content_type)
         if not current.path:
             raise ValidationError("Unmaterialized documents must be materialized before moving")
+        if current.content_type == "application/pdf":
+            return self._move_pdf_document(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                path=normalized_path,
+                summary=summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
         document, _ = self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
@@ -816,6 +891,147 @@ class DocumentService:
         )
         return document
 
+    def _move_pdf_document(
+        self,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        path: str,
+        summary: str | None,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        with self.mutations.document(document_id):
+            payload = {
+                "document_id": document_id,
+                "expected_revision_id": expected_revision_id,
+                "path": path,
+                "operation": "move",
+                "summary": summary,
+            }
+            fingerprint = request_hash(payload)
+            with self.database.connection() as connection:
+                duplicate = self._idempotent_result(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation="move",
+                    request_hash=fingerprint,
+                )
+                if duplicate is not None:
+                    return self.get_document(duplicate[0], include_deleted=True)
+
+                current = self._get_document_in_connection(
+                    connection, document_id, include_deleted=True
+                )
+                if current.current_revision_id != expected_revision_id:
+                    raise ConflictError(
+                        "The document changed since it was read",
+                        details={
+                            "document_id": document_id,
+                            "expected_revision_id": expected_revision_id,
+                            "current_revision_id": current.current_revision_id,
+                        },
+                    )
+                if current.deleted:
+                    raise NotFoundError(f"Document is deleted: {document_id}")
+                if current.path == path:
+                    raise ValidationError("An organization plan cannot contain a no-op move")
+                if not current.path:
+                    raise ValidationError(
+                        "Unmaterialized documents must be materialized before moving"
+                    )
+
+                existing = connection.execute(
+                    "SELECT document_id FROM documents WHERE path = ? AND deleted = 0",
+                    (path,),
+                ).fetchone()
+                if existing and existing["document_id"] != document_id:
+                    raise ConflictError(f"A document already uses that path: {path}")
+                if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
+                    raise ConflictError(f"Destination path conflicts with a folder: {path}")
+
+            old_path = current.path
+            source_exists = self.workspace.is_document_file(old_path)
+            dest_exists = self.workspace.is_document_file(path)
+            if dest_exists and source_exists:
+                raise ConflictError(f"A workspace file already exists at that path: {path}")
+
+            if source_exists:
+                self.workspace.move_document(old_path, path)
+
+            try:
+                with self.database.transaction() as connection:
+                    self.actors.require_known(connection, actor_id)
+                    duplicate = self._idempotent_result(
+                        connection,
+                        actor_id=actor_id,
+                        key=idempotency_key,
+                        operation="move",
+                        request_hash=fingerprint,
+                    )
+                    if duplicate is not None:
+                        result = duplicate
+                    else:
+                        now = utc_now()
+                        revision_id = str(uuid.uuid4())
+                        self.organization.ensure_document_folder_hierarchy(connection, path)
+                        connection.execute(
+                            """
+                            INSERT INTO revisions(
+                                revision_id, document_id, parent_revision_id, content,
+                                content_hash, size_bytes, actor_id, operation, summary, created_at
+                            ) VALUES (?, ?, ?, '', ?, ?, ?, 'move', ?, ?)
+                            """,
+                            (
+                                revision_id,
+                                document_id,
+                                current.current_revision_id,
+                                current.content_hash,
+                                current.size_bytes,
+                                actor_id,
+                                summary or f"Moved to {path}",
+                                now,
+                            ),
+                        )
+                        connection.execute(
+                            """
+                            UPDATE documents
+                            SET path = ?, current_revision_id = ?, materialization_state = 'clean',
+                                file_hash = ?, updated_at = ?
+                            WHERE document_id = ?
+                            """,
+                            (path, revision_id, current.content_hash, now, document_id),
+                        )
+                        self._record_idempotency(
+                            connection,
+                            actor_id=actor_id,
+                            key=idempotency_key,
+                            operation="move",
+                            request_hash=fingerprint,
+                            document_id=document_id,
+                            revision_id=revision_id,
+                        )
+                        self.organization._replace_document_search_row(connection, document_id)
+                        result = (document_id, revision_id)
+            except Exception:
+                try:
+                    if (
+                        source_exists
+                        and self.workspace.is_document_file(path)
+                        and not self.workspace.is_document_file(old_path)
+                    ):
+                        self.workspace.move_document(path, old_path)
+                except Exception as rollback_err:
+                    raise RuntimeError(
+                        "Move failed and filesystem rollback failed"
+                    ) from rollback_err
+                raise
+
+            document = self.get_document(result[0], include_deleted=True)
+            self.search_index.sync(document)
+            return document
+
     def delete_document(
         self,
         *,
@@ -825,9 +1041,15 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        self._require_text_document(
-            document_id, "PDF deletion is deferred so immutable research sources remain available"
-        )
+        current = self.get_document(document_id)
+        if current.content_type == "application/pdf":
+            return self._delete_pdf_document(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                summary=summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
         document, _ = self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
@@ -841,6 +1063,135 @@ class DocumentService:
             deleted=True,
         )
         return document
+
+    def _delete_pdf_document(
+        self,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        summary: str | None,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        with self.mutations.document(document_id):
+            payload = {
+                "document_id": document_id,
+                "expected_revision_id": expected_revision_id,
+                "operation": "delete",
+                "summary": summary,
+                "deleted": True,
+            }
+            fingerprint = request_hash(payload)
+            with self.database.connection() as connection:
+                duplicate = self._idempotent_result(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation="delete",
+                    request_hash=fingerprint,
+                )
+                if duplicate is not None:
+                    return self.get_document(duplicate[0], include_deleted=True)
+
+                current = self._get_document_in_connection(
+                    connection, document_id, include_deleted=True
+                )
+                if current.current_revision_id != expected_revision_id:
+                    raise ConflictError(
+                        "The document changed since it was read",
+                        details={
+                            "document_id": document_id,
+                            "expected_revision_id": expected_revision_id,
+                            "current_revision_id": current.current_revision_id,
+                        },
+                    )
+                if current.deleted:
+                    raise NotFoundError(f"Document is deleted: {document_id}")
+                if not current.path:
+                    raise ValidationError("Unmaterialized documents cannot be moved to trash")
+
+            old_path = current.path
+            self.workspace.trash_document(
+                document_id=document_id,
+                path=old_path,
+                content_hash=current.content_hash,
+                size_bytes=current.size_bytes,
+            )
+
+            try:
+                with self.database.transaction() as connection:
+                    self.actors.require_known(connection, actor_id)
+                    duplicate = self._idempotent_result(
+                        connection,
+                        actor_id=actor_id,
+                        key=idempotency_key,
+                        operation="delete",
+                        request_hash=fingerprint,
+                    )
+                    if duplicate is not None:
+                        result = duplicate
+                    else:
+                        now = utc_now()
+                        revision_id = str(uuid.uuid4())
+                        connection.execute(
+                            """
+                            INSERT INTO revisions(
+                                revision_id, document_id, parent_revision_id, content,
+                                content_hash, size_bytes, actor_id, operation, summary, created_at
+                            ) VALUES (?, ?, ?, '', ?, ?, ?, 'delete', ?, ?)
+                            """,
+                            (
+                                revision_id,
+                                document_id,
+                                current.current_revision_id,
+                                current.content_hash,
+                                current.size_bytes,
+                                actor_id,
+                                summary or "Moved to trash",
+                                now,
+                            ),
+                        )
+                        connection.execute(
+                            """
+                            UPDATE documents
+                            SET current_revision_id = ?, deleted = 1,
+                                materialization_state = 'none',
+                                file_hash = NULL, updated_at = ?
+                            WHERE document_id = ?
+                            """,
+                            (revision_id, now, document_id),
+                        )
+                        self._record_idempotency(
+                            connection,
+                            actor_id=actor_id,
+                            key=idempotency_key,
+                            operation="delete",
+                            request_hash=fingerprint,
+                            document_id=document_id,
+                            revision_id=revision_id,
+                        )
+                        self.organization._replace_document_search_row(connection, document_id)
+                        result = (document_id, revision_id)
+            except Exception:
+                try:
+                    if self.workspace.has_trashed_document(
+                        document_id
+                    ) and not self.workspace.is_document_file(old_path):
+                        self.workspace.restore_trash_document(
+                            document_id=document_id,
+                            path=old_path,
+                            content_hash=current.content_hash,
+                            size_bytes=current.size_bytes,
+                        )
+                except Exception as rollback_err:
+                    raise RuntimeError(
+                        "Delete failed and filesystem rollback failed"
+                    ) from rollback_err
+                raise
+
+            document = self.get_document(result[0], include_deleted=True)
+            self.search_index.sync(document)
+            return document
 
     def history(self, document_id: str) -> list[Revision]:
         self.get_document(document_id, include_deleted=True)
@@ -914,9 +1265,20 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        self._require_text_document(
-            document_id, "Immutable PDF source bytes cannot be restored as text revisions"
-        )
+        current = self.get_document(document_id, include_deleted=True)
+        if current.content_type == "application/pdf":
+            if not current.deleted:
+                raise ValidationError(
+                    "Immutable PDF source bytes cannot be restored as text revisions"
+                )
+            return self._restore_pdf_document(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                revision_id=revision_id,
+                summary=summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
         with self.database.connection() as connection:
             target = connection.execute(
                 "SELECT content FROM revisions WHERE revision_id = ? AND document_id = ?",
@@ -937,6 +1299,160 @@ class DocumentService:
             deleted=False,
         )
         return document
+
+    def _restore_pdf_document(
+        self,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        revision_id: str,
+        summary: str | None,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        with self.mutations.document(document_id):
+            payload = {
+                "document_id": document_id,
+                "expected_revision_id": expected_revision_id,
+                "revision_id": revision_id,
+                "operation": "restore",
+                "summary": summary,
+                "deleted": False,
+            }
+            fingerprint = request_hash(payload)
+            with self.database.connection() as connection:
+                duplicate = self._idempotent_result(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation="restore",
+                    request_hash=fingerprint,
+                )
+                if duplicate is not None:
+                    return self.get_document(duplicate[0], include_deleted=True)
+
+                current = self._get_document_in_connection(
+                    connection, document_id, include_deleted=True
+                )
+                if not current.deleted:
+                    raise ValidationError(
+                        "Immutable PDF source bytes cannot be restored as text revisions"
+                    )
+                if current.current_revision_id != expected_revision_id:
+                    raise ConflictError(
+                        "The document changed since it was read",
+                        details={
+                            "document_id": document_id,
+                            "expected_revision_id": expected_revision_id,
+                            "current_revision_id": current.current_revision_id,
+                        },
+                    )
+                if not current.path:
+                    raise ValidationError("Cannot restore a document without a path")
+
+                existing = connection.execute(
+                    "SELECT document_id FROM documents WHERE path = ? AND deleted = 0",
+                    (current.path,),
+                ).fetchone()
+                if existing and existing["document_id"] != document_id:
+                    raise ConflictError(
+                        f"Cannot restore document: path is occupied: {current.path}"
+                    )
+                if connection.execute(
+                    "SELECT 1 FROM folders WHERE path = ?", (current.path,)
+                ).fetchone():
+                    raise ConflictError(
+                        f"Cannot restore document: path conflicts with a folder: {current.path}"
+                    )
+
+            if self.workspace.is_document_file(current.path):
+                raise ConflictError(f"Cannot restore document: path is occupied: {current.path}")
+            if not self.workspace.has_trashed_document(document_id):
+                raise NotFoundError(f"Retained trash file not found for document: {document_id}")
+
+            target_path = current.path
+            self.workspace.restore_trash_document(
+                document_id=document_id,
+                path=target_path,
+                content_hash=current.content_hash,
+                size_bytes=current.size_bytes,
+            )
+
+            try:
+                with self.database.transaction() as connection:
+                    self.actors.require_known(connection, actor_id)
+                    duplicate = self._idempotent_result(
+                        connection,
+                        actor_id=actor_id,
+                        key=idempotency_key,
+                        operation="restore",
+                        request_hash=fingerprint,
+                    )
+                    if duplicate is not None:
+                        result = duplicate
+                    else:
+                        now = utc_now()
+                        new_revision_id = str(uuid.uuid4())
+                        self.organization.ensure_document_folder_hierarchy(connection, target_path)
+                        connection.execute(
+                            """
+                            INSERT INTO revisions(
+                                revision_id, document_id, parent_revision_id, content,
+                                content_hash, size_bytes, actor_id, operation, summary, created_at
+                            ) VALUES (?, ?, ?, '', ?, ?, ?, 'restore', ?, ?)
+                            """,
+                            (
+                                new_revision_id,
+                                document_id,
+                                current.current_revision_id,
+                                current.content_hash,
+                                current.size_bytes,
+                                actor_id,
+                                summary or f"Restored {document_id} from trash",
+                                now,
+                            ),
+                        )
+                        connection.execute(
+                            """
+                            UPDATE documents
+                            SET current_revision_id = ?, deleted = 0,
+                                materialization_state = 'clean',
+                                file_hash = ?, updated_at = ?
+                            WHERE document_id = ?
+                            """,
+                            (new_revision_id, current.content_hash, now, document_id),
+                        )
+                        self._record_idempotency(
+                            connection,
+                            actor_id=actor_id,
+                            key=idempotency_key,
+                            operation="restore",
+                            request_hash=fingerprint,
+                            document_id=document_id,
+                            revision_id=new_revision_id,
+                        )
+                        self.organization._replace_document_search_row(connection, document_id)
+                        result = (document_id, new_revision_id)
+            except Exception:
+                try:
+                    if self.workspace.is_document_file(
+                        target_path
+                    ) and not self.workspace.has_trashed_document(document_id):
+                        self.workspace.trash_document(
+                            document_id=document_id,
+                            path=target_path,
+                            content_hash=current.content_hash,
+                            size_bytes=current.size_bytes,
+                        )
+                except Exception as rollback_err:
+                    raise RuntimeError(
+                        "Restore failed and filesystem rollback failed"
+                    ) from rollback_err
+                raise
+
+            document = self.get_document(result[0], include_deleted=True)
+            self.search_index.sync(document)
+            return document
 
     def _finish_materialization(self, document: Document) -> None:
         if document.deleted or not document.path:

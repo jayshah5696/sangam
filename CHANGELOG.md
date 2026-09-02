@@ -5,7 +5,10 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 ## [Unreleased]
 
-See the generated notes attached to each GitHub Release.
+### Added
+
+- Consistent workspace organization for PDF documents: PDFs now participate in organization plans, drag-and-drop, context menu actions (Move to..., Rename, Duplicate, Edit tags and category..., Move to trash), keyboard actions (F2 rename), and Trash restoration (#176).
+- Managed PDF trash storage with immutable byte retention in `.sangam-trash`, conflict-safe restoration, and reconciliation scan protection (#176).
 
 ## [0.11.1] - 2026-08-29
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable, Iterator
+from pathlib import PurePosixPath
 from typing import TypeVar
 
 from sangam.activity import ActivityService
@@ -581,8 +582,21 @@ class WorkspaceAccessService:
 
         def operation() -> Document:
             self.policy.require(principal, Capability.READ, current.path)
+            destination_path = path
+            if (
+                destination_path is None
+                and current.content_type == "application/pdf"
+                and current.path
+            ):
+                source_parts = PurePosixPath(current.path)
+                candidate_name = f"{source_parts.stem} copy{source_parts.suffix}"
+                destination_path = (
+                    (source_parts.parent / candidate_name).as_posix()
+                    if source_parts.parent != PurePosixPath(".")
+                    else candidate_name
+                )
             authorized_path = self._authorize_destination_path(
-                principal, capability=Capability.CREATE, path=path
+                principal, capability=Capability.CREATE, path=destination_path
             )
             return self.documents.duplicate_document(
                 document_id=document_id,
@@ -1250,8 +1264,9 @@ class WorkspaceAccessService:
                     )
                 if operation.destination_path == document.path:
                     raise ValidationError("An organization plan cannot contain a no-op move")
-                if document.content_type == "application/pdf":
-                    raise ValidationError("PDF path changes are not supported")
+                self.documents._validate_path_type(
+                    operation.destination_path, document.content_type
+                )
                 self.policy.require(principal, Capability.MOVE, document.path)
                 self.policy.require(principal, Capability.MOVE, operation.destination_path)
                 owner = existing_document_paths.get(operation.destination_path)

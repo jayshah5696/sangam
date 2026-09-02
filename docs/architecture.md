@@ -66,7 +66,7 @@ Chat-grounded edits go further: the assistant produces a **proposal** (a suggest
 
 ## PDF research
 
-PDFs are imported immutably (SHA-256 tracked), page text is extracted into FTS5 in a background job, and pages are served by byte range. Annotations and notes are pinned to exact pages with optimistic versioning. A PDF can be replaced via `supersedes`, which preserves the old document's identity chain.
+PDFs are imported immutably (SHA-256 tracked), page text is extracted into FTS5 in a background job, and pages are served by byte range. Annotations and notes are pinned to exact pages with optimistic versioning. A PDF can be replaced via `supersedes`, which preserves the old document's identity chain. In the workspace, PDFs participate in organization plans alongside Markdown and HTML: they can be moved, renamed, duplicated (as clean copies without annotations), and moved to managed trash with byte retention and restoration.
 
 ## Publishing
 

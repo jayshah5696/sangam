@@ -11,6 +11,9 @@ type MockFileTreeOptions = {
     item: { kind: 'directory'; name: string; path: string }
     row: Record<string, never>
   }) => { text: string; title?: string } | null
+  dragAndDrop?: {
+    canDrag: (paths: readonly string[]) => boolean
+  }
   renaming?: {
     canRename: (item: { isFolder: boolean; path: string }) => boolean
     onRename?: (event: { sourcePath: string; destinationPath: string }) => void
@@ -235,7 +238,8 @@ describe('FileExplorerPanel', () => {
     expect(options?.renaming?.canRename({ isFolder: true, path: 'projects' })).toBe(true)
     expect(options?.renaming?.canRename({ isFolder: true, path: 'Drafts' })).toBe(false)
     expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/note.md' })).toBe(true)
-    expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/paper.pdf' })).toBe(false)
+    expect(options?.renaming?.canRename({ isFolder: false, path: 'projects/paper.pdf' })).toBe(true)
+    expect(options?.dragAndDrop?.canDrag(['projects/paper.pdf'])).toBe(true)
   })
 
   it('applies sort via prepareFileTreeInput on resetPaths, not on useFileTree options', () => {

@@ -266,3 +266,95 @@ def test_plan_applies_exact_tags_and_trashes_documents_with_preconditions(
         if document["deleted"]
     }
     assert deleted_ids.issuperset({first["document_id"], second["document_id"]})
+
+
+def test_mixed_content_organization_plan_with_pdf(client: TestClient, settings) -> None:
+    from test_phase_five_pdf_research import import_pdf, text_pdf
+
+    md_doc = create_document(client, title="Markdown Note", path="incoming/note.md", key="plan-md")
+    html_resp = client.post(
+        "/api/v1/documents",
+        headers=headers("plan-html"),
+        json={
+            "title": "HTML Page",
+            "path": "incoming/page.html",
+            "content": "<p>hello</p>",
+            "content_type": "text/html",
+        },
+    )
+    assert html_resp.status_code == 201
+    html_doc = html_resp.json()
+
+    pdf_source = text_pdf("Mixed plan test")
+    pdf_resp = import_pdf(
+        client, content=pdf_source, key="plan-pdf", path="incoming/research.pdf", title="PDF Report"
+    )
+    assert pdf_resp.status_code == 201
+    pdf_doc = pdf_resp.json()
+
+    tag_resp = client.post(
+        "/api/v1/tags", headers=headers("tag-mixed"), json={"name": "Organized", "color": "#123456"}
+    )
+    assert tag_resp.status_code == 201
+    tag_id = tag_resp.json()["tag_id"]
+
+    plan = {
+        "operations": [
+            move_operation(md_doc, "organized/note.md"),
+            move_operation(html_doc, "organized/page.html"),
+            move_operation(pdf_doc, "organized/research.pdf"),
+            {
+                "kind": "update_document_metadata",
+                "document_id": pdf_doc["document_id"],
+                "expected_metadata_version": pdf_doc["metadata_version"],
+                "expected_category": None,
+                "expected_tag_ids": [],
+                "category": "Reports",
+                "tag_ids": [tag_id],
+            },
+        ]
+    }
+    applied = client.post("/api/v1/organization/plans", headers=headers("mixed-plan"), json=plan)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "completed"
+    assert applied.json()["completed"] == 4
+
+    assert (
+        client.get(f"/api/v1/documents/{md_doc['document_id']}").json()["path"]
+        == "organized/note.md"
+    )
+    assert (
+        client.get(f"/api/v1/documents/{html_doc['document_id']}").json()["path"]
+        == "organized/page.html"
+    )
+    pdf_current = client.get(f"/api/v1/documents/{pdf_doc['document_id']}").json()
+    assert pdf_current["path"] == "organized/research.pdf"
+    assert pdf_current["category"] == "Reports"
+    assert [t["tag_id"] for t in pdf_current["tags"]] == [tag_id]
+    assert (settings.workspace_root / "organized/research.pdf").read_bytes() == pdf_source
+
+    trash_plan = {
+        "operations": [
+            {
+                "kind": "trash_document",
+                "document_id": doc["document_id"],
+                "expected_revision_id": client.get(
+                    f"/api/v1/documents/{doc['document_id']}"
+                ).json()["current_revision_id"],
+                "expected_source_path": expected_path,
+            }
+            for doc, expected_path in [
+                (md_doc, "organized/note.md"),
+                (html_doc, "organized/page.html"),
+                (pdf_doc, "organized/research.pdf"),
+            ]
+        ]
+    }
+    trashed = client.post(
+        "/api/v1/organization/plans", headers=headers("trash-all"), json=trash_plan
+    )
+    assert trashed.status_code == 200, trashed.text
+    assert trashed.json()["completed"] == 3
+
+    assert not (settings.workspace_root / "organized/research.pdf").exists()
+    assert (settings.workspace_root / ".sangam-trash" / f"{pdf_doc['document_id']}.pdf").exists()

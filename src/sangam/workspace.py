@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
-from sangam.errors import InvalidPathError, NotFoundError
+from sangam.errors import ConflictError, InvalidPathError, NotFoundError
 
 
 def canonicalize_document_path(raw_path: str) -> str:
@@ -58,6 +58,18 @@ class WorkspaceFilesystem(Protocol):
     def write_atomic_bytes(self, path: str, content: bytes, *, overwrite: bool = False) -> str: ...
 
     def delete_document(self, path: str) -> None: ...
+
+    def move_document(self, source_path: str, destination_path: str) -> None: ...
+
+    def trash_document(
+        self, document_id: str, path: str, content_hash: str, size_bytes: int
+    ) -> None: ...
+
+    def restore_trash_document(
+        self, document_id: str, path: str, content_hash: str, size_bytes: int
+    ) -> None: ...
+
+    def has_trashed_document(self, document_id: str) -> bool: ...
 
     def scan_documents(self) -> dict[str, str]: ...
 
@@ -146,15 +158,127 @@ class DiskWorkspaceFilesystem:
             document.unlink()
             self._fsync_directory(document.parent)
 
+    def move_document(self, source_path: str, destination_path: str) -> None:
+        source = self._document_path(source_path)
+        destination = self._document_path(destination_path)
+        if not source.is_file():
+            raise NotFoundError(f"Document file not found on disk: {source_path}")
+        if source == destination:
+            return
+        if destination.exists():
+            raise InvalidPathError("Destination document path already exists on disk")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, destination)
+        self._fsync_directory(destination.parent)
+        if source.parent != destination.parent and source.parent.exists():
+            self._fsync_directory(source.parent)
+
+    @property
+    def _trash_root(self) -> Path:
+        trash_dir = self.root.resolve() / ".sangam-trash"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        return trash_dir
+
+    def _trash_path(self, document_id: str) -> Path:
+        return self._trash_root / f"{document_id}.pdf"
+
+    def trash_document(
+        self, document_id: str, path: str, content_hash: str, size_bytes: int
+    ) -> None:
+        source = self._document_path(path)
+        if not source.is_file():
+            raise NotFoundError(f"Workspace file not found to trash: {path}")
+        actual_size = source.stat().st_size
+        if actual_size != size_bytes:
+            raise ConflictError(
+                "Document size does not match expected size for trash retention",
+                details={"expected_size": size_bytes, "actual_size": actual_size},
+            )
+        actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        if actual_hash != content_hash:
+            raise ConflictError(
+                "Document hash does not match expected hash for trash retention",
+                details={"expected_hash": content_hash, "actual_hash": actual_hash},
+            )
+        target = self._trash_path(document_id)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{document_id}.sangam-trash-", dir=self._trash_root
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(source.read_bytes())
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, target)
+            self._fsync_directory(self._trash_root)
+        finally:
+            temporary.unlink(missing_ok=True)
+        retained_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+        if retained_hash != content_hash:
+            target.unlink(missing_ok=True)
+            raise OSError("Retained trash file hash does not match expected content hash")
+        source.unlink()
+        self._fsync_directory(source.parent)
+
+    def restore_trash_document(
+        self, document_id: str, path: str, content_hash: str, size_bytes: int
+    ) -> None:
+        destination = self._document_path(path)
+        if destination.exists():
+            raise ConflictError(f"Destination path is already occupied: {path}")
+        retained = self._trash_path(document_id)
+        if not retained.is_file():
+            raise NotFoundError(f"Retained trash copy not found for document: {document_id}")
+        actual_size = retained.stat().st_size
+        if actual_size != size_bytes:
+            raise ConflictError(
+                "Retained trash document size does not match expected size",
+                details={"expected_size": size_bytes, "actual_size": actual_size},
+            )
+        actual_hash = hashlib.sha256(retained.read_bytes()).hexdigest()
+        if actual_hash != content_hash:
+            raise ConflictError(
+                "Retained trash document hash does not match expected hash",
+                details={"expected_hash": content_hash, "actual_hash": actual_hash},
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.sangam-", dir=destination.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(retained.read_bytes())
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, destination)
+            self._fsync_directory(destination.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
+        restored_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
+        if restored_hash != content_hash:
+            destination.unlink(missing_ok=True)
+            raise OSError("Restored document hash does not match expected content hash")
+        retained.unlink(missing_ok=True)
+        self._fsync_directory(self._trash_root)
+
+    def has_trashed_document(self, document_id: str) -> bool:
+        return self._trash_path(document_id).is_file()
+
     def scan_documents(self) -> dict[str, str]:
         files: dict[str, str] = {}
         root = self.root.resolve()
         for file_path in root.rglob("*"):
             if file_path.suffix.lower() not in {".md", ".html", ".htm", ".pdf"}:
                 continue
-            if file_path.is_file() and ".sangam-" not in file_path.name:
-                relative = file_path.relative_to(root).as_posix()
-                files[relative] = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            if not file_path.is_file():
+                continue
+            relative_parts = file_path.relative_to(root).parts
+            if any(part.startswith(".") or ".sangam-" in part for part in relative_parts):
+                continue
+            relative = file_path.relative_to(root).as_posix()
+            files[relative] = hashlib.sha256(file_path.read_bytes()).hexdigest()
         return files
 
     def scan_markdown(self) -> dict[str, str]:
