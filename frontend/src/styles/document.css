@@ -292,7 +292,18 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-effect-complete-copy span { overflow-wrap: anywhere; color: var(--muted); font-size: var(--text-meta); }
 .chat-effect-complete-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .chat-effect-complete-actions .secondary-action { text-decoration: none; }
+.chat-effect-complete.is-failed { border-color: var(--danger); }
 .chat-effect-history { flex: none; display: grid; gap: var(--space-2); }
+.chat-effect-tray { border: 1px solid var(--danger); border-radius: var(--radius-panel); background: var(--surface); flex: none; overflow: hidden; }
+.chat-effect-tray.is-collapsed { border-color: var(--line); }
+.chat-effect-tray-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--danger-soft); min-height: var(--control-height); }
+.chat-effect-tray.is-collapsed .chat-effect-tray-header { background: var(--surface-soft); }
+.chat-effect-tray-disclosure { display: flex; align-items: center; gap: var(--space-2); background: transparent; border: 0; padding: 0; cursor: pointer; color: var(--text); font: inherit; font-weight: 500; text-align: left; flex: 1; min-width: 0; }
+.chat-effect-tray-disclosure > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-control); }
+.chat-effect-tray-scroll { max-height: min(35dvh, 18rem); overflow-y: auto; display: grid; gap: var(--space-2); padding: var(--space-2); }
+.chat-effect-live-announcer { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.load-more-history-btn { width: 100%; justify-content: center; }
+@media (pointer: coarse), (max-width: 768px) { .chat-effect-tray-disclosure, .secondary-action.chat-effect-clear-btn, .chat-effect-clear-btn, .chat-effect-complete-actions > button, .chat-effect-complete-actions > a, .chat-effect-stack > summary, .load-more-history-btn { min-height: var(--control-touch); } }
 .chat-effect-stack { border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
 .chat-effect-stack > summary { min-height: var(--control-height); display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); cursor: pointer; list-style: none; }
 .chat-effect-stack > summary::-webkit-details-marker { display: none; }

@@ -75,6 +75,8 @@ class DocumentService:
     def _normalize_path(self, raw_path: str) -> str:
         return self.workspace.normalize_document_path(raw_path)
 
+    normalize_document_path = _normalize_path
+
     @staticmethod
     def _validate_path_type(path: str | None, content_type: str) -> None:
         if path is None:

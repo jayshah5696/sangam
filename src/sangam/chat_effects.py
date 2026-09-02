@@ -5,20 +5,69 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from sangam.access import WorkspaceAccessService
 from sangam.chat_capabilities import ChatCapability, ChatCapabilityRegistry
 from sangam.db import Database, utc_now
 from sangam.errors import (
+    AuthenticationError,
     AuthorizationError,
     ConflictError,
+    CredentialConflictError,
+    IdempotencyError,
+    IntegrationError,
+    InvalidPathError,
+    MaterializationError,
     NotFoundError,
     SangamError,
     ValidationError,
 )
 from sangam.idempotency import request_hash
-from sangam.schemas import ApplyOrganizationPlan, ChatEffect
+from sangam.schemas import (
+    ApplyOrganizationPlan,
+    ChatEffect,
+    ChatEffectsAcknowledgementResult,
+    ChatEffectsSummary,
+)
 from sangam.security import Principal
+
+
+def classify_effect_retry_safety(error: Exception) -> bool:
+    """Determine whether the exact same request can succeed without human intervention
+    or workspace changes.
+    """
+    if isinstance(
+        error,
+        (
+            InvalidPathError,
+            ValidationError,
+            NotFoundError,
+            ConflictError,
+            CredentialConflictError,
+            IdempotencyError,
+            AuthenticationError,
+            AuthorizationError,
+            MaterializationError,
+        ),
+    ):
+        return False
+    return isinstance(error, IntegrationError)
+
+
+def build_effect_failure_record(error: Exception) -> dict[str, object]:
+    """Produce a safe, bounded failure record stored with the durable effect."""
+    if isinstance(error, SangamError):
+        code = error.code
+        message = error.message
+    else:
+        code = "execution_failed"
+        message = "The effect could not be completed."
+    return {
+        "code": code,
+        "message": message[:500],
+        "retry_safe": classify_effect_retry_safety(error),
+    }
 
 
 @dataclass(frozen=True)
@@ -69,6 +118,26 @@ class ChatEffectService:
                 "The chat effect preview must include every material argument unchanged",
                 details={"fields": hidden_arguments},
             )
+        if capability.capability_id == "create_document":
+            self.workspace.preflight_create_document(
+                principal,
+                title=str(normalized.get("title", "")),
+                content=str(normalized.get("content", "")),
+                content_type=str(normalized.get("content_type", "text/markdown")),
+                path=str(normalized["path"]) if normalized.get("path") else None,
+            )
+        elif capability.capability_id == "publish_document":
+            self.workspace.preflight_publish_document(
+                principal,
+                document_id=str(normalized.get("document_id", "")),
+                revision_id=str(normalized.get("revision_id", "")),
+                slug=str(normalized.get("slug", "")),
+                access_policy=str(normalized.get("access_policy", "")),
+            )
+        elif capability.capability_id == "apply_workspace_organization_plan":
+            plan = ApplyOrganizationPlan.model_validate(normalized)
+            self.workspace.preflight_organization_plan(principal, plan=plan)
+
         encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         digest = request_hash(normalized)
         preview_json = json.dumps(preview, sort_keys=True, separators=(",", ":"))
@@ -155,7 +224,11 @@ class ChatEffectService:
         *,
         thread_id: str | None = None,
         statuses: tuple[str, ...] = (),
+        view: Literal["attention", "history"] | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
     ) -> list[ChatEffect]:
+        limit = max(1, min(limit, 100))
         params: list[object] = [principal.actor_id]
         clauses = ["t.created_by = ?"]
         if principal.administrator:
@@ -168,18 +241,149 @@ class ChatEffectService:
             placeholders = ",".join("?" for _ in statuses)
             clauses.append(f"e.status IN ({placeholders})")
             params.extend(statuses)
+        if view == "attention":
+            clauses.append(
+                "(e.status IN ('pending_approval', 'approved', 'executing') "
+                "OR (e.status = 'failed' AND e.acknowledged_at IS NULL))"
+            )
+        elif view == "history":
+            clauses.append(
+                "(e.acknowledged_at IS NOT NULL "
+                "OR e.status IN ('completed', 'denied', 'expired', 'cancelled'))"
+            )
+
         with self.database.connection() as connection:
+            if cursor:
+                cursor_row = connection.execute(
+                    "SELECT created_at, effect_id FROM chat_effects WHERE effect_id = ?",
+                    (cursor,),
+                ).fetchone()
+                if cursor_row:
+                    clauses.append("(e.created_at, e.effect_id) < (?, ?)")
+                    params.extend([cursor_row["created_at"], cursor_row["effect_id"]])
+
             rows = connection.execute(
                 f"""
                 SELECT e.*, t.created_by AS thread_owner
                 FROM chat_effects e JOIN chat_threads t ON t.thread_id = e.thread_id
                 WHERE {" AND ".join(clauses)}
                 ORDER BY e.created_at DESC, e.effect_id DESC
-                LIMIT 100
+                LIMIT ?
                 """,
-                params,
+                [*params, limit],
             ).fetchall()
         return [self._schema(row) for row in rows]
+
+    def summary(self, principal: Principal, thread_id: str) -> ChatEffectsSummary:
+        owner_clause = "t.created_by = ?"
+        params = [thread_id, principal.actor_id]
+        if principal.administrator:
+            owner_clause = "1 = 1"
+            params = [thread_id]
+
+        with self.database.connection() as connection:
+            thread_row = connection.execute(
+                f"SELECT 1 FROM chat_threads t WHERE t.thread_id = ? AND {owner_clause}",
+                params,
+            ).fetchone()
+            if thread_row is None:
+                raise NotFoundError(f"Chat thread not found: {thread_id}")
+
+            row = connection.execute(
+                f"""
+                SELECT
+                    COUNT(
+                        CASE WHEN e.status IN ('pending_approval', 'approved', 'executing')
+                                  OR (e.status = 'failed' AND e.acknowledged_at IS NULL)
+                             THEN 1 END
+                    ) AS total_attention,
+                    COUNT(
+                        CASE WHEN e.status IN ('approved', 'executing')
+                             THEN 1 END
+                    ) AS recovering_active,
+                    COUNT(
+                        CASE WHEN e.status = 'failed' AND e.acknowledged_at IS NULL
+                                  AND json_extract(e.failure_json, '$.retry_safe') = 1
+                             THEN 1 END
+                    ) AS retryable_failures,
+                    COUNT(
+                        CASE WHEN e.status = 'failed' AND e.acknowledged_at IS NULL
+                                  AND (json_extract(e.failure_json, '$.retry_safe') IS NULL
+                                       OR json_extract(e.failure_json, '$.retry_safe') != 1)
+                             THEN 1 END
+                    ) AS terminal_failures,
+                    COUNT(
+                        CASE WHEN e.acknowledged_at IS NOT NULL
+                                  OR e.status IN ('completed', 'denied', 'expired', 'cancelled')
+                             THEN 1 END
+                    ) AS total_history
+                FROM chat_effects e
+                JOIN chat_threads t ON t.thread_id = e.thread_id
+                WHERE e.thread_id = ? AND {owner_clause}
+                """,
+                params,
+            ).fetchone()
+
+        return ChatEffectsSummary(
+            thread_id=thread_id,
+            total_attention=row["total_attention"] if row else 0,
+            recovering_active=row["recovering_active"] if row else 0,
+            retryable_failures=row["retryable_failures"] if row else 0,
+            terminal_failures=row["terminal_failures"] if row else 0,
+            total_history=row["total_history"] if row else 0,
+        )
+
+    def acknowledge(
+        self, principal: Principal, effect_ids: list[str]
+    ) -> ChatEffectsAcknowledgementResult:
+        if not effect_ids:
+            raise ValidationError("At least one effect ID must be provided")
+        if len(effect_ids) > 100:
+            raise ValidationError("At most 100 effect IDs can be acknowledged at once")
+        if len(set(effect_ids)) != len(effect_ids):
+            raise ValidationError("Effect IDs must be unique")
+
+        now = utc_now()
+        with self.database.transaction() as connection:
+            placeholders = ",".join("?" for _ in effect_ids)
+            rows = connection.execute(
+                f"""
+                SELECT effect_id, requested_by, status
+                FROM chat_effects
+                WHERE effect_id IN ({placeholders})
+                """,
+                effect_ids,
+            ).fetchall()
+
+            found_map = {row["effect_id"]: row for row in rows}
+            missing = [eid for eid in effect_ids if eid not in found_map]
+            if missing:
+                raise NotFoundError(f"Chat effect not found: {missing[0]}")
+
+            for eid in effect_ids:
+                row = found_map[eid]
+                if row["requested_by"] != principal.actor_id:
+                    raise AuthorizationError(
+                        f"Only the principal that requested this effect can acknowledge it: {eid}"
+                    )
+                if row["status"] in {"pending_approval", "approved", "executing"}:
+                    raise ConflictError(f"Active effects cannot be acknowledged: {eid}")
+
+            connection.execute(
+                f"""
+                UPDATE chat_effects
+                SET acknowledged_at = ?, acknowledged_by = ?
+                WHERE effect_id IN ({placeholders})
+                """,
+                [now, principal.actor_id, *effect_ids],
+            )
+
+        updated_effects = [self.get(principal, eid) for eid in effect_ids]
+        return ChatEffectsAcknowledgementResult(
+            acknowledged_ids=effect_ids,
+            acknowledged_at=now,
+            effects=updated_effects,
+        )
 
     def decide(
         self,
@@ -251,7 +455,9 @@ class ChatEffectService:
                     """
                     UPDATE chat_effects
                     SET status = CASE WHEN status = 'executing' THEN status ELSE 'approved' END,
-                        decided_at = COALESCE(decided_at, ?)
+                        decided_at = COALESCE(decided_at, ?),
+                        acknowledged_at = NULL,
+                        acknowledged_by = NULL
                     WHERE effect_id = ?
                     """,
                     (now, effect_id),
@@ -279,7 +485,8 @@ class ChatEffectService:
             connection.execute(
                 """
                 UPDATE chat_effects
-                SET status = 'executing', started_at = COALESCE(started_at, ?), failure_json = NULL
+                SET status = 'executing', started_at = COALESCE(started_at, ?), failure_json = NULL,
+                    acknowledged_at = NULL, acknowledged_by = NULL
                 WHERE effect_id = ?
                 """,
                 (utc_now(), effect_id),
@@ -360,13 +567,8 @@ class ChatEffectService:
                 resource_id = effect_id
             else:
                 raise ValidationError("Unsupported durable chat effect capability")
-        except SangamError as error:
-            retry_safe = not isinstance(error, (AuthorizationError, ConflictError, ValidationError))
-            failure = {
-                "code": error.code,
-                "message": error.message,
-                "retry_safe": retry_safe,
-            }
+        except Exception as error:
+            failure = build_effect_failure_record(error)
             with self.database.transaction() as connection:
                 connection.execute(
                     """
@@ -445,6 +647,7 @@ class ChatEffectService:
 
     @staticmethod
     def _schema(row: sqlite3.Row) -> ChatEffect:
+        keys = row.keys()
         return ChatEffect(
             effect_id=row["effect_id"],
             thread_id=row["thread_id"],
@@ -464,4 +667,6 @@ class ChatEffectService:
             created_at=row["created_at"],
             decided_at=row["decided_at"],
             completed_at=row["completed_at"],
+            acknowledged_at=row["acknowledged_at"] if "acknowledged_at" in keys else None,
+            acknowledged_by=row["acknowledged_by"] if "acknowledged_by" in keys else None,
         )

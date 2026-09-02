@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from chatkit.server import NonStreamingResult, StreamingResult
@@ -11,10 +11,13 @@ from fastapi.responses import StreamingResponse
 from sangam.chat import ChatRequestContext, SangamChatServer
 from sangam.errors import ValidationError
 from sangam.schemas import (
+    AcknowledgeChatEffectsRequest,
     ApplyChatProposal,
     ChatEffect,
     ChatEffectDecision,
     ChatEffectDecisionResult,
+    ChatEffectsAcknowledgementResult,
+    ChatEffectsSummary,
     ChatModelSelectionUpdate,
     ChatModelSettings,
     ChatProposal,
@@ -215,9 +218,33 @@ def create_chat_router(
     def list_effects(
         thread_id: str | None = Query(default=None),
         status: Annotated[list[str] | None, Query()] = None,
+        view: Literal["attention", "history"] | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=100),
+        cursor: str | None = Query(default=None),
         principal: Principal = principal_dependency,
     ) -> list[ChatEffect]:
-        return chat.effects.list(principal, thread_id=thread_id, statuses=tuple(status or ()))
+        return chat.effects.list(
+            principal,
+            thread_id=thread_id,
+            statuses=tuple(status or ()),
+            view=view,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    @router.get("/chat/effects/summary", response_model=ChatEffectsSummary)
+    def get_effects_summary(
+        thread_id: str = Query(),
+        principal: Principal = principal_dependency,
+    ) -> ChatEffectsSummary:
+        return chat.effects.summary(principal, thread_id=thread_id)
+
+    @router.post("/chat/effects/acknowledge", response_model=ChatEffectsAcknowledgementResult)
+    def acknowledge_effects(
+        body: AcknowledgeChatEffectsRequest,
+        principal: Principal = principal_dependency,
+    ) -> ChatEffectsAcknowledgementResult:
+        return chat.effects.acknowledge(principal, effect_ids=body.effect_ids)
 
     @router.post("/chat/threads/{thread_id}/cancel")
     def cancel_active_run(

@@ -359,7 +359,7 @@ class ChatToolset:
         content: str,
         content_type: str,
         path: str | None = None,
-    ) -> None:
+    ) -> str | None:
         normalized_title = " ".join(title.strip().split())
         arguments = CreateDocumentInput.model_validate(
             {
@@ -369,7 +369,7 @@ class ChatToolset:
                 "path": path,
             }
         ).model_dump(mode="json")
-        await self._request_effect(
+        return await self._request_effect(
             ctx,
             capability=self.policies["create_document"],
             arguments=arguments,
@@ -378,7 +378,7 @@ class ChatToolset:
 
     async def apply_workspace_organization_plan(
         self, ctx: ToolContext, operations: list[OrganizationOperation]
-    ) -> None:
+    ) -> str | None:
         validated = ApplyWorkspaceOrganizationPlanInput.model_validate({"operations": operations})
         arguments = validated.model_dump(mode="json")
         counts: dict[str, int] = {}
@@ -387,7 +387,7 @@ class ChatToolset:
         summary = ", ".join(
             f"{count} {kind.replace('_', ' ')}" for kind, count in sorted(counts.items())
         )
-        await self._request_effect(
+        return await self._request_effect(
             ctx,
             capability=self.policies["apply_workspace_organization_plan"],
             arguments=arguments,
@@ -396,7 +396,7 @@ class ChatToolset:
 
     async def publish_document(
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
-    ) -> None:
+    ) -> str | None:
         document = self.workspace.get_document(ctx.context.request_context.principal, document_id)
         if document.content_type == "application/pdf":
             raise ValidationError("PDF documents cannot be published")
@@ -408,7 +408,7 @@ class ChatToolset:
                 "access_policy": access_policy,
             }
         ).model_dump(mode="json")
-        await self._request_effect(
+        return await self._request_effect(
             ctx,
             capability=self.policies["publish_document"],
             arguments=arguments,
@@ -422,7 +422,7 @@ class ChatToolset:
         capability: ChatCapability,
         arguments: dict[str, object],
         preview: dict[str, object],
-    ) -> None:
+    ) -> str | None:
         request_context = ctx.context.request_context
         if not request_context.run_id:
             raise RuntimeError("Durable chat effects require a persisted run")
@@ -431,15 +431,41 @@ class ChatToolset:
         tool_call_id = getattr(ctx, "tool_call_id", None)
         if not tool_call_id:
             raise RuntimeError("Durable chat effects require a tool call ID")
-        effect = self.effects.propose(
-            request_context.principal,
-            run_id=request_context.run_id,
-            thread_id=ctx.context.thread.id,
-            tool_call_id=tool_call_id,
-            capability=capability,
-            arguments=arguments,
-            preview=preview,
-        )
+        try:
+            effect = self.effects.propose(
+                request_context.principal,
+                run_id=request_context.run_id,
+                thread_id=ctx.context.thread.id,
+                tool_call_id=tool_call_id,
+                capability=capability,
+                arguments=arguments,
+                preview=preview,
+            )
+        except SangamError as error:
+            self.evidence.record_tool(
+                run_id=request_context.run_id,
+                tool_call_id=tool_call_id,
+                capability_id=capability.capability_id,
+                capability_version=capability.version,
+                effect_class=capability.effect,
+                approval_policy=capability.approval,
+                outcome="rejected",
+                duration_ms=0,
+                result_bytes=0,
+                citation_count=0,
+                error_class=error.code,
+            )
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": error.code,
+                        "message": error.message,
+                        "details": error.details,
+                    },
+                }
+            )
+
         self.evidence.record_tool(
             run_id=request_context.run_id,
             tool_call_id=tool_call_id,
@@ -461,6 +487,7 @@ class ChatToolset:
                 "argument_digest": effect.argument_digest,
             },
         )
+        return None
 
     async def _run_tool(
         self,

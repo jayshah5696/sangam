@@ -564,6 +564,209 @@ test('completed effects stay grouped and organization review shows exact operati
   }
 })
 
+test('failed chat effects are recoverable, dismissible, bounded, and save evidence', async ({
+  page,
+  request,
+}, testInfo) => {
+  const threadId = await createChatThread(request)
+  const digest = 'b'.repeat(64)
+
+  const retryableEffect = {
+    effect_id: 'eff-retryable',
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: 'publish_document',
+    capability_version: 1,
+    argument_digest: digest,
+    preview: { document_id: 'doc-1', access_policy: 'unlisted', slug: 'demo' },
+    effect_class: 'external',
+    risk: 'external',
+    status: 'failed',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: null,
+    resource_id: null,
+    result: null,
+    failure: {
+      code: 'integration_error',
+      message: 'The publishing service timed out.',
+      retry_safe: true,
+    },
+    created_at: '2026-08-23T12:00:00Z',
+    decided_at: '2026-08-23T12:01:00Z',
+    completed_at: null,
+    acknowledged_at: null,
+    acknowledged_by: null,
+  } as const
+
+  const terminalEffect1 = {
+    effect_id: 'eff-terminal-1',
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: 'apply_workspace_organization_plan',
+    capability_version: 1,
+    argument_digest: 'c'.repeat(64),
+    preview: { operations: [] },
+    effect_class: 'write',
+    risk: 'workspace',
+    status: 'failed',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: null,
+    resource_id: null,
+    result: null,
+    failure: {
+      code: 'conflict',
+      message: 'The destination folder already contains documents.',
+      retry_safe: false,
+    },
+    created_at: '2026-08-23T12:02:00Z',
+    decided_at: '2026-08-23T12:03:00Z',
+    completed_at: null,
+    acknowledged_at: null,
+    acknowledged_by: null,
+  } as const
+
+  const terminalEffect2 = {
+    effect_id: 'eff-terminal-2',
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: 'create_document',
+    capability_version: 1,
+    argument_digest: 'd'.repeat(64),
+    preview: { title: 'Collision Doc' },
+    effect_class: 'write',
+    risk: 'workspace',
+    status: 'failed',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: null,
+    resource_id: null,
+    result: null,
+    failure: {
+      code: 'conflict',
+      message: 'The document already exists at that path.',
+      retry_safe: false,
+    },
+    created_at: '2026-08-23T12:04:00Z',
+    decided_at: '2026-08-23T12:04:30Z',
+    completed_at: null,
+    acknowledged_at: null,
+    acknowledged_by: null,
+  } as const
+
+  let visibleEffects: Array<typeof retryableEffect | typeof terminalEffect1 | typeof terminalEffect2> = [
+    retryableEffect,
+    terminalEffect1,
+    terminalEffect2,
+  ]
+  const acknowledgedIds: string[] = []
+
+  await page.route('**/api/v1/chat/effects/acknowledge', async (route) => {
+    // SAFETY: acknowledge request contains effect_ids array
+    const body = route.request().postDataJSON() as { effect_ids: string[] }
+    acknowledgedIds.push(...body.effect_ids)
+    visibleEffects = visibleEffects.filter((e) => !body.effect_ids.includes(e.effect_id))
+    await route.fulfill({
+      json: {
+        acknowledged_ids: body.effect_ids,
+        acknowledged_at: '2026-08-23T12:05:00Z',
+        effects: [],
+      },
+    })
+  })
+
+  await page.route('**/api/v1/chat/effects/summary*', async (route) => {
+    const retryableCount = visibleEffects.filter((e) => e.failure?.retry_safe).length
+    const terminalCount = visibleEffects.filter((e) => !e.failure?.retry_safe).length
+    await route.fulfill({
+      json: {
+        thread_id: threadId,
+        total_attention: visibleEffects.length,
+        recovering_active: 0,
+        retryable_failures: retryableCount,
+        terminal_failures: terminalCount,
+        total_history: acknowledgedIds.length,
+      },
+    })
+  })
+
+  await page.route('**/api/v1/chat/effects?*', async (route) => {
+    await route.fulfill({ json: visibleEffects })
+  })
+
+  await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
+  await page.goto('/chat')
+
+  // Tray is collapsed initially
+  const tray = page.locator('.chat-effect-tray')
+  await expect(tray).toBeVisible()
+  const disclosure = tray.getByRole('button', { name: /Attention required/i })
+  await expect(disclosure).toBeVisible()
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await expect(disclosure).toContainText('1 retry available, 2 failed plans')
+
+  // Expand the tray
+  await disclosure.click()
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+
+  const scrollContainer = tray.locator('.chat-effect-tray-scroll')
+  await expect(scrollContainer).toBeVisible()
+
+  // Cards are sorted: retryable before terminal
+  const retryableCard = scrollContainer.locator('[data-effect-id="eff-retryable"]')
+  const terminalCard1 = scrollContainer.locator('[data-effect-id="eff-terminal-1"]')
+  const terminalCard2 = scrollContainer.locator('[data-effect-id="eff-terminal-2"]')
+  await expect(retryableCard).toBeVisible()
+  await expect(terminalCard1).toBeVisible()
+  await expect(terminalCard2).toBeVisible()
+
+  await expect(retryableCard.getByText('Publication failed')).toBeVisible()
+  await expect(retryableCard.getByText(/The publishing service timed out/)).toBeVisible()
+  await expect(retryableCard.getByRole('button', { name: 'Retry safely' })).toBeVisible()
+  await expect(retryableCard.getByRole('button', { name: 'Dismiss' })).toBeVisible()
+
+  await expect(terminalCard1.getByText('Organization plan failed')).toBeVisible()
+  await expect(terminalCard1.getByText(/The destination folder already contains documents/)).toBeVisible()
+  await expect(terminalCard1.getByRole('button', { name: 'Retry safely' })).toHaveCount(0)
+  await expect(terminalCard1.getByRole('button', { name: 'Dismiss' })).toBeVisible()
+
+  await expect(terminalCard2.getByText('Document creation failed')).toBeVisible()
+  await expect(terminalCard2.getByRole('button', { name: 'Dismiss' })).toBeVisible()
+
+  // Clear button is present because 3 eligible failed effects exist
+  const clearBtn = tray.getByRole('button', { name: 'Clear resolved failures' })
+  await expect(clearBtn).toBeVisible()
+
+  if (testInfo.project.name.includes('touch-mobile')) {
+    const retryBox = await retryableCard.getByRole('button', { name: 'Dismiss' }).boundingBox()
+    expect(retryBox).not.toBeNull()
+    expect(retryBox!.height).toBeGreaterThanOrEqual(44)
+
+    const clearBox = await clearBtn.boundingBox()
+    expect(clearBox).not.toBeNull()
+    expect(clearBox!.height).toBeGreaterThanOrEqual(44)
+  }
+
+  // Visual evidence capture
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
+  if (evidenceDir) {
+    await page.locator('.chat-panel').screenshot({
+      path: path.join(evidenceDir, `chat-effect-tray-expanded-${testInfo.project.name}.png`),
+    })
+  }
+
+  // Dismiss retryable card
+  await retryableCard.getByRole('button', { name: 'Dismiss' }).click()
+  expect(acknowledgedIds).toContain('eff-retryable')
+
+  // Clear button is still visible because 2 terminal effects remain
+  await expect(clearBtn).toBeVisible()
+  await clearBtn.click()
+  expect(acknowledgedIds).toContain('eff-terminal-1')
+  expect(acknowledgedIds).toContain('eff-terminal-2')
+
+  // Tray disappears
+  await expect(page.locator('.chat-effect-tray')).toHaveCount(0)
+})
+
 test('publication dashboard filters and manages workspace publications', async ({ page, request }) => {
   await createPublication(request)
   await page.goto('/publications')
