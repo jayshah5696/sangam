@@ -5,10 +5,23 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 ## [Unreleased]
 
+See the generated notes attached to each GitHub Release.
+
+## [0.12.0] - 2026-09-01
+
 ### Added
 
 - Consistent workspace organization for PDF documents: PDFs now participate in organization plans, drag-and-drop, context menu actions (Move to..., Rename, Duplicate, Edit tags and category..., Move to trash), keyboard actions (F2 rename), and Trash restoration (#176).
 - Managed PDF trash storage with immutable byte retention in `.sangam-trash`, conflict-safe restoration, and reconciliation scan protection (#176).
+- Recoverable and dismissible chat effects: failed or rejected chat tool effects now surface in an interactive effect tray with dismiss controls, retry workflows, bounded error summaries, and durable acknowledgement tracking (#177).
+
+### Changed
+
+- Migrated frontend package management and repository tooling from npm to pnpm (v11.24.0) with store caching across local justfile recipes, Docker builds, and CI workflows (#178).
+
+### Upgrade notes
+
+- Database migration `020_chat_effect_acknowledgement.sql` stores durable dismissal and acknowledgement state for failed chat effects.
 
 ## [0.11.1] - 2026-08-29
 
@@ -303,7 +316,8 @@ All notable changes to Sangam are documented in this file. Releases follow
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.0
 [0.11.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.1
 [0.11.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.0
 [0.10.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.10.1
