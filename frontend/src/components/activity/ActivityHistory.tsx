@@ -1,6 +1,17 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { CheckCircle2, Clipboard, FileText, GitCompareArrows, ShieldAlert, XCircle } from 'lucide-react'
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clipboard,
+  FileText,
+  GitCompareArrows,
+  ListFilter,
+  ShieldAlert,
+  XCircle,
+} from 'lucide-react'
 import { useState } from 'react'
 import { groupActivityEvents } from '../../activityGrouping'
 import type { ActivitySearch } from '../../activitySearch'
@@ -71,20 +82,24 @@ export function ActivityHistory({
       <nav className="activity-pagination" aria-label="Activity pages">
         <button
           type="button"
-          className="secondary-action"
+          className="icon-button"
+          aria-label="Previous"
+          title="Previous page"
           disabled={search.page === 1}
           onClick={() => onSearchChange({ page: search.page - 1 })}
         >
-          Previous
+          <ChevronLeft size="var(--icon-control)" />
         </button>
         <span>Page {search.page}</span>
         <button
           type="button"
-          className="secondary-action"
+          className="icon-button"
+          aria-label="Next"
+          title="Next page"
           disabled={(events.data?.length ?? 0) < pageSize}
           onClick={() => onSearchChange({ page: search.page + 1 })}
         >
-          Next
+          <ChevronRight size="var(--icon-control)" />
         </button>
       </nav>
     </div>
@@ -109,6 +124,14 @@ function OperationGroup({
   const actions = [...new Set(events.map((event) => event.action))]
   const resourceTypes = [...new Set(events.map((event) => event.resource_type))]
   const end = events[events.length - 1] ?? first
+  const outcomeSummary = [
+    counts.accepted > 0 ? `${counts.accepted} accepted` : undefined,
+    counts.denied > 0 ? `${counts.denied} denied` : undefined,
+    counts.conflict > 0 ? `${counts.conflict} conflict` : undefined,
+    counts.failed > 0 ? `${counts.failed} failed` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <article className="activity-operation">
@@ -119,40 +142,44 @@ function OperationGroup({
             {first.actor_display_name} · {actions.join(', ')} · {resources.size}{' '}
             {resources.size === 1 ? resourceTypes[0] : 'resources'}
           </strong>
-          {first.token_label && <small>Token {first.token_label}</small>}
           <small>
-            {counts.accepted} accepted · {counts.denied} denied · {counts.conflict} conflict · {counts.failed}{' '}
-            failed
+            {first.token_label ? `${first.token_label} · ` : ''}
+            {outcomeSummary}
           </small>
-          <small>
-            {first.created_at === end.created_at
-              ? 'One recorded outcome'
-              : `${new Date(end.created_at).toLocaleString()} to ${new Date(first.created_at).toLocaleString()}`}
-          </small>
+          {first.created_at !== end.created_at && (
+            <small>
+              {new Date(end.created_at).toLocaleString()} to {new Date(first.created_at).toLocaleString()}
+            </small>
+          )}
         </div>
         <div className="activity-operation-actions">
           <button
             type="button"
-            className="secondary-action"
+            className="icon-button"
             aria-label={`Copy operation ID ${first.operation_id}`}
+            title="Copy operation ID"
             onClick={() => void navigator.clipboard.writeText(first.operation_id)}
           >
-            <Clipboard size="var(--icon-inline)" /> Copy ID
+            <Clipboard size="var(--icon-control)" />
           </button>
           <button
             type="button"
-            className="secondary-action"
+            className="icon-button"
+            aria-label="Filter operation"
+            title="Filter operation"
             onClick={() => onSearchChange({ operation_id: first.operation_id })}
           >
-            Filter operation
+            <ListFilter size="var(--icon-control)" />
           </button>
           <button
             type="button"
-            className="secondary-action"
+            className="icon-button activity-expand-operation"
+            aria-label={expanded ? 'Hide details' : 'Expand details'}
+            title={expanded ? 'Hide details' : 'Expand details'}
             aria-expanded={expanded}
             onClick={() => setExpanded((current) => !current)}
           >
-            {expanded ? 'Hide details' : 'Expand details'}
+            <ChevronDown size="var(--icon-control)" />
           </button>
         </div>
       </div>

@@ -2,10 +2,11 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   AlertTriangle,
-  ArrowRight,
   ChartNoAxesCombined,
   BookOpen,
   FilePenLine,
+  KeyRound,
+  ListFilter,
   RadioTower,
   ShieldAlert,
   Users,
@@ -74,7 +75,6 @@ export function ActivityInsights({
             <div className="activity-section-heading">
               <ShieldAlert size="var(--icon-section)" />
               <h2 id="needs-attention-title">Needs attention</h2>
-              <small>Newest first</small>
             </div>
             {data.problems.length === 0 ? (
               <StateMessage compact kind="success" title="No problems in this range" />
@@ -136,16 +136,20 @@ export function ActivityInsights({
                     )}
                     {problem.token_id && (
                       <Link
-                        className="secondary-action"
+                        className="icon-button"
+                        aria-label="Manage access"
+                        title="Manage access"
                         to="/settings"
                         search={{ category: 'agents', destination: problem.token_id }}
                       >
-                        Manage access
+                        <KeyRound size="var(--icon-control)" />
                       </Link>
                     )}
                     <button
                       type="button"
-                      className="secondary-action"
+                      className="icon-button"
+                      aria-label="View events"
+                      title="View events"
                       onClick={() =>
                         onSearchChange({
                           view: 'activity',
@@ -160,7 +164,7 @@ export function ActivityInsights({
                         })
                       }
                     >
-                      View events <ArrowRight size="var(--icon-inline)" />
+                      <ListFilter size="var(--icon-control)" />
                     </button>
                   </div>
                 </article>
@@ -232,7 +236,6 @@ export function ActivityInsights({
                   >
                     <span>
                       <strong>{actor.actor_display_name}</strong>
-                      <small>{actor.actor_id}</small>
                     </span>
                     <span>
                       {actor.accepted_changes} changes · {actor.reads} reads ·{' '}
@@ -258,10 +261,7 @@ export function ActivityInsights({
           <section className="activity-insight-section" aria-labelledby="publication-activity-title">
             <div className="activity-section-heading">
               <RadioTower size="var(--icon-section)" />
-              <div>
-                <h2 id="publication-activity-title">Publication activity</h2>
-                <p>History here; current state remains in Publications.</p>
-              </div>
+              <h2 id="publication-activity-title">Publication activity</h2>
               <Link to="/publications">Manage publications</Link>
             </div>
             {data.publications.length === 0 ? (

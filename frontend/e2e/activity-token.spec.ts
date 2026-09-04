@@ -226,12 +226,16 @@ test('activity operation details and responsive layout remain usable', async ({ 
   await createActivity(request)
   await page.goto('/activity?view=activity&range=7d')
   await openActivityFilters(page)
+  const expandedFilterOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
+  expect(expandedFilterOverflow).toBe(0)
   const operation = page.locator('.activity-operation').filter({ hasText: 'Token editor evidence' }).first()
   await expect(operation).toBeVisible()
   await operation.getByRole('button', { name: 'Expand details' }).click()
   await expect(operation.locator('.activity-event')).toBeVisible()
   await expect(operation.getByText(/Outcome: denied|denied/).first()).toBeVisible()
-  await expect(operation).toContainText('Token Research reader')
+  await expect(operation).toContainText('Research reader · 1 denied')
   await expect(operation).toContainText('capability:')
   await operation.getByRole('button', { name: 'Filter operation' }).click()
   await expect(page).toHaveURL(/operation_id=/)
