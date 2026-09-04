@@ -291,6 +291,7 @@ export const agentTokenSchema = z.object({
   revoked_at: z.string().nullable(),
   last_used_at: z.string().nullable(),
   rotated_from_token_id: z.string().nullable(),
+  recent_denied_count: z.number().int().nonnegative(),
 })
 
 export type AgentToken = z.infer<typeof agentTokenSchema>
@@ -314,11 +315,147 @@ export const operationEventSchema = z.object({
   outcome: z.enum(['accepted', 'denied', 'conflict', 'failed']),
   error_code: z.string().nullable(),
   revision_id: z.string().nullable(),
-  details: z.record(z.string(), z.unknown()),
+  details: z.object({
+    current_revision_id: z.string().optional(),
+    expected_revision_id: z.string().optional(),
+    current_metadata_version: z.number().optional(),
+    expected_metadata_version: z.number().optional(),
+    capability: z.string().optional(),
+  }),
   created_at: z.string(),
 })
 
 export type OperationEvent = z.infer<typeof operationEventSchema>
+
+const activityOutcomeCountsSchema = z.object({
+  total: z.number().int().nonnegative(),
+  operations: z.number().int().nonnegative(),
+  accepted: z.number().int().nonnegative(),
+  denied: z.number().int().nonnegative(),
+  conflict: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  active_actors: z.number().int().nonnegative(),
+})
+
+const activityBucketSchema = z.object({
+  start: z.string(),
+  accepted: z.number().int().nonnegative(),
+  denied: z.number().int().nonnegative(),
+  conflict: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+})
+
+const activityActorSummarySchema = z.object({
+  actor_id: z.string(),
+  actor_display_name: z.string(),
+  accepted_changes: z.number().int().nonnegative(),
+  reads: z.number().int().nonnegative(),
+  denied: z.number().int().nonnegative(),
+  conflict: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  last_activity_at: z.string(),
+})
+
+const activityDocumentSummarySchema = z.object({
+  document_id: z.string(),
+  title: z.string().nullable(),
+  current_path: z.string().nullable(),
+  historical_path: z.string().nullable(),
+  count: z.number().int().nonnegative(),
+})
+
+const activityPublicationSummarySchema = z.object({
+  publication_id: z.string(),
+  document_id: z.string().nullable(),
+  document_title: z.string().nullable(),
+  slug: z.string().nullable(),
+  active: z.boolean().nullable(),
+  access_policy: z.enum(['public', 'unlisted']).nullable(),
+  actor_id: z.string(),
+  action: z.string(),
+  outcome: z.enum(['accepted', 'denied', 'conflict', 'failed']),
+  created_at: z.string(),
+})
+
+const activityProblemSummarySchema = z.object({
+  category: z.enum(['access', 'conflict', 'publication', 'failure']),
+  actor_id: z.string(),
+  actor_display_name: z.string(),
+  token_id: z.string().nullable(),
+  token_label: z.string().nullable(),
+  action: z.string(),
+  resource_type: z.string(),
+  resource_id: z.string().nullable(),
+  path: z.string().nullable(),
+  error_code: z.string().nullable(),
+  capability: z.string().nullable(),
+  current_revision_id: z.string().nullable(),
+  expected_revision_id: z.string().nullable(),
+  count: z.number().int().positive(),
+  first_at: z.string(),
+  latest_at: z.string(),
+})
+
+export const agentAccessHealthSchema = z.object({
+  active_tokens: z.number().int().nonnegative(),
+  expired_tokens: z.number().int().nonnegative(),
+  expiring_soon_tokens: z.number().int().nonnegative(),
+  recent_denied: z.number().int().nonnegative(),
+  latest_activity_at: z.string().nullable(),
+  attention_count: z.number().int().nonnegative(),
+})
+
+export const activitySummarySchema = z.object({
+  counts: activityOutcomeCountsSchema,
+  buckets: z.array(activityBucketSchema),
+  actors: z.array(activityActorSummarySchema),
+  actors_truncated: z.boolean(),
+  changed_documents: z.array(activityDocumentSummarySchema),
+  read_documents: z.array(activityDocumentSummarySchema),
+  problem_documents: z.array(activityDocumentSummarySchema),
+  documents_truncated: z.boolean(),
+  publications: z.array(activityPublicationSummarySchema),
+  publications_truncated: z.boolean(),
+  problems: z.array(activityProblemSummarySchema),
+  problems_truncated: z.boolean(),
+  access_health: agentAccessHealthSchema,
+})
+
+export type ActivitySummary = z.infer<typeof activitySummarySchema>
+export type ActivityFilters = {
+  actorId?: string
+  outcome?: OperationEvent['outcome']
+  tokenId?: string
+  action?: string
+  resourceType?: string
+  resourceId?: string
+  path?: string
+  errorCode?: string
+  operationId?: string
+  attention?: boolean
+  since?: string
+  until?: string
+}
+
+function activityParams(filters: ActivityFilters): URLSearchParams {
+  const params = new URLSearchParams()
+  const fields = [
+    ['actor_id', filters.actorId],
+    ['outcome', filters.outcome],
+    ['token_id', filters.tokenId],
+    ['action', filters.action],
+    ['resource_type', filters.resourceType],
+    ['resource_id', filters.resourceId],
+    ['path', filters.path],
+    ['error_code', filters.errorCode],
+    ['operation_id', filters.operationId],
+    ['since', filters.since],
+    ['until', filters.until],
+  ] as const
+  for (const [key, value] of fields) if (value) params.set(key, value)
+  if (filters.attention) params.set('attention', 'true')
+  return params
+}
 
 export const publicationSchema = z.object({
   publication_id: z.string(),
@@ -877,20 +1014,15 @@ export const api = {
   async revokeAgentToken(tokenId: string): Promise<AgentToken> {
     return agentTokenSchema.parse(await request(`/agent-tokens/${tokenId}`, { method: 'DELETE' }))
   },
-  async listActivity(
-    filters: {
-      actorId?: string
-      outcome?: OperationEvent['outcome']
-      since?: string
-      until?: string
-    } = {},
-  ): Promise<OperationEvent[]> {
-    const params = new URLSearchParams({ limit: '100' })
-    if (filters.actorId) params.set('actor_id', filters.actorId)
-    if (filters.outcome) params.set('outcome', filters.outcome)
-    if (filters.since) params.set('since', filters.since)
-    if (filters.until) params.set('until', filters.until)
+  async listActivity(filters: ActivityFilters = {}, limit = 100, offset = 0): Promise<OperationEvent[]> {
+    const params = activityParams(filters)
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
     return z.array(operationEventSchema).parse(await request(`/activity?${params.toString()}`))
+  },
+  async activitySummary(filters: ActivityFilters = {}): Promise<ActivitySummary> {
+    const params = activityParams(filters)
+    return activitySummarySchema.parse(await request(`/activity/summary?${params.toString()}`))
   },
   async listDocuments(): Promise<DocumentSummary[]> {
     return collectPages(async (offset, limit) =>

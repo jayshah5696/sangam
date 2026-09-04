@@ -15,7 +15,7 @@ These public resources explain the interface and safe workflows but grant no acc
 
 ## Issuing a token
 
-Create tokens in **Settings → Operations & AI → Agents & tokens** (or via `POST /api/v1/agent-tokens`). A token specifies:
+Create tokens in **Settings → Agents & access** (or via `POST /api/v1/agent-tokens`). The access-health summary shows active, expired, and soon-to-expire tokens, recent denied attempts, and the latest agent activity without blocking token management if the summary is unavailable. A token specifies:
 
 - **Actor ID** — becomes the actor (`agent:<name>`) in the activity ledger
 - **Display name & label** — human-readable description of the agent's role
@@ -69,7 +69,8 @@ Agents driving the workspace chat produce **proposals**, not direct writes: a su
 
 If a token is compromised:
 
-1. **Revoke immediately** in Settings → Agents & tokens (or via `DELETE /api/v1/agent-tokens/<token_id>`). Revocation takes effect instantly.
-2. **Review ledger** in **Agent activity** to audit all accepted, denied, conflicted, and failed operations under that actor ID.
-3. **Restore damaged files** from revision history using `sangam restore` or the document history inspector.
-4. **Rotate related tokens** if shared secret material was potentially exposed.
+1. **Revoke immediately** in **Settings → Agents & access** (or via `DELETE /api/v1/agent-tokens/<token_id>`). Revocation takes effect instantly.
+2. **Review Activity insights** to find recent access, conflict, publication, and other failures. Attention means a problem occurred in the selected range; it is not a durable acknowledgement or resolution state.
+3. **Open the Activity view** with the actor and token filters preserved in the URL. Expand an operation to inspect its immutable events, then follow the document or access-management link.
+4. **Restore damaged files** from revision history using `sangam restore` or the document history inspector.
+5. **Rotate related tokens** if shared secret material was potentially exposed.

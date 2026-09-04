@@ -6,6 +6,29 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { AgentAccessSettings } from './AgentAccessSettings'
 
+const emptySummary = vi.hoisted(() => ({
+  counts: { total: 0, operations: 0, accepted: 0, denied: 0, conflict: 0, failed: 0, active_actors: 0 },
+  buckets: [],
+  actors: [],
+  actors_truncated: false,
+  changed_documents: [],
+  read_documents: [],
+  problem_documents: [],
+  documents_truncated: false,
+  publications: [],
+  publications_truncated: false,
+  problems: [],
+  problems_truncated: false,
+  access_health: {
+    active_tokens: 0,
+    expired_tokens: 0,
+    expiring_soon_tokens: 0,
+    recent_denied: 0,
+    latest_activity_at: null,
+    attention_count: 0,
+  },
+}))
+
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a href="/activity">{children}</a>,
 }))
@@ -17,6 +40,7 @@ vi.mock('../api', () => ({
     updateAgentToken: vi.fn(),
     rotateAgentToken: vi.fn(),
     revokeAgentToken: vi.fn(),
+    activitySummary: vi.fn().mockResolvedValue(emptySummary),
   },
 }))
 
@@ -65,12 +89,13 @@ describe('AgentAccessSettings', () => {
       revoked_at: null,
       last_used_at: null,
       rotated_from_token_id: null,
+      recent_denied_count: 0,
     }
     vi.mocked(api.listAgentTokens).mockResolvedValue([sampleToken])
     vi.mocked(api.updateAgentToken).mockResolvedValue(sampleToken)
     renderSettings()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage access' }))
     const dialog = document.querySelector<HTMLDialogElement>('[aria-label="Edit Research workspace"]')
     expect(dialog).not.toBeNull()
     expect(screen.getByText('Edit token details')).not.toBeNull()

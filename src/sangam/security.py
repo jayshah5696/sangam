@@ -138,14 +138,23 @@ class IdentityService:
         return [Actor.model_validate(dict(row)) for row in rows]
 
     def list_tokens(self) -> list[AgentToken]:
+        denied_since = (datetime.now(UTC) - timedelta(days=1)).isoformat().replace("+00:00", "Z")
         with self.database.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT t.*, a.display_name AS actor_display_name
+                SELECT t.*, a.display_name AS actor_display_name,
+                    COALESCE(denied.recent_denied_count, 0) AS recent_denied_count
                 FROM actor_tokens t
                 JOIN actors a ON a.actor_id = t.actor_id
+                LEFT JOIN (
+                    SELECT token_id, COUNT(*) AS recent_denied_count
+                    FROM operation_events
+                    WHERE outcome = 'denied' AND created_at >= ? AND token_id IS NOT NULL
+                    GROUP BY token_id
+                ) denied ON denied.token_id = t.token_id
                 ORDER BY t.created_at DESC, t.token_id DESC
-                """
+                """,
+                (denied_since,),
             ).fetchall()
             scope_rows = connection.execute(
                 """
@@ -161,6 +170,7 @@ class IdentityService:
                     connection,
                     row,
                     scopes=scopes_by_token.get(row["token_id"], []),
+                    recent_denied_count=row["recent_denied_count"],
                 )
                 for row in rows
             ]
@@ -516,6 +526,7 @@ class IdentityService:
         row: sqlite3.Row,
         *,
         scopes: list[sqlite3.Row] | None = None,
+        recent_denied_count: int = 0,
     ) -> AgentToken:
         if scopes is None:
             scopes = connection.execute(
@@ -540,6 +551,7 @@ class IdentityService:
             revoked_at=row["revoked_at"],
             last_used_at=row["last_used_at"],
             rotated_from_token_id=row["rotated_from_token_id"],
+            recent_denied_count=recent_denied_count,
         )
 
 

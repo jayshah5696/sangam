@@ -467,6 +467,7 @@ class AgentToken(BaseModel):
     revoked_at: str | None
     last_used_at: str | None
     rotated_from_token_id: str | None
+    recent_denied_count: int = 0
 
 
 class IssuedAgentToken(AgentToken):
@@ -505,6 +506,100 @@ class OperationEvent(BaseModel):
     revision_id: str | None
     details: dict[str, object]
     created_at: str
+
+
+class ActivityOutcomeCounts(BaseModel):
+    total: int
+    operations: int
+    accepted: int
+    denied: int
+    conflict: int
+    failed: int
+    active_actors: int
+
+
+class ActivityBucket(BaseModel):
+    start: str
+    accepted: int
+    denied: int
+    conflict: int
+    failed: int
+
+
+class ActivityActorSummary(BaseModel):
+    actor_id: str
+    actor_display_name: str
+    accepted_changes: int
+    reads: int
+    denied: int
+    conflict: int
+    failed: int
+    last_activity_at: str
+
+
+class ActivityDocumentSummary(BaseModel):
+    document_id: str
+    title: str | None
+    current_path: str | None
+    historical_path: str | None
+    count: int
+
+
+class ActivityPublicationSummary(BaseModel):
+    publication_id: str
+    document_id: str | None
+    document_title: str | None
+    slug: str | None
+    active: bool | None
+    access_policy: Literal["public", "unlisted"] | None
+    actor_id: str
+    action: str
+    outcome: Literal["accepted", "denied", "conflict", "failed"]
+    created_at: str
+
+
+class ActivityProblemSummary(BaseModel):
+    category: Literal["access", "conflict", "publication", "failure"]
+    actor_id: str
+    actor_display_name: str
+    token_id: str | None
+    token_label: str | None
+    action: str
+    resource_type: str
+    resource_id: str | None
+    path: str | None
+    error_code: str | None
+    capability: str | None
+    current_revision_id: str | None
+    expected_revision_id: str | None
+    count: int
+    first_at: str
+    latest_at: str
+
+
+class AgentAccessHealth(BaseModel):
+    active_tokens: int
+    expired_tokens: int
+    expiring_soon_tokens: int
+    recent_denied: int
+    latest_activity_at: str | None
+    attention_count: int
+
+
+class ActivitySummary(BaseModel):
+    counts: ActivityOutcomeCounts
+    buckets: list[ActivityBucket]
+    actors: list[ActivityActorSummary]
+    actors_truncated: bool
+    changed_documents: list[ActivityDocumentSummary]
+    read_documents: list[ActivityDocumentSummary]
+    problem_documents: list[ActivityDocumentSummary]
+    documents_truncated: bool
+    publications: list[ActivityPublicationSummary]
+    publications_truncated: bool
+    problems: list[ActivityProblemSummary]
+    problems_truncated: bool
+    access_health: AgentAccessHealth
 
 
 class UpdateDocumentTrust(MutationRequest):

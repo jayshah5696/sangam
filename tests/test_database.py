@@ -46,6 +46,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "018",
         "019",
         "020",
+        "021",
     ]
     assert {
         "operation_events_revision_outcome_created_idx",
@@ -57,8 +58,72 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "operation_events_operation_created_idx",
         "operation_events_created_idx",
         "actor_token_events_token_created_idx",
+        "operation_events_token_created_idx",
+        "operation_events_resource_created_idx",
+        "operation_events_action_created_idx",
+        "operation_events_error_created_idx",
         "chat_effects_thread_attention_idx",
     } <= indexes
+
+
+def test_activity_filter_query_plans_use_investigation_indexes(tmp_path: Path) -> None:
+    database = Database(tmp_path / "activity-query-plan.sqlite3")
+    database.initialize()
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO actors(actor_id, display_name, actor_type, created_at)
+            VALUES ('agent:test', 'Test Agent', 'client', '2026-09-01T00:00:00+00:00')
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO operation_events(
+                event_id, operation_id, actor_id, token_id, action, resource_type,
+                resource_id, outcome, error_code, created_at
+            ) VALUES (?, ?, 'agent:test', NULL, ?, 'document', ?, ?, ?, ?)
+            """,
+            [
+                (
+                    f"event-{index}",
+                    f"operation-{index // 2}",
+                    "update" if index % 3 else "read",
+                    f"doc-{index % 40}",
+                    "denied" if index % 11 == 0 else "accepted",
+                    "authorization_denied" if index % 11 == 0 else None,
+                    f"2026-09-01T00:{index // 60:02d}:{index % 60:02d}+00:00",
+                )
+                for index in range(1_000)
+            ],
+        )
+        plans = {
+            "token": connection.execute(
+                """
+                EXPLAIN QUERY PLAN SELECT * FROM operation_events
+                WHERE token_id = ? ORDER BY created_at DESC LIMIT 50
+                """,
+                ("agt_test",),
+            ).fetchall(),
+            "resource": connection.execute(
+                """
+                EXPLAIN QUERY PLAN SELECT * FROM operation_events
+                WHERE resource_type = ? AND resource_id = ?
+                ORDER BY created_at DESC LIMIT 50
+                """,
+                ("document", "doc_test"),
+            ).fetchall(),
+            "error": connection.execute(
+                """
+                EXPLAIN QUERY PLAN SELECT * FROM operation_events
+                WHERE error_code = ? ORDER BY created_at DESC LIMIT 50
+                """,
+                ("authorization_denied",),
+            ).fetchall(),
+        }
+    descriptions = {name: " ".join(row["detail"] for row in rows) for name, rows in plans.items()}
+    assert "operation_events_token_created_idx" in descriptions["token"]
+    assert "operation_events_resource_created_idx" in descriptions["resource"]
+    assert "operation_events_error_created_idx" in descriptions["error"]
 
 
 def test_failing_migration_rolls_back_the_whole_file(

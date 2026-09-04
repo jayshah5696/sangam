@@ -213,6 +213,78 @@ def test_activity_date_range_filters_inclusive_utc_boundaries(client: TestClient
     assert invalid.json()["error"]["message"] == "Activity start must not be after its end"
 
 
+def test_activity_filters_and_server_summary_are_bounded_safe_and_enriched(
+    client: TestClient,
+) -> None:
+    document = create_human_document(
+        client, title="Agent field notes", path="agents/field-notes.md", key="field-notes"
+    )
+    issued = issue_token(
+        client,
+        scopes=[{"capability": "read", "path_prefix": "agents"}],
+    )
+    token = issued["token"]
+    token_id = issued["token_id"]
+    read = client.get(f"/api/v1/documents/{document['document_id']}", headers=bearer(token))
+    assert read.status_code == 200
+    denied = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "denied-summary-create"),
+        json={"title": "Denied body", "content": "must stay private", "path": "outside.md"},
+    )
+    assert denied.status_code == 403
+
+    activity = client.get(
+        "/api/v1/activity",
+        params={"token_id": token_id, "resource_type": "document"},
+    )
+    assert activity.status_code == 200
+    rows = activity.json()
+    assert {row["outcome"] for row in rows} == {"accepted", "denied"}
+    denied_event = next(row for row in rows if row["outcome"] == "denied")
+
+    exact = client.get(
+        "/api/v1/activity",
+        params={
+            "token_id": token_id,
+            "action": denied_event["action"],
+            "resource_type": denied_event["resource_type"],
+            "path": "outside",
+            "error_code": denied_event["error_code"],
+            "operation_id": denied_event["operation_id"],
+        },
+    )
+    assert [row["event_id"] for row in exact.json()] == [denied_event["event_id"]]
+
+    summary_response = client.get(
+        "/api/v1/activity/summary",
+        params={"token_id": token_id},
+    )
+    assert summary_response.status_code == 200, summary_response.text
+    summary = summary_response.json()
+    assert summary["counts"]["total"] == 2
+    assert summary["counts"]["operations"] == 2
+    assert summary["counts"]["accepted"] == 1
+    assert summary["counts"]["denied"] == 1
+    assert summary["actors"][0]["reads"] == 1
+    assert summary["read_documents"][0]["title"] == "Agent field notes"
+    assert summary["problems"][0]["category"] == "access"
+    assert summary["problems"][0]["capability"] == "create"
+    assert summary["access_health"]["active_tokens"] == 1
+    assert summary["access_health"]["recent_denied"] == 1
+    serialized = json.dumps(summary)
+    assert token not in serialized
+    assert "must stay private" not in serialized
+    listed_token = next(
+        item for item in client.get("/api/v1/agent-tokens").json() if item["token_id"] == token_id
+    )
+    assert listed_token["recent_denied_count"] == 1
+
+    attention = client.get("/api/v1/activity", params={"token_id": token_id, "attention": True})
+    assert [row["outcome"] for row in attention.json()] == ["denied"]
+    assert client.get("/api/v1/activity", params={"limit": 201}).status_code == 422
+
+
 def test_token_listing_bulk_loads_scopes_and_agent_names_are_immutable(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -387,6 +459,13 @@ def test_agent_scope_enforcement_conflict_and_reviewable_activity(client: TestCl
     assert ("update", "denied") in outcomes
     assert ("move", "denied") in outcomes
     assert ("update", "conflict") in outcomes
+    summary = client.get(
+        "/api/v1/activity/summary",
+        params={"actor_id": "agent:researcher"},
+    ).json()
+    conflict = next(problem for problem in summary["problems"] if problem["category"] == "conflict")
+    assert conflict["expected_revision_id"] == report["current_revision_id"]
+    assert conflict["current_revision_id"] == updated.json()["current_revision_id"]
     serialized = json.dumps(activity)
     assert token not in serialized
     assert "Agent revision" not in serialized
