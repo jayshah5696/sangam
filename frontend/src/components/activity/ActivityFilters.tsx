@@ -1,9 +1,8 @@
-import { RotateCcw } from 'lucide-react'
+import { ChevronDown, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useState } from 'react'
 import type { ActivitySearch } from '../../activitySearch'
 import { api } from '../../api'
-import { useMediaQuery } from '../../useMediaQuery'
 
 export function ActivityFilters({
   search,
@@ -12,11 +11,20 @@ export function ActivityFilters({
   search: ActivitySearch
   onChange: (patch: Partial<ActivitySearch>) => void
 }) {
-  const compact = useMediaQuery('(max-width: 800px)')
-  const disclosure = useRef<HTMLDetailsElement>(null)
-  useEffect(() => {
-    if (disclosure.current) disclosure.current.open = !compact
-  }, [compact])
+  const activeFilterCount = [
+    search.actor_id,
+    search.token_id,
+    search.outcome,
+    search.action,
+    search.resource_type,
+    search.resource_id,
+    search.path,
+    search.error_code,
+    search.operation_id,
+    search.attention ? 'attention' : undefined,
+    search.range !== '7d' ? search.range : undefined,
+  ].filter(Boolean).length
+  const [filtersOpen, setFiltersOpen] = useState(activeFilterCount > 0)
   const directory = useQuery({
     queryKey: ['activity-filter-directory'],
     queryFn: async () => {
@@ -33,8 +41,18 @@ export function ActivityFilters({
   const selectedTokenKnown =
     directory.data?.tokens.some((token) => token.token_id === search.token_id) ?? false
   return (
-    <details ref={disclosure} className="activity-filter-disclosure">
-      <summary>Filters</summary>
+    <details
+      className="activity-filter-disclosure"
+      open={filtersOpen}
+      onToggle={(event) => setFiltersOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>
+          <SlidersHorizontal size="var(--icon-inline)" /> Filters
+          {activeFilterCount > 0 && <b>{activeFilterCount}</b>}
+        </span>
+        <ChevronDown className="activity-filter-chevron" size="var(--icon-inline)" />
+      </summary>
       <div className="activity-filters">
         <label>
           <span>Agent</span>

@@ -34,6 +34,25 @@ async function createActivity(request: import('@playwright/test').APIRequestCont
   return issued
 }
 
+async function createAdditionalDeniedActivity(
+  request: import('@playwright/test').APIRequestContext,
+  token: string,
+  index: number,
+) {
+  const denied = await request.post('/api/v1/documents', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': randomUUID(),
+    },
+    data: {
+      title: `Denied draft ${index}`,
+      content: 'private',
+      path: `outside/denied-${index}-${randomUUID().slice(0, 8)}.md`,
+    },
+  })
+  expect(denied.status()).toBe(403)
+}
+
 async function createPublicPublication(request: import('@playwright/test').APIRequestContext) {
   const suffix = randomUUID().slice(0, 8)
   const actorId = `agent:publisher-${suffix}`
@@ -112,10 +131,12 @@ function captureBrowserErrors(page: import('@playwright/test').Page) {
 
 test('activity date presets and custom boundaries filter the review log', async ({ page, request }) => {
   const browserErrors = captureBrowserErrors(page)
-  await createActivity(request)
+  const issued = await createActivity(request)
+  await Promise.all([1, 2, 3].map((index) => createAdditionalDeniedActivity(request, issued.token, index)))
   const publicationActorId = await createPublicPublication(request)
   await page.goto('/activity')
   await expectActivitySettingsRail(page)
+  await expect(page.locator('.activity-filter-disclosure')).not.toHaveAttribute('open', '')
   const refresh = page.getByRole('button', { name: 'Refresh activity' })
   await expect(refresh).toBeEnabled()
   await expect(page.getByText(/Refreshing (activity|insights)/)).toHaveCount(0)
@@ -140,8 +161,18 @@ test('activity date presets and custom boundaries filter the review log', async 
   await activityTab.press('ArrowLeft')
   await expect(insightsTab).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('heading', { name: 'Needs attention' })).toBeVisible()
+  await expect(page.locator('.activity-problem')).toHaveCount(3)
+  const showMoreProblems = page.getByRole('button', { name: /Show \d+ more/ })
+  await expect(showMoreProblems).toBeVisible()
+  await showMoreProblems.click()
+  await expect.poll(() => page.locator('.activity-problem').count()).toBeGreaterThan(3)
+  const showFewerProblems = page.getByRole('button', { name: 'Show fewer' })
+  await expect(showFewerProblems).toBeVisible()
+  await showFewerProblems.click()
+  await expect(page.locator('.activity-problem')).toHaveCount(3)
+  await showMoreProblems.click()
   const accessProblem = page.locator('.activity-problem').filter({ hasText: 'Access denied' }).first()
-  await expect(accessProblem).toContainText('Capability create')
+  await expect(accessProblem).toContainText('Research reader · create · forbidden')
   await expect(accessProblem.getByRole('link', { name: 'Manage access' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open public page' }).first()).toBeVisible()
   await page.getByRole('tab', { name: 'Activity' }).click()
@@ -172,7 +203,7 @@ test('activity date presets and custom boundaries filter the review log', async 
     await openActivityFilters(page)
     await range.selectOption('7d')
     await expect(page.getByRole('heading', { name: 'Needs attention' })).toBeVisible()
-    if (test.info().project.name !== 'chromium-desktop') {
+    if (await page.locator('.activity-filter-disclosure').getAttribute('open')) {
       await page.locator('.activity-filter-disclosure > summary').click()
     }
     await page.screenshot({
