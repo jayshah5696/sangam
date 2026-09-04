@@ -19,7 +19,7 @@ import {
 import { api, type DocumentSummary } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
-import { SettingsSidebar } from '../components/SettingsSidebar'
+import { SettingsRouteSidebar, SettingsSidebar } from '../components/SettingsSidebar'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { activateTabFromKeyboard } from '../components/tabKeyboard'
 import { workspaceBasename } from '../workspaceTree'
@@ -42,6 +42,8 @@ function RootLayout() {
   const narrowSidebar = useMediaQuery('(max-width: 1100px)')
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
   const isSettings = location.pathname.startsWith('/settings')
+  const isActivity = location.pathname.startsWith('/activity')
+  const usesSettingsRail = isSettings || isActivity
   const locationKey = location.state.__TSR_key ?? location.href
   const sidebarVisible = narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible
 
@@ -52,9 +54,9 @@ function RootLayout() {
   }, [locationKey, mobileSidebarLocationKey])
 
   useEffect(() => {
-    if (isSettings || location.pathname.startsWith('/p/')) return
+    if (usesSettingsRail || location.pathname.startsWith('/p/')) return
     sessionStorage.setItem('sangam.settings-return-to', location.href)
-  }, [isSettings, location.href, location.pathname])
+  }, [location.href, location.pathname, usesSettingsRail])
 
   const returnFromSettings = useCallback(() => {
     const returnTo = sessionStorage.getItem('sangam.settings-return-to')
@@ -62,7 +64,7 @@ function RootLayout() {
   }, [navigate])
 
   useEffect(() => {
-    if (!isSettings) return
+    if (!usesSettingsRail) return
     const exitSettings = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], [role="listbox"]')) {
@@ -73,7 +75,7 @@ function RootLayout() {
     }
     window.addEventListener('keydown', exitSettings)
     return () => window.removeEventListener('keydown', exitSettings)
-  }, [isSettings, returnFromSettings])
+  }, [returnFromSettings, usesSettingsRail])
 
   if (location.pathname.startsWith('/p/')) return <Outlet />
 
@@ -103,7 +105,7 @@ function RootLayout() {
           {narrowSidebar && (
             <button
               className="sidebar-backdrop"
-              aria-label={isSettings ? 'Close settings sidebar' : 'Close workspace sidebar'}
+              aria-label={usesSettingsRail ? 'Close settings sidebar' : 'Close workspace sidebar'}
               onClick={hideSidebar}
             />
           )}
@@ -112,7 +114,8 @@ function RootLayout() {
             modal={narrowSidebar}
             onCollapse={hideSidebar}
             onMode={(next) => void chooseSidebarMode(next)}
-            settings={isSettings}
+            settings={usesSettingsRail}
+            activity={isActivity}
             onSettingsBack={returnFromSettings}
             style={{ width: preferences.leftWidth }}
           />
@@ -127,8 +130,8 @@ function RootLayout() {
       ) : (
         <button
           className="sidebar-reveal icon-button"
-          aria-label={isSettings ? 'Show settings sidebar' : 'Show workspace sidebar'}
-          title={isSettings ? 'Show settings sidebar' : 'Show workspace sidebar'}
+          aria-label={usesSettingsRail ? 'Show settings sidebar' : 'Show workspace sidebar'}
+          title={usesSettingsRail ? 'Show settings sidebar' : 'Show workspace sidebar'}
           onClick={showSidebar}
         >
           <PanelLeftOpen size="var(--icon-control)" />
@@ -167,6 +170,7 @@ function PrimarySidebar({
   onCollapse,
   onMode,
   settings,
+  activity,
   onSettingsBack,
   style,
 }: {
@@ -175,6 +179,7 @@ function PrimarySidebar({
   onCollapse: () => void
   onMode: (mode: SidebarMode) => void
   settings: boolean
+  activity: boolean
   onSettingsBack: () => void
   style: CSSProperties
 }) {
@@ -251,7 +256,11 @@ function PrimarySidebar({
         </button>
       </header>
       {settings ? (
-        <SettingsSidebar onBack={onSettingsBack} />
+        activity ? (
+          <SettingsSidebar activeCategory="agents" onBack={onSettingsBack} />
+        ) : (
+          <SettingsRouteSidebar onBack={onSettingsBack} />
+        )
       ) : (
         <>
           <div className="sidebar-mode-switch" role="tablist" aria-label="Workspace navigation">

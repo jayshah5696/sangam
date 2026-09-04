@@ -1,6 +1,8 @@
 import { RotateCcw } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import type { ActivitySearch } from '../../activitySearch'
+import { api } from '../../api'
 import { useMediaQuery } from '../../useMediaQuery'
 
 export function ActivityFilters({
@@ -15,25 +17,59 @@ export function ActivityFilters({
   useEffect(() => {
     if (disclosure.current) disclosure.current.open = !compact
   }, [compact])
+  const directory = useQuery({
+    queryKey: ['activity-filter-directory'],
+    queryFn: async () => {
+      const [summary, tokens] = await Promise.all([api.activitySummary(), api.listAgentTokens()])
+      const actorNames = new Map(summary.actors.map((actor) => [actor.actor_id, actor.actor_display_name]))
+      for (const token of tokens) actorNames.set(token.actor_id, token.actor_display_name)
+      return {
+        actors: [...actorNames].sort((left, right) => left[1].localeCompare(right[1])),
+        tokens,
+      }
+    },
+  })
+  const selectedActorKnown = directory.data?.actors.some(([id]) => id === search.actor_id) ?? false
+  const selectedTokenKnown =
+    directory.data?.tokens.some((token) => token.token_id === search.token_id) ?? false
   return (
     <details ref={disclosure} className="activity-filter-disclosure">
       <summary>Filters</summary>
       <div className="activity-filters">
         <label>
-          <span>Actor ID</span>
-          <input
-            placeholder="agent:researcher"
+          <span>Agent</span>
+          <select
+            aria-label="Agent"
             value={search.actor_id ?? ''}
             onChange={(event) => onChange({ actor_id: event.target.value || undefined })}
-          />
+          >
+            <option value="">All agents</option>
+            {search.actor_id && !selectedActorKnown && (
+              <option value={search.actor_id}>{search.actor_id} (historical)</option>
+            )}
+            {directory.data?.actors.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name} ({id})
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <span>Token</span>
-          <input
-            placeholder="agt_…"
+          <select
             value={search.token_id ?? ''}
             onChange={(event) => onChange({ token_id: event.target.value || undefined })}
-          />
+          >
+            <option value="">All tokens</option>
+            {search.token_id && !selectedTokenKnown && (
+              <option value={search.token_id}>{search.token_id} (historical)</option>
+            )}
+            {directory.data?.tokens.map((token) => (
+              <option key={token.token_id} value={token.token_id}>
+                {token.label} · {token.actor_display_name}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <span>Outcome</span>

@@ -36,9 +36,10 @@ async function createActivity(request: import('@playwright/test').APIRequestCont
 
 async function createPublicPublication(request: import('@playwright/test').APIRequestContext) {
   const suffix = randomUUID().slice(0, 8)
+  const actorId = `agent:publisher-${suffix}`
   const tokenResponse = await request.post('/api/v1/agent-tokens', {
     data: {
-      actor_id: `agent:publisher-${suffix}`,
+      actor_id: actorId,
       display_name: 'Publication evidence agent',
       label: 'Publication writer',
       scopes: [{ capability: 'publish', path_prefix: 'published' }],
@@ -70,11 +71,34 @@ async function createPublicPublication(request: import('@playwright/test').APIRe
     },
   })
   expect(publication.ok(), await publication.text()).toBeTruthy()
+  return actorId
 }
 
 async function openActivityFilters(page: import('@playwright/test').Page) {
-  const actor = page.getByLabel('Actor ID')
+  const actor = page.getByRole('combobox', { name: 'Agent', exact: true })
   if (!(await actor.isVisible())) await page.locator('.activity-filter-disclosure > summary').click()
+}
+
+async function expectActivitySettingsRail(page: import('@playwright/test').Page) {
+  const settingsSidebar = page.getByRole('complementary', { name: 'Settings sidebar' })
+  if (page.viewportSize()!.width > 1100) {
+    await expect(settingsSidebar).toBeVisible()
+    await expect(settingsSidebar.getByRole('button', { name: /Agents & access/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  } else {
+    await page.getByRole('button', { name: 'Show settings sidebar' }).click()
+    const settingsDrawer = page.getByRole('dialog', { name: 'Settings sidebar' })
+    await expect(settingsDrawer).toBeVisible()
+    await expect(settingsDrawer.getByRole('button', { name: /Agents & access/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await settingsDrawer.getByRole('button', { name: 'Hide settings sidebar' }).click()
+    await expect(settingsDrawer).toBeHidden()
+  }
+  await expect(page.getByRole('complementary', { name: 'Workspace sidebar' })).toHaveCount(0)
 }
 
 function captureBrowserErrors(page: import('@playwright/test').Page) {
@@ -89,9 +113,14 @@ function captureBrowserErrors(page: import('@playwright/test').Page) {
 test('activity date presets and custom boundaries filter the review log', async ({ page, request }) => {
   const browserErrors = captureBrowserErrors(page)
   await createActivity(request)
-  await createPublicPublication(request)
+  const publicationActorId = await createPublicPublication(request)
   await page.goto('/activity')
+  await expectActivitySettingsRail(page)
   await openActivityFilters(page)
+  await expect(page.getByRole('combobox', { name: 'Agent', exact: true })).toContainText(
+    'Token editor evidence',
+  )
+  await expect(page.getByRole('combobox', { name: 'Token', exact: true })).toContainText('Research reader')
   const range = page.getByLabel('Activity date range')
   await expect(range).toHaveValue('7d')
   const insightsTab = page.getByRole('tab', { name: 'Insights' })
@@ -113,14 +142,13 @@ test('activity date presets and custom boundaries filter the review log', async 
   await expect(
     page.locator('.activity-operation').filter({ hasText: 'Token editor evidence' }).first(),
   ).toBeVisible()
-  await page.getByLabel('Actor ID').fill('agent:no-match')
-  await expect(page).toHaveURL(/actor_id=agent%3Ano-match/)
-  await expect(page.getByText('No matching activity')).toBeVisible()
+  await page.getByRole('combobox', { name: 'Agent', exact: true }).selectOption(publicationActorId)
+  await expect(page).toHaveURL(/actor_id=agent%3Apublisher-/)
   await page.reload()
   await openActivityFilters(page)
-  await expect(page.getByLabel('Actor ID')).toHaveValue('agent:no-match')
+  await expect(page.getByRole('combobox', { name: 'Agent', exact: true })).toHaveValue(/agent:publisher-/)
   await page.getByRole('button', { name: 'Clear all' }).click()
-  await expect(page.getByLabel('Actor ID')).toHaveValue('')
+  await expect(page.getByRole('combobox', { name: 'Agent', exact: true })).toHaveValue('')
   await range.selectOption('7d')
   await expect.poll(() => new URL(page.url()).pathname).toBe('/activity')
 
@@ -179,7 +207,7 @@ test('activity operation details and responsive layout remain usable', async ({ 
     const filterSummary = page.locator('.activity-filter-disclosure > summary')
     await expect(filterSummary).toBeVisible()
     await filterSummary.click()
-    await expect(page.getByLabel('Actor ID')).toBeHidden()
+    await expect(page.getByRole('combobox', { name: 'Agent', exact: true })).toBeHidden()
     await filterSummary.click()
     const minHeight = await operation
       .getByRole('button', { name: 'Hide details' })
@@ -202,9 +230,10 @@ test('activity pagination keeps filters in the URL beyond the first page', async
   }
   await page.goto(`/activity?view=activity&range=7d&token_id=${issued.token_id}`)
   await openActivityFilters(page)
+  await expect(page.getByRole('combobox', { name: 'Token', exact: true })).toContainText('Research reader')
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page).toHaveURL(/page=2/)
-  await expect(page.getByLabel('Token')).toHaveValue(issued.token_id)
+  await expect(page.getByRole('combobox', { name: 'Token', exact: true })).toHaveValue(issued.token_id)
   await expect(page.getByText('Page 2')).toBeVisible()
 })
 

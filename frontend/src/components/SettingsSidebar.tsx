@@ -174,9 +174,19 @@ const settingsSearchIndex: Array<{
 
 const settingsRoute = getRouteApi('/settings')
 
-export function SettingsSidebar({ onBack }: { onBack: () => void }) {
+export function SettingsRouteSidebar({ onBack }: { onBack: () => void }) {
   const { category: activeCategory } = settingsRoute.useSearch()
-  const navigate = useNavigate({ from: '/settings' })
+  return <SettingsSidebar activeCategory={activeCategory} onBack={onBack} />
+}
+
+export function SettingsSidebar({
+  activeCategory,
+  onBack,
+}: {
+  activeCategory: SettingsCategory
+  onBack: () => void
+}) {
+  const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const accessHealth = useQuery({
@@ -208,7 +218,10 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
   const openDestination = (category: SettingsCategory, destination?: string) => {
     setQuery('')
     setSelectedIndex(0)
-    void navigate({ search: { category, destination: destination ?? category } })
+    void navigate({
+      to: '/settings',
+      search: { category, destination: destination ?? category },
+    })
   }
 
   return (
