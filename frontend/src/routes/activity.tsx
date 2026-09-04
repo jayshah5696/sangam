@@ -1,6 +1,7 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useIsFetching, useQuery } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { Activity } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
+import { useState } from 'react'
 import { activityRange } from '../activityFilters'
 import { activitySearchSchema, type ActivitySearch } from '../activitySearch'
 import { api, type ActivityFilters } from '../api'
@@ -17,8 +18,9 @@ export const Route = createFileRoute('/activity')({
 function ActivityPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: '/activity' })
+  const [refresh, setRefresh] = useState(() => ({ anchor: new Date(), key: 0 }))
   const custom = { since: search.since ?? '', until: search.until ?? '' }
-  const range = activityRange(search.range, new Date(), custom)
+  const range = activityRange(search.range, refresh.anchor, custom)
   const invalidRange = Boolean(range.since && range.until && range.since > range.until)
   const filters: ActivityFilters = {
     actorId: search.actor_id,
@@ -34,11 +36,13 @@ function ActivityPage() {
     ...range,
   }
   const summary = useQuery({
-    queryKey: ['activity-summary', filters],
+    queryKey: ['activity-summary', filters, refresh.key],
     queryFn: () => api.activitySummary(filters),
-    enabled: !invalidRange,
+    enabled: search.view === 'insights' && !invalidRange,
     placeholderData: keepPreviousData,
   })
+  const refreshQueryRoot = search.view === 'insights' ? 'activity-summary' : 'activity'
+  const refreshing = useIsFetching({ queryKey: [refreshQueryRoot] }) > 0
 
   const updateSearch = (patch: Partial<ActivitySearch>) => {
     void navigate({
@@ -54,7 +58,16 @@ function ActivityPage() {
           <h1>Activity</h1>
           <p>Understand agent work, investigate problems, and review the immutable operation ledger.</p>
         </div>
-        <Activity size="var(--icon-page)" />
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Refresh activity"
+          title="Refresh activity"
+          disabled={refreshing}
+          onClick={() => setRefresh((current) => ({ anchor: new Date(), key: current.key + 1 }))}
+        >
+          <RefreshCw className={refreshing ? 'spin' : undefined} size="var(--icon-control)" />
+        </button>
       </header>
 
       <div className="activity-view-tabs" role="tablist" aria-label="Activity views">
@@ -90,6 +103,7 @@ function ActivityPage() {
           search={search}
           filters={filters}
           invalidRange={invalidRange}
+          refreshKey={refresh.key}
           onSearchChange={updateSearch}
         />
       )}

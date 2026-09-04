@@ -116,6 +116,14 @@ test('activity date presets and custom boundaries filter the review log', async 
   const publicationActorId = await createPublicPublication(request)
   await page.goto('/activity')
   await expectActivitySettingsRail(page)
+  const refresh = page.getByRole('button', { name: 'Refresh activity' })
+  await expect(refresh).toBeEnabled()
+  await expect(page.getByText(/Refreshing (activity|insights)/)).toHaveCount(0)
+  await Promise.all([
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/activity/summary'),
+    refresh.click(),
+  ])
+  await expect(refresh).toBeEnabled()
   await openActivityFilters(page)
   await expect(page.getByRole('combobox', { name: 'Agent', exact: true })).toContainText(
     'Token editor evidence',

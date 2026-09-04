@@ -16,15 +16,17 @@ export function ActivityHistory({
   search,
   filters,
   invalidRange,
+  refreshKey,
   onSearchChange,
 }: {
   search: ActivitySearch
   filters: ActivityFilters
   invalidRange: boolean
+  refreshKey: number
   onSearchChange: (patch: Partial<ActivitySearch>) => void
 }) {
   const events = useQuery({
-    queryKey: ['activity', filters, search.page],
+    queryKey: ['activity', filters, search.page, refreshKey],
     queryFn: () => api.listActivity(filters, pageSize, (search.page - 1) * pageSize),
     enabled: !invalidRange,
     placeholderData: keepPreviousData,
@@ -42,9 +44,6 @@ export function ActivityHistory({
           title="Activity is offline"
           description="Showing loaded events. Reconnect to refresh the ledger."
         />
-      )}
-      {events.isFetching && !events.isLoading && online && (
-        <StateMessage compact kind="loading" title="Refreshing activity" />
       )}
       <section className="activity-list" aria-live="polite" aria-busy={events.isFetching}>
         {groups.map((group) => (

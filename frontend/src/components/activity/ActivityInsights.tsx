@@ -40,9 +40,6 @@ export function ActivityInsights({
         />
       )}
       {summary.isLoading && <StateMessage compact kind="loading" title="Loading insights" />}
-      {summary.isFetching && !summary.isLoading && online && (
-        <StateMessage compact kind="loading" title="Refreshing insights" />
-      )}
       {summary.isError && (
         <StateMessage
           compact
