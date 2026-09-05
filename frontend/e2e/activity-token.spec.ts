@@ -312,7 +312,7 @@ test('active agent token metadata and scopes can be edited in place', async ({ p
   await issueToken(request)
   await page.goto('/settings?category=agents')
   const token = page.locator('.token-row').filter({ hasText: 'Token editor evidence' }).first()
-  await token.getByRole('button', { name: 'Manage access' }).click()
+  await token.getByRole('button', { name: 'Edit' }).click()
   const dialog = page.getByRole('dialog', { name: 'Edit Research reader' })
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('Existing secret stays valid after saving')
@@ -327,7 +327,7 @@ test('active agent token metadata and scopes can be edited in place', async ({ p
 
   const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
   if (evidenceDir) {
-    await token.getByRole('button', { name: 'Manage access' }).click()
+    await token.getByRole('button', { name: 'Edit' }).click()
     await page.screenshot({ path: path.join(evidenceDir, 'token-editor.png'), fullPage: false })
   }
 })

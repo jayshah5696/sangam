@@ -620,7 +620,6 @@ export function AgentAccessSettings() {
               <KeyRound size="var(--icon-control)" />
               <strong>Issued agents</strong>
             </div>
-            <Link to="/activity">Review agent activity</Link>
           </div>
           {(() => {
             const activeTokens = tokens.data?.filter((token) => !token.revoked_at) ?? []
