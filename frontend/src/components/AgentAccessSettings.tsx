@@ -985,7 +985,7 @@ function AgentTokenEditor({
                 : 'Saving…'
               : isCurrentlyExpired
                 ? 'Renew token'
-                : 'Save changes'}
+                : 'Save token'}
           </button>
           <button type="button" className="secondary-action" onClick={onClose}>
             Cancel
