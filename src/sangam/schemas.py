@@ -575,6 +575,15 @@ class ActivityProblemSummary(BaseModel):
     count: int
     first_at: str
     latest_at: str
+    latest_event_id: str
+    acknowledged_at: str | None
+    acknowledged_by: str | None
+
+
+class ActivityProblemAcknowledgement(BaseModel):
+    event_id: str
+    acknowledged_at: str
+    acknowledged_by: str
 
 
 class AgentAccessHealth(BaseModel):
@@ -599,6 +608,9 @@ class ActivitySummary(BaseModel):
     publications_truncated: bool
     problems: list[ActivityProblemSummary]
     problems_truncated: bool
+    acknowledged_problems: list[ActivityProblemSummary]
+    acknowledged_problems_truncated: bool
+    attention_count: int
     access_health: AgentAccessHealth
 
 

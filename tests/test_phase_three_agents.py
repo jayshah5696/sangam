@@ -270,6 +270,9 @@ def test_activity_filters_and_server_summary_are_bounded_safe_and_enriched(
     assert summary["read_documents"][0]["title"] == "Agent field notes"
     assert summary["problems"][0]["category"] == "access"
     assert summary["problems"][0]["capability"] == "create"
+    assert summary["problems"][0]["acknowledged_at"] is None
+    assert summary["attention_count"] == 1
+    assert summary["acknowledged_problems"] == []
     assert summary["access_health"]["active_tokens"] == 1
     assert summary["access_health"]["recent_denied"] == 1
     serialized = json.dumps(summary)
@@ -280,8 +283,51 @@ def test_activity_filters_and_server_summary_are_bounded_safe_and_enriched(
     )
     assert listed_token["recent_denied_count"] == 1
 
+    problem_event_id = summary["problems"][0]["latest_event_id"]
+    acknowledged = client.post(f"/api/v1/activity/problems/{problem_event_id}/acknowledgement")
+    assert acknowledged.status_code == 200, acknowledged.text
+    assert acknowledged.json()["event_id"] == problem_event_id
+
+    hidden_summary = client.get("/api/v1/activity/summary", params={"token_id": token_id}).json()
+    assert hidden_summary["attention_count"] == 0
+    assert hidden_summary["access_health"]["attention_count"] == 0
+    assert hidden_summary["access_health"]["recent_denied"] == 1
+    assert hidden_summary["problems"] == []
+    assert hidden_summary["acknowledged_problems"][0]["latest_event_id"] == problem_event_id
+    assert hidden_summary["acknowledged_problems"][0]["acknowledged_at"] is not None
+    assert any(row["event_id"] == problem_event_id for row in client.get("/api/v1/activity").json())
+
+    repeated_denial = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "reopened-summary-create"),
+        json={"title": "Denied again", "content": "private", "path": "outside.md"},
+    )
+    assert repeated_denial.status_code == 403
+    reopened_summary = client.get("/api/v1/activity/summary", params={"token_id": token_id}).json()
+    reopened_event_id = reopened_summary["problems"][0]["latest_event_id"]
+    assert reopened_event_id != problem_event_id
+    assert reopened_summary["attention_count"] == 1
+    assert reopened_summary["access_health"]["attention_count"] == 1
+    assert reopened_summary["acknowledged_problems"] == []
+
+    client.post(f"/api/v1/activity/problems/{reopened_event_id}/acknowledgement").raise_for_status()
+    restored = client.delete(f"/api/v1/activity/problems/{reopened_event_id}/acknowledgement")
+    assert restored.status_code == 204
+    assert (
+        client.get("/api/v1/activity/summary", params={"token_id": token_id}).json()[
+            "attention_count"
+        ]
+        == 1
+    )
+
+    accepted_event_id = next(row["event_id"] for row in rows if row["outcome"] == "accepted")
+    invalid_acknowledgement = client.post(
+        f"/api/v1/activity/problems/{accepted_event_id}/acknowledgement"
+    )
+    assert invalid_acknowledgement.status_code == 422
+
     attention = client.get("/api/v1/activity", params={"token_id": token_id, "attention": True})
-    assert [row["outcome"] for row in attention.json()] == ["denied"]
+    assert [row["outcome"] for row in attention.json()] == ["denied", "denied"]
     assert client.get("/api/v1/activity", params={"limit": 201}).status_code == 422
 
 

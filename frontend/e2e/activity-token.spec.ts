@@ -175,6 +175,22 @@ test('activity date presets and custom boundaries filter the review log', async 
   await expect(accessProblem).toContainText('Research reader · create · forbidden')
   await expect(accessProblem.getByRole('link', { name: 'Manage access' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open public page' }).first()).toBeVisible()
+  const problemDescription = await accessProblem.locator('p').innerText()
+  await accessProblem.getByRole('button', { name: 'Acknowledge issue' }).click()
+  await expect(page.getByRole('button', { name: 'Show acknowledged (1)' })).toBeVisible()
+  await page.reload()
+  await expect(
+    page.locator('.activity-problem:not(.acknowledged)').filter({ hasText: problemDescription }),
+  ).toHaveCount(0)
+  await page.getByRole('button', { name: 'Show acknowledged (1)' }).click()
+  const acknowledgedProblem = page
+    .locator('.activity-problem.acknowledged')
+    .filter({ hasText: problemDescription })
+  await expect(acknowledgedProblem).toBeVisible()
+  await acknowledgedProblem.getByRole('button', { name: 'Restore issue' }).click()
+  await expect(
+    page.locator('.activity-problem:not(.acknowledged)').filter({ hasText: problemDescription }),
+  ).toBeVisible()
   await page.getByRole('tab', { name: 'Activity' }).click()
   await openActivityFilters(page)
   await expect(page).toHaveURL(/view=activity/)

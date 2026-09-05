@@ -19,6 +19,9 @@ const emptySummary = vi.hoisted(() => ({
   publications_truncated: false,
   problems: [],
   problems_truncated: false,
+  acknowledged_problems: [],
+  acknowledged_problems_truncated: false,
+  attention_count: 0,
   access_health: {
     active_tokens: 0,
     expired_tokens: 0,

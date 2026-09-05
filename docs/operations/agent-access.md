@@ -70,7 +70,7 @@ Agents driving the workspace chat produce **proposals**, not direct writes: a su
 If a token is compromised:
 
 1. **Revoke immediately** in **Settings → Agents & access** (or via `DELETE /api/v1/agent-tokens/<token_id>`). Revocation takes effect instantly.
-2. **Review Activity insights** to find recent access, conflict, publication, and other failures. Attention means a problem occurred in the selected range; it is not a durable acknowledgement or resolution state.
+2. **Review Activity insights** to find recent access, conflict, publication, and other failures. Acknowledging an item removes it from Needs attention without deleting its immutable activity events. A later matching failure appears again automatically.
 3. **Open the Activity view** with the actor and token filters preserved in the URL. Expand an operation to inspect its immutable events, then follow the document or access-management link.
 4. **Restore damaged files** from revision history using `sangam restore` or the document history inspector.
 5. **Rotate related tokens** if shared secret material was potentially exposed.

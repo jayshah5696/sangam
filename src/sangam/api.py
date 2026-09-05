@@ -35,6 +35,7 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.schemas import (
+    ActivityProblemAcknowledgement,
     ActivitySummary,
     Actor,
     AgentToken,
@@ -662,6 +663,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             limit=limit,
             offset=offset,
         )
+
+    @app.post(
+        "/api/v1/activity/problems/{event_id}/acknowledgement",
+        response_model=ActivityProblemAcknowledgement,
+    )
+    def acknowledge_activity_problem(
+        event_id: str,
+        principal: Principal = admin_dependency,
+    ) -> ActivityProblemAcknowledgement:
+        return activity.acknowledge_problem(principal=principal, event_id=event_id)
+
+    @app.delete(
+        "/api/v1/activity/problems/{event_id}/acknowledgement",
+        status_code=204,
+    )
+    def restore_activity_problem(
+        event_id: str,
+        _principal: Principal = admin_dependency,
+    ) -> Response:
+        activity.restore_problem(event_id=event_id)
+        return Response(status_code=204)
 
     @app.get("/api/v1/activity/summary", response_model=ActivitySummary)
     def summarize_activity(

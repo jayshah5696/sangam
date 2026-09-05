@@ -1,19 +1,21 @@
-import type { UseQueryResult } from '@tanstack/react-query'
+import { useMutation, type UseQueryResult } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   AlertTriangle,
   ChartNoAxesCombined,
   BookOpen,
+  CircleCheck,
   FilePenLine,
   KeyRound,
   ListFilter,
   RadioTower,
   ShieldAlert,
+  Undo2,
   Users,
 } from 'lucide-react'
 import { useState } from 'react'
 import type { ActivitySearch } from '../../activitySearch'
-import type { ActivitySummary } from '../../api'
+import { api, type ActivitySummary } from '../../api'
 import { citationHref } from '../../citationNavigation'
 import { StateMessage } from '../ui/StateMessage'
 import { useOnlineStatus } from '../../useOnlineStatus'
@@ -31,6 +33,14 @@ export function ActivityInsights({
   const data = summary.data
   const online = useOnlineStatus()
   const [showAllProblems, setShowAllProblems] = useState(false)
+  const [showAcknowledged, setShowAcknowledged] = useState(false)
+  const acknowledgement = useMutation({
+    mutationFn: async ({ eventId, restore }: { eventId: string; restore: boolean }) => {
+      if (restore) await api.restoreActivityProblem(eventId)
+      else await api.acknowledgeActivityProblem(eventId)
+    },
+    onSuccess: () => summary.refetch(),
+  })
   return (
     <div id="activity-insights-panel" role="tabpanel" aria-label="Activity insights">
       <ActivityFilters search={search} onChange={onSearchChange} />
@@ -56,7 +66,7 @@ export function ActivityInsights({
         <>
           <section className="activity-metrics" aria-label={`Summary for ${rangeLabel(search.range)}`}>
             {[
-              ['Needs attention', data.counts.denied + data.counts.conflict + data.counts.failed],
+              ['Needs attention', data.attention_count],
               ['Changes', data.actors.reduce((total, actor) => total + actor.accepted_changes, 0)],
               ['Publications', data.publications.length],
               ['Active agents', data.counts.active_actors],
@@ -77,98 +87,24 @@ export function ActivityInsights({
               <h2 id="needs-attention-title">Needs attention</h2>
             </div>
             {data.problems.length === 0 ? (
-              <StateMessage compact kind="success" title="No problems in this range" />
+              <StateMessage compact kind="success" title="Nothing needs attention" />
             ) : (
-              data.problems.slice(0, showAllProblems ? undefined : 3).map((problem) => (
-                <article
-                  key={`${problem.category}:${problem.actor_id}:${problem.action}:${problem.resource_id ?? problem.path}`}
-                  className={`activity-problem ${problem.category}`}
-                >
-                  <AlertTriangle size="var(--icon-control)" />
-                  <div>
-                    <strong>
-                      {problem.category === 'access'
-                        ? 'Access denied'
-                        : problem.category === 'conflict'
-                          ? 'Revision conflict'
-                          : problem.category === 'publication'
-                            ? 'Publication failed'
-                            : 'Operation failed'}
-                    </strong>
-                    <p>
-                      {problem.actor_display_name} attempted {problem.action} on{' '}
-                      {problem.path ? `/${problem.path}` : problem.resource_type}.{' '}
-                      {problem.count > 1 ? `${problem.count} occurrences.` : ''}
-                    </p>
-                    <small>
-                      {[problem.token_label, problem.capability, problem.error_code]
-                        .filter(Boolean)
-                        .join(' · ')}{' '}
-                      · {new Date(problem.latest_at).toLocaleString()}
-                    </small>
-                  </div>
-                  <div className="activity-problem-actions">
-                    {problem.resource_type === 'document' &&
-                      problem.resource_id &&
-                      (problem.expected_revision_id ? (
-                        <a
-                          className="secondary-action"
-                          href={citationHref({
-                            documentId: problem.resource_id,
-                            revisionId: problem.expected_revision_id,
-                          })}
-                        >
-                          Review expected revision
-                        </a>
-                      ) : (
-                        <Link
-                          className="secondary-action"
-                          to="/documents/$documentId"
-                          params={{ documentId: problem.resource_id }}
-                        >
-                          Open document
-                        </Link>
-                      ))}
-                    {problem.resource_type === 'publication' && (
-                      <Link className="secondary-action" to="/publications">
-                        Open publications
-                      </Link>
-                    )}
-                    {problem.token_id && (
-                      <Link
-                        className="icon-button"
-                        aria-label="Manage access"
-                        title="Manage access"
-                        to="/settings"
-                        search={{ category: 'agents', destination: problem.token_id }}
-                      >
-                        <KeyRound size="var(--icon-control)" />
-                      </Link>
-                    )}
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label="View events"
-                      title="View events"
-                      onClick={() =>
-                        onSearchChange({
-                          view: 'activity',
-                          actor_id: problem.actor_id,
-                          token_id: problem.token_id ?? undefined,
-                          action: problem.action,
-                          resource_type: problem.resource_type,
-                          resource_id: problem.resource_id ?? undefined,
-                          path: problem.path ?? undefined,
-                          error_code: problem.error_code ?? undefined,
-                          attention: true,
-                        })
-                      }
-                    >
-                      <ListFilter size="var(--icon-control)" />
-                    </button>
-                  </div>
-                </article>
-              ))
+              data.problems
+                .slice(0, showAllProblems ? undefined : 3)
+                .map((problem) => (
+                  <ActivityProblem
+                    key={problem.latest_event_id}
+                    problem={problem}
+                    pending={
+                      acknowledgement.isPending &&
+                      acknowledgement.variables.eventId === problem.latest_event_id
+                    }
+                    onAcknowledge={() =>
+                      acknowledgement.mutate({ eventId: problem.latest_event_id, restore: false })
+                    }
+                    onSearchChange={onSearchChange}
+                  />
+                ))
             )}
             {data.problems.length > 3 && (
               <button
@@ -178,8 +114,41 @@ export function ActivityInsights({
               >
                 {showAllProblems
                   ? 'Show fewer'
-                  : `Show ${data.problems.length - 3} more${data.problems_truncated ? '+' : ''}`}
+                  : `Show ${data.attention_count - 3} more${data.problems_truncated ? '+' : ''}`}
               </button>
+            )}
+            {acknowledgement.isError && (
+              <StateMessage compact kind="error" title="Acknowledgement could not be saved" />
+            )}
+            {data.acknowledged_problems.length > 0 && (
+              <button
+                type="button"
+                className="activity-show-acknowledged"
+                aria-expanded={showAcknowledged}
+                onClick={() => setShowAcknowledged((current) => !current)}
+              >
+                {showAcknowledged ? 'Hide' : 'Show'} acknowledged ({data.acknowledged_problems.length}
+                {data.acknowledged_problems_truncated ? '+' : ''})
+              </button>
+            )}
+            {showAcknowledged && (
+              <div className="activity-acknowledged-list" aria-label="Acknowledged issues">
+                {data.acknowledged_problems.map((problem) => (
+                  <ActivityProblem
+                    key={problem.latest_event_id}
+                    problem={problem}
+                    acknowledged
+                    pending={
+                      acknowledgement.isPending &&
+                      acknowledgement.variables.eventId === problem.latest_event_id
+                    }
+                    onAcknowledge={() =>
+                      acknowledgement.mutate({ eventId: problem.latest_event_id, restore: true })
+                    }
+                    onSearchChange={onSearchChange}
+                  />
+                ))}
+              </div>
             )}
           </section>
 
@@ -297,6 +266,120 @@ export function ActivityInsights({
         </>
       )}
     </div>
+  )
+}
+
+function ActivityProblem({
+  problem,
+  acknowledged = false,
+  pending,
+  onAcknowledge,
+  onSearchChange,
+}: {
+  problem: ActivitySummary['problems'][number]
+  acknowledged?: boolean
+  pending: boolean
+  onAcknowledge: () => void
+  onSearchChange: (patch: Partial<ActivitySearch>) => void
+}) {
+  const title =
+    problem.category === 'access'
+      ? 'Access denied'
+      : problem.category === 'conflict'
+        ? 'Revision conflict'
+        : problem.category === 'publication'
+          ? 'Publication failed'
+          : 'Operation failed'
+  const StatusIcon = acknowledged ? CircleCheck : AlertTriangle
+  return (
+    <article className={`activity-problem ${problem.category}${acknowledged ? ' acknowledged' : ''}`}>
+      <StatusIcon size="var(--icon-control)" />
+      <div>
+        <strong>{title}</strong>
+        <p>
+          {problem.actor_display_name} attempted {problem.action} on{' '}
+          {problem.path ? `/${problem.path}` : problem.resource_type}.{' '}
+          {problem.count > 1 ? `${problem.count} occurrences.` : ''}
+        </p>
+        <small>
+          {[problem.token_label, problem.capability, problem.error_code].filter(Boolean).join(' · ')} ·{' '}
+          {new Date(problem.latest_at).toLocaleString()}
+          {acknowledged && problem.acknowledged_at
+            ? ` · Acknowledged ${new Date(problem.acknowledged_at).toLocaleString()}`
+            : ''}
+        </small>
+      </div>
+      <div className="activity-problem-actions">
+        {problem.resource_type === 'document' &&
+          problem.resource_id &&
+          (problem.expected_revision_id ? (
+            <a
+              className="secondary-action"
+              href={citationHref({
+                documentId: problem.resource_id,
+                revisionId: problem.expected_revision_id,
+              })}
+            >
+              Review expected revision
+            </a>
+          ) : (
+            <Link
+              className="secondary-action"
+              to="/documents/$documentId"
+              params={{ documentId: problem.resource_id }}
+            >
+              Open document
+            </Link>
+          ))}
+        {problem.resource_type === 'publication' && (
+          <Link className="secondary-action" to="/publications">
+            Open publications
+          </Link>
+        )}
+        {problem.token_id && (
+          <Link
+            className="icon-button"
+            aria-label="Manage access"
+            title="Manage access"
+            to="/settings"
+            search={{ category: 'agents', destination: problem.token_id }}
+          >
+            <KeyRound size="var(--icon-control)" />
+          </Link>
+        )}
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="View events"
+          title="View events"
+          onClick={() =>
+            onSearchChange({
+              view: 'activity',
+              actor_id: problem.actor_id,
+              token_id: problem.token_id ?? undefined,
+              action: problem.action,
+              resource_type: problem.resource_type,
+              resource_id: problem.resource_id ?? undefined,
+              path: problem.path ?? undefined,
+              error_code: problem.error_code ?? undefined,
+              attention: true,
+            })
+          }
+        >
+          <ListFilter size="var(--icon-control)" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={acknowledged ? 'Restore issue' : 'Acknowledge issue'}
+          title={acknowledged ? 'Restore to needs attention' : 'Acknowledge issue'}
+          disabled={pending}
+          onClick={onAcknowledge}
+        >
+          {acknowledged ? <Undo2 size="var(--icon-control)" /> : <CircleCheck size="var(--icon-control)" />}
+        </button>
+      </div>
+    </article>
   )
 }
 

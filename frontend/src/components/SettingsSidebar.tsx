@@ -307,7 +307,7 @@ export function SettingsSidebar({
                 {id === 'agents' && (accessHealth.data?.access_health.attention_count ?? 0) > 0 && (
                   <span
                     className="settings-attention-badge"
-                    aria-label={`${label}, ${accessHealth.data?.access_health.attention_count} issues need attention`}
+                    aria-label={`${label}, ${accessHealth.data?.access_health.attention_count} ${accessHealth.data?.access_health.attention_count === 1 ? 'issue needs' : 'issues need'} attention`}
                   >
                     {accessHealth.data?.access_health.attention_count}
                   </span>

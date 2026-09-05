@@ -394,6 +394,15 @@ const activityProblemSummarySchema = z.object({
   count: z.number().int().positive(),
   first_at: z.string(),
   latest_at: z.string(),
+  latest_event_id: z.string(),
+  acknowledged_at: z.string().nullable(),
+  acknowledged_by: z.string().nullable(),
+})
+
+const activityProblemAcknowledgementSchema = z.object({
+  event_id: z.string(),
+  acknowledged_at: z.string(),
+  acknowledged_by: z.string(),
 })
 
 export const agentAccessHealthSchema = z.object({
@@ -418,6 +427,9 @@ export const activitySummarySchema = z.object({
   publications_truncated: z.boolean(),
   problems: z.array(activityProblemSummarySchema),
   problems_truncated: z.boolean(),
+  acknowledged_problems: z.array(activityProblemSummarySchema),
+  acknowledged_problems_truncated: z.boolean(),
+  attention_count: z.number().int().nonnegative(),
   access_health: agentAccessHealthSchema,
 })
 
@@ -1023,6 +1035,18 @@ export const api = {
   async activitySummary(filters: ActivityFilters = {}): Promise<ActivitySummary> {
     const params = activityParams(filters)
     return activitySummarySchema.parse(await request(`/activity/summary?${params.toString()}`))
+  },
+  async acknowledgeActivityProblem(eventId: string) {
+    return activityProblemAcknowledgementSchema.parse(
+      await request(`/activity/problems/${encodeURIComponent(eventId)}/acknowledgement`, {
+        method: 'POST',
+      }),
+    )
+  },
+  async restoreActivityProblem(eventId: string): Promise<void> {
+    await request(`/activity/problems/${encodeURIComponent(eventId)}/acknowledgement`, {
+      method: 'DELETE',
+    })
   },
   async listDocuments(): Promise<DocumentSummary[]> {
     return collectPages(async (offset, limit) =>

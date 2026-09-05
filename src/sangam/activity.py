@@ -5,12 +5,13 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from sangam.db import Database, utc_now
-from sangam.errors import ValidationError
+from sangam.errors import NotFoundError, ValidationError
 from sangam.schemas import (
     ActivityActorSummary,
     ActivityBucket,
     ActivityDocumentSummary,
     ActivityOutcomeCounts,
+    ActivityProblemAcknowledgement,
     ActivityProblemSummary,
     ActivityPublicationSummary,
     ActivitySummary,
@@ -78,6 +79,41 @@ class ActivityService:
                     json.dumps(safe_details, sort_keys=True),
                     utc_now(),
                 ),
+            )
+
+    def acknowledge_problem(
+        self, *, principal: Principal, event_id: str
+    ) -> ActivityProblemAcknowledgement:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            event = connection.execute(
+                "SELECT outcome FROM operation_events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+            if event is None:
+                raise NotFoundError(f"Activity event not found: {event_id}")
+            if event["outcome"] not in {"denied", "conflict", "failed"}:
+                raise ValidationError("Only events that need attention can be acknowledged")
+            connection.execute(
+                """
+                INSERT INTO activity_problem_acknowledgements(
+                    event_id, acknowledged_at, acknowledged_by
+                ) VALUES (?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                    acknowledged_at = excluded.acknowledged_at,
+                    acknowledged_by = excluded.acknowledged_by
+                """,
+                (event_id, now, principal.actor_id),
+            )
+        return ActivityProblemAcknowledgement(
+            event_id=event_id,
+            acknowledged_at=now,
+            acknowledged_by=principal.actor_id,
+        )
+
+    def restore_problem(self, *, event_id: str) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                "DELETE FROM activity_problem_acknowledgements WHERE event_id = ?", (event_id,)
             )
 
     def list_events(
@@ -280,28 +316,48 @@ class ActivityService:
             ).fetchall()
             problem_rows = connection.execute(
                 f"""
-                SELECT CASE
-                    WHEN e.outcome = 'denied' THEN 'access'
-                    WHEN e.outcome = 'conflict' THEN 'conflict'
-                    WHEN e.outcome = 'failed' AND e.resource_type = 'publication' THEN 'publication'
-                    ELSE 'failure' END AS category,
-                    e.actor_id, a.display_name AS actor_display_name, e.token_id,
-                    t.label AS token_label, e.action, e.resource_type, e.resource_id,
-                    e.path, e.error_code,
-                    MAX(json_extract(e.detail_json, '$.capability')) AS capability,
-                    MAX(json_extract(
-                        e.detail_json, '$.current_revision_id'
-                    )) AS current_revision_id,
-                    MAX(json_extract(
-                        e.detail_json, '$.expected_revision_id'
-                    )) AS expected_revision_id,
-                    COUNT(*) AS count, MIN(e.created_at) AS first_at, MAX(e.created_at) AS latest_at
-                FROM operation_events e JOIN actors a ON a.actor_id = e.actor_id
-                LEFT JOIN actor_tokens t ON t.token_id = e.token_id
-                {where}{" AND" if where else "WHERE"} e.outcome IN ('denied', 'conflict', 'failed')
-                GROUP BY category, e.actor_id, a.display_name, e.token_id, t.label, e.action,
-                    e.resource_type, e.resource_id, e.path, e.error_code
-                ORDER BY latest_at DESC LIMIT ?
+                WITH problem_groups AS (
+                    SELECT CASE
+                        WHEN e.outcome = 'denied' THEN 'access'
+                        WHEN e.outcome = 'conflict' THEN 'conflict'
+                        WHEN e.outcome = 'failed' AND e.resource_type = 'publication'
+                            THEN 'publication'
+                        ELSE 'failure' END AS category,
+                        e.actor_id, a.display_name AS actor_display_name, e.token_id,
+                        t.label AS token_label, e.action, e.resource_type, e.resource_id,
+                        e.path, e.error_code,
+                        MAX(json_extract(e.detail_json, '$.capability')) AS capability,
+                        MAX(json_extract(
+                            e.detail_json, '$.current_revision_id'
+                        )) AS current_revision_id,
+                        MAX(json_extract(
+                            e.detail_json, '$.expected_revision_id'
+                        )) AS expected_revision_id,
+                        COUNT(*) AS count, MIN(e.created_at) AS first_at,
+                        MAX(e.created_at) AS latest_at, e.event_id AS latest_event_id
+                    FROM operation_events e JOIN actors a ON a.actor_id = e.actor_id
+                    LEFT JOIN actor_tokens t ON t.token_id = e.token_id
+                    {where}{" AND" if where else "WHERE"}
+                        e.outcome IN ('denied', 'conflict', 'failed')
+                    GROUP BY category, e.actor_id, a.display_name, e.token_id, t.label,
+                        e.action, e.resource_type, e.resource_id, e.path, e.error_code
+                ), enriched AS (
+                    SELECT problem_groups.*, acknowledgement.acknowledged_at,
+                        acknowledgement.acknowledged_by,
+                        acknowledgement.event_id IS NOT NULL AS acknowledged
+                    FROM problem_groups
+                    LEFT JOIN activity_problem_acknowledgements acknowledgement
+                        ON acknowledgement.event_id = problem_groups.latest_event_id
+                ), ranked AS (
+                    SELECT enriched.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY acknowledged ORDER BY latest_at DESC
+                        ) AS state_rank,
+                        COUNT(*) OVER (PARTITION BY acknowledged) AS state_count
+                    FROM enriched
+                )
+                SELECT * FROM ranked WHERE state_rank <= ?
+                ORDER BY acknowledged, latest_at DESC
                 """,
                 [*parameters, list_limit + 1],
             ).fetchall()
@@ -329,6 +385,23 @@ class ActivityService:
                 """,
                 ((now - timedelta(days=RECENT_DENIED_DAYS)).isoformat().replace("+00:00", "Z"),),
             ).fetchone()
+            unacknowledged_denied_row = connection.execute(
+                """
+                WITH denied_groups AS (
+                    SELECT e.event_id AS latest_event_id, MAX(e.created_at) AS latest_at
+                    FROM operation_events e
+                    WHERE e.outcome = 'denied' AND e.created_at >= ?
+                    GROUP BY e.actor_id, e.token_id, e.action, e.resource_type,
+                        e.resource_id, e.path, e.error_code
+                )
+                SELECT COUNT(*) AS count
+                FROM denied_groups
+                LEFT JOIN activity_problem_acknowledgements acknowledgement
+                    ON acknowledgement.event_id = denied_groups.latest_event_id
+                WHERE acknowledgement.event_id IS NULL
+                """,
+                ((now - timedelta(days=RECENT_DENIED_DAYS)).isoformat().replace("+00:00", "Z"),),
+            ).fetchone()
             latest_row = connection.execute(
                 """
                 SELECT MAX(created_at) AS latest
@@ -345,7 +418,14 @@ class ActivityService:
             expiring_soon_tokens=health_row["expiring_soon_tokens"] or 0,
             recent_denied=denied_row["count"],
             latest_activity_at=latest_row["latest"],
-            attention_count=(health_row["expiring_soon_tokens"] or 0) + denied_row["count"],
+            attention_count=(health_row["expiring_soon_tokens"] or 0)
+            + unacknowledged_denied_row["count"],
+        )
+        visible_problem_rows = [row for row in problem_rows if not row["acknowledged"]]
+        acknowledged_problem_rows = [row for row in problem_rows if row["acknowledged"]]
+        attention_count = visible_problem_rows[0]["state_count"] if visible_problem_rows else 0
+        acknowledged_count = (
+            acknowledged_problem_rows[0]["state_count"] if acknowledged_problem_rows else 0
         )
         return ActivitySummary(
             counts=ActivityOutcomeCounts(**dict(counts_row)),
@@ -373,9 +453,15 @@ class ActivityService:
             publications_truncated=len(publication_rows) > list_limit,
             problems=[
                 ActivityProblemSummary.model_validate(dict(row))
-                for row in problem_rows[:list_limit]
+                for row in visible_problem_rows[:list_limit]
             ],
-            problems_truncated=len(problem_rows) > list_limit,
+            problems_truncated=attention_count > list_limit,
+            acknowledged_problems=[
+                ActivityProblemSummary.model_validate(dict(row))
+                for row in acknowledged_problem_rows[:list_limit]
+            ],
+            acknowledged_problems_truncated=acknowledged_count > list_limit,
+            attention_count=attention_count,
             access_health=health,
         )
 
