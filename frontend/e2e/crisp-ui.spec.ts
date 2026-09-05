@@ -571,7 +571,7 @@ test('settings exposes operational destinations and the compact footer keeps onl
   await expect(page.locator('.workspace-freshness')).toHaveCount(0)
 
   await page.goto('/settings?category=agents')
-  await expect(page.getByRole('link', { name: 'Review activity' })).toHaveAttribute('href', '/activity')
+  await expect(page.getByRole('link', { name: 'Open activity' })).toHaveAttribute('href', /\/activity/)
 
   await page.getByRole('button', { name: /Operations/ }).click()
   await page.reload()

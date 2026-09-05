@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { AlertTriangle, Bot, KeyRound, Pencil, RefreshCw, ShieldOff, X } from 'lucide-react'
+import { Activity, AlertTriangle, Bot, KeyRound, Pencil, RefreshCw, ShieldOff, X } from 'lucide-react'
 import { api, type AgentToken, type IssuedAgentToken, type TokenScope } from '../api'
 import { OneTimeSecret } from './OneTimeSecret'
+import { StateMessage } from './ui/StateMessage'
 
 type Capability = TokenScope['capability']
 
@@ -93,6 +94,7 @@ export const tokenPresets: PresetMap = {
 }
 
 export const defaultTokenLifetimeHours = 24
+export const expiryWarningDays = 7
 
 export function agentSetupInstructions(origin = window.location.origin): string {
   return [
@@ -118,6 +120,19 @@ export function defaultExpirationValue(now = new Date()): string {
   const expiresAt = new Date(now.getTime() + defaultTokenLifetimeHours * 60 * 60 * 1000)
   const localTime = new Date(expiresAt.getTime() - expiresAt.getTimezoneOffset() * 60 * 1000)
   return localTime.toISOString().slice(0, 16)
+}
+
+export function tokenStatus(
+  token: AgentToken,
+  now = new Date(),
+): 'active' | 'expiring' | 'expired' | 'revoked' | 'rotated' {
+  if (token.rotated_from_token_id) return 'rotated'
+  if (token.revoked_at) return 'revoked'
+  if (!token.expires_at) return 'active'
+  const expiresAt = new Date(token.expires_at)
+  if (expiresAt <= now) return 'expired'
+  if (expiresAt.getTime() <= now.getTime() + expiryWarningDays * 24 * 60 * 60 * 1000) return 'expiring'
+  return 'active'
 }
 
 export function buildTokenScopes(selected: Set<Capability>, prefixes: ScopePrefixes): TokenScope[] {
@@ -177,6 +192,11 @@ function prefixesFromScopes(scopes: TokenScope[]): ScopePrefixes {
 export function AgentAccessSettings() {
   const queryClient = useQueryClient()
   const tokens = useQuery({ queryKey: ['agent-tokens'], queryFn: api.listAgentTokens })
+  const health = useQuery({
+    queryKey: ['activity-summary', 'access-health'],
+    queryFn: () =>
+      api.activitySummary({ since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }),
+  })
   const [actorId, setActorId] = useState('agent:researcher')
   const [displayName, setDisplayName] = useState('Researcher')
   const [label, setLabel] = useState('Research workspace')
@@ -249,6 +269,7 @@ export function AgentAccessSettings() {
       setValidationAttempted(false)
       setIssued(token)
       await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
+      await queryClient.invalidateQueries({ queryKey: ['activity-summary'] })
     },
   })
 
@@ -258,6 +279,7 @@ export function AgentAccessSettings() {
       setRotating(null)
       setIssued(token)
       await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
+      await queryClient.invalidateQueries({ queryKey: ['activity-summary'] })
     },
   })
 
@@ -275,6 +297,7 @@ export function AgentAccessSettings() {
     onSuccess: async () => {
       setEditing(null)
       await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
+      await queryClient.invalidateQueries({ queryKey: ['activity-summary'] })
     },
   })
 
@@ -282,6 +305,7 @@ export function AgentAccessSettings() {
     mutationFn: (tokenId: string) => api.revokeAgentToken(tokenId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
+      await queryClient.invalidateQueries({ queryKey: ['activity-summary'] })
     },
   })
 
@@ -290,8 +314,8 @@ export function AgentAccessSettings() {
       <header>
         <Bot size="var(--icon-section)" />
         <div>
-          <h2>Agents & tokens</h2>
-          <p>Issue revocable credentials with explicit capabilities and workspace boundaries.</p>
+          <h2>Access credentials</h2>
+          <p>Issue revocable credentials with explicit permissions and workspace boundaries.</p>
         </div>
         <span className="scope-badge workspace">Shared workspace</span>
       </header>
@@ -345,6 +369,55 @@ export function AgentAccessSettings() {
             onSave={(input) => update.mutate({ tokenId: editing.token_id, ...input })}
           />
         )}
+        <section className="agent-access-health" aria-labelledby="access-health-title">
+          <div className="settings-subtitle">
+            <div>
+              <ShieldOff size="var(--icon-control)" />
+              <h3 id="access-health-title">Access health</h3>
+            </div>
+            {health.data && health.data.access_health.attention_count > 0 && (
+              <Link
+                className="secondary-action"
+                to="/activity"
+                search={{ view: 'insights', range: '7d', attention: true }}
+              >
+                Review issues
+              </Link>
+            )}
+          </div>
+          {health.isLoading && <StateMessage compact kind="loading" title="Loading access health" />}
+          {health.isError && (
+            <StateMessage
+              compact
+              kind="error"
+              title="Access health unavailable"
+              description="Token management is still available."
+              action={<button onClick={() => void health.refetch()}>Retry</button>}
+            />
+          )}
+          {health.data && (
+            <div className="agent-health-metrics">
+              <span>
+                <strong>{health.data.access_health.active_tokens}</strong> active
+              </span>
+              <span>
+                <strong>{health.data.access_health.expiring_soon_tokens}</strong> expiring within{' '}
+                {expiryWarningDays} days
+              </span>
+              <span>
+                <strong>{health.data.access_health.expired_tokens}</strong> expired
+              </span>
+              <span>
+                <strong>{health.data.access_health.recent_denied}</strong> denied today
+              </span>
+              <span>
+                {health.data.access_health.latest_activity_at
+                  ? `Last activity ${new Date(health.data.access_health.latest_activity_at).toLocaleString()}`
+                  : 'No agent activity yet'}
+              </span>
+            </div>
+          )}
+        </section>
         <form
           className="agent-token-form"
           onSubmit={(event) => {
@@ -545,9 +618,8 @@ export function AgentAccessSettings() {
           <div className="settings-subtitle">
             <div>
               <KeyRound size="var(--icon-control)" />
-              <strong>Issued tokens</strong>
+              <strong>Issued agents</strong>
             </div>
-            <Link to="/activity">Review agent activity</Link>
           </div>
           {(() => {
             const activeTokens = tokens.data?.filter((token) => !token.revoked_at) ?? []
@@ -558,7 +630,7 @@ export function AgentAccessSettings() {
                 {activeTokens.map((token) => {
                   const isExpired = token.expires_at ? new Date(token.expires_at) <= new Date() : false
                   return (
-                    <article key={token.token_id} className="token-row">
+                    <article id={token.token_id} key={token.token_id} className="token-row" tabIndex={-1}>
                       <div>
                         <strong>{token.actor_display_name}</strong>
                         <small>
@@ -581,8 +653,25 @@ export function AgentAccessSettings() {
                             {isExpired ? 'Expired' : 'Expires'} {new Date(token.expires_at).toLocaleString()}
                           </small>
                         )}
+                        <small>
+                          {token.recent_denied_count}{' '}
+                          {token.recent_denied_count === 1 ? 'denied request' : 'denied requests'} today
+                        </small>
+                        <span className={`token-status ${tokenStatus(token)}`}>{tokenStatus(token)}</span>
                       </div>
                       <div className="token-actions">
+                        <Link
+                          className="secondary-action"
+                          to="/activity"
+                          search={{
+                            view: 'activity',
+                            range: '30d',
+                            actor_id: token.actor_id,
+                            token_id: token.token_id,
+                          }}
+                        >
+                          View activity
+                        </Link>
                         {isExpired ? (
                           <button
                             type="button"
@@ -643,7 +732,12 @@ export function AgentAccessSettings() {
                     {showRevoked && (
                       <div className="agent-token-history-list">
                         {revokedTokens.map((token) => (
-                          <article key={token.token_id} className="token-row revoked">
+                          <article
+                            id={token.token_id}
+                            key={token.token_id}
+                            className="token-row revoked"
+                            tabIndex={-1}
+                          >
                             <div>
                               <strong>{token.actor_display_name}</strong>
                               <small>
@@ -664,6 +758,22 @@ export function AgentAccessSettings() {
               </>
             )
           })()}
+        </div>
+        <div className="maintenance-row" id="agent-activity" tabIndex={-1}>
+          <div>
+            <Activity size="var(--icon-control)" />
+            <span>
+              <strong>Agent activity</strong>
+              <small>
+                {health.data
+                  ? `${health.data.access_health.attention_count} need attention · ${health.data.counts.accepted} accepted events in the last 7 days`
+                  : 'Review operations and outcomes'}
+              </small>
+            </span>
+          </div>
+          <Link className="secondary-action" to="/activity" search={{ view: 'insights', range: '7d' }}>
+            Open activity
+          </Link>
         </div>
       </div>
     </section>

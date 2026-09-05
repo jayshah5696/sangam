@@ -222,6 +222,18 @@ Agent activity under Agents & access; Reconciliation, Backups, and configured
 Karakeep imports under Operations. Their direct URLs remain valid and the
 command palette keeps them discoverable.
 
+Agents & access begins with a compact server-backed health summary. The Settings
+category shows an attention count only for current access conditions; healthy
+workspaces do not carry a permanent success badge. One searchable Activity
+destination links to the separate `/activity` investigation surface.
+
+Activity has URL-persisted Insights and Activity views. Insights puts recent
+problems before server-computed totals and keeps changed, read, and problem
+document measures separate. Activity groups immutable events only by
+`operation_id`, calls the group an operation, and retains explicit pagination.
+Narrow layouts disclose filters, and touch layouts keep controls at least 44px
+tall without creating page-level horizontal scrolling.
+
 ## Freshness and recovery
 
 React Query owns server freshness. Queries become stale after 15 seconds and

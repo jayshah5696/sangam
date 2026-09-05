@@ -35,6 +35,8 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.schemas import (
+    ActivityProblemAcknowledgement,
+    ActivitySummary,
     Actor,
     AgentToken,
     ApplyOrganizationPlan,
@@ -630,6 +632,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             default="agent", pattern="^(human|agent|integration|client|system)$"
         ),
         outcome: str | None = Query(default=None, pattern="^(accepted|denied|conflict|failed)$"),
+        token_id: str | None = Query(default=None, max_length=120),
+        action: str | None = Query(default=None, max_length=80),
+        resource_type: str | None = Query(default=None, max_length=80),
+        resource_id: str | None = Query(default=None, max_length=160),
+        path: str | None = Query(default=None, max_length=500),
+        error_code: str | None = Query(default=None, max_length=120),
+        operation_id: str | None = Query(default=None, max_length=160),
+        attention: bool = Query(default=False),
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
         limit: int = Query(default=100, ge=1, le=200),
@@ -640,10 +650,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             actor_id=actor_id,
             actor_kind=actor_kind,
             outcome=outcome,
+            token_id=token_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            operation_id=operation_id,
+            attention=attention,
             since=since,
             until=until,
             limit=limit,
             offset=offset,
+        )
+
+    @app.post(
+        "/api/v1/activity/problems/{event_id}/acknowledgement",
+        response_model=ActivityProblemAcknowledgement,
+    )
+    def acknowledge_activity_problem(
+        event_id: str,
+        principal: Principal = admin_dependency,
+    ) -> ActivityProblemAcknowledgement:
+        return activity.acknowledge_problem(principal=principal, event_id=event_id)
+
+    @app.delete(
+        "/api/v1/activity/problems/{event_id}/acknowledgement",
+        status_code=204,
+    )
+    def restore_activity_problem(
+        event_id: str,
+        _principal: Principal = admin_dependency,
+    ) -> Response:
+        activity.restore_problem(event_id=event_id)
+        return Response(status_code=204)
+
+    @app.get("/api/v1/activity/summary", response_model=ActivitySummary)
+    def summarize_activity(
+        actor_id: str | None = Query(default=None, max_length=120),
+        actor_kind: str | None = Query(
+            default="agent", pattern="^(human|agent|integration|client|system)$"
+        ),
+        outcome: str | None = Query(default=None, pattern="^(accepted|denied|conflict|failed)$"),
+        token_id: str | None = Query(default=None, max_length=120),
+        action: str | None = Query(default=None, max_length=80),
+        resource_type: str | None = Query(default=None, max_length=80),
+        resource_id: str | None = Query(default=None, max_length=160),
+        path: str | None = Query(default=None, max_length=500),
+        error_code: str | None = Query(default=None, max_length=120),
+        operation_id: str | None = Query(default=None, max_length=160),
+        attention: bool = Query(default=False),
+        since: str | None = Query(default=None, max_length=40),
+        until: str | None = Query(default=None, max_length=40),
+        _principal: Principal = admin_dependency,
+    ) -> ActivitySummary:
+        return activity.summarize(
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+            outcome=outcome,
+            token_id=token_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            operation_id=operation_id,
+            attention=attention,
+            since=since,
+            until=until,
         )
 
     @app.get("/api/v1/documents", response_model=list[DocumentSummary])

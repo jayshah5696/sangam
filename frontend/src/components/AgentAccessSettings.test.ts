@@ -78,6 +78,7 @@ describe('agent access contracts', () => {
       revoked_at: null,
       last_used_at: null,
       rotated_from_token_id: null,
+      recent_denied_count: 0,
     }
     expect(agentTokenSchema.parse(record)).toEqual(record)
     expect(issuedAgentTokenSchema.parse({ ...record, token: 'sgm_agt_123.secret' }).token).toBe(
