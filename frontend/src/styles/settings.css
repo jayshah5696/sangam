@@ -182,6 +182,40 @@
 .agent-token-edit-dialog > header p { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--text-meta); }
 .agent-token-edit-dialog .agent-token-form { border: 0; border-radius: 0; }
 .agent-token-edit-actions { grid-column: 1 / -1; display: flex; gap: var(--space-2); }
+.token-warning-callout, .token-info-callout { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-control); }
+.token-warning-callout { border: 1px solid var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--surface)); color: var(--text); }
+.token-warning-callout > svg { flex: none; color: var(--warning); margin-top: 2px; }
+.token-info-callout { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--text); }
+.token-info-callout > svg { flex: none; color: var(--accent); margin-top: 2px; }
+.token-warning-callout > div, .token-info-callout > div { display: grid; gap: var(--space-1); }
+.token-warning-callout strong, .token-info-callout strong { font-size: var(--text-control); }
+.token-warning-callout p, .token-info-callout p { margin: 0; font-size: var(--text-meta); line-height: 1.45; }
+.token-rotate-help { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
+.agent-token-rotate-dialog { width: min(34rem, calc(100vw - var(--space-5) * 2)); max-height: calc(100dvh - var(--space-5) * 2); margin: auto; padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: var(--shadow-panel-inset), var(--shadow-panel); }
+.agent-token-rotate-dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px); }
+.agent-token-rotate-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); border-bottom: 1px solid var(--line); }
+.agent-token-rotate-dialog > header h3 { margin: 0; font-size: var(--text-title); }
+.agent-token-rotate-dialog > header p { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--text-meta); }
+.agent-token-rotate-body { display: grid; gap: var(--space-3); padding: var(--space-4); }
+.agent-token-rotate-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+.token-renew-button { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.token-renew-button:hover { background: color-mix(in srgb, var(--accent) 25%, var(--surface)); }
+.agent-token-history { margin-top: var(--space-2); }
+.agent-token-history-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); background: transparent; border: 1px dashed var(--line); border-radius: var(--radius-control); color: var(--muted); font-size: var(--text-meta); cursor: pointer; }
+.agent-token-history-toggle:hover { color: var(--text); border-color: var(--accent); }
+.agent-token-history-list { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.token-history-badge { padding: 2px 6px; border-radius: var(--radius-pill); background: var(--surface-soft); color: var(--muted); font-size: var(--text-meta); }
+.token-revoked-text { color: var(--muted); }
+.agent-token-expiration-field { grid-column: 1 / -1; display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
+.agent-token-expiration-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--muted); font-size: var(--text-label); }
+.agent-token-expiration-presets { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.preset-pill { padding: var(--space-1) var(--space-2); height: auto; min-height: 28px; font-size: var(--text-meta); font-weight: 500; border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
+.preset-pill:hover { border-color: var(--accent); }
+.preset-pill.active { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.token-expired-tag { padding: 1px 6px; border-radius: var(--radius-pill); background: var(--danger-soft); color: var(--danger); font-size: var(--text-meta); font-weight: 600; }
+.token-expired-help { color: var(--muted); font-size: var(--text-meta); line-height: 1.4; }
+.token-expired-text { color: var(--danger); font-weight: 600; }
+.agent-token-custom-date { display: grid; gap: var(--space-1); color: var(--muted); font-size: var(--text-label); margin-top: var(--space-1); }
 .agent-token-form fieldset { grid-column: 1 / -1; margin: 0; padding: 9px; border: 1px solid var(--line); border-radius: var(--radius-control); }
 .agent-token-form legend { padding: 0 5px; color: var(--muted); font-size: var(--text-label); }
 .agent-token-presets > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }

@@ -73,6 +73,7 @@ describe('AgentAccessSettings', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     const dialog = document.querySelector<HTMLDialogElement>('[aria-label="Edit Research workspace"]')
     expect(dialog).not.toBeNull()
+    expect(screen.getByText('Edit token details')).not.toBeNull()
     fireEvent.change(dialog!.querySelector<HTMLInputElement>('input[required]')!, {
       target: { value: 'Incident reviewer' },
     })
@@ -111,5 +112,125 @@ describe('AgentAccessSettings', () => {
 
     fireEvent.click(confirmation)
     expect(issue.disabled).toBe(false)
+  })
+
+  it('extends and reactivates an expired token with quick duration presets', async () => {
+    const expiredToken = {
+      token_id: 'agt_expired',
+      actor_id: 'agent:researcher',
+      actor_display_name: 'Researcher',
+      label: 'Research runner',
+      scopes: [{ capability: 'read' as const, path_prefix: 'agents' }],
+      version: 2,
+      created_at: '2026-08-01T12:00:00Z',
+      expires_at: '2026-08-08T12:00:00Z',
+      revoked_at: null,
+      last_used_at: '2026-08-07T12:00:00Z',
+      rotated_from_token_id: null,
+    }
+    vi.mocked(api.listAgentTokens).mockResolvedValue([expiredToken])
+    vi.mocked(api.updateAgentToken).mockResolvedValue({
+      ...expiredToken,
+      version: 3,
+      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+    })
+    renderSettings()
+
+    const renewBtn = await screen.findByRole('button', { name: /Renew token/ })
+    expect(renewBtn).not.toBeNull()
+    fireEvent.click(renewBtn)
+
+    const dialog = document.querySelector<HTMLDialogElement>('[aria-label="Renew Research runner"]')
+    expect(dialog).not.toBeNull()
+    expect(screen.getByText('Renew agent token')).not.toBeNull()
+    expect(screen.getByText(/No runner updates required/)).not.toBeNull()
+
+    const saveBtn = dialog!.querySelector<HTMLButtonElement>('.agent-token-edit-actions button')
+    expect(saveBtn?.textContent).toBe('Renew token')
+
+    const thirtyDaysBtn = Array.from(dialog!.querySelectorAll<HTMLButtonElement>('.preset-pill')).find(
+      (btn) => btn.textContent?.includes('+30 Days'),
+    )
+    expect(thirtyDaysBtn).not.toBeUndefined()
+    fireEvent.click(thirtyDaysBtn!)
+
+    fireEvent.submit(dialog!.querySelector('form')!)
+
+    await waitFor(() =>
+      expect(api.updateAgentToken).toHaveBeenCalledWith(
+        'agt_expired',
+        expect.objectContaining({
+          expected_version: 2,
+          label: 'Research runner',
+          scopes: [{ capability: 'read', path_prefix: 'agents' }],
+        }),
+      ),
+    )
+  })
+
+  it('confirms rotation with explicit consequence warning and manages inactive history', async () => {
+    const activeToken = {
+      token_id: 'agt_active',
+      actor_id: 'agent:researcher',
+      actor_display_name: 'Researcher',
+      label: 'Research runner',
+      scopes: [{ capability: 'read' as const, path_prefix: 'agents' }],
+      version: 1,
+      created_at: '2026-08-01T12:00:00Z',
+      expires_at: '2026-09-01T12:00:00Z',
+      revoked_at: null,
+      last_used_at: null,
+      rotated_from_token_id: 'agt_old',
+    }
+    const revokedToken = {
+      token_id: 'agt_old',
+      actor_id: 'agent:researcher',
+      actor_display_name: 'Researcher',
+      label: 'Research runner',
+      scopes: [{ capability: 'read' as const, path_prefix: 'agents' }],
+      version: 1,
+      created_at: '2026-07-01T12:00:00Z',
+      expires_at: '2026-08-01T12:00:00Z',
+      revoked_at: '2026-08-01T12:00:00Z',
+      last_used_at: null,
+      rotated_from_token_id: 'agt_prev',
+    }
+    vi.mocked(api.listAgentTokens).mockResolvedValue([activeToken, revokedToken])
+    vi.mocked(api.rotateAgentToken).mockResolvedValue({
+      ...activeToken,
+      token_id: 'agt_new',
+      token: 'sg_agent_newsecretkey123',
+    })
+
+    renderSettings()
+
+    // Main active token is shown
+    expect(await screen.findByText(/Research runner/)).not.toBeNull()
+
+    // Revoked token is not in main table by default, but in the history toggle
+    const toggleBtn = screen.getByRole('button', { name: /Inactive & rotated tokens \(1\)/ })
+    expect(toggleBtn).not.toBeNull()
+
+    // Expanding history reveals the revoked token
+    fireEvent.click(toggleBtn)
+    expect(screen.getByText(/Rotated predecessor/)).not.toBeNull()
+
+    // Clicking Rotate key... opens the dedicated warning dialog
+    const rotateBtn = screen.getByRole('button', { name: /Rotate key…/ })
+    fireEvent.click(rotateBtn)
+
+    const rotateDialog = document.querySelector<HTMLDialogElement>(
+      '[aria-label="Rotate secret for Research runner"]',
+    )
+    expect(rotateDialog).not.toBeNull()
+    expect(screen.getByText('Rotate secret key')).not.toBeNull()
+    expect(screen.getByText(/Immediate runner disruption warning/)).not.toBeNull()
+
+    // Confirm rotation
+    const confirmBtn = rotateDialog!.querySelector<HTMLButtonElement>('.agent-token-rotate-actions .danger')
+    expect(confirmBtn?.textContent).toContain('Revoke old key & generate new')
+    fireEvent.click(confirmBtn!)
+
+    await waitFor(() => expect(api.rotateAgentToken).toHaveBeenCalledWith('agt_active'))
   })
 })

@@ -148,6 +148,19 @@ function formatEffectiveScope(scope: TokenScope): string {
   return `${scope.capability}: ${scope.path_prefix ? `/${scope.path_prefix}/**` : '/** (workspace-wide)'}`
 }
 
+export function calculateFutureDate(days: number): string {
+  const target = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+  return localExpirationValue(target.toISOString())
+}
+
+export function calculateDurationExtension(createdAt: string, expiresAt: string): string {
+  const created = new Date(createdAt).getTime()
+  const expires = new Date(expiresAt).getTime()
+  const duration = Math.max(expires - created, 7 * 24 * 60 * 60 * 1000)
+  const target = new Date(Date.now() + duration)
+  return localExpirationValue(target.toISOString())
+}
+
 function localExpirationValue(value: string | null): string {
   if (!value) return ''
   const expiresAt = new Date(value)
@@ -177,6 +190,8 @@ export function AgentAccessSettings() {
   const [issued, setIssued] = useState<IssuedAgentToken | null>(null)
   const [validationAttempted, setValidationAttempted] = useState(false)
   const [editing, setEditing] = useState<AgentToken | null>(null)
+  const [rotating, setRotating] = useState<AgentToken | null>(null)
+  const [showRevoked, setShowRevoked] = useState(false)
   const secretDialogRef = useRef<HTMLDialogElement>(null)
   const writePrefixRef = useRef<HTMLInputElement>(null)
   const sensitiveConfirmationRef = useRef<HTMLInputElement>(null)
@@ -190,7 +205,7 @@ export function AgentAccessSettings() {
 
   useEffect(() => {
     const dialog = secretDialogRef.current
-    if (issued && dialog && !dialog.open) dialog.showModal()
+    if (issued && dialog && !dialog.open && dialog.showModal) dialog.showModal()
   }, [issued])
 
   const closeIssuedSecret = () => {
@@ -238,8 +253,9 @@ export function AgentAccessSettings() {
   })
 
   const rotate = useMutation({
-    mutationFn: api.rotateAgentToken,
+    mutationFn: (tokenId: string) => api.rotateAgentToken(tokenId),
     onSuccess: async (token) => {
+      setRotating(null)
       setIssued(token)
       await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
     },
@@ -263,7 +279,7 @@ export function AgentAccessSettings() {
   })
 
   const revoke = useMutation({
-    mutationFn: api.revokeAgentToken,
+    mutationFn: (tokenId: string) => api.revokeAgentToken(tokenId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['agent-tokens'] })
     },
@@ -310,7 +326,15 @@ export function AgentAccessSettings() {
             />
           )}
         </dialog>
-
+        {rotating && (
+          <AgentTokenRotator
+            token={rotating}
+            pending={rotate.isPending}
+            error={rotate.isError ? rotate.error.message : null}
+            onClose={() => setRotating(null)}
+            onRotate={() => rotate.mutate(rotating.token_id)}
+          />
+        )}
         {editing && (
           <AgentTokenEditor
             key={`${editing.token_id}:${editing.version}`}
@@ -321,7 +345,6 @@ export function AgentAccessSettings() {
             onSave={(input) => update.mutate({ tokenId: editing.token_id, ...input })}
           />
         )}
-
         <form
           className="agent-token-form"
           onSubmit={(event) => {
@@ -518,7 +541,6 @@ export function AgentAccessSettings() {
             Token rotation failed: {rotate.error.message}
           </p>
         )}
-
         <div className="agent-token-list">
           <div className="settings-subtitle">
             <div>
@@ -527,56 +549,205 @@ export function AgentAccessSettings() {
             </div>
             <Link to="/activity">Review agent activity</Link>
           </div>
-          {tokens.data?.map((token) => (
-            <article key={token.token_id} className={token.revoked_at ? 'token-row revoked' : 'token-row'}>
-              <div>
-                <strong>{token.actor_display_name}</strong>
-                <small>
-                  {token.actor_id} · {token.label}
-                </small>
-                <span>
-                  {token.scopes.map((scope) => (
-                    <i key={`${scope.capability}:${scope.path_prefix ?? '*'}`}>
-                      {scope.capability}:{scope.path_prefix ? `/${scope.path_prefix}/**` : '/**'}
-                    </i>
-                  ))}
-                </span>
-                <small>
-                  {token.revoked_at
-                    ? `Revoked ${new Date(token.revoked_at).toLocaleString()}`
-                    : token.last_used_at
-                      ? `Last used ${new Date(token.last_used_at).toLocaleString()}`
-                      : 'Never used'}
-                </small>
-                {token.expires_at && <small>Expires {new Date(token.expires_at).toLocaleString()}</small>}
-              </div>
-              {!token.revoked_at && (
-                <div className="token-actions">
-                  <button className="secondary-action" onClick={() => setEditing(token)}>
-                    <Pencil size="var(--icon-inline)" /> Edit
-                  </button>
-                  <button
-                    className="secondary-action"
-                    disabled={rotate.isPending}
-                    onClick={() => rotate.mutate(token.token_id)}
-                  >
-                    <RefreshCw size="var(--icon-inline)" /> Rotate
-                  </button>
-                  <button
-                    className="secondary-action danger"
-                    disabled={revoke.isPending}
-                    onClick={() => revoke.mutate(token.token_id)}
-                  >
-                    <ShieldOff size="var(--icon-inline)" /> Revoke
-                  </button>
-                </div>
-              )}
-            </article>
-          ))}
-          {tokens.data?.length === 0 && <p className="small-muted">No agent tokens have been issued.</p>}
+          {(() => {
+            const activeTokens = tokens.data?.filter((token) => !token.revoked_at) ?? []
+            const revokedTokens = tokens.data?.filter((token) => !!token.revoked_at) ?? []
+
+            return (
+              <>
+                {activeTokens.map((token) => {
+                  const isExpired = token.expires_at ? new Date(token.expires_at) <= new Date() : false
+                  return (
+                    <article key={token.token_id} className="token-row">
+                      <div>
+                        <strong>{token.actor_display_name}</strong>
+                        <small>
+                          {token.actor_id} · {token.label}
+                        </small>
+                        <span>
+                          {token.scopes.map((scope) => (
+                            <i key={`${scope.capability}:${scope.path_prefix ?? '*'}`}>
+                              {scope.capability}:{scope.path_prefix ? `/${scope.path_prefix}/**` : '/**'}
+                            </i>
+                          ))}
+                        </span>
+                        <small>
+                          {token.last_used_at
+                            ? `Last used ${new Date(token.last_used_at).toLocaleString()}`
+                            : 'Never used'}
+                        </small>
+                        {token.expires_at && (
+                          <small className={isExpired ? 'token-expired-text' : undefined}>
+                            {isExpired ? 'Expired' : 'Expires'} {new Date(token.expires_at).toLocaleString()}
+                          </small>
+                        )}
+                      </div>
+                      <div className="token-actions">
+                        {isExpired ? (
+                          <button
+                            type="button"
+                            className="secondary-action token-renew-button"
+                            onClick={() => setEditing(token)}
+                          >
+                            <RefreshCw size="var(--icon-inline)" /> Renew token
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="secondary-action"
+                            onClick={() => setEditing(token)}
+                          >
+                            <Pencil size="var(--icon-inline)" /> Edit
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="secondary-action"
+                          disabled={rotate.isPending}
+                          onClick={() => setRotating(token)}
+                        >
+                          <KeyRound size="var(--icon-inline)" /> Rotate key…
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-action danger"
+                          disabled={revoke.isPending}
+                          onClick={() => revoke.mutate(token.token_id)}
+                        >
+                          <ShieldOff size="var(--icon-inline)" /> Revoke
+                        </button>
+                      </div>
+                    </article>
+                  )
+                })}
+
+                {activeTokens.length === 0 && revokedTokens.length === 0 && (
+                  <p className="small-muted">No agent tokens have been issued.</p>
+                )}
+                {activeTokens.length === 0 && revokedTokens.length > 0 && (
+                  <p className="small-muted">No active agent tokens. All issued tokens are revoked.</p>
+                )}
+
+                {revokedTokens.length > 0 && (
+                  <div className="agent-token-history">
+                    <button
+                      type="button"
+                      className="agent-token-history-toggle"
+                      onClick={() => setShowRevoked((prev) => !prev)}
+                    >
+                      <span>
+                        {showRevoked ? '▾' : '▸'} Inactive & rotated tokens ({revokedTokens.length})
+                      </span>
+                      <small>{showRevoked ? 'Click to hide history' : 'Click to view history'}</small>
+                    </button>
+                    {showRevoked && (
+                      <div className="agent-token-history-list">
+                        {revokedTokens.map((token) => (
+                          <article key={token.token_id} className="token-row revoked">
+                            <div>
+                              <strong>{token.actor_display_name}</strong>
+                              <small>
+                                {token.actor_id} · {token.label}
+                              </small>
+                              <small className="token-revoked-text">
+                                Revoked {new Date(token.revoked_at!).toLocaleString()}
+                                {token.rotated_from_token_id ? ' · Rotated predecessor' : ''}
+                              </small>
+                            </div>
+                            <span className="token-history-badge">Revoked</span>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
     </section>
+  )
+}
+
+function AgentTokenRotator({
+  token,
+  pending,
+  error,
+  onClose,
+  onRotate,
+}: {
+  token: AgentToken
+  pending: boolean
+  error: string | null
+  onClose: () => void
+  onRotate: () => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (dialog && !dialog.open && dialog.showModal) dialog.showModal()
+  }, [])
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="agent-token-rotate-dialog"
+      aria-label={`Rotate secret for ${token.label}`}
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+      onClose={onClose}
+    >
+      <header>
+        <div>
+          <h3>Rotate secret key</h3>
+          <p>{token.actor_display_name} · Invalidate old secret and generate a new key</p>
+        </div>
+        <button className="icon-button" aria-label="Close rotator" onClick={onClose}>
+          <X size="var(--icon-control)" />
+        </button>
+      </header>
+      <div className="agent-token-rotate-body">
+        <div className="token-warning-callout" role="alert">
+          <AlertTriangle size="var(--icon-inline)" />
+          <div>
+            <strong>Immediate runner disruption warning</strong>
+            <p>
+              Rotating will permanently revoke the current secret key. Any autonomous agent currently running
+              with this token will stop working until you update it with the new secret.
+            </p>
+          </div>
+        </div>
+
+        <p className="token-rotate-help">
+          A replacement secret key will be generated and displayed for one-time copy. Its lease duration will
+          be preserved from today.
+        </p>
+
+        {error && (
+          <p className="operation-result error-text" role="alert">
+            {error}
+          </p>
+        )}
+
+        <div className="agent-token-rotate-actions">
+          <button type="button" className="secondary-action" onClick={onClose} disabled={pending}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="secondary-action danger"
+            disabled={pending}
+            onClick={() => onRotate()}
+          >
+            {pending ? 'Rotating…' : 'Revoke old key & generate new'}
+          </button>
+        </div>
+      </div>
+    </dialog>
   )
 }
 
@@ -599,8 +770,11 @@ function AgentTokenEditor({
   }) => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const isCurrentlyExpired = token.expires_at ? new Date(token.expires_at) <= new Date() : false
   const [label, setLabel] = useState(token.label)
-  const [expiresAt, setExpiresAt] = useState(() => localExpirationValue(token.expires_at))
+  const [expiresAt, setExpiresAt] = useState(() =>
+    isCurrentlyExpired ? calculateFutureDate(7) : localExpirationValue(token.expires_at),
+  )
   const [selected, setSelected] = useState<Set<Capability>>(
     () => new Set(token.scopes.map((scope) => scope.capability)),
   )
@@ -621,7 +795,7 @@ function AgentTokenEditor({
     <dialog
       ref={dialogRef}
       className="agent-token-edit-dialog"
-      aria-label={`Edit ${token.label}`}
+      aria-label={isCurrentlyExpired ? `Renew ${token.label}` : `Edit ${token.label}`}
       onCancel={(event) => {
         event.preventDefault()
         onClose()
@@ -630,8 +804,13 @@ function AgentTokenEditor({
     >
       <header>
         <div>
-          <h3>Edit token authority</h3>
-          <p>{token.actor_display_name} · Existing secret stays valid after saving.</p>
+          <h3>{isCurrentlyExpired ? 'Renew agent token' : 'Edit token details'}</h3>
+          <p>
+            {token.actor_display_name} ·{' '}
+            {isCurrentlyExpired
+              ? 'Instant reactivation with existing secret.'
+              : 'Existing secret stays valid after saving.'}
+          </p>
         </div>
         <button className="icon-button" aria-label="Close token editor" onClick={onClose}>
           <X size="var(--icon-control)" />
@@ -651,18 +830,80 @@ function AgentTokenEditor({
           })
         }}
       >
+        {isCurrentlyExpired && (
+          <div className="token-info-callout" role="status">
+            <KeyRound size="var(--icon-inline)" />
+            <div>
+              <strong>No runner updates required</strong>
+              <p>
+                Extending expiration immediately reactivates this token with its existing secret key. Your
+                agent runner will resume working without updating .env or configuration.
+              </p>
+            </div>
+          </div>
+        )}
+
         <label>
           <span>Token label</span>
           <input required value={label} onChange={(event) => setLabel(event.target.value)} />
         </label>
-        <label>
-          <span>Expiration</span>
-          <input
-            type="datetime-local"
-            value={expiresAt}
-            onChange={(event) => setExpiresAt(event.target.value)}
-          />
-        </label>
+        <div className="agent-token-expiration-field">
+          <div className="agent-token-expiration-header">
+            <span>Expiration & extension</span>
+            {isCurrentlyExpired && (
+              <span className="token-expired-tag">
+                Expired {new Date(token.expires_at!).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+          <div className="agent-token-expiration-presets">
+            <button
+              type="button"
+              className={`preset-pill ${expiresAt === calculateFutureDate(7) ? 'active' : ''}`}
+              onClick={() => setExpiresAt(calculateFutureDate(7))}
+            >
+              Extend +7 Days (Default)
+            </button>
+            <button
+              type="button"
+              className={`preset-pill ${expiresAt === calculateFutureDate(30) ? 'active' : ''}`}
+              onClick={() => setExpiresAt(calculateFutureDate(30))}
+            >
+              +30 Days
+            </button>
+            <button
+              type="button"
+              className={`preset-pill ${expiresAt === calculateFutureDate(90) ? 'active' : ''}`}
+              onClick={() => setExpiresAt(calculateFutureDate(90))}
+            >
+              +90 Days
+            </button>
+            {token.expires_at && (
+              <button
+                type="button"
+                className="preset-pill"
+                onClick={() => setExpiresAt(calculateDurationExtension(token.created_at, token.expires_at!))}
+              >
+                Same duration
+              </button>
+            )}
+            <button
+              type="button"
+              className={`preset-pill ${expiresAt === '' ? 'active' : ''}`}
+              onClick={() => setExpiresAt('')}
+            >
+              No expiration
+            </button>
+          </div>
+          <label className="agent-token-custom-date">
+            <span>Custom date & time</span>
+            <input
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(event) => setExpiresAt(event.target.value)}
+            />
+          </label>
+        </div>
         <div className="agent-token-prefixes">
           <label>
             <span>Read path prefix</span>
@@ -738,7 +979,13 @@ function AgentTokenEditor({
         )}
         <div className="agent-token-edit-actions">
           <button disabled={pending || selected.size === 0 || writePrefixMissing}>
-            {pending ? 'Saving…' : 'Save token'}
+            {pending
+              ? isCurrentlyExpired
+                ? 'Renewing…'
+                : 'Saving…'
+              : isCurrentlyExpired
+                ? 'Renew token'
+                : 'Save token'}
           </button>
           <button type="button" className="secondary-action" onClick={onClose}>
             Cancel
