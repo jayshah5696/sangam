@@ -326,7 +326,6 @@ export function AgentAccessSettings() {
             />
           )}
         </dialog>
-
         {rotating && (
           <AgentTokenRotator
             token={rotating}
@@ -336,7 +335,6 @@ export function AgentAccessSettings() {
             onRotate={() => rotate.mutate(rotating.token_id)}
           />
         )}
-
         {editing && (
           <AgentTokenEditor
             key={`${editing.token_id}:${editing.version}`}
@@ -347,7 +345,6 @@ export function AgentAccessSettings() {
             onSave={(input) => update.mutate({ tokenId: editing.token_id, ...input })}
           />
         )}
-
         <form
           className="agent-token-form"
           onSubmit={(event) => {
@@ -544,7 +541,6 @@ export function AgentAccessSettings() {
             Token rotation failed: {rotate.error.message}
           </p>
         )}
-
         <div className="agent-token-list">
           <div className="settings-subtitle">
             <div>
@@ -582,8 +578,7 @@ export function AgentAccessSettings() {
                         </small>
                         {token.expires_at && (
                           <small className={isExpired ? 'token-expired-text' : undefined}>
-                            {isExpired ? 'Expired' : 'Expires'}{' '}
-                            {new Date(token.expires_at).toLocaleString()}
+                            {isExpired ? 'Expired' : 'Expires'} {new Date(token.expires_at).toLocaleString()}
                           </small>
                         )}
                       </div>
@@ -669,7 +664,8 @@ export function AgentAccessSettings() {
               </>
             )
           })()}
-        </div>      </div>
+        </div>
+      </div>
     </section>
   )
 }
@@ -720,15 +716,15 @@ function AgentTokenRotator({
           <div>
             <strong>Immediate runner disruption warning</strong>
             <p>
-              Rotating will permanently revoke the current secret key. Any autonomous agent
-              currently running with this token will stop working until you update it with the new secret.
+              Rotating will permanently revoke the current secret key. Any autonomous agent currently running
+              with this token will stop working until you update it with the new secret.
             </p>
           </div>
         </div>
 
         <p className="token-rotate-help">
-          A replacement secret key will be generated and displayed for one-time copy.
-          Its lease duration will be preserved from today.
+          A replacement secret key will be generated and displayed for one-time copy. Its lease duration will
+          be preserved from today.
         </p>
 
         {error && (
@@ -840,8 +836,8 @@ function AgentTokenEditor({
             <div>
               <strong>No runner updates required</strong>
               <p>
-                Extending expiration immediately reactivates this token with its existing secret key.
-                Your agent runner will resume working without updating .env or configuration.
+                Extending expiration immediately reactivates this token with its existing secret key. Your
+                agent runner will resume working without updating .env or configuration.
               </p>
             </div>
           </div>

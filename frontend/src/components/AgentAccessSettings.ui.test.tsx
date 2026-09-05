@@ -227,9 +227,7 @@ describe('AgentAccessSettings', () => {
     expect(screen.getByText(/Immediate runner disruption warning/)).not.toBeNull()
 
     // Confirm rotation
-    const confirmBtn = rotateDialog!.querySelector<HTMLButtonElement>(
-      '.agent-token-rotate-actions .danger',
-    )
+    const confirmBtn = rotateDialog!.querySelector<HTMLButtonElement>('.agent-token-rotate-actions .danger')
     expect(confirmBtn?.textContent).toContain('Revoke old key & generate new')
     fireEvent.click(confirmBtn!)
 
