@@ -220,11 +220,8 @@ class IdentityService:
                 ).fetchone()
                 if not old or old["actor_id"] != normalized_actor_id:
                     raise NotFoundError("Token to rotate was not found for this agent")
-                if old["revoked_at"] is not None or (
-                    old["expires_at"] is not None
-                    and self._parse_timestamp(old["expires_at"]) <= datetime.now(UTC)
-                ):
-                    raise CredentialConflictError("Only an active agent token can be rotated")
+                if old["revoked_at"] is not None:
+                    raise CredentialConflictError("Revoked agent tokens cannot be rotated")
                 connection.execute(
                     """
                     UPDATE actor_tokens SET revoked_at = COALESCE(revoked_at, ?)
@@ -279,12 +276,21 @@ class IdentityService:
             if row is None:
                 raise NotFoundError(f"Agent token not found: {token_id}")
             token = self._token_from_row(connection, row)
+        now_dt = datetime.now(UTC)
+        expires_at = token.expires_at
+        if expires_at is not None:
+            old_expiry = self._parse_timestamp(expires_at)
+            if old_expiry <= now_dt:
+                created_dt = self._parse_timestamp(token.created_at)
+                duration = max(old_expiry - created_dt, timedelta(days=7))
+                expires_at = (now_dt + duration).astimezone(UTC).isoformat(timespec="microseconds")
+
         return self.issue_agent_token(
             actor_id=token.actor_id,
             display_name=token.actor_display_name,
             label=token.label,
             scopes=token.scopes,
-            expires_at=token.expires_at,
+            expires_at=expires_at,
             rotated_from_token_id=token_id,
         )
 
@@ -317,12 +323,16 @@ class IdentityService:
             if row["revoked_at"] is not None:
                 raise CredentialConflictError("Revoked agent tokens cannot be edited")
             now_datetime = datetime.now(UTC)
+            normalized_expiry = self._validate_update_expiry(expires_at, now=now_datetime)
             if (
                 row["expires_at"] is not None
                 and self._parse_timestamp(row["expires_at"]) <= now_datetime
+                and normalized_expiry is not None
+                and self._parse_timestamp(normalized_expiry) <= now_datetime
             ):
-                raise CredentialConflictError("Expired agent tokens cannot be edited")
-            normalized_expiry = self._validate_update_expiry(expires_at, now=now_datetime)
+                raise ValidationError(
+                    "To re-activate an expired token, set its expiration to the future"
+                )
             if row["version"] != expected_version:
                 raise ConflictError(
                     "Agent token changed since it was loaded",

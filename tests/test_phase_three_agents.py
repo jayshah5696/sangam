@@ -665,6 +665,66 @@ def test_expired_and_malformed_tokens_fail_without_secret_disclosure(client: Tes
     assert malformed.headers["X-Operation-ID"]
 
 
+def test_extend_and_rotate_expired_agent_token(client: TestClient) -> None:
+    issued = issue_token(client)
+    raw_token = issued["token"]
+    token_id = issued["token_id"]
+    services = client.app.state.services
+    with services.documents.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE actor_tokens
+            SET created_at = '2020-01-01T00:00:00+00:00',
+                expires_at = '2021-01-01T00:00:00+00:00'
+            WHERE token_id = ?
+            """,
+            (token_id,),
+        )
+    # Bearer token is rejected because it is expired
+    expired_call = client.get("/api/v1/documents", headers=bearer(raw_token))
+    assert expired_call.status_code == 401
+    assert "expired" in expired_call.json()["error"]["message"].lower()
+
+    # Extending the expired token to future reactivates the SAME secret
+    future_expiry = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+    update_res = client.patch(
+        f"/api/v1/agent-tokens/{token_id}",
+        json={
+            "expected_version": issued["version"],
+            "label": "Extended token",
+            "scopes": issued["scopes"],
+            "expires_at": future_expiry,
+        },
+    )
+    assert update_res.status_code == 200, update_res.text
+    updated_data = update_res.json()
+    assert updated_data["label"] == "Extended token"
+    assert updated_data["version"] == issued["version"] + 1
+
+    # Now the ORIGINAL raw token works immediately!
+    reactivated_call = client.get("/api/v1/documents", headers=bearer(raw_token))
+    assert reactivated_call.status_code == 200
+
+    # Rotating an expired token also works and sets a future expiration
+    with services.documents.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE actor_tokens
+            SET expires_at = '2021-01-01T00:00:00+00:00'
+            WHERE token_id = ?
+            """,
+            (token_id,),
+        )
+    rotated_res = client.post(f"/api/v1/agent-tokens/{token_id}/rotate")
+    assert rotated_res.status_code == 200, rotated_res.text
+    rotated_data = rotated_res.json()
+    assert rotated_data["token_id"] != token_id
+    assert rotated_data["rotated_from_token_id"] == token_id
+    assert rotated_data["expires_at"] is not None
+    assert datetime.fromisoformat(rotated_data["expires_at"]) > datetime.now(UTC)
+    assert client.get("/api/v1/documents", headers=bearer(rotated_data["token"])).status_code == 200
+
+
 def test_list_search_and_document_payloads_are_bounded(tmp_path: Path) -> None:
     settings = Settings(
         database_path=tmp_path / "database" / "sangam.sqlite3",

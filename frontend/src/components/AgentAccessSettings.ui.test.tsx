@@ -112,4 +112,58 @@ describe('AgentAccessSettings', () => {
     fireEvent.click(confirmation)
     expect(issue.disabled).toBe(false)
   })
+
+  it('extends and reactivates an expired token with quick duration presets', async () => {
+    const expiredToken = {
+      token_id: 'agt_expired',
+      actor_id: 'agent:researcher',
+      actor_display_name: 'Researcher',
+      label: 'Research runner',
+      scopes: [{ capability: 'read' as const, path_prefix: 'agents' }],
+      version: 2,
+      created_at: '2026-08-01T12:00:00Z',
+      expires_at: '2026-08-08T12:00:00Z',
+      revoked_at: null,
+      last_used_at: '2026-08-07T12:00:00Z',
+      rotated_from_token_id: null,
+    }
+    vi.mocked(api.listAgentTokens).mockResolvedValue([expiredToken])
+    vi.mocked(api.updateAgentToken).mockResolvedValue({
+      ...expiredToken,
+      version: 3,
+      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+    })
+    renderSettings()
+
+    const extendBtn = await screen.findByRole('button', { name: /Extend \/ Edit/ })
+    expect(extendBtn).not.toBeNull()
+    fireEvent.click(extendBtn)
+
+    const dialog = document.querySelector<HTMLDialogElement>('[aria-label="Edit Research runner"]')
+    expect(dialog).not.toBeNull()
+    expect(screen.getByText('Extend & edit token authority')).not.toBeNull()
+    expect(screen.getByText(/This token is expired/)).not.toBeNull()
+
+    const saveBtn = dialog!.querySelector<HTMLButtonElement>('.agent-token-edit-actions-main button')
+    expect(saveBtn?.textContent).toBe('Reactivate & save')
+
+    const thirtyDaysBtn = Array.from(dialog!.querySelectorAll<HTMLButtonElement>('.preset-pill')).find(
+      (btn) => btn.textContent?.includes('+30 Days'),
+    )
+    expect(thirtyDaysBtn).not.toBeUndefined()
+    fireEvent.click(thirtyDaysBtn!)
+
+    fireEvent.submit(dialog!.querySelector('form')!)
+
+    await waitFor(() =>
+      expect(api.updateAgentToken).toHaveBeenCalledWith(
+        'agt_expired',
+        expect.objectContaining({
+          expected_version: 2,
+          label: 'Research runner',
+          scopes: [{ capability: 'read', path_prefix: 'agents' }],
+        }),
+      ),
+    )
+  })
 })
