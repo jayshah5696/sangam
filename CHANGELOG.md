@@ -7,6 +7,29 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.12.1] - 2026-09-04
+
+### Added
+
+- Operations center for agent access and activity: `Settings > Agents & access` now provides outcome-first visibility into active, expired, expiring-soon, and recently denied tokens alongside last-activity timestamps (#175, #190).
+- Dedicated Activity interface within the Settings navigation rail featuring route-aware Insights and Activity tabs, responsive metrics, and a two-series activity trend chart (#175, #190).
+- Operator attention acknowledgement workflow: review and acknowledge attention items with reversible dismissal, synchronized badge counts, and automatic reopening when newer matching failures occur without altering immutable audit records (#175, #190).
+- Server-backed agent and token selectors, URL-persisted investigative filters, and anchored refresh controls that avoid continuous request loops (#175, #190).
+- Support for extending expiration on expired agent tokens, reactivating existing secrets immediately without runner configuration redeployments (#191).
+- Safe rotation for expired tokens with automatic duration calculation (minimum 7 days) and distinct confirmation modals separating renewal, scope editing, and key rotation (#191).
+- Collapsible inactive and rotated token history drawer to declutter the active agent access table (#191).
+
+### Changed
+
+- Replaced raw actor and token ID text inputs with server-populated dropdowns and fallback deep-link support across Activity views (#175, #190).
+- Aligned Activity typography with the Settings UI design system, replacing verbose text labels with accessible, titled icon actions and ensuring 44px touch targets (#175, #190).
+
+### Upgrade notes
+
+- Database migration `021_activity_investigation_indexes.sql` adds targeted indexes on `operation_events` for token, resource, action, and error queries.
+- Database migration `022_activity_problem_acknowledgements.sql` adds the `activity_problem_acknowledgements` table for durable presentation state of reviewed attention items.
+- Activity APIs remain strictly administrator-only and ledger records remain append-only.
+
 ## [0.12.0] - 2026-09-01
 
 ### Added
@@ -316,7 +339,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.1
 [0.12.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.0
 [0.11.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.1
 [0.11.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.0
