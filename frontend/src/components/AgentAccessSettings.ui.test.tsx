@@ -98,7 +98,7 @@ describe('AgentAccessSettings', () => {
     vi.mocked(api.updateAgentToken).mockResolvedValue(sampleToken)
     renderSettings()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Manage access' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     const dialog = document.querySelector<HTMLDialogElement>('[aria-label="Edit Research workspace"]')
     expect(dialog).not.toBeNull()
     expect(screen.getByText('Edit token details')).not.toBeNull()
@@ -155,6 +155,7 @@ describe('AgentAccessSettings', () => {
       revoked_at: null,
       last_used_at: '2026-08-07T12:00:00Z',
       rotated_from_token_id: null,
+      recent_denied_count: 0,
     }
     vi.mocked(api.listAgentTokens).mockResolvedValue([expiredToken])
     vi.mocked(api.updateAgentToken).mockResolvedValue({
@@ -209,6 +210,7 @@ describe('AgentAccessSettings', () => {
       revoked_at: null,
       last_used_at: null,
       rotated_from_token_id: 'agt_old',
+      recent_denied_count: 0,
     }
     const revokedToken = {
       token_id: 'agt_old',
@@ -222,6 +224,7 @@ describe('AgentAccessSettings', () => {
       revoked_at: '2026-08-01T12:00:00Z',
       last_used_at: null,
       rotated_from_token_id: 'agt_prev',
+      recent_denied_count: 0,
     }
     vi.mocked(api.listAgentTokens).mockResolvedValue([activeToken, revokedToken])
     vi.mocked(api.rotateAgentToken).mockResolvedValue({
