@@ -25,6 +25,10 @@ def _canonicalize_relative_path(
     kind: str,
     strip_outer_slashes: bool = False,
 ) -> str:
+    if "\x00" in raw_path:
+        raise InvalidPathError(f"{kind} paths cannot contain null bytes")
+    if any(ord(char) < 32 or ord(char) == 127 for char in raw_path):
+        raise InvalidPathError(f"{kind} paths cannot contain control characters")
     if "\\" in raw_path:
         raise InvalidPathError(f"{kind} paths must use forward slashes")
     if kind == "Folder" and raw_path.strip().startswith("/"):
@@ -45,6 +49,8 @@ def _canonicalize_relative_path(
             else "Folder path must stay inside the workspace"
         )
         raise InvalidPathError(message)
+    if any(part.startswith(".") or ".sangam-" in part for part in raw_parts):
+        raise InvalidPathError(f"{kind} path cannot access hidden or reserved system locations")
     return path.as_posix()
 
 
