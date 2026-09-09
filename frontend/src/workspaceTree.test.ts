@@ -132,6 +132,22 @@ describe('buildModifiedSortComparator', () => {
     expect(compare(newDir, oldDir)).toBeLessThan(0)
   })
 
+  it('aggregates timestamps across deeply nested directory structures', () => {
+    const timestamps = new Map([
+      ['a/b/c/d/old.md', '2026-01-01T00:00:00Z'],
+      ['x/y/z/new.md', '2026-09-01T00:00:00Z'],
+    ])
+    const compare = buildModifiedSortComparator(timestamps)
+    const dirA = entry({ path: 'a', basename: 'a', isDirectory: true })
+    const dirX = entry({ path: 'x', basename: 'x', isDirectory: true })
+    const dirAB = entry({ path: 'a/b', basename: 'b', isDirectory: true })
+    const dirXY = entry({ path: 'x/y', basename: 'y', isDirectory: true })
+
+    expect(compare(dirA, dirX)).toBeGreaterThan(0)
+    expect(compare(dirX, dirA)).toBeLessThan(0)
+    expect(compare(dirAB, dirXY)).toBeGreaterThan(0)
+  })
+
   it('uses name as tie-breaker when timestamps are equal', () => {
     const ts = '2026-06-01T00:00:00Z'
     const timestamps = new Map([
