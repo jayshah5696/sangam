@@ -7,6 +7,31 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.12.2] - 2026-09-09
+
+### Added
+
+- Unified verifiable behavior harness (`scripts/control-sangam.sh`, `just verify-behavior`): automated 5-stage pipeline covering isolated launch, SQLite doctor health checks, deterministic multi-modal data seeding, write/search latency benchmarking, and live agent evaluations (#200).
+- Automated multi-modal verification data seeding (`scripts/seed_verification.py`): generates rich Markdown documents, sandboxed HTML widgets for trusted preview isolation validation, multi-page searchable PDFs, and scoped agent bearer tokens (#200).
+- Live chat agent evaluations and capability lifecycle verification embedded into the automated test pipeline, achieving a 100% pass rate across all 17 agent tasks on `openai/gpt-5.6-luna` (#200).
+- Comprehensive behavioral feature maps in `.agents/skills/verify-sangam/features/` documenting boundaries for chat agent evals, agent tokens and security, file materialization, trusted preview, document creation, search, revisions, and performance benchmarking (#200).
+- Interactive visual architecture explainer documented in `docs/verifiable-architecture.html` (#200).
+- Immediate visual and screen-reader copy URL feedback on publication cards with dynamic aria-label announcements (#193).
+
+### Changed
+
+- Migrated default chat model from `openai/gpt-5.6-sol` to `openai/gpt-5.6-luna` across server configuration, environment templates, evaluators, and documentation (#200).
+- Optimized workspace tree sorting by precomputing directory modification timestamps, eliminating repetitive linear scans and reducing sort complexity from O(N * M log N) to O(N log N) (#194).
+- Consolidated and upgraded backend dependencies (`typer` 0.27.2, `ruff` 0.16.5) and frontend dependencies (`react` / `react-dom` 19.2.8, `zod` 4.5.4, `mermaid` 11.17.2, `react-resizable-panels` 4.12.4, `globals` 17.12.0, `pnpm/action-setup`) (#183, #201).
+
+### Fixed
+
+- Enforced path-scoped read capability checks on trusted preview issuance (`POST /api/v1/documents/{document_id}/trusted-preview`) to prevent authorization bypass for scoped agent tokens (#195).
+- Hardened workspace path canonicalization and agent token scope prefix validation to explicitly reject null bytes, control characters, and reserved directory locations (#196).
+- Guaranteed cleanup of orphaned temporary manifest files during backup failures and added concurrency safety tests for atomic document operations (#197).
+- Hardened mutation audit provenance tracking, sensitive authorization header and bearer token stripping, and structured JSON Lines audit log export (#198).
+- Overrode `smol-toml` to >=1.7.1 to remediate advisory GHSA-7w5x-hrqm-74c2 (#199).
+
 ## [0.12.1] - 2026-09-04
 
 ### Added
@@ -339,7 +364,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.2
 [0.12.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.1
 [0.12.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.0
 [0.11.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.11.1
