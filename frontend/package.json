@@ -21,7 +21,7 @@
     "@codemirror/lang-markdown": "6.5.0",
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "6.7.1",
-    "@codemirror/view": "6.43.6",
+    "@codemirror/view": "6.43.11",
     "@openai/chatkit": "^1.5.1",
     "@openai/chatkit-react": "^1.5.1",
     "@pierre/diffs": "1.2.12",
