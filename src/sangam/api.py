@@ -80,7 +80,7 @@ from sangam.schemas import (
     UpdateHtmlJavascriptSettings,
     UpdatePublication,
 )
-from sangam.security import Principal, PublicationAccess
+from sangam.security import Principal, PublicationAccess, sanitize_headers
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +345,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def operation_context(request: Request, call_next):
         request.state.operation_id = str(uuid.uuid4())
+        request.state.sanitized_headers = sanitize_headers(request.headers)
         response = await call_next(request)
         response.headers["X-Operation-ID"] = request.state.operation_id
         preview_url = urlsplit(resolved_settings.trusted_preview_base_url)
@@ -624,6 +625,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             outcome="accepted",
         )
         return revoked
+
+    @app.get("/api/v1/activity/export.jsonl", response_class=PlainTextResponse)
+    def export_activity_jsonl(
+        actor_id: str | None = Query(default=None, max_length=120),
+        actor_kind: str | None = Query(
+            default="agent", pattern="^(human|agent|integration|client|system)$"
+        ),
+        outcome: str | None = Query(default=None, pattern="^(accepted|denied|conflict|failed)$"),
+        token_id: str | None = Query(default=None, max_length=120),
+        action: str | None = Query(default=None, max_length=80),
+        resource_type: str | None = Query(default=None, max_length=80),
+        resource_id: str | None = Query(default=None, max_length=160),
+        path: str | None = Query(default=None, max_length=500),
+        error_code: str | None = Query(default=None, max_length=120),
+        operation_id: str | None = Query(default=None, max_length=160),
+        attention: bool = Query(default=False),
+        since: str | None = Query(default=None, max_length=40),
+        until: str | None = Query(default=None, max_length=40),
+        limit: int = Query(default=100, ge=1, le=200),
+        offset: int = Query(default=0, ge=0, le=10_000),
+        _principal: Principal = admin_dependency,
+    ) -> PlainTextResponse:
+        content = activity.export_json_lines(
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+            outcome=outcome,
+            token_id=token_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            operation_id=operation_id,
+            attention=attention,
+            since=since,
+            until=until,
+            limit=limit,
+            offset=offset,
+        )
+        return PlainTextResponse(
+            content=content,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="audit_events.jsonl"'},
+        )
 
     @app.get("/api/v1/activity", response_model=list[OperationEvent])
     def list_activity(

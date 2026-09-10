@@ -18,7 +18,7 @@ from sangam.schemas import (
     AgentAccessHealth,
     OperationEvent,
 )
-from sangam.security import Principal
+from sangam.security import Principal, sanitize_sensitive_data
 
 EXPIRY_WARNING_DAYS = 7
 RECENT_DENIED_DAYS = 1
@@ -44,7 +44,7 @@ class ActivityService:
         details: dict[str, object] | None = None,
     ) -> None:
         safe_details = {
-            key: value
+            key: sanitize_sensitive_data(value)
             for key, value in (details or {}).items()
             if key
             in {
@@ -53,6 +53,13 @@ class ActivityService:
                 "current_metadata_version",
                 "expected_metadata_version",
                 "capability",
+                "summary",
+                "title",
+                "source_path",
+                "destination_path",
+                "content_type",
+                "category",
+                "tag_ids",
             }
         }
         with self.database.transaction() as connection:
@@ -187,6 +194,46 @@ class ActivityService:
             )
             for row in rows
         ]
+
+    def export_json_lines(
+        self,
+        *,
+        actor_id: str | None = None,
+        actor_kind: str | None = None,
+        outcome: str | None = None,
+        token_id: str | None = None,
+        action: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        operation_id: str | None = None,
+        attention: bool = False,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> str:
+        """Export audit events as a newline-delimited JSON (JSONL) string."""
+        events = self.list_events(
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+            outcome=outcome,
+            token_id=token_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            operation_id=operation_id,
+            attention=attention,
+            since=since,
+            until=until,
+            limit=limit,
+            offset=offset,
+        )
+        lines = [json.dumps(event.model_dump(mode="json"), sort_keys=True) for event in events]
+        return "\n".join(lines) + ("\n" if lines else "")
 
     def summarize(
         self,
