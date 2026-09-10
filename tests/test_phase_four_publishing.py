@@ -422,6 +422,46 @@ def test_publish_capability_is_path_scoped_and_trust_remains_human_only(client: 
     assert trust.status_code == 403
 
 
+def test_trusted_preview_obeys_read_scope(client: TestClient) -> None:
+    allowed = create_document(
+        client,
+        title="Allowed HTML",
+        content="<script>console.log('allowed')</script>",
+        path="public/doc.html",
+        content_type="text/html",
+        key="trusted-preview-allowed-doc",
+    )
+    denied = create_document(
+        client,
+        title="Denied HTML",
+        content="<script>console.log('denied')</script>",
+        path="private/doc.html",
+        content_type="text/html",
+        key="trusted-preview-denied-doc",
+    )
+    token = issue_agent_token(
+        client,
+        actor_id="agent:preview-reader",
+        display_name="Preview reader",
+        capabilities=("read",),
+        path_prefix="public",
+    )
+
+    accepted = client.post(
+        f"/api/v1/documents/{allowed['document_id']}/trusted-preview",
+        params={"revision_id": allowed["current_revision_id"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert accepted.status_code == 200
+
+    forbidden = client.post(
+        f"/api/v1/documents/{denied['document_id']}/trusted-preview",
+        params={"revision_id": denied["current_revision_id"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert forbidden.status_code == 403
+
+
 def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_check(
     client: TestClient, settings: Settings
 ) -> None:
