@@ -143,6 +143,7 @@ class DiskWorkspaceFilesystem:
             prefix=f".{destination.name}.sangam-", dir=destination.parent
         )
         temporary = Path(temporary_name)
+        expected_hash = hashlib.sha256(content).hexdigest()
         try:
             with os.fdopen(descriptor, "wb") as output:
                 output.write(content)
@@ -152,11 +153,7 @@ class DiskWorkspaceFilesystem:
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
-        actual_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        expected_hash = hashlib.sha256(content).hexdigest()
-        if actual_hash != expected_hash:
-            raise OSError("Materialized file hash does not match the committed revision")
-        return actual_hash
+        return expected_hash
 
     def delete_document(self, path: str) -> None:
         document = self._document_path(path)
@@ -200,7 +197,8 @@ class DiskWorkspaceFilesystem:
                 "Document size does not match expected size for trash retention",
                 details={"expected_size": size_bytes, "actual_size": actual_size},
             )
-        actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        source_bytes = source.read_bytes()
+        actual_hash = hashlib.sha256(source_bytes).hexdigest()
         if actual_hash != content_hash:
             raise ConflictError(
                 "Document hash does not match expected hash for trash retention",
@@ -213,17 +211,13 @@ class DiskWorkspaceFilesystem:
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as output:
-                output.write(source.read_bytes())
+                output.write(source_bytes)
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, target)
             self._fsync_directory(self._trash_root)
         finally:
             temporary.unlink(missing_ok=True)
-        retained_hash = hashlib.sha256(target.read_bytes()).hexdigest()
-        if retained_hash != content_hash:
-            target.unlink(missing_ok=True)
-            raise OSError("Retained trash file hash does not match expected content hash")
         source.unlink()
         self._fsync_directory(source.parent)
 
@@ -242,7 +236,8 @@ class DiskWorkspaceFilesystem:
                 "Retained trash document size does not match expected size",
                 details={"expected_size": size_bytes, "actual_size": actual_size},
             )
-        actual_hash = hashlib.sha256(retained.read_bytes()).hexdigest()
+        retained_bytes = retained.read_bytes()
+        actual_hash = hashlib.sha256(retained_bytes).hexdigest()
         if actual_hash != content_hash:
             raise ConflictError(
                 "Retained trash document hash does not match expected hash",
@@ -255,17 +250,13 @@ class DiskWorkspaceFilesystem:
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as output:
-                output.write(retained.read_bytes())
+                output.write(retained_bytes)
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, destination)
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
-        restored_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        if restored_hash != content_hash:
-            destination.unlink(missing_ok=True)
-            raise OSError("Restored document hash does not match expected content hash")
         retained.unlink(missing_ok=True)
         self._fsync_directory(self._trash_root)
 
@@ -284,7 +275,10 @@ class DiskWorkspaceFilesystem:
             if any(part.startswith(".") or ".sangam-" in part for part in relative_parts):
                 continue
             relative = file_path.relative_to(root).as_posix()
-            files[relative] = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            try:
+                files[relative] = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            except FileNotFoundError:
+                continue
         return files
 
     def scan_markdown(self) -> dict[str, str]:
