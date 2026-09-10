@@ -60,6 +60,9 @@ class ActivityService:
                 "content_type",
                 "category",
                 "tag_ids",
+                "patch",
+                "diff",
+                "operations_count",
             }
         }
         with self.database.transaction() as connection:

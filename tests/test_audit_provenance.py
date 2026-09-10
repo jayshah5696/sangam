@@ -174,3 +174,87 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_agent_actor_mutation_audit_trail(client: TestClient) -> None:
+    # Issue token for agent
+    issue_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:chronicle_bot",
+            "display_name": "Chronicle Bot Agent",
+            "label": "Audit Test Agent Token",
+            "scopes": [
+                {"capability": "create", "path_prefix": "agent_docs/"},
+                {"capability": "update", "path_prefix": "agent_docs/"},
+                {"capability": "delete", "path_prefix": "agent_docs/"},
+            ],
+        },
+        headers=headers("idemp_issue_agent_token"),
+    )
+    assert issue_resp.status_code == 201
+    issued = issue_resp.json()
+    agent_token = issued["token"]
+    agent_token_id = issued["token_id"]
+
+    agent_headers = {
+        "Authorization": f"Bearer {agent_token}",
+        "Idempotency-Key": "agent_doc_create_idemp",
+    }
+
+    # 1. Agent creates document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Audit Document",
+            "content": "# Agent Doc Content",
+            "path": "agent_docs/agent_test.md",
+        },
+        headers=agent_headers,
+    )
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    doc_id = created["document_id"]
+    rev1 = created["current_revision_id"]
+
+    # 2. Agent updates document
+    agent_update_headers = {
+        "Authorization": f"Bearer {agent_token}",
+        "Idempotency-Key": "agent_doc_update_idemp",
+    }
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "# Agent Doc Content\nAgent patch line.",
+            "title": "Agent Audit Document (Patched)",
+            "summary": "Applied patch edit",
+        },
+        headers=agent_update_headers,
+    )
+    assert update_resp.status_code == 200
+
+    # Query activity logs for agent actor
+    activity_resp = client.get("/api/v1/activity", params={"actor_id": "agent:chronicle_bot"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+    assert len(events) >= 2
+
+    # Verify agent provenance attribution
+    for event in events:
+        assert event["actor_id"] == "agent:chronicle_bot"
+        assert event["actor_kind"] == "agent"
+        assert event["token_id"] == agent_token_id
+        assert event["created_at"].endswith("Z") or "+00:00" in event["created_at"]
+        assert event["path"] == "agent_docs/agent_test.md"
+
+    # Verify JSONL export contains agent provenance without secret token leakage
+    jsonl_resp = client.get(
+        "/api/v1/activity/export.jsonl",
+        params={"actor_id": "agent:chronicle_bot"},
+    )
+    assert jsonl_resp.status_code == 200
+    export_text = jsonl_resp.text
+    assert agent_token not in export_text
+    assert "agent:chronicle_bot" in export_text
+    assert "agent_docs/agent_test.md" in export_text
