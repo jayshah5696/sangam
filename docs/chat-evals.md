@@ -10,7 +10,7 @@ just eval-chat-yolo
 just eval-chat-policy
 ```
 
-`just eval-chat` runs GPT-5.6 Sol with medium reasoning and exact review. `just eval-chat-yolo` runs the same cases in no-prompt YOLO mode and verifies the resulting files, metadata, and publications. Both commands write JSON under `test-results/` and need `SANGAM_OPENROUTER_API_KEY` in the environment or a local `.env`.
+`just eval-chat` runs GPT-5.6 Luna with medium reasoning and exact review. `just eval-chat-yolo` runs the same cases in no-prompt YOLO mode and verifies the resulting files, metadata, and publications. Both commands write JSON under `test-results/` and need `SANGAM_OPENROUTER_API_KEY` in the environment or a local `.env`.
 
 `just eval-chat-policy` is credential-free. It verifies capability scopes, exact approval, digest binding, stale state, duplicate delivery, cancellation, no-prompt YOLO execution, materialized chat creation, and organization-plan recovery.
 

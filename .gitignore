@@ -44,6 +44,7 @@ frontend/test-results/
 playwright-report/
 test-results/
 docs/assets/walkthrough/
+artifacts/
 
 # Logs and local process state
 *.log
@@ -58,18 +59,14 @@ pnpm-debug.log*
 *.db
 *.db-shm
 *.db-wal
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
 *.sqlite3
 *.sqlite3-shm
 *.sqlite3-wal
 
-# Runtime data and disposable smoke-test state
-.sangam-smoke.*/
-data/database/*
-data/workspace/*
-data/backups/*
-!data/database/.gitkeep
-!data/workspace/.gitkeep
-!data/backups/.gitkeep
+# Local workspace runtime data
+/data/database/*
+!/data/database/.gitkeep
+/data/workspace/*
+!/data/workspace/.gitkeep
+/data/backups/*
+!/data/backups/.gitkeep

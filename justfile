@@ -52,12 +52,12 @@ bundle-report:
     pnpm --dir frontend run bundle:report
 
 # Run the review-mode chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
-eval-chat model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-review.json":
+eval-chat model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-review.json":
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
 
 # Run the same live evals under bounded private-workspace YOLO policy.
-eval-chat-yolo model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-yolo.json":
+eval-chat-yolo model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-yolo.json":
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode workspace --output "{{ output }}"
 
@@ -66,13 +66,36 @@ eval-chat-policy:
     uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py
 
 # Run the chat eval suite against another checkout's code for before/after comparison.
-eval-chat-against source model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-baseline.json":
+eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-baseline.json":
     mkdir -p test-results
     cd "{{ source }}" && uv run python "{{ justfile_directory() }}/scripts/run_chat_evals.py" --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
 
 # Exercise desktop and narrow browser interactions against isolated data.
 test-e2e:
     pnpm --dir frontend run test:e2e
+
+# Run empirical verification, performance benchmark, and chat agent evals across isolated Sangam services.
+verify-behavior port="8765" count="25" eval_limit="3":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    trap './scripts/control-sangam.sh cleanup >/dev/null 2>&1 || true' EXIT
+    ./scripts/control-sangam.sh launch "{{ port }}"
+    ./scripts/control-sangam.sh doctor
+    ./scripts/control-sangam.sh seed
+    ./scripts/control-sangam.sh benchmark "{{ count }}"
+    ./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" "{{ eval_limit }}"
+
+# Run a read-only doctor health and integrity check on the active verification instance.
+verify-doctor:
+    ./scripts/control-sangam.sh doctor
+
+# Seed rich multi-modal test data into the active verification instance.
+verify-seed:
+    ./scripts/control-sangam.sh seed
+
+# Run chat agent capability policy and empirical eval verification saving evidence to artifacts.
+verify-eval model="openai/gpt-5.6-luna" limit="":
+    ./scripts/control-sangam.sh eval "{{ model }}" "{{ limit }}" 
 
 # Update verified Playwright screenshot baselines.
 update-screenshots:
