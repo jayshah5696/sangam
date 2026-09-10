@@ -52,12 +52,12 @@ bundle-report:
     pnpm --dir frontend run bundle:report
 
 # Run the review-mode chat agent eval suite (requires SANGAM_OPENROUTER_API_KEY).
-eval-chat model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-review.json":
+eval-chat model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-review.json":
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
 
 # Run the same live evals under bounded private-workspace YOLO policy.
-eval-chat-yolo model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-yolo.json":
+eval-chat-yolo model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-yolo.json":
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode workspace --output "{{ output }}"
 
@@ -66,7 +66,7 @@ eval-chat-policy:
     uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py
 
 # Run the chat eval suite against another checkout's code for before/after comparison.
-eval-chat-against source model="openai/gpt-5.6-sol" reasoning="medium" output="test-results/chat-evals-baseline.json":
+eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-baseline.json":
     mkdir -p test-results
     cd "{{ source }}" && uv run python "{{ justfile_directory() }}/scripts/run_chat_evals.py" --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
 

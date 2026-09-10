@@ -57,7 +57,7 @@ FALLBACK_ENV_FILES = (
     REPO_ROOT / ".env",
     Path("/Users/jshah/Documents/GitHub/sangam/.env"),
 )
-DEFAULT_MODEL = "openai/gpt-5.6-sol"
+DEFAULT_MODEL = "openai/gpt-5.6-luna"
 ITEM_TIMEOUT_SECONDS = 300.0
 
 REFUSAL_RE = re.compile(

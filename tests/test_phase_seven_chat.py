@@ -262,7 +262,7 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
     assert config["transport_status"] == "misconfigured"
     assert config["chat_enabled"] is False
     assert config["domain_key"] == "local-dev"
-    assert config["default_model"] == "openrouter::openai/gpt-5.6-sol"
+    assert config["default_model"] == "openrouter::openai/gpt-5.6-luna"
     assert config["autonomy_mode"] == "review"
     assert {item["id"] for item in config["available_models"]} == {
         "openrouter::openai/gpt-5.6-sol",
