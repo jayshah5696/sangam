@@ -982,10 +982,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def issue_trusted_preview(
         document_id: str,
         revision_id: str = Query(),
-        principal: Principal = admin_dependency,
+        principal: Principal = principal_dependency,
     ) -> TrustedPreviewGrant:
-        del principal
-        return publications.issue_trusted_preview(document_id=document_id, revision_id=revision_id)
+        # Require read authorization for the document being previewed
+        doc = workspace.get_document(principal, document_id)
+        return publications.issue_trusted_preview(
+            document_id=doc.document_id, revision_id=revision_id
+        )
 
     @app.get("/api/v1/publications", response_model=list[Publication])
     def list_publications(_principal: Principal = admin_dependency) -> list[Publication]:
