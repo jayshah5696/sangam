@@ -91,3 +91,48 @@ def test_duplicate_materialized_path_is_rejected(client: TestClient) -> None:
     )
     assert first.status_code == 201
     assert second.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "bad_text",
+    [
+        "Bad\x00Text",
+        "Bad\x07Text",
+        "Bad\x1fText",
+        "Bad\x7fText",
+        "Bad\r\nText",
+    ],
+)
+def test_metadata_rejects_null_bytes_and_control_characters(
+    client: TestClient, bad_text: str
+) -> None:
+    # Creating document with bad title
+    response = client.post(
+        "/api/v1/documents",
+        json={"title": bad_text, "content": "valid"},
+        headers=headers("bad-title"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+    # Creating tag with bad name
+    tag_response = client.post(
+        "/api/v1/tags",
+        json={"name": bad_text, "color": "#ff0000"},
+        headers=headers("bad-tag"),
+    )
+    assert tag_response.status_code == 422
+    assert tag_response.json()["error"]["code"] == "validation_error"
+
+    # Issuing agent token with bad display_name / label
+    token_response = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:testbad",
+            "display_name": bad_text,
+            "label": "valid",
+            "scopes": [{"capability": "read", "path_prefix": None}],
+        },
+    )
+    assert token_response.status_code == 422
+    assert token_response.json()["error"]["code"] == "validation_error"

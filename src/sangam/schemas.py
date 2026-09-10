@@ -2,9 +2,19 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from sangam.capabilities import Capability
+
+
+def validate_metadata_text(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if "\x00" in value:
+        raise ValueError("Metadata cannot contain null bytes")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("Metadata cannot contain control characters")
+    return value
 
 
 class MutationRequest(BaseModel):
@@ -156,16 +166,31 @@ class CreateDocument(MutationRequest):
     path: str | None = None
     content_type: Literal["text/markdown", "text/html"] = "text/markdown"
 
+    @field_validator("title", mode="before")
+    @classmethod
+    def _validate_title(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class UpdateDocumentMetadata(MutationRequest):
     expected_metadata_version: int = Field(ge=0)
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def _validate_category(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class CreateTag(MutationRequest):
     name: str = Field(min_length=1, max_length=60)
     color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _validate_name(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
 
 
 class CreateFolder(MutationRequest):
@@ -173,11 +198,21 @@ class CreateFolder(MutationRequest):
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def _validate_category(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class UpdateFolderMetadata(MutationRequest):
     expected_metadata_version: int = Field(ge=0)
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _validate_category(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
 
 
 class MoveFolder(MutationRequest):
@@ -189,6 +224,11 @@ class OrganizationCreateFolder(MutationRequest):
     path: str = Field(min_length=1, max_length=500)
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _validate_category(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
 
 
 class OrganizationMoveDocument(MutationRequest):
@@ -230,6 +270,11 @@ class OrganizationUpdateDocumentMetadata(MutationRequest):
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
 
+    @field_validator("category", "expected_category", mode="before")
+    @classmethod
+    def _validate_categories(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class OrganizationUpdateFolderMetadata(MutationRequest):
     kind: Literal["update_folder_metadata"]
@@ -239,6 +284,11 @@ class OrganizationUpdateFolderMetadata(MutationRequest):
     expected_tag_ids: list[str] = Field(default_factory=list, max_length=50)
     category: str | None = Field(default=None, max_length=120)
     tag_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("category", "expected_category", mode="before")
+    @classmethod
+    def _validate_categories(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
 
 
 OrganizationOperation = Annotated[
@@ -355,16 +405,31 @@ class UpdateDocument(MutationRequest):
     title: str | None = Field(default=None, min_length=1, max_length=240)
     summary: str | None = Field(default=None, max_length=500)
 
+    @field_validator("title", "summary", mode="before")
+    @classmethod
+    def _validate_fields(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class PathMutation(MutationRequest):
     expected_revision_id: str
     path: str
     summary: str | None = Field(default=None, max_length=500)
 
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _validate_summary(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class DeleteDocument(MutationRequest):
     expected_revision_id: str
     summary: str | None = Field(default=None, max_length=500)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _validate_summary(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
 
 
 class RestoreDocument(MutationRequest):
@@ -372,11 +437,21 @@ class RestoreDocument(MutationRequest):
     revision_id: str
     summary: str | None = Field(default=None, max_length=500)
 
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _validate_summary(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class DuplicateDocument(MutationRequest):
     expected_revision_id: str
     title: str | None = Field(default=None, min_length=1, max_length=240)
     path: str | None = Field(default=None, max_length=500)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _validate_title(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
 
 
 class RevisionDiff(BaseModel):
@@ -481,12 +556,22 @@ class CreateAgentToken(MutationRequest):
     scopes: list[TokenScope] = Field(min_length=1, max_length=50)
     expires_at: str | None = None
 
+    @field_validator("display_name", "label", mode="before")
+    @classmethod
+    def _validate_agent_metadata(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
+
 
 class UpdateAgentToken(BaseModel):
     expected_version: int = Field(ge=1)
     label: str = Field(min_length=1, max_length=120)
     scopes: list[TokenScope] = Field(min_length=1, max_length=50)
     expires_at: str | None = None
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _validate_label(cls, v: str | None) -> str | None:
+        return validate_metadata_text(v)
 
 
 class OperationEvent(BaseModel):
