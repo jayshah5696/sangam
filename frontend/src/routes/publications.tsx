@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Copy, ExternalLink, FileText, Globe2, KeyRound, Pencil, RefreshCw, Search, X } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  FileText,
+  Globe2,
+  KeyRound,
+  Pencil,
+  RefreshCw,
+  Search,
+  X,
+} from 'lucide-react'
 import { api, type IssuedPublication, type Publication } from '../api'
 import { OneTimeSecret } from '../components/OneTimeSecret'
 import { StateMessage } from '../components/ui/StateMessage'
@@ -118,63 +129,15 @@ function PublicationsDashboard() {
       )}
       <div className="publication-list" aria-live="polite">
         {filtered.map((publication) => (
-          <article key={publication.publication_id} className="publication-card">
-            <div className="publication-card-main">
-              <div>
-                <Link to="/documents/$documentId" params={{ documentId: publication.document_id }}>
-                  <FileText size="var(--icon-inline)" /> {publication.document_title}
-                </Link>
-                <code>{publication.document_path ?? `/p/${publication.slug}`}</code>
-              </div>
-              <div className="publication-badges">
-                <span className={`scope-badge policy-${publication.access_policy}`}>
-                  {publication.access_policy}
-                </span>
-                <span className={`scope-badge ${publication.active ? 'publication-live' : ''}`}>
-                  {publication.active ? 'Live' : 'Unpublished'}
-                </span>
-                {publication.access_policy === 'unlisted' && (
-                  <span className="scope-badge">
-                    <KeyRound size="var(--icon-inline)" />{' '}
-                    {publication.has_active_token ? 'Token active' : 'No token'}
-                  </span>
-                )}
-              </div>
-              <small>Updated {new Date(publication.updated_at).toLocaleString()}</small>
-            </div>
-            <div className="publication-card-actions">
-              <a className="secondary-action" href={publication.url} target="_blank" rel="noreferrer">
-                <ExternalLink size="var(--icon-inline)" /> Open
-              </a>
-              <button
-                className="secondary-action"
-                onClick={() => void navigator.clipboard.writeText(publication.url)}
-              >
-                <Copy size="var(--icon-inline)" /> Copy URL
-              </button>
-              <button className="secondary-action" onClick={() => setEditing(publication)}>
-                <Pencil size="var(--icon-inline)" /> Edit
-              </button>
-              {publication.active && publication.access_policy === 'unlisted' && (
-                <button
-                  className="secondary-action"
-                  disabled={rotate.isPending}
-                  onClick={() => rotate.mutate(publication.publication_id)}
-                >
-                  <RefreshCw size="var(--icon-inline)" /> Rotate link
-                </button>
-              )}
-              {publication.active && (
-                <button
-                  className="secondary-action danger"
-                  disabled={unpublish.isPending}
-                  onClick={() => unpublish.mutate(publication)}
-                >
-                  Unpublish
-                </button>
-              )}
-            </div>
-          </article>
+          <PublicationCard
+            key={publication.publication_id}
+            publication={publication}
+            rotatePending={rotate.isPending}
+            unpublishPending={unpublish.isPending}
+            onEdit={setEditing}
+            onRotate={(id) => rotate.mutate(id)}
+            onUnpublish={(pub) => unpublish.mutate(pub)}
+          />
         ))}
         {publications.isLoading && <StateMessage compact kind="loading" title="Loading publications" />}
         {publications.isError && (
@@ -205,6 +168,99 @@ function PublicationsDashboard() {
         />
       )}
     </section>
+  )
+}
+
+function PublicationCard({
+  publication,
+  rotatePending,
+  unpublishPending,
+  onEdit,
+  onRotate,
+  onUnpublish,
+}: {
+  publication: Publication
+  rotatePending: boolean
+  unpublishPending: boolean
+  onEdit: (publication: Publication) => void
+  onRotate: (publicationId: string) => void
+  onUnpublish: (publication: Publication) => void
+}) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(publication.url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // clipboard write error handled gracefully
+    }
+  }
+
+  return (
+    <article className="publication-card">
+      <div className="publication-card-main">
+        <div>
+          <Link to="/documents/$documentId" params={{ documentId: publication.document_id }}>
+            <FileText size="var(--icon-inline)" /> {publication.document_title}
+          </Link>
+          <code>{publication.document_path ?? `/p/${publication.slug}`}</code>
+        </div>
+        <div className="publication-badges">
+          <span className={`scope-badge policy-${publication.access_policy}`}>
+            {publication.access_policy}
+          </span>
+          <span className={`scope-badge ${publication.active ? 'publication-live' : ''}`}>
+            {publication.active ? 'Live' : 'Unpublished'}
+          </span>
+          {publication.access_policy === 'unlisted' && (
+            <span className="scope-badge">
+              <KeyRound size="var(--icon-inline)" />{' '}
+              {publication.has_active_token ? 'Token active' : 'No token'}
+            </span>
+          )}
+        </div>
+        <small>Updated {new Date(publication.updated_at).toLocaleString()}</small>
+      </div>
+      <div className="publication-card-actions">
+        <a className="secondary-action" href={publication.url} target="_blank" rel="noreferrer">
+          <ExternalLink size="var(--icon-inline)" /> Open
+        </a>
+        <button
+          type="button"
+          className="secondary-action"
+          aria-label={copied ? 'URL copied to clipboard' : `Copy URL for ${publication.document_title}`}
+          onClick={() => void handleCopy()}
+        >
+          {copied ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
+          {copied ? 'Copied' : 'Copy URL'}
+        </button>
+        <button type="button" className="secondary-action" onClick={() => onEdit(publication)}>
+          <Pencil size="var(--icon-inline)" /> Edit
+        </button>
+        {publication.active && publication.access_policy === 'unlisted' && (
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={rotatePending}
+            onClick={() => onRotate(publication.publication_id)}
+          >
+            <RefreshCw size="var(--icon-inline)" /> Rotate link
+          </button>
+        )}
+        {publication.active && (
+          <button
+            type="button"
+            className="secondary-action danger"
+            disabled={unpublishPending}
+            onClick={() => onUnpublish(publication)}
+          >
+            Unpublish
+          </button>
+        )}
+      </div>
+    </article>
   )
 }
 
