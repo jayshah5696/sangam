@@ -74,6 +74,19 @@ eval-chat-against source model="openai/gpt-5.6-sol" reasoning="medium" output="t
 test-e2e:
     pnpm --dir frontend run test:e2e
 
+# Run empirical verification and performance benchmark across isolated Sangam services.
+verify-behavior port="8765" count="25":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    trap './scripts/control-sangam.sh cleanup >/dev/null 2>&1 || true' EXIT
+    ./scripts/control-sangam.sh launch "{{ port }}"
+    ./scripts/control-sangam.sh doctor
+    ./scripts/control-sangam.sh benchmark "{{ count }}"
+
+# Run a read-only doctor health and integrity check on the active verification instance.
+verify-doctor:
+    ./scripts/control-sangam.sh doctor
+
 # Update verified Playwright screenshot baselines.
 update-screenshots:
     pnpm --dir frontend run update:screenshots
