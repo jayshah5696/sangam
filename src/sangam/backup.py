@@ -35,16 +35,19 @@ def _artifact(path: Path) -> BackupArtifact:
 
 def _write_manifest(path: Path, backup: BackupSet) -> None:
     temporary = path.with_suffix(".json.tmp")
-    with temporary.open("w", encoding="utf-8") as handle:
-        handle.write(backup.model_dump_json(indent=2) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    directory = os.open(path.parent, os.O_RDONLY)
     try:
-        os.fsync(directory)
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(backup.model_dump_json(indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
-        os.close(directory)
+        temporary.unlink(missing_ok=True)
 
 
 class BackupManager:

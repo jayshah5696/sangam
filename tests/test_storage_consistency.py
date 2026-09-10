@@ -422,3 +422,52 @@ def test_backup_deletion_via_api(client: TestClient) -> None:
     # Ensure it is no longer listed
     list_after = client.get("/api/v1/backups", headers=headers("list-backups-2")).json()
     assert not any(b["backup_id"] == backup_id for b in list_after)
+
+
+def test_concurrent_read_write_atomic_file_replacement(client: TestClient, settings) -> None:
+    created = _create_text(client, path="concurrent_rw.md")
+    doc_id = created["document_id"]
+    stop_event = threading.Event()
+    read_results: list[bytes] = []
+    read_errors: list[str] = []
+
+    def reader():
+        while not stop_event.is_set():
+            res = client.get(
+                f"/api/v1/documents/{doc_id}/raw", headers=headers("concurrent-reader")
+            )
+            if res.status_code == 200:
+                read_results.append(res.content)
+            else:
+                read_errors.append(f"Status {res.status_code}: {res.text}")
+
+    reader_thread = threading.Thread(target=reader)
+    reader_thread.start()
+
+    current_rev = created["current_revision_id"]
+    for i in range(15):
+        update_res = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={
+                "expected_revision_id": current_rev,
+                "content": f"content revision iteration {i} " + ("x" * 1000),
+            },
+            headers=headers(f"concurrent-writer-{i}"),
+        )
+        assert update_res.status_code == 200
+        current_rev = update_res.json()["current_revision_id"]
+
+    stop_event.set()
+    reader_thread.join()
+
+    assert not read_errors
+    assert len(read_results) > 0
+    # Verify every read content is complete, valid, and non-zero-byte
+    for content in read_results:
+        assert len(content) > 0
+        assert content.startswith(b"base") or content.startswith(b"content revision iteration")
+
+    # Verify no temporary staging files exist in workspace directory
+    parent_dir = settings.workspace_root
+    temp_files = [f for f in parent_dir.glob("*") if ".sangam-" in f.name]
+    assert temp_files == []
