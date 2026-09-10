@@ -1630,7 +1630,7 @@ class WorkspaceAccessService:
         revision_id: str | None = None
         if isinstance(result, Document):
             result_resource_id = result.document_id
-            result_path = result.path
+            result_path = result.path if result.path is not None else path
             revision_id = result.current_revision_id
         if principal.identity_kind != "human" or action not in {
             "list",

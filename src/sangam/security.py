@@ -29,6 +29,70 @@ from sangam.schemas import Actor, AgentToken, IssuedAgentToken, TokenScope
 
 logger = logging.getLogger(__name__)
 
+SENSITIVE_HEADER_NAMES: set[str] = {
+    "authorization",
+    "sangam-publication",
+    "cf-access-jwt-assertion",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+    "api-key",
+    "x-auth-token",
+    "proxy-authorization",
+}
+
+_SAFE_KEY_EXCEPTIONS: set[str] = {
+    "token_id",
+    "token_label",
+    "token_count",
+    "has_active_token",
+    "expires_at",
+    "created_at",
+    "updated_at",
+    "revoked_at",
+}
+
+_TOKEN_PATTERN = re.compile(
+    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"
+)
+
+
+def sanitize_headers(headers: object) -> dict[str, str]:
+    """Strip sensitive headers such as tokens, cookies, and JWT assertions."""
+    result: dict[str, str] = {}
+    items = headers.items() if hasattr(headers, "items") else headers
+    for key, value in items:
+        norm_key = str(key).strip().casefold()
+        if norm_key in SENSITIVE_HEADER_NAMES or "trusted-identity" in norm_key:
+            result[str(key)] = "[REDACTED]"
+        else:
+            result[str(key)] = _TOKEN_PATTERN.sub("[REDACTED]", str(value))
+    return result
+
+
+def sanitize_sensitive_data(value: object) -> object:
+    """Recursively redact sensitive token strings, passwords, and secret fields."""
+    if isinstance(value, str):
+        return _TOKEN_PATTERN.sub("[REDACTED]", value)
+    if isinstance(value, dict):
+        sanitized_dict: dict[str, object] = {}
+        for k, v in value.items():
+            k_str = str(k)
+            k_norm = k_str.strip().casefold()
+            if k_norm not in _SAFE_KEY_EXCEPTIONS and any(
+                term in k_norm
+                for term in ("secret", "password", "token", "credential", "api_key", "auth_token")
+            ):
+                sanitized_dict[k_str] = "[REDACTED]"
+            else:
+                sanitized_dict[k_str] = sanitize_sensitive_data(v)
+        return sanitized_dict
+    if isinstance(value, list):
+        return [sanitize_sensitive_data(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(sanitize_sensitive_data(item) for item in value)
+    return value
+
 
 class AccessIdentityVerifier(Protocol):
     def verify(self, raw_token: str) -> str: ...
