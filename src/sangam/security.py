@@ -102,6 +102,10 @@ class Principal:
 def normalize_scope_prefix(value: str | None) -> str | None:
     if value is None or value.strip() in {"", "/", "/**", "**"}:
         return None
+    if "\x00" in value:
+        raise ValidationError("Token path scope prefix cannot contain null bytes")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValidationError("Token path scope prefix cannot contain control characters")
     candidate = value.strip().replace("\\", "/")
     if candidate.endswith("/**"):
         candidate = candidate[:-3]
@@ -109,6 +113,10 @@ def normalize_scope_prefix(value: str | None) -> str | None:
     pure = PurePosixPath(candidate)
     if not candidate or pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         raise ValidationError("Token path scope must be a workspace-relative prefix")
+    if any(part.startswith(".") or ".sangam-" in part for part in pure.parts):
+        raise ValidationError(
+            "Token path scope prefix cannot access hidden or reserved system locations"
+        )
     return pure.as_posix()
 
 
