@@ -100,6 +100,19 @@ just test-e2e
 pnpm --dir frontend exec playwright test e2e/workspace-organizer.spec.ts
 ```
 
+### F. Chat Agent Evaluation & Autonomy Policy
+Verify deterministic approval policies, replay lifecycles, and empirical OpenRouter tool-calling accuracy:
+```bash
+./scripts/control-sangam.sh eval [MODEL] [LIMIT]
+# Examples:
+./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" 3
+./scripts/control-sangam.sh eval "openai/gpt-5.6-luna"
+# Or via Justfile:
+just verify-eval
+```
+Evaluates 17 standardized workspace benchmark tasks (document mutations, multi-hop search, organization plans, and safety gates). Generates empirical eval manifest at `artifacts/verify-sangam/<RUN_ID>/agent-eval.json`.
+
+
 ## 5. Evidence
 
 All proof artifacts are collected under:
@@ -110,6 +123,7 @@ Required proof standards:
 - **Mutations:** Verification of returned `current_revision_id` and SQLite DB inspection.
 - **Performance:** `benchmark.json` with p50/p90/p95/p99 latency numbers and throughput metrics.
 - **Security:** 403 Forbidden assertions on unauthorized token operations.
+- **Agent Evals:** `agent-eval.json` with 17-item pass counts, tool call sequences, token usage, and latency.
 - **UI:** ARIA snapshots or screenshots with the app identity visible.
 
 ## 6. Cleanup
@@ -133,3 +147,4 @@ See `features/README.md` for individual feature verification recipes:
 - [Agent Tokens & Security](features/agent-tokens-and-security.md)
 - [File Materialization & Disk Sync](features/file-materialization.md)
 - [Trusted Preview & HTML Sandboxing](features/trusted-preview.md)
+- [Chat Agent Evals & Autonomy Policy](features/chat-agent-evals.md)

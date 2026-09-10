@@ -74,8 +74,8 @@ eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="
 test-e2e:
     pnpm --dir frontend run test:e2e
 
-# Run empirical verification and performance benchmark across isolated Sangam services.
-verify-behavior port="8765" count="25":
+# Run empirical verification, performance benchmark, and chat agent evals across isolated Sangam services.
+verify-behavior port="8765" count="25" eval_limit="3":
     #!/usr/bin/env bash
     set -Eeuo pipefail
     trap './scripts/control-sangam.sh cleanup >/dev/null 2>&1 || true' EXIT
@@ -83,6 +83,7 @@ verify-behavior port="8765" count="25":
     ./scripts/control-sangam.sh doctor
     ./scripts/control-sangam.sh seed
     ./scripts/control-sangam.sh benchmark "{{ count }}"
+    ./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" "{{ eval_limit }}"
 
 # Run a read-only doctor health and integrity check on the active verification instance.
 verify-doctor:
@@ -91,6 +92,10 @@ verify-doctor:
 # Seed rich multi-modal test data into the active verification instance.
 verify-seed:
     ./scripts/control-sangam.sh seed
+
+# Run chat agent capability policy and empirical eval verification saving evidence to artifacts.
+verify-eval model="openai/gpt-5.6-luna" limit="":
+    ./scripts/control-sangam.sh eval "{{ model }}" "{{ limit }}" 
 
 # Update verified Playwright screenshot baselines.
 update-screenshots:

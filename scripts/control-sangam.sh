@@ -20,6 +20,7 @@ Commands:
   cli <args...>               Run sangam CLI command against active verification instance
   api <METHOD> <PATH> [JSON]  Run API request against active verification instance
   benchmark [COUNT]           Run verifiable performance/latency test suite (default: 30)
+  eval [MODEL] [LIMIT]        Run chat agent policy verification and live evaluations
   cleanup                     Tear down the instance, remove temp state, retain evidence
   help                        Show this message
 EOF
@@ -338,6 +339,53 @@ PYEOF
   echo "==> Benchmark report saved to: $report_file"
 }
 
+cmd_eval() {
+  local model="${1:-openai/gpt-5.6-luna}"
+  local limit="${2:-}"
+  local report_file
+  if [[ -f "$STATE_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$STATE_FILE"
+    report_file="$SANGAM_ARTIFACTS_DIR/agent-eval.json"
+  else
+    local run_id
+    run_id="$(date +%Y%m%d%H%M%S)_$RANDOM"
+    local artifacts_dir="$ROOT_DIR/artifacts/verify-sangam/$run_id"
+    mkdir -p "$artifacts_dir"
+    report_file="$artifacts_dir/agent-eval.json"
+  fi
+
+  echo "==> Verifying Chat Agent & Capability Policy (Model: $model)..."
+  cd "$ROOT_DIR"
+
+  # 1. Deterministic capability policy and plan lifecycle verification
+  echo "  --> Verifying deterministic capability policies and organization lifecycle..."
+  uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py
+
+  # 2. Live empirical evals via OpenRouter if key is available
+  local has_key=0
+  if [[ -n "${SANGAM_OPENROUTER_API_KEY:-}" ]] || [[ -n "${OPENROUTER_API_KEY:-}" ]] || grep -qE "^SANGAM_OPENROUTER_API_KEY=.+" "$ROOT_DIR/.env" 2>/dev/null; then
+    has_key=1
+  fi
+
+  if [[ $has_key -eq 1 ]]; then
+    echo "  --> Running live agent evaluations against OpenRouter ($model)..."
+    local extra_args=()
+    if [[ -n "$limit" ]]; then
+      extra_args+=(--limit "$limit")
+    fi
+    uv run python scripts/run_chat_evals.py \
+      --model "$model" \
+      --autonomy-mode review \
+      --output "$report_file" \
+      "${extra_args[@]}"
+    echo "==> Agent eval evidence saved to: $report_file"
+  else
+    echo "  --> Notice: SANGAM_OPENROUTER_API_KEY not configured in environment or .env."
+    echo "      Deterministic chat policies verified; skipping live remote LLM eval."
+  fi
+}
+
 cmd_cleanup() {
   if [[ ! -f "$STATE_FILE" ]]; then
     echo "No active verification instance to clean up."
@@ -390,6 +438,10 @@ case "${1:-help}" in
   benchmark)
     shift
     cmd_benchmark "$@"
+    ;;
+  eval)
+    shift
+    cmd_eval "$@"
     ;;
   cleanup)
     cmd_cleanup

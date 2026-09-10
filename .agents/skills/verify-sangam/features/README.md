@@ -25,6 +25,7 @@ This directory is the maintained source for verifying user-facing Sangam behavio
 - **Performance Proof:** Record latency percentiles (p50, p90, p95, p99) and throughput (req/s) saved to `benchmark.json`.
 - **Security Proof:** Verify 403 Forbidden on unauthorized operations and CSP header compliance.
 - **Side Effects:** Verify SQLite row count and schema consistency.
+- **Agent Eval Proof:** Record item pass rate, tool sequence accuracy, token counts, and latency saved to `agent-eval.json`.
 
 ## Comprehensive Features
 
@@ -35,3 +36,4 @@ This directory is the maintained source for verifying user-facing Sangam behavio
 5. [Agent Tokens & Security](./agent-tokens-and-security.md) - Covers scoped agent bearer tokens, TTL, and role boundaries.
 6. [File Materialization & Disk Sync](./file-materialization.md) - Covers physical file syncing, bidirectional edit reconciliation, and tombstoning.
 7. [Trusted Preview & HTML Sandboxing](./trusted-preview.md) - Covers isolated preview origin, iframe sandboxing, and CSP security.
+8. [Chat Agent Evals & Autonomy Policy](./chat-agent-evals.md) - Covers LLM tool calling, structured edits, multi-hop search, and policy gates.
