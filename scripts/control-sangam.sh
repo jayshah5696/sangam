@@ -16,6 +16,7 @@ Commands:
   launch [PORT]               Launch an isolated Sangam instance on [PORT] (default: 8765)
   doctor                      Run read-only verification check against the instance
   status                      Show running verification instance status
+  seed                        Seed rich verification dataset (docs, revisions, publications, tokens)
   cli <args...>               Run sangam CLI command against active verification instance
   api <METHOD> <PATH> [JSON]  Run API request against active verification instance
   benchmark [COUNT]           Run verifiable performance/latency test suite (default: 30)
@@ -49,8 +50,11 @@ cmd_launch() {
 
   local run_id
   run_id="$(date +%Y%m%d%H%M%S)_$RANDOM"
-  local run_dir="${TMPDIR:-/tmp}/sangam-verify-$run_id"
+  local tmp_root="${TMPDIR:-/tmp}"
+  tmp_root="${tmp_root%/}"
+  local run_dir="$tmp_root/sangam-verify-$run_id"
   mkdir -p "$run_dir/database" "$run_dir/workspace" "$run_dir/backups" "$ARTIFACTS_DIR/$run_id"
+  touch "$run_dir/sangam.log"
 
   export SANGAM_DATABASE_PATH="$run_dir/database/sangam.sqlite3"
   export SANGAM_WORKSPACE_ROOT="$run_dir/workspace"
@@ -181,6 +185,18 @@ cmd_status() {
   fi
 }
 
+cmd_seed() {
+  get_active_env
+  local port="$SANGAM_VERIFY_PORT"
+  local report_file="$SANGAM_ARTIFACTS_DIR/seed.json"
+
+  echo "==> Seeding verification dataset into Sangam on port $port..."
+  cd "$ROOT_DIR"
+  uv run python scripts/seed_verification.py "$port" > "$report_file"
+  cat "$report_file"
+  echo "==> Seed data report saved to: $report_file"
+}
+
 cmd_cli() {
   get_active_env
   export SANGAM_API_URL
@@ -201,13 +217,9 @@ cmd_api() {
   local url="$SANGAM_API_URL/api/v1$path"
 
   if [[ -n "$data" ]]; then
-    curl -s -X "$method" "$url" \
-      -H "Content-Type: application/json" \
-      -H "Idempotency-Key: $idemp_key" \
-      -d "$data"
+    curl -s -X "$method" "$url"       -H "Content-Type: application/json"       -H "Idempotency-Key: $idemp_key"       -d "$data"
   else
-    curl -s -X "$method" "$url" \
-      -H "Idempotency-Key: $idemp_key"
+    curl -s -X "$method" "$url"       -H "Idempotency-Key: $idemp_key"
   fi
   echo ""
 }
@@ -363,6 +375,9 @@ case "${1:-help}" in
     ;;
   status)
     cmd_status
+    ;;
+  seed)
+    cmd_seed
     ;;
   cli)
     shift

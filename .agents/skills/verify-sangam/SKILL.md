@@ -83,7 +83,16 @@ Measures:
 - FTS5 search query latency (searches/sec, p50, p95)
 - SQLite row consistency confirmation
 
-### D. Browser UI Driving (Playwright)
+### D. Deterministic Data Seeding
+Populate the instance with multi-modal verification assets (Markdown, HTML widgets, binary PDFs, and scoped agent tokens):
+```bash
+./scripts/control-sangam.sh seed
+# Or via Justfile:
+just verify-seed
+```
+Generates verifiable proof and FTS5 search verification manifest to `artifacts/verify-sangam/<RUN_ID>/seed.json`.
+
+### E. Browser UI Driving (Playwright)
 Run the dedicated browser test suite:
 ```bash
 just test-e2e

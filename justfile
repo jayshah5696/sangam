@@ -81,11 +81,16 @@ verify-behavior port="8765" count="25":
     trap './scripts/control-sangam.sh cleanup >/dev/null 2>&1 || true' EXIT
     ./scripts/control-sangam.sh launch "{{ port }}"
     ./scripts/control-sangam.sh doctor
+    ./scripts/control-sangam.sh seed
     ./scripts/control-sangam.sh benchmark "{{ count }}"
 
 # Run a read-only doctor health and integrity check on the active verification instance.
 verify-doctor:
     ./scripts/control-sangam.sh doctor
+
+# Seed rich multi-modal test data into the active verification instance.
+verify-seed:
+    ./scripts/control-sangam.sh seed
 
 # Update verified Playwright screenshot baselines.
 update-screenshots:
