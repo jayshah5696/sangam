@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, getRouteApi, Link, redirect, useNavigate } from '@tanstack/react-router'
 import {
   Check,
-  Activity,
   Archive,
   FolderTree,
   MonitorCog,
@@ -395,19 +394,7 @@ export function WorkspaceSettings() {
           )}
 
           {activeCategory === 'models' && <ChatModelSettings />}
-          {activeCategory === 'agents' && (
-            <>
-              <AgentAccessSettings />
-              <SettingsDestination
-                id="agent-activity"
-                icon={Activity}
-                title="Agent activity"
-                description="Review accepted, denied, conflicted, and failed agent operations."
-                to="/activity"
-                action="Review activity"
-              />
-            </>
-          )}
+          {activeCategory === 'agents' && <AgentAccessSettings />}
 
           {activeCategory === 'operations' && (
             <SettingsSection

@@ -195,14 +195,28 @@ export function buildNameDescSortComparator(): (a: FileTreeSortEntry, b: FileTre
 export function buildModifiedSortComparator(
   timestamps: Map<string, string>,
 ): (a: FileTreeSortEntry, b: FileTreeSortEntry) => number {
+  // OPTIMIZATION: Precompute maximum updated_at timestamp for every directory prefix.
+  // Sorting calls the comparator O(N log N) times. Pre-aggregating directory timestamps
+  // in O(N * D) time reduces directory timestamp lookups during comparison from
+  // an O(N) linear scan over all timestamps to O(1) Map lookups.
+  const dirMaxTimestamps = new Map<string, string>()
+  for (const [path, ts] of timestamps) {
+    let idx = path.indexOf('/')
+    while (idx !== -1) {
+      const dir = path.slice(0, idx)
+      const current = dirMaxTimestamps.get(dir)
+      if (!current || ts > current) {
+        dirMaxTimestamps.set(dir, ts)
+      }
+      idx = path.indexOf('/', idx + 1)
+    }
+  }
+
   const timestampFor = (entry: WorkspaceSortNode): string => {
     if (!entry.isDirectory) return timestamps.get(entry.path) ?? ''
-    let max = ''
-    for (const [path, ts] of timestamps) {
-      if (path.startsWith(entry.path + '/') && ts > max) max = ts
-    }
-    return max
+    return dirMaxTimestamps.get(entry.path) ?? ''
   }
+
   return (left, right) =>
     compareWorkspaceHierarchy(left, right, (leftSibling, rightSibling) => {
       if (leftSibling.isDirectory !== rightSibling.isDirectory) {

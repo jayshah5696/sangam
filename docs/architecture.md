@@ -62,6 +62,14 @@ Agents never share the human's session. Each agent gets a bearer token created i
 
 Every agent mutation must carry the expected revision and an idempotency key. Conflicts return `409` with the current state so the agent can re-read and retry. All agent actions are recorded in an append-only activity ledger visible in the UI.
 
+`GET /api/v1/activity` provides bounded chronological pages and exact filters;
+`GET /api/v1/activity/summary` computes bounded outcome, actor, document,
+publication, problem, and token-health aggregates in SQLite. The client never
+derives workspace totals from a page of events. `operation_id` is the only
+durable grouping key and is not a session or run identifier. The ledger is
+currently retained without an automatic deletion policy; retention controls
+require a separate, explicit migration and operating policy.
+
 Chat-grounded edits go further: the assistant produces a **proposal** (a suggested new revision) that the human reviews and applies. Proposals are recoverable and pinned to the revision they were generated from.
 
 ## PDF research

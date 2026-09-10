@@ -44,6 +44,14 @@ def test_idempotency_key_reuse_with_different_payload_is_rejected(client: TestCl
         "projects\\note.md",
         "projects/note.txt",
         "",
+        "note\x00.md",
+        "note\n.md",
+        "note\r.md",
+        "note\x1f.md",
+        "note\x7f.md",
+        ".sangam-trash/exploit.md",
+        ".git/config.md",
+        "sub/.sangam-trash/exploit.md",
     ],
 )
 def test_invalid_paths_never_escape_workspace(client: TestClient, invalid_path: str) -> None:

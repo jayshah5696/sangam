@@ -29,6 +29,70 @@ from sangam.schemas import Actor, AgentToken, IssuedAgentToken, TokenScope
 
 logger = logging.getLogger(__name__)
 
+SENSITIVE_HEADER_NAMES: set[str] = {
+    "authorization",
+    "sangam-publication",
+    "cf-access-jwt-assertion",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+    "api-key",
+    "x-auth-token",
+    "proxy-authorization",
+}
+
+_SAFE_KEY_EXCEPTIONS: set[str] = {
+    "token_id",
+    "token_label",
+    "token_count",
+    "has_active_token",
+    "expires_at",
+    "created_at",
+    "updated_at",
+    "revoked_at",
+}
+
+_TOKEN_PATTERN = re.compile(
+    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"
+)
+
+
+def sanitize_headers(headers: object) -> dict[str, str]:
+    """Strip sensitive headers such as tokens, cookies, and JWT assertions."""
+    result: dict[str, str] = {}
+    items = headers.items() if hasattr(headers, "items") else headers
+    for key, value in items:
+        norm_key = str(key).strip().casefold()
+        if norm_key in SENSITIVE_HEADER_NAMES or "trusted-identity" in norm_key:
+            result[str(key)] = "[REDACTED]"
+        else:
+            result[str(key)] = _TOKEN_PATTERN.sub("[REDACTED]", str(value))
+    return result
+
+
+def sanitize_sensitive_data(value: object) -> object:
+    """Recursively redact sensitive token strings, passwords, and secret fields."""
+    if isinstance(value, str):
+        return _TOKEN_PATTERN.sub("[REDACTED]", value)
+    if isinstance(value, dict):
+        sanitized_dict: dict[str, object] = {}
+        for k, v in value.items():
+            k_str = str(k)
+            k_norm = k_str.strip().casefold()
+            if k_norm not in _SAFE_KEY_EXCEPTIONS and any(
+                term in k_norm
+                for term in ("secret", "password", "token", "credential", "api_key", "auth_token")
+            ):
+                sanitized_dict[k_str] = "[REDACTED]"
+            else:
+                sanitized_dict[k_str] = sanitize_sensitive_data(v)
+        return sanitized_dict
+    if isinstance(value, list):
+        return [sanitize_sensitive_data(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(sanitize_sensitive_data(item) for item in value)
+    return value
+
 
 class AccessIdentityVerifier(Protocol):
     def verify(self, raw_token: str) -> str: ...
@@ -102,6 +166,10 @@ class Principal:
 def normalize_scope_prefix(value: str | None) -> str | None:
     if value is None or value.strip() in {"", "/", "/**", "**"}:
         return None
+    if "\x00" in value:
+        raise ValidationError("Token path scope prefix cannot contain null bytes")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValidationError("Token path scope prefix cannot contain control characters")
     candidate = value.strip().replace("\\", "/")
     if candidate.endswith("/**"):
         candidate = candidate[:-3]
@@ -109,6 +177,10 @@ def normalize_scope_prefix(value: str | None) -> str | None:
     pure = PurePosixPath(candidate)
     if not candidate or pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         raise ValidationError("Token path scope must be a workspace-relative prefix")
+    if any(part.startswith(".") or ".sangam-" in part for part in pure.parts):
+        raise ValidationError(
+            "Token path scope prefix cannot access hidden or reserved system locations"
+        )
     return pure.as_posix()
 
 
@@ -138,14 +210,23 @@ class IdentityService:
         return [Actor.model_validate(dict(row)) for row in rows]
 
     def list_tokens(self) -> list[AgentToken]:
+        denied_since = (datetime.now(UTC) - timedelta(days=1)).isoformat().replace("+00:00", "Z")
         with self.database.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT t.*, a.display_name AS actor_display_name
+                SELECT t.*, a.display_name AS actor_display_name,
+                    COALESCE(denied.recent_denied_count, 0) AS recent_denied_count
                 FROM actor_tokens t
                 JOIN actors a ON a.actor_id = t.actor_id
+                LEFT JOIN (
+                    SELECT token_id, COUNT(*) AS recent_denied_count
+                    FROM operation_events
+                    WHERE outcome = 'denied' AND created_at >= ? AND token_id IS NOT NULL
+                    GROUP BY token_id
+                ) denied ON denied.token_id = t.token_id
                 ORDER BY t.created_at DESC, t.token_id DESC
-                """
+                """,
+                (denied_since,),
             ).fetchall()
             scope_rows = connection.execute(
                 """
@@ -161,6 +242,7 @@ class IdentityService:
                     connection,
                     row,
                     scopes=scopes_by_token.get(row["token_id"], []),
+                    recent_denied_count=row["recent_denied_count"],
                 )
                 for row in rows
             ]
@@ -220,11 +302,8 @@ class IdentityService:
                 ).fetchone()
                 if not old or old["actor_id"] != normalized_actor_id:
                     raise NotFoundError("Token to rotate was not found for this agent")
-                if old["revoked_at"] is not None or (
-                    old["expires_at"] is not None
-                    and self._parse_timestamp(old["expires_at"]) <= datetime.now(UTC)
-                ):
-                    raise CredentialConflictError("Only an active agent token can be rotated")
+                if old["revoked_at"] is not None:
+                    raise CredentialConflictError("Revoked agent tokens cannot be rotated")
                 connection.execute(
                     """
                     UPDATE actor_tokens SET revoked_at = COALESCE(revoked_at, ?)
@@ -279,12 +358,21 @@ class IdentityService:
             if row is None:
                 raise NotFoundError(f"Agent token not found: {token_id}")
             token = self._token_from_row(connection, row)
+        now_dt = datetime.now(UTC)
+        expires_at = token.expires_at
+        if expires_at is not None:
+            old_expiry = self._parse_timestamp(expires_at)
+            if old_expiry <= now_dt:
+                created_dt = self._parse_timestamp(token.created_at)
+                duration = max(old_expiry - created_dt, timedelta(days=7))
+                expires_at = (now_dt + duration).astimezone(UTC).isoformat(timespec="microseconds")
+
         return self.issue_agent_token(
             actor_id=token.actor_id,
             display_name=token.actor_display_name,
             label=token.label,
             scopes=token.scopes,
-            expires_at=token.expires_at,
+            expires_at=expires_at,
             rotated_from_token_id=token_id,
         )
 
@@ -317,12 +405,16 @@ class IdentityService:
             if row["revoked_at"] is not None:
                 raise CredentialConflictError("Revoked agent tokens cannot be edited")
             now_datetime = datetime.now(UTC)
+            normalized_expiry = self._validate_update_expiry(expires_at, now=now_datetime)
             if (
                 row["expires_at"] is not None
                 and self._parse_timestamp(row["expires_at"]) <= now_datetime
+                and normalized_expiry is not None
+                and self._parse_timestamp(normalized_expiry) <= now_datetime
             ):
-                raise CredentialConflictError("Expired agent tokens cannot be edited")
-            normalized_expiry = self._validate_update_expiry(expires_at, now=now_datetime)
+                raise ValidationError(
+                    "To re-activate an expired token, set its expiration to the future"
+                )
             if row["version"] != expected_version:
                 raise ConflictError(
                     "Agent token changed since it was loaded",
@@ -506,6 +598,7 @@ class IdentityService:
         row: sqlite3.Row,
         *,
         scopes: list[sqlite3.Row] | None = None,
+        recent_denied_count: int = 0,
     ) -> AgentToken:
         if scopes is None:
             scopes = connection.execute(
@@ -530,6 +623,7 @@ class IdentityService:
             revoked_at=row["revoked_at"],
             last_used_at=row["last_used_at"],
             rotated_from_token_id=row["rotated_from_token_id"],
+            recent_denied_count=recent_denied_count,
         )
 
 

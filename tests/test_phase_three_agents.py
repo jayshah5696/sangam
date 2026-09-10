@@ -213,6 +213,124 @@ def test_activity_date_range_filters_inclusive_utc_boundaries(client: TestClient
     assert invalid.json()["error"]["message"] == "Activity start must not be after its end"
 
 
+def test_activity_filters_and_server_summary_are_bounded_safe_and_enriched(
+    client: TestClient,
+) -> None:
+    document = create_human_document(
+        client, title="Agent field notes", path="agents/field-notes.md", key="field-notes"
+    )
+    issued = issue_token(
+        client,
+        scopes=[{"capability": "read", "path_prefix": "agents"}],
+    )
+    token = issued["token"]
+    token_id = issued["token_id"]
+    read = client.get(f"/api/v1/documents/{document['document_id']}", headers=bearer(token))
+    assert read.status_code == 200
+    denied = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "denied-summary-create"),
+        json={"title": "Denied body", "content": "must stay private", "path": "outside.md"},
+    )
+    assert denied.status_code == 403
+
+    activity = client.get(
+        "/api/v1/activity",
+        params={"token_id": token_id, "resource_type": "document"},
+    )
+    assert activity.status_code == 200
+    rows = activity.json()
+    assert {row["outcome"] for row in rows} == {"accepted", "denied"}
+    denied_event = next(row for row in rows if row["outcome"] == "denied")
+
+    exact = client.get(
+        "/api/v1/activity",
+        params={
+            "token_id": token_id,
+            "action": denied_event["action"],
+            "resource_type": denied_event["resource_type"],
+            "path": "outside",
+            "error_code": denied_event["error_code"],
+            "operation_id": denied_event["operation_id"],
+        },
+    )
+    assert [row["event_id"] for row in exact.json()] == [denied_event["event_id"]]
+
+    summary_response = client.get(
+        "/api/v1/activity/summary",
+        params={"token_id": token_id},
+    )
+    assert summary_response.status_code == 200, summary_response.text
+    summary = summary_response.json()
+    assert summary["counts"]["total"] == 2
+    assert summary["counts"]["operations"] == 2
+    assert summary["counts"]["accepted"] == 1
+    assert summary["counts"]["denied"] == 1
+    assert summary["actors"][0]["reads"] == 1
+    assert summary["read_documents"][0]["title"] == "Agent field notes"
+    assert summary["problems"][0]["category"] == "access"
+    assert summary["problems"][0]["capability"] == "create"
+    assert summary["problems"][0]["acknowledged_at"] is None
+    assert summary["attention_count"] == 1
+    assert summary["acknowledged_problems"] == []
+    assert summary["access_health"]["active_tokens"] == 1
+    assert summary["access_health"]["recent_denied"] == 1
+    serialized = json.dumps(summary)
+    assert token not in serialized
+    assert "must stay private" not in serialized
+    listed_token = next(
+        item for item in client.get("/api/v1/agent-tokens").json() if item["token_id"] == token_id
+    )
+    assert listed_token["recent_denied_count"] == 1
+
+    problem_event_id = summary["problems"][0]["latest_event_id"]
+    acknowledged = client.post(f"/api/v1/activity/problems/{problem_event_id}/acknowledgement")
+    assert acknowledged.status_code == 200, acknowledged.text
+    assert acknowledged.json()["event_id"] == problem_event_id
+
+    hidden_summary = client.get("/api/v1/activity/summary", params={"token_id": token_id}).json()
+    assert hidden_summary["attention_count"] == 0
+    assert hidden_summary["access_health"]["attention_count"] == 0
+    assert hidden_summary["access_health"]["recent_denied"] == 1
+    assert hidden_summary["problems"] == []
+    assert hidden_summary["acknowledged_problems"][0]["latest_event_id"] == problem_event_id
+    assert hidden_summary["acknowledged_problems"][0]["acknowledged_at"] is not None
+    assert any(row["event_id"] == problem_event_id for row in client.get("/api/v1/activity").json())
+
+    repeated_denial = client.post(
+        "/api/v1/documents",
+        headers=bearer(token, "reopened-summary-create"),
+        json={"title": "Denied again", "content": "private", "path": "outside.md"},
+    )
+    assert repeated_denial.status_code == 403
+    reopened_summary = client.get("/api/v1/activity/summary", params={"token_id": token_id}).json()
+    reopened_event_id = reopened_summary["problems"][0]["latest_event_id"]
+    assert reopened_event_id != problem_event_id
+    assert reopened_summary["attention_count"] == 1
+    assert reopened_summary["access_health"]["attention_count"] == 1
+    assert reopened_summary["acknowledged_problems"] == []
+
+    client.post(f"/api/v1/activity/problems/{reopened_event_id}/acknowledgement").raise_for_status()
+    restored = client.delete(f"/api/v1/activity/problems/{reopened_event_id}/acknowledgement")
+    assert restored.status_code == 204
+    assert (
+        client.get("/api/v1/activity/summary", params={"token_id": token_id}).json()[
+            "attention_count"
+        ]
+        == 1
+    )
+
+    accepted_event_id = next(row["event_id"] for row in rows if row["outcome"] == "accepted")
+    invalid_acknowledgement = client.post(
+        f"/api/v1/activity/problems/{accepted_event_id}/acknowledgement"
+    )
+    assert invalid_acknowledgement.status_code == 422
+
+    attention = client.get("/api/v1/activity", params={"token_id": token_id, "attention": True})
+    assert [row["outcome"] for row in attention.json()] == ["denied", "denied"]
+    assert client.get("/api/v1/activity", params={"limit": 201}).status_code == 422
+
+
 def test_token_listing_bulk_loads_scopes_and_agent_names_are_immutable(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -387,6 +505,13 @@ def test_agent_scope_enforcement_conflict_and_reviewable_activity(client: TestCl
     assert ("update", "denied") in outcomes
     assert ("move", "denied") in outcomes
     assert ("update", "conflict") in outcomes
+    summary = client.get(
+        "/api/v1/activity/summary",
+        params={"actor_id": "agent:researcher"},
+    ).json()
+    conflict = next(problem for problem in summary["problems"] if problem["category"] == "conflict")
+    assert conflict["expected_revision_id"] == report["current_revision_id"]
+    assert conflict["current_revision_id"] == updated.json()["current_revision_id"]
     serialized = json.dumps(activity)
     assert token not in serialized
     assert "Agent revision" not in serialized
@@ -663,6 +788,66 @@ def test_expired_and_malformed_tokens_fail_without_secret_disclosure(client: Tes
     assert malformed.status_code == 401
     assert "definitely-not-a-token" not in malformed.text
     assert malformed.headers["X-Operation-ID"]
+
+
+def test_extend_and_rotate_expired_agent_token(client: TestClient) -> None:
+    issued = issue_token(client)
+    raw_token = issued["token"]
+    token_id = issued["token_id"]
+    services = client.app.state.services
+    with services.documents.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE actor_tokens
+            SET created_at = '2020-01-01T00:00:00+00:00',
+                expires_at = '2021-01-01T00:00:00+00:00'
+            WHERE token_id = ?
+            """,
+            (token_id,),
+        )
+    # Bearer token is rejected because it is expired
+    expired_call = client.get("/api/v1/documents", headers=bearer(raw_token))
+    assert expired_call.status_code == 401
+    assert "expired" in expired_call.json()["error"]["message"].lower()
+
+    # Extending the expired token to future reactivates the SAME secret
+    future_expiry = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+    update_res = client.patch(
+        f"/api/v1/agent-tokens/{token_id}",
+        json={
+            "expected_version": issued["version"],
+            "label": "Extended token",
+            "scopes": issued["scopes"],
+            "expires_at": future_expiry,
+        },
+    )
+    assert update_res.status_code == 200, update_res.text
+    updated_data = update_res.json()
+    assert updated_data["label"] == "Extended token"
+    assert updated_data["version"] == issued["version"] + 1
+
+    # Now the ORIGINAL raw token works immediately!
+    reactivated_call = client.get("/api/v1/documents", headers=bearer(raw_token))
+    assert reactivated_call.status_code == 200
+
+    # Rotating an expired token also works and sets a future expiration
+    with services.documents.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE actor_tokens
+            SET expires_at = '2021-01-01T00:00:00+00:00'
+            WHERE token_id = ?
+            """,
+            (token_id,),
+        )
+    rotated_res = client.post(f"/api/v1/agent-tokens/{token_id}/rotate")
+    assert rotated_res.status_code == 200, rotated_res.text
+    rotated_data = rotated_res.json()
+    assert rotated_data["token_id"] != token_id
+    assert rotated_data["rotated_from_token_id"] == token_id
+    assert rotated_data["expires_at"] is not None
+    assert datetime.fromisoformat(rotated_data["expires_at"]) > datetime.now(UTC)
+    assert client.get("/api/v1/documents", headers=bearer(rotated_data["token"])).status_code == 200
 
 
 def test_list_search_and_document_payloads_are_bounded(tmp_path: Path) -> None:

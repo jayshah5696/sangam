@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sangam · Agent Token Management UX Architecture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --card-bg: #14171f;
+      --card-subtle: #1a1e28;
+      --border: #232836;
+      --border-focus: #3d465d;
+      --text: #f0f3f8;
+      --text-muted: #8b95a8;
+      --text-dim: #5a6476;
+      --accent: #3b82f6;
+      --accent-glow: rgba(59, 130, 246, 0.15);
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.12);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.12);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.12);
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      padding: 40px 24px 100px;
+    }
+
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+
+    header.doc-header {
+      margin-bottom: 40px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+    }
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #60a5fa;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 14px;
+    }
+    h1 {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 15px;
+      color: var(--text-muted);
+      max-width: 740px;
+    }
+
+    /* Diagnosis Section */
+    .diagnosis-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+    .diag-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .diag-card.before {
+      border-left: 4px solid var(--danger);
+    }
+    .diag-card.after {
+      border-left: 4px solid var(--success);
+    }
+    .diag-card h3 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .diag-card ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .diag-card li {
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .diag-card li strong {
+      color: var(--text);
+    }
+    .icon-fail { color: var(--danger); font-size: 15px; line-height: 1.2; }
+    .icon-pass { color: var(--success); font-size: 15px; line-height: 1.2; }
+
+    /* Comparison Table for Language */
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .table-wrap {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 40px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+    th {
+      background: var(--card-subtle);
+      padding: 12px 16px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    .term-bad {
+      color: #f87171;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .term-good {
+      color: #34d399;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* Live Interactive Sandbox */
+    .sandbox-banner {
+      background: linear-gradient(180deg, #161b26 0%, #0d1117 100%);
+      border: 1px solid #2d3748;
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .sandbox-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .sandbox-header h2 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .interactive-tag {
+      background: var(--accent);
+      color: white;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      letter-spacing: 0.04em;
+    }
+
+    /* Token Row in Mock */
+    .mock-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .mock-row {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s;
+    }
+    .mock-row:hover {
+      border-color: var(--border-focus);
+    }
+    .mock-row.expired {
+      border-left: 3px solid var(--warning);
+      background: rgba(245, 158, 11, 0.03);
+    }
+    .mock-row.active {
+      border-left: 3px solid var(--success);
+    }
+    .mock-row.revoked {
+      opacity: 0.6;
+      border-left: 3px solid var(--text-dim);
+    }
+
+    .row-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .row-title-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .row-title {
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .badge.active-badge {
+      background: var(--success-bg);
+      color: var(--success);
+    }
+    .badge.expired-badge {
+      background: var(--warning-bg);
+      color: var(--warning);
+    }
+    .badge.revoked-badge {
+      background: rgba(255,255,255,0.06);
+      color: var(--text-dim);
+    }
+    .row-meta {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .row-scopes {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .scope-pill {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 6px;
+      background: var(--card-subtle);
+      border-radius: 4px;
+      color: #94a3b8;
+    }
+
+    .row-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    button.btn {
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--card-subtle);
+      color: var(--text);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      font-family: var(--font-sans);
+    }
+    button.btn:hover {
+      background: #252b3b;
+      border-color: var(--border-focus);
+    }
+    button.btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+    button.btn-primary:hover {
+      background: #2563eb;
+    }
+    button.btn-renew {
+      background: color-mix(in srgb, var(--warning) 15%, var(--card-subtle));
+      border-color: var(--warning);
+      color: #fbbf24;
+      font-weight: 700;
+    }
+    button.btn-renew:hover {
+      background: color-mix(in srgb, var(--warning) 25%, var(--card-subtle));
+    }
+    button.btn-danger {
+      color: #f87171;
+    }
+    button.btn-danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: var(--danger);
+    }
+
+    /* Collapsible Drawer */
+    .history-drawer {
+      margin-top: 16px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.25);
+    }
+    .history-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+      user-select: none;
+    }
+    .history-toggle:hover { color: var(--text); }
+    .history-content {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* Modals for Demo */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.78);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+    }
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-box {
+      background: #141824;
+      border: 1px solid var(--border-focus);
+      box-shadow: 0 24px 48px rgba(0,0,0,0.6);
+      width: 100%;
+      max-width: 520px;
+      border-radius: 14px;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      transform: translateY(12px);
+      transition: transform 0.18s ease;
+    }
+    .modal-overlay.open .modal-box {
+      transform: translateY(0);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .modal-header h3 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .modal-header p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+    .close-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 22px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 4px;
+    }
+    .close-btn:hover { color: var(--text); }
+
+    .callout {
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .callout-info {
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      color: #93c5fd;
+    }
+    .callout-warning {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #fcd34d;
+    }
+
+    .preset-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .preset-btn {
+      padding: 7px 12px;
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 7px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .preset-btn:hover { border-color: var(--accent); }
+    .preset-btn.active {
+      background: rgba(59, 130, 246, 0.18);
+      border-color: var(--accent);
+      color: #60a5fa;
+      font-weight: 700;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .form-group label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    input[type="text"] {
+      background: #0d1017;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header class="doc-header">
+    <div class="badge-pill">UX Architecture Blueprint</div>
+    <h1>Agent Token Experience & Clarity Redesign</h1>
+    <p class="subtitle">
+      A human-centered overhaul that solves zombie row proliferation, eliminates cryptographic confusion, and provides distinct, intuitive workflows for renewing vs rotating credentials.
+    </p>
+  </header>
+
+  <!-- 1. The Core UX Flaws -->
+  <h2 class="section-title">1. Why the Previous Flow Was Disorienting</h2>
+  <div class="diagnosis-grid">
+    <div class="diag-card before">
+      <h3 style="color: #f87171;">The Previous Experience</h3>
+      <ul>
+        <li>
+          <span class="icon-fail">✕</span>
+          <div>
+            <strong>Silent 1-Click Rotation:</strong> Clicking "Rotate" instantly revoked the old key and created a new one without asking any questions or explaining what happened.
+          </div>
+        </li>
+        <li>
+          <span class="icon-fail">✕</span>
+          <div>
+            <strong>Zombie Duplicate Rows:</strong> Revoked tokens remained directly inside the main list. Rotating 3 times created 4 identical-looking rows with confusing "Revoked" timestamps.
+          </div>
+        </li>
+        <li>
+          <span class="icon-fail">✕</span>
+          <div>
+            <strong>Action Conflict in Edit Window:</strong> Having both <code>Save token</code> and <code>Rotate secret instead</code> in the same dialog forced users to guess which one extends the token.
+          </div>
+        </li>
+        <li>
+          <span class="icon-fail">✕</span>
+          <div>
+            <strong>Cryptographic Jargon:</strong> Terminology like <em>"Edit token authority"</em> and <em>"Rotate secret"</em> obscured the user's practical goal: <em>"Make my agent work again."</em>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <div class="diag-card after">
+      <h3 style="color: #34d399;">The Redesigned UX</h3>
+      <ul>
+        <li>
+          <span class="icon-pass">✓</span>
+          <div>
+            <strong>One-Click "Renew Token" on Expired Rows:</strong> Directly opens a focused renewal modal pre-set to +7 days. The user just clicks "Renew token".
+          </div>
+        </li>
+        <li>
+          <span class="icon-pass">✓</span>
+          <div>
+            <strong>Collapsible Revocation History:</strong> Main list displays ONLY active or expired tokens. Historical predecessors are cleanly grouped under an expandable drawer.
+          </div>
+        </li>
+        <li>
+          <span class="icon-pass">✓</span>
+          <div>
+            <strong>Single Unambiguous Save Action:</strong> No conflicting "Rotate" button inside the Edit/Renew modal. Exactly one clear primary action per window.
+          </div>
+        </li>
+        <li>
+          <span class="icon-pass">✓</span>
+          <div>
+            <strong>Dedicated Rotate Modal with Warning:</strong> Clicking Rotate opens a modal explaining that existing runners will be invalidated, with a new duration selector.
+          </div>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 2. Language Clarity Matrix -->
+  <h2 class="section-title">2. Plain Human Language vs. Cryptographic Jargon</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>User Intent</th>
+          <th>Confusing Tech Jargon (Removed)</th>
+          <th>Clear Human Language (Adopted)</th>
+          <th>What Actually Happens Under the Hood</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Token expired, want agent to work</strong></td>
+          <td><span class="term-bad">Rotate secret instead / Edit authority</span></td>
+          <td><span class="term-good">Renew token</span></td>
+          <td>Keeps existing secret key; pushes expiration date forward. Agent runner `.env` does not need to change.</td>
+        </tr>
+        <tr>
+          <td><strong>Key leaked or need new secret</strong></td>
+          <td><span class="term-bad">Silent 1-click Rotate button</span></td>
+          <td><span class="term-good">Rotate key... (with warning modal)</span></td>
+          <td>Invalidates previous secret; issues brand new raw secret with one-time copy modal.</td>
+        </tr>
+        <tr>
+          <td><strong>Cleaning up old tokens</strong></td>
+          <td><span class="term-bad">Multiple identical rows in same list</span></td>
+          <td><span class="term-good">▾ Inactive & rotated tokens (3 predecessors)</span></td>
+          <td>Old predecessors tucked away; main screen stays focused on active runners.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 3. Interactive Prototype -->
+  <div class="sandbox-banner">
+    <div class="sandbox-header">
+      <div>
+        <h2>3. Interactive Experience Prototype</h2>
+        <p style="color: var(--text-muted); font-size: 14px; margin-top: 3px;">
+          Try clicking <strong>Renew token</strong>, <strong>Rotate key...</strong>, and the <strong>history toggle</strong> below.
+        </p>
+      </div>
+      <span class="interactive-tag">TRY LIVE DEMO</span>
+    </div>
+
+    <div class="mock-list">
+      <!-- Active Token -->
+      <div class="mock-row active">
+        <div class="row-info">
+          <div class="row-title-line">
+            <span class="row-title">Researcher</span>
+            <span class="badge active-badge">Active</span>
+          </div>
+          <div class="row-meta">agent:researcher · Research workspace · Expires Sep 12, 2026 (7 days left)</div>
+          <div class="row-scopes">
+            <span class="scope-pill">read:/agents/**</span>
+            <span class="scope-pill">search:/agents/**</span>
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="btn" onclick="openEditModal('Researcher', 'Sep 12, 2026')">Edit</button>
+          <button class="btn" onclick="openRotateModal('Researcher')">Rotate key...</button>
+          <button class="btn btn-danger">Revoke</button>
+        </div>
+      </div>
+
+      <!-- Expired Token -->
+      <div class="mock-row expired">
+        <div class="row-info">
+          <div class="row-title-line">
+            <span class="row-title">Documentation Writer</span>
+            <span class="badge expired-badge">Expired yesterday</span>
+          </div>
+          <div class="row-meta">agent:writer · Docs workspace · Stopped working Sep 3, 2026</div>
+          <div class="row-scopes">
+            <span class="scope-pill">read:/docs/**</span>
+            <span class="scope-pill">update:/docs/**</span>
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-renew" onclick="openRenewModal('Documentation Writer')">
+            ↻ Renew token
+          </button>
+          <button class="btn" onclick="openRotateModal('Documentation Writer')">Rotate key...</button>
+          <button class="btn btn-danger">Revoke</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsible History for Revoked Tokens -->
+    <div class="history-drawer">
+      <div class="history-toggle" onclick="toggleHistory()">
+        <span id="history-label">▾ Inactive & rotated tokens (3 predecessors)</span>
+        <span style="font-size: 11px; color: var(--text-dim);">Click to hide / show</span>
+      </div>
+      <div class="history-content" id="history-content">
+        <div class="mock-row revoked">
+          <div class="row-info">
+            <div class="row-title-line">
+              <span class="row-title">Researcher (Predecessor)</span>
+              <span class="badge revoked-badge">Revoked via rotation</span>
+            </div>
+            <div class="row-meta">Revoked Sep 4, 2026, 6:32 PM · Rotated to active token</div>
+          </div>
+          <div class="row-actions">
+            <span style="font-size: 12px; color: var(--text-dim);">Replaced</span>
+          </div>
+        </div>
+
+        <div class="mock-row revoked">
+          <div class="row-info">
+            <div class="row-title-line">
+              <span class="row-title">Researcher (Predecessor)</span>
+              <span class="badge revoked-badge">Revoked via rotation</span>
+            </div>
+            <div class="row-meta">Revoked Sep 4, 2026, 6:31 PM</div>
+          </div>
+          <div class="row-actions">
+            <span style="font-size: 12px; color: var(--text-dim);">Replaced</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 1: RENEW TOKEN -->
+<div class="modal-overlay" id="renew-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <h3>Renew Agent Token</h3>
+        <p><span id="renew-agent-name">Documentation Writer</span> · Instant reactivation</p>
+      </div>
+      <button class="close-btn" onclick="closeModals()">&times;</button>
+    </div>
+
+    <div class="callout callout-info">
+      <div style="font-size: 18px;">💡</div>
+      <div>
+        <strong>No configuration needed!</strong>
+        <div>Your agent will immediately resume running using its <strong>existing secret</strong>. You do not need to update your runner or `.env`.</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Extend active duration</label>
+      <div class="preset-pills">
+        <button type="button" class="preset-btn active">+7 Days (Default)</button>
+        <button type="button" class="preset-btn">+30 Days</button>
+        <button type="button" class="preset-btn">+90 Days</button>
+        <button type="button" class="preset-btn">No expiration</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>New expiration date & time</label>
+      <input type="text" value="September 12, 2026 · 06:30 PM (7 days from now)" readonly style="color: #60a5fa; font-weight: 600;" />
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModals()">Cancel</button>
+      <button class="btn btn-primary" style="background: var(--success); border-color: var(--success);" onclick="alert('Token renewed successfully! Agent continues running with existing secret.'); closeModals();">
+        ✓ Renew token
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 2: ROTATE SECRET KEY -->
+<div class="modal-overlay" id="rotate-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <h3 style="color: #fbbf24;">Rotate Secret Key</h3>
+        <p><span id="rotate-agent-name">Researcher</span> · Replace secret credential</p>
+      </div>
+      <button class="close-btn" onclick="closeModals()">&times;</button>
+    </div>
+
+    <div class="callout callout-warning">
+      <div style="font-size: 18px;">⚠️</div>
+      <div>
+        <strong>Runner disruption warning:</strong>
+        <div>Rotating will <strong>immediately revoke the old secret</strong>. Your agent runner will stop working until you update it with the new key.</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Choose expiration for the new secret</label>
+      <div class="preset-pills">
+        <button type="button" class="preset-btn active">Keep 7 Days</button>
+        <button type="button" class="preset-btn">30 Days</button>
+        <button type="button" class="preset-btn">90 Days</button>
+        <button type="button" class="preset-btn">No expiration</button>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModals()">Cancel</button>
+      <button class="btn btn-danger" onclick="alert('Old secret revoked! New secret generated and ready to copy.'); closeModals();">
+        Invalidate old key & generate new
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 3: EDIT TOKEN -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <h3>Edit Token Details</h3>
+        <p><span id="edit-agent-name">Researcher</span> · Adjust label, permissions, or expiry</p>
+      </div>
+      <button class="close-btn" onclick="closeModals()">&times;</button>
+    </div>
+
+    <div class="form-group">
+      <label>Token label</label>
+      <input type="text" value="Research workspace" />
+    </div>
+
+    <div class="form-group">
+      <label>Expiration</label>
+      <div class="preset-pills">
+        <button type="button" class="preset-btn active">Current (Sep 12)</button>
+        <button type="button" class="preset-btn">+30 Days</button>
+        <button type="button" class="preset-btn">+90 Days</button>
+        <button type="button" class="preset-btn">No expiration</button>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModals()">Cancel</button>
+      <button class="btn btn-primary" onclick="alert('Token updated successfully.'); closeModals();">
+        Save changes
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openRenewModal(name) {
+    document.getElementById('renew-agent-name').textContent = name;
+    document.getElementById('renew-modal').classList.add('open');
+  }
+  function openRotateModal(name) {
+    document.getElementById('rotate-agent-name').textContent = name;
+    document.getElementById('rotate-modal').classList.add('open');
+  }
+  function openEditModal(name, expiry) {
+    document.getElementById('edit-agent-name').textContent = name;
+    document.getElementById('edit-modal').classList.add('open');
+  }
+  function closeModals() {
+    document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('open'));
+  }
+  function toggleHistory() {
+    const el = document.getElementById('history-content');
+    const label = document.getElementById('history-label');
+    if (el.style.display === 'none') {
+      el.style.display = 'flex';
+      label.textContent = '▾ Inactive & rotated tokens (3 predecessors)';
+    } else {
+      el.style.display = 'none';
+      label.textContent = '▸ Inactive & rotated tokens (3 predecessors - click to view)';
+    }
+  }
+
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeModals();
+    });
+  });
+</script>
+
+</body>
+</html>

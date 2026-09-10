@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import {
   ArrowLeft,
@@ -11,6 +12,7 @@ import {
   ShieldCheck,
   Wrench,
 } from 'lucide-react'
+import { api } from '../api'
 
 export type SettingsCategory =
   'appearance' | 'workbench' | 'organization' | 'models' | 'agents' | 'operations'
@@ -25,7 +27,12 @@ export const settingsCategories: Array<{
   { id: 'workbench', label: 'Workbench', description: 'Panels and editor groups', icon: MonitorCog },
   { id: 'organization', label: 'Organization', description: 'Tags and folder metadata', icon: FolderTree },
   { id: 'models', label: 'AI & models', description: 'Connections and model policy', icon: Cpu },
-  { id: 'agents', label: 'Agents & access', description: 'Tokens and activity', icon: ShieldCheck },
+  {
+    id: 'agents',
+    label: 'Agents & access',
+    description: 'Tokens, permissions, and access health',
+    icon: ShieldCheck,
+  },
   { id: 'operations', label: 'Operations', description: 'Integrity and recovery', icon: Wrench },
 ]
 
@@ -125,14 +132,15 @@ const settingsSearchIndex: Array<{
     category: 'agents',
     label: 'Agent access',
     description: 'Issue scoped, expiring workspace tokens',
-    keywords: 'capability token prefix read write publish revoke',
+    keywords:
+      'capability token prefix read write publish revoke revoked expired expiring scope permission denied access health',
   },
   {
     id: 'agent-activity',
     category: 'agents',
     label: 'Agent activity',
     description: 'Review agent operations and outcomes',
-    keywords: 'audit accepted denied conflicted failed',
+    keywords: 'audit accepted denied conflicted conflict failed publication activity operation',
   },
   {
     id: 'workspace-integrity',
@@ -166,11 +174,25 @@ const settingsSearchIndex: Array<{
 
 const settingsRoute = getRouteApi('/settings')
 
-export function SettingsSidebar({ onBack }: { onBack: () => void }) {
+export function SettingsRouteSidebar({ onBack }: { onBack: () => void }) {
   const { category: activeCategory } = settingsRoute.useSearch()
-  const navigate = useNavigate({ from: '/settings' })
+  return <SettingsSidebar activeCategory={activeCategory} onBack={onBack} />
+}
+
+export function SettingsSidebar({
+  activeCategory,
+  onBack,
+}: {
+  activeCategory: SettingsCategory
+  onBack: () => void
+}) {
+  const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const accessHealth = useQuery({
+    queryKey: ['activity-summary', 'access-health'],
+    queryFn: () => api.activitySummary(),
+  })
   const searchInputRef = useRef<HTMLInputElement>(null)
   const normalizedQuery = query.trim().toLowerCase()
   const searchResults = normalizedQuery
@@ -196,7 +218,10 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
   const openDestination = (category: SettingsCategory, destination?: string) => {
     setQuery('')
     setSelectedIndex(0)
-    void navigate({ search: { category, destination: destination ?? category } })
+    void navigate({
+      to: '/settings',
+      search: { category, destination: destination ?? category },
+    })
   }
 
   return (
@@ -279,6 +304,14 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
                   <strong>{label}</strong>
                   <small>{description}</small>
                 </span>
+                {id === 'agents' && (accessHealth.data?.access_health.attention_count ?? 0) > 0 && (
+                  <span
+                    className="settings-attention-badge"
+                    aria-label={`${label}, ${accessHealth.data?.access_health.attention_count} ${accessHealth.data?.access_health.attention_count === 1 ? 'issue needs' : 'issues need'} attention`}
+                  >
+                    {accessHealth.data?.access_health.attention_count}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
