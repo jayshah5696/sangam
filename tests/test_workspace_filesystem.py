@@ -71,3 +71,67 @@ def test_scan_ignores_sangam_temporary_files(tmp_path: Path) -> None:
     assert workspace.scan_markdown() == {
         "kept.md": hashlib.sha256(b"kept").hexdigest(),
     }
+
+
+def test_write_atomic_cleanup_on_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    path = "docs/test.md"
+
+    # Test failure before replace (during os.fsync or write)
+    def mock_fsync_fail(fd: int) -> None:
+        raise OSError("Disk write error")
+
+    monkeypatch.setattr("os.fsync", mock_fsync_fail)
+    with pytest.raises(OSError, match="Disk write error"):
+        workspace.write_atomic(path, "failed content")
+
+    # Verify no temporary files or orphaned destination file exist
+    folder = workspace.root / "docs"
+    assert folder.exists()
+    assert list(folder.iterdir()) == []
+
+
+def test_concurrent_reads_and_writes(tmp_path: Path) -> None:
+    import concurrent.futures
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    doc_path = "concurrent.md"
+    workspace.write_atomic(doc_path, "initial content")
+
+    stop = False
+    read_errors: list[str] = []
+
+    def writer() -> None:
+        idx = 0
+        while not stop:
+            content = f"revision-{idx}-" + ("x" * 1000)
+            workspace.write_atomic(doc_path, content)
+            idx += 1
+
+    def reader() -> None:
+        while not stop:
+            try:
+                content = workspace.read_document(doc_path)
+                valid_prefix = content.startswith("initial content") or content.startswith(
+                    "revision-"
+                )
+                if not valid_prefix:
+                    read_errors.append(f"Corrupt read content: {content[:30]}")
+                if len(content) == 0:
+                    read_errors.append("Zero-byte read detected!")
+            except Exception as e:
+                read_errors.append(f"Exception during read: {e}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        writer_future = executor.submit(writer)
+        reader_futures = [executor.submit(reader) for _ in range(4)]
+
+        import time
+        time.sleep(0.5)
+        stop = True
+
+        writer_future.result()
+        for rf in reader_futures:
+            rf.result()
+
+    assert not read_errors, f"Concurrency errors occurred: {read_errors}"
