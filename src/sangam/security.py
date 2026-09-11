@@ -24,6 +24,7 @@ from sangam.errors import (
     CredentialConflictError,
     NotFoundError,
     ValidationError,
+    validate_metadata_text,
 )
 from sangam.schemas import Actor, AgentToken, IssuedAgentToken, TokenScope
 
@@ -257,6 +258,8 @@ class IdentityService:
         expires_at: str | None,
         rotated_from_token_id: str | None = None,
     ) -> IssuedAgentToken:
+        validate_metadata_text(display_name, "Agent display name")
+        validate_metadata_text(label, "Token label")
         normalized_actor_id = actor_id.strip().lower()
         if not self._agent_id.fullmatch(normalized_actor_id):
             raise ValidationError("Agent IDs must look like agent:researcher")
@@ -386,6 +389,7 @@ class IdentityService:
         expires_at: str | None,
         actor_id: str,
     ) -> AgentToken:
+        validate_metadata_text(label, "Token label")
         normalized_label = " ".join(label.strip().split())
         if not normalized_label:
             raise ValidationError("Token label is required")

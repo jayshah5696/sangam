@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 
 from sangam.actors import ActorService
 from sangam.db import Database, utc_now
-from sangam.errors import ConflictError, NotFoundError, ValidationError
+from sangam.errors import ConflictError, NotFoundError, ValidationError, validate_metadata_text
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.mutations import MutationCoordinator
 from sangam.schemas import Folder, Tag
@@ -84,6 +84,8 @@ class WorkspaceOrganizationService:
         return [Tag.model_validate(dict(row)) for row in rows]
 
     def create_tag(self, *, name: str, color: str, actor_id: str, idempotency_key: str) -> Tag:
+        validate_metadata_text(name, "Tag name")
+        validate_metadata_text(color, "Tag color")
         normalized_name = " ".join(name.strip().split())
         if not normalized_name:
             raise ValidationError("Tag name cannot be blank")
@@ -162,6 +164,7 @@ class WorkspaceOrganizationService:
         idempotency_key: str,
     ) -> Folder:
         normalized_path = self.normalize_folder_path(path)
+        validate_metadata_text(category, "Folder category")
         normalized_category = category.strip() if category and category.strip() else None
         fingerprint = request_hash(
             {
@@ -243,6 +246,7 @@ class WorkspaceOrganizationService:
         actor_id: str,
         idempotency_key: str,
     ) -> Folder:
+        validate_metadata_text(category, "Folder category")
         normalized_category = category.strip() if category and category.strip() else None
         fingerprint = request_hash(
             {
