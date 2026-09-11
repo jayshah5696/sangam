@@ -15,6 +15,7 @@ from sangam.errors import (
     MaterializationError,
     NotFoundError,
     ValidationError,
+    validate_metadata_text,
 )
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.mutations import MutationCoordinator
@@ -1527,6 +1528,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(category, "Document category")
         normalized_category = category.strip() if category and category.strip() else None
         payload = {
             "document_id": document_id,
