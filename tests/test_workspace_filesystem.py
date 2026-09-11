@@ -127,6 +127,7 @@ def test_concurrent_reads_and_writes(tmp_path: Path) -> None:
         reader_futures = [executor.submit(reader) for _ in range(4)]
 
         import time
+
         time.sleep(0.5)
         stop = True
 
