@@ -60,6 +60,8 @@ class ActivityService:
                 "content_type",
                 "category",
                 "tag_ids",
+                "source_document_id",
+                "revision_id",
             }
         }
         with self.database.transaction() as connection:

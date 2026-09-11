@@ -40,6 +40,9 @@ def test_sensitive_header_and_data_sanitization() -> None:
             "api_key": "secret_api_key_123",
             "title": "My Sensitive Note",
             "jwt": "eyA0NTY3OCB9.eyBjb250ZW50IH0.sig_string_here_123",
+            "private_key_pem": "-----BEGIN PRIVATE KEY-----\nMIIE...",
+            "auth_cookie": "session_id_val_999",
+            "user_auth_token": "auth_token_value_777",
         },
     }
     sanitized_data = sanitize_sensitive_data(sensitive_payload)
@@ -52,6 +55,87 @@ def test_sensitive_header_and_data_sanitization() -> None:
     assert sanitized_data["nested"]["api_key"] == "[REDACTED]"
     assert sanitized_data["nested"]["title"] == "My Sensitive Note"
     assert sanitized_data["nested"]["jwt"] == "[REDACTED]"
+    assert sanitized_data["nested"]["private_key_pem"] == "[REDACTED]"
+    assert sanitized_data["nested"]["auth_cookie"] == "[REDACTED]"
+    assert sanitized_data["nested"]["user_auth_token"] == "[REDACTED]"
+
+
+def test_agent_actor_mutation_provenance(client: TestClient) -> None:
+    # Issue agent token with full capabilities
+    issue_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:provenance_bot",
+            "display_name": "Provenance Bot Agent",
+            "label": "Audit Test Token",
+            "scopes": [
+                {"capability": "create", "path_prefix": ""},
+                {"capability": "read", "path_prefix": ""},
+                {"capability": "update", "path_prefix": ""},
+                {"capability": "move", "path_prefix": ""},
+                {"capability": "delete", "path_prefix": ""},
+                {"capability": "restore", "path_prefix": ""},
+            ],
+            "expires_at": None,
+        },
+    )
+    assert issue_resp.status_code == 201
+    issued_token = issue_resp.json()["token"]
+    agent_token_id = issue_resp.json()["token_id"]
+
+    agent_headers = {
+        "Authorization": f"Bearer {issued_token}",
+        "Idempotency-Key": "agent_idemp_create",
+    }
+
+    # 1. Agent creates document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Provenance Doc",
+            "content": "# Agent Content",
+            "path": "docs/agent_test.md",
+        },
+        headers=agent_headers,
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # 2. Agent moves document
+    move_headers = {
+        "Authorization": f"Bearer {issued_token}",
+        "Idempotency-Key": "agent_idemp_move",
+    }
+    move_resp = client.post(
+        f"/api/v1/documents/{doc_id}/move",
+        json={
+            "expected_revision_id": rev1,
+            "path": "docs/agent_test_moved.md",
+        },
+        headers=move_headers,
+    )
+    assert move_resp.status_code == 200
+
+    # Query activity log for agent actor
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    agent_events = [e for e in events if e["actor_id"] == "agent:provenance_bot"]
+    assert len(agent_events) >= 2
+
+    create_event = next(e for e in agent_events if e["action"] == "create")
+    assert create_event["actor_kind"] == "agent"
+    assert create_event["token_id"] == agent_token_id
+    assert create_event["path"] == "docs/agent_test.md"
+
+    move_event = next(e for e in agent_events if e["action"] == "move")
+    assert move_event["actor_kind"] == "agent"
+    assert move_event["token_id"] == agent_token_id
+    assert move_event["details"]["source_path"] == "docs/agent_test.md"
+    assert move_event["details"]["destination_path"] == "docs/agent_test_moved.md"
 
 
 def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> None:

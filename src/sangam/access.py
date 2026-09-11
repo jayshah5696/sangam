@@ -618,6 +618,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details={"expected_revision_id": expected_revision_id, "title": title, "summary": summary},
         )
 
     def duplicate_document(
@@ -666,6 +667,13 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details={
+                "source_document_id": document_id,
+                "expected_revision_id": expected_revision_id,
+                "source_path": current.path,
+                "destination_path": path,
+                "title": title,
+            },
         )
 
     def update_document_metadata(
@@ -692,6 +700,11 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details={
+                "expected_metadata_version": expected_metadata_version,
+                "category": category,
+                "tag_ids": tag_ids,
+            },
         )
 
     def materialize_document(
@@ -727,6 +740,11 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details={
+                "expected_revision_id": expected_revision_id,
+                "destination_path": path,
+                "summary": summary,
+            },
         )
 
     def move_document(
@@ -762,6 +780,12 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details={
+                "expected_revision_id": expected_revision_id,
+                "source_path": current.path,
+                "destination_path": path,
+                "summary": summary,
+            },
         )
 
     def delete_document(
@@ -786,6 +810,11 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details={
+                "expected_revision_id": expected_revision_id,
+                "source_path": current.path,
+                "summary": summary,
+            },
         )
 
     def history(self, principal: Principal, document_id: str) -> list[Revision]:
@@ -845,6 +874,12 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details={
+                "expected_revision_id": expected_revision_id,
+                "revision_id": revision_id,
+                "source_path": current.path,
+                "summary": summary,
+            },
         )
 
     def inspect_workspace_organization(
@@ -1566,6 +1601,7 @@ class WorkspaceAccessService:
         action: str,
         current: Document,
         operation: Callable[[], T],
+        details: dict[str, object] | None = None,
     ) -> T:
         def authorized() -> T:
             self.policy.require(principal, capability, current.path)
@@ -1578,6 +1614,7 @@ class WorkspaceAccessService:
             authorized,
             resource_id=current.document_id,
             path=current.path,
+            details=details,
         )
 
     def _require_global_read(self, principal: Principal) -> None:
@@ -1603,6 +1640,7 @@ class WorkspaceAccessService:
         *,
         resource_id: str | None = None,
         path: str | None = None,
+        details: dict[str, object] | None = None,
     ) -> T:
         try:
             result = operation()
@@ -1622,7 +1660,7 @@ class WorkspaceAccessService:
                 path=path,
                 outcome=outcome,
                 error_code=error.code,
-                details=error.details,
+                details={**(details or {}), **(error.details or {})},
             )
             raise
         result_resource_id = resource_id
@@ -1649,5 +1687,6 @@ class WorkspaceAccessService:
                 path=result_path,
                 outcome="accepted",
                 revision_id=revision_id,
+                details=details,
             )
         return result
