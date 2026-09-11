@@ -618,7 +618,11 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
-            details={"expected_revision_id": expected_revision_id, "title": title, "summary": summary},
+            details={
+                "expected_revision_id": expected_revision_id,
+                "title": title,
+                "summary": summary,
+            },
         )
 
     def duplicate_document(
