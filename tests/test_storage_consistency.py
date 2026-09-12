@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import shutil
 import sqlite3
 import tarfile
@@ -470,4 +471,89 @@ def test_concurrent_read_write_atomic_file_replacement(client: TestClient, setti
     # Verify no temporary staging files exist in workspace directory
     parent_dir = settings.workspace_root
     temp_files = [f for f in parent_dir.glob("*") if ".sangam-" in f.name]
+    assert temp_files == []
+
+
+def test_concurrent_backup_manifest_verification_race(client: TestClient) -> None:
+    manager = client.app.state.services.backups.manager
+    backup = manager.create()
+    backup_id = backup.backup_id
+
+    errors: list[Exception] = []
+
+    def verify_worker():
+        try:
+            for _ in range(10):
+                manager.verify(backup_id)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=verify_worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
+    backup_dir = manager.backup_root / backup_id
+    temp_files = [f for f in backup_dir.glob("*") if f.name.startswith(".manifest.json-")]
+    assert temp_files == []
+
+
+def test_write_atomic_bytes_pre_rename_hash_mismatch_prunes_staging_file(
+    client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service: DocumentService = client.app.state.services.documents
+    workspace = service.workspace
+    path = "hash_mismatch_test.md"
+
+    workspace.write_atomic(path, "initial content")
+    target_file = settings.workspace_root / path
+    assert target_file.read_text() == "initial content"
+
+    replace_called = False
+    original_replace = os.replace
+
+    def tracked_replace(src, dst):
+        nonlocal replace_called
+        replace_called = True
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", tracked_replace)
+
+    original_fdopen = os.fdopen
+
+    class CorruptingFD:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def write(self, data):
+            return self.handle.write(b"corrupted bytes on disk")
+
+        def __getattr__(self, item):
+            return getattr(self.handle, item)
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return self.handle.__exit__(exc_type, exc_val, exc_tb)
+
+    def corrupting_fdopen(fd, mode="r", **kwargs):
+        handle = original_fdopen(fd, mode, **kwargs)
+        if "w" in mode or "b" in mode:
+            return CorruptingFD(handle)
+        return handle
+
+    monkeypatch.setattr(os, "fdopen", corrupting_fdopen)
+
+    with pytest.raises(
+        OSError, match="Materialized file hash does not match the committed revision"
+    ):
+        workspace.write_atomic_bytes(path, b"expected bytes", overwrite=True)
+
+    assert not replace_called
+    assert target_file.read_text() == "initial content"
+    temp_files = [f for f in settings.workspace_root.glob("*") if ".sangam-" in f.name]
     assert temp_files == []
