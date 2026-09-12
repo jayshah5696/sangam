@@ -34,9 +34,11 @@ def _artifact(path: Path) -> BackupArtifact:
 
 
 def _write_manifest(path: Path, backup: BackupSet) -> None:
-    temporary = path.with_suffix(".json.tmp")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
+    temporary = Path(temporary_name)
     try:
-        with temporary.open("w", encoding="utf-8") as handle:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
             handle.write(backup.model_dump_json(indent=2) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
@@ -47,6 +49,8 @@ def _write_manifest(path: Path, backup: BackupSet) -> None:
         finally:
             os.close(directory)
     finally:
+        if descriptor >= 0:
+            os.close(descriptor)
         temporary.unlink(missing_ok=True)
 
 
