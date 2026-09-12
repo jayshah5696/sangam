@@ -122,7 +122,14 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "import", "pdf_document", operation, path=path)
+        return self._run(
+            principal,
+            "import",
+            "pdf_document",
+            operation,
+            path=path,
+            details={"title": title},
+        )
 
     def pdf_bytes(self, principal: Principal, document_id: str) -> tuple[Document, bytes]:
         current = self.documents.get_document(document_id)
@@ -390,7 +397,8 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "document", operation, path=path)
+        details: dict[str, object] = {"title": title, "content_type": content_type}
+        return self._run(principal, "create", "document", operation, path=path, details=details)
 
     def create_publication(
         self,
@@ -604,11 +612,17 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {"expected_revision_id": expected_revision_id}
+        if title is not None:
+            details["title"] = title
+        if summary is not None:
+            details["summary"] = summary
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
             action="update",
             current=current,
+            details=details,
             operation=lambda: self.documents.update_document(
                 document_id=document_id,
                 expected_revision_id=expected_revision_id,
@@ -659,6 +673,14 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "source_path": current.path,
+            "expected_revision_id": expected_revision_id,
+        }
+        if title is not None:
+            details["title"] = title
+        if path is not None:
+            details["destination_path"] = path
         return self._run(
             principal,
             "duplicate",
@@ -666,6 +688,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details=details,
         )
 
     def update_document_metadata(
@@ -679,11 +702,17 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "expected_metadata_version": expected_metadata_version,
+            "category": category,
+            "tag_ids": tag_ids,
+        }
         return self._document_operation(
             principal,
             capability=Capability.TAG,
             action="tag",
             current=current,
+            details=details,
             operation=lambda: self.documents.update_document_metadata(
                 document_id=document_id,
                 expected_metadata_version=expected_metadata_version,
@@ -720,6 +749,13 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "source_path": current.path,
+            "destination_path": path,
+            "expected_revision_id": expected_revision_id,
+        }
+        if summary:
+            details["summary"] = summary
         return self._run(
             principal,
             "materialize",
@@ -727,6 +763,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details=details,
         )
 
     def move_document(
@@ -755,6 +792,13 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "source_path": current.path,
+            "destination_path": path,
+            "expected_revision_id": expected_revision_id,
+        }
+        if summary:
+            details["summary"] = summary
         return self._run(
             principal,
             "move",
@@ -762,6 +806,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details=details,
         )
 
     def delete_document(
@@ -774,11 +819,17 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+        }
+        if summary:
+            details["summary"] = summary
         return self._document_operation(
             principal,
             capability=Capability.DELETE,
             action="delete",
             current=current,
+            details=details,
             operation=lambda: self.documents.delete_document(
                 document_id=document_id,
                 expected_revision_id=expected_revision_id,
@@ -832,11 +883,18 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id, include_deleted=True)
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "restored_revision_id": revision_id,
+        }
+        if summary:
+            details["summary"] = summary
         return self._document_operation(
             principal,
             capability=Capability.RESTORE,
             action="restore",
             current=current,
+            details=details,
             operation=lambda: self.documents.restore_document(
                 document_id=document_id,
                 expected_revision_id=expected_revision_id,
@@ -1159,7 +1217,9 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "tag", operation)
+        return self._run(
+            principal, "create", "tag", operation, details={"name": name, "color": color}
+        )
 
     def create_folder(
         self,
@@ -1181,7 +1241,8 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "folder", operation, path=path)
+        details = {"category": category, "tag_ids": tag_ids}
+        return self._run(principal, "create", "folder", operation, path=path, details=details)
 
     def update_folder_metadata(
         self,
@@ -1210,7 +1271,14 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "tag", "folder", operation, resource_id=folder_id)
+        details = {
+            "expected_metadata_version": expected_metadata_version,
+            "category": category,
+            "tag_ids": tag_ids,
+        }
+        return self._run(
+            principal, "tag", "folder", operation, resource_id=folder_id, details=details
+        )
 
     def move_folder(
         self,
@@ -1237,7 +1305,16 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "move", "folder", operation, resource_id=folder_id, path=path)
+        details = {"destination_path": path}
+        return self._run(
+            principal,
+            "move",
+            "folder",
+            operation,
+            resource_id=folder_id,
+            path=path,
+            details=details,
+        )
 
     def _normalize_organization_plan(self, plan: ApplyOrganizationPlan) -> ApplyOrganizationPlan:
         operations: list[dict[str, object]] = []
@@ -1566,6 +1643,7 @@ class WorkspaceAccessService:
         action: str,
         current: Document,
         operation: Callable[[], T],
+        details: dict[str, object] | None = None,
     ) -> T:
         def authorized() -> T:
             self.policy.require(principal, capability, current.path)
@@ -1578,6 +1656,7 @@ class WorkspaceAccessService:
             authorized,
             resource_id=current.document_id,
             path=current.path,
+            details=details,
         )
 
     def _require_global_read(self, principal: Principal) -> None:
@@ -1603,6 +1682,7 @@ class WorkspaceAccessService:
         *,
         resource_id: str | None = None,
         path: str | None = None,
+        details: dict[str, object] | None = None,
     ) -> T:
         try:
             result = operation()
@@ -1614,6 +1694,9 @@ class WorkspaceAccessService:
                 if isinstance(error, ConflictError)
                 else "failed"
             )
+            merged_details = dict(details or {})
+            if error.details:
+                merged_details.update(error.details)
             self.activity.record(
                 principal=principal,
                 action=action,
@@ -1622,7 +1705,7 @@ class WorkspaceAccessService:
                 path=path,
                 outcome=outcome,
                 error_code=error.code,
-                details=error.details,
+                details=merged_details or None,
             )
             raise
         result_resource_id = resource_id
@@ -1649,5 +1732,6 @@ class WorkspaceAccessService:
                 path=result_path,
                 outcome="accepted",
                 revision_id=revision_id,
+                details=details,
             )
         return result

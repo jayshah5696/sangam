@@ -60,6 +60,9 @@ class ActivityService:
                 "content_type",
                 "category",
                 "tag_ids",
+                "name",
+                "color",
+                "restored_revision_id",
             }
         }
         with self.database.transaction() as connection:
