@@ -1492,7 +1492,15 @@ else fetch('/api/v1/trusted-previews/content', {
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = admin_dependency,
     ) -> BackupSet:
-        return backups.create(actor_id=principal.actor_id, idempotency_key=idempotency_key)
+        created = backups.create(actor_id=principal.actor_id, idempotency_key=idempotency_key)
+        activity.record(
+            principal=principal,
+            action="create",
+            resource_type="backup",
+            resource_id=created.backup_id,
+            outcome="accepted",
+        )
+        return created
 
     @app.post("/api/v1/backups/{backup_id}/verify", response_model=BackupVerification)
     def verify_backup(
@@ -1504,9 +1512,16 @@ else fetch('/api/v1/trusted-previews/content', {
     @app.delete("/api/v1/backups/{backup_id}", status_code=204)
     def delete_backup(
         backup_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Response:
         backups.delete(backup_id)
+        activity.record(
+            principal=principal,
+            action="delete",
+            resource_type="backup",
+            resource_id=backup_id,
+            outcome="accepted",
+        )
         return Response(status_code=204)
 
     frontend_dist = resolved_settings.frontend_dist
