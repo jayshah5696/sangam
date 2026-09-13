@@ -6,6 +6,7 @@ import json
 import shutil
 import sqlite3
 import tarfile
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -471,3 +472,85 @@ def test_concurrent_read_write_atomic_file_replacement(client: TestClient, setti
     parent_dir = settings.workspace_root
     temp_files = [f for f in parent_dir.glob("*") if ".sangam-" in f.name]
     assert temp_files == []
+
+
+def test_concurrent_folder_metadata_atomic_write_and_cleanup(
+    client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Create folder via API
+    res = client.post(
+        "/api/v1/folders",
+        json={"path": "projects/active", "category": "initial", "tag_ids": []},
+        headers=headers("create-folder-race"),
+    )
+    assert res.status_code == 201
+    folder_id = res.json()["folder_id"]
+
+    folder_dir = settings.workspace_root / "projects/active"
+    manifest_file = folder_dir / ".sangam-folder.json"
+    assert manifest_file.is_file()
+
+    stop_event = threading.Event()
+    read_results: list[bytes] = []
+    read_errors: list[str] = []
+
+    def reader():
+        while not stop_event.is_set():
+            if manifest_file.exists():
+                try:
+                    content = manifest_file.read_bytes()
+                    read_results.append(content)
+                except Exception as exc:
+                    read_errors.append(str(exc))
+
+    reader_thread = threading.Thread(target=reader)
+    reader_thread.start()
+
+    current_version = res.json()["metadata_version"]
+    for i in range(10):
+        update_res = client.patch(
+            f"/api/v1/folders/{folder_id}",
+            json={
+                "expected_metadata_version": current_version,
+                "category": f"cat-{i}",
+                "tag_ids": [],
+            },
+            headers=headers(f"update-folder-meta-{i}"),
+        )
+        assert update_res.status_code == 200
+        current_version = update_res.json()["metadata_version"]
+
+    stop_event.set()
+    reader_thread.join()
+
+    assert not read_errors
+    assert len(read_results) > 0
+    # Confirm every read content was valid JSON and non-zero-byte
+    for content in read_results:
+        assert len(content) > 0
+        parsed = json.loads(content.decode("utf-8"))
+        assert parsed["folder_id"] == folder_id
+
+    # Verify no temporary staging files left behind
+    temp_files = list(folder_dir.glob(".sangam-folder-*"))
+    assert temp_files == []
+
+    # Test failure cleanup when writing folder metadata throws error
+    def failing_write(*args, **kwargs):
+        raise OSError("Simulated disk error during folder metadata write")
+
+    monkeypatch.setattr(tempfile, "mkstemp", failing_write)
+    with pytest.raises(OSError, match="Simulated disk error"):
+        client.patch(
+            f"/api/v1/folders/{folder_id}",
+            json={
+                "expected_metadata_version": current_version,
+                "category": "cat-fail",
+                "tag_ids": [],
+            },
+            headers=headers("update-folder-meta-fail"),
+        )
+
+    # Clean up verified: no leftover temporary files in folder directory
+    temp_files_after_fail = list(folder_dir.glob(".sangam-folder-*"))
+    assert temp_files_after_fail == []
