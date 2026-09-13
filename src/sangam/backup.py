@@ -262,7 +262,21 @@ class BackupManager:
         database_path.parent.mkdir(parents=True, exist_ok=True)
         workspace_root.mkdir(parents=True, exist_ok=True)
         shutil.copy2(backup_dir / "database.sqlite3", database_path)
+
+        target_root = workspace_root.resolve()
         with tarfile.open(backup_dir / "workspace.tar.gz", "r:gz") as archive:
+            for member in archive.getmembers():
+                member_path = PurePosixPath(member.name)
+                if (
+                    member_path.is_absolute()
+                    or ".." in member_path.parts
+                    or member.issym()
+                    or member.islnk()
+                ):
+                    raise ValidationError("Workspace backup contains an unsafe archive member")
+                destination = (target_root / member_path).resolve(strict=False)
+                if not destination.is_relative_to(target_root):
+                    raise ValidationError("Workspace backup contains an unsafe archive member")
             archive.extractall(workspace_root, filter="data")
 
     def delete(self, backup_id: str) -> None:

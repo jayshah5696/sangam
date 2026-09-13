@@ -471,3 +471,49 @@ def test_concurrent_read_write_atomic_file_replacement(client: TestClient, setti
     parent_dir = settings.workspace_root
     temp_files = [f for f in parent_dir.glob("*") if ".sangam-" in f.name]
     assert temp_files == []
+
+
+@pytest.mark.parametrize(
+    "malicious_member",
+    ["../evil.txt", "/tmp/evil.txt", "../../etc/passwd", "sub/../../evil.txt"],
+)
+def test_restore_to_rejects_path_traversal_in_workspace_archive(
+    client: TestClient, tmp_path: Path, malicious_member: str
+) -> None:
+    manager = client.app.state.services.backups.manager
+    backup = manager.create()
+    backup_dir = manager.backup_root / backup.backup_id
+    workspace_archive = backup_dir / "workspace.tar.gz"
+
+    # Create a fake extracted directory and inject a path traversal tar member
+    extracted_root = backup_dir / "malicious-workspace"
+    extracted_root.mkdir()
+    (extracted_root / "safe.txt").write_text("safe content")
+
+    with tarfile.open(workspace_archive, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+        archive.add(extracted_root / "safe.txt", arcname="safe.txt")
+        # Add entry with dangerous member name
+        tarinfo = tarfile.TarInfo(name=malicious_member)
+        content = b"evil payload"
+        tarinfo.size = len(content)
+        archive.addfile(tarinfo, io.BytesIO(content))
+
+    # Update manifest to match tampered workspace archive
+    manifest_path = backup_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    workspace_artifact = next(
+        artifact for artifact in manifest["artifacts"] if artifact["name"] == "workspace.tar.gz"
+    )
+    workspace_artifact["size_bytes"] = workspace_archive.stat().st_size
+    workspace_artifact["sha256"] = hashlib.sha256(workspace_archive.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    restore_db_target = tmp_path / "restore_target" / "db.sqlite3"
+    restore_ws_target = tmp_path / "restore_target" / "workspace"
+
+    with pytest.raises(ValidationError, match="Workspace backup contains an unsafe archive member"):
+        manager.restore_to(
+            backup.backup_id,
+            database_path=restore_db_target,
+            workspace_root=restore_ws_target,
+        )
