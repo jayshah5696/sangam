@@ -122,7 +122,18 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "import", "pdf_document", operation, path=path)
+        return self._run(
+            principal,
+            "import",
+            "pdf_document",
+            operation,
+            path=path,
+            details={
+                "title": title,
+                "destination_path": path,
+                "content_type": "application/pdf",
+            },
+        )
 
     def pdf_bytes(self, principal: Principal, document_id: str) -> tuple[Document, bytes]:
         current = self.documents.get_document(document_id)
@@ -240,6 +251,9 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details={
+                "source_path": current.path,
+            },
         )
 
     def update_annotation(
@@ -390,7 +404,18 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "document", operation, path=path)
+        return self._run(
+            principal,
+            "create",
+            "document",
+            operation,
+            path=path,
+            details={
+                "title": title,
+                "destination_path": path,
+                "content_type": content_type,
+            },
+        )
 
     def create_publication(
         self,
@@ -420,6 +445,10 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=current.path,
+            details={
+                "slug": slug,
+                "access_policy": access_policy,
+            },
         )
 
     def preflight_create_document(
@@ -505,6 +534,11 @@ class WorkspaceAccessService:
             operation,
             resource_id=publication_id,
             path=current.path,
+            details={
+                "slug": slug,
+                "access_policy": access_policy,
+                "expected_metadata_version": expected_version,
+            },
         )
 
     def unpublish(
@@ -534,6 +568,9 @@ class WorkspaceAccessService:
             operation,
             resource_id=publication_id,
             path=current.path,
+            details={
+                "expected_metadata_version": expected_version,
+            },
         )
 
     def expose_publication_revision(
@@ -563,6 +600,9 @@ class WorkspaceAccessService:
             operation,
             resource_id=publication_id,
             path=current.path,
+            details={
+                "current_revision_id": revision_id,
+            },
         )
 
     def rotate_publication_token(
@@ -604,6 +644,14 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "source_path": current.path,
+        }
+        if title is not None:
+            details["title"] = title
+        if summary is not None:
+            details["summary"] = summary
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -618,6 +666,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def duplicate_document(
@@ -666,6 +715,12 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details={
+                "source_path": current.path,
+                "destination_path": path,
+                "expected_revision_id": expected_revision_id,
+                "title": title,
+            },
         )
 
     def update_document_metadata(
@@ -679,6 +734,12 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "expected_metadata_version": expected_metadata_version,
+            "category": category,
+            "tag_ids": tag_ids,
+            "source_path": current.path,
+        }
         return self._document_operation(
             principal,
             capability=Capability.TAG,
@@ -692,6 +753,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def materialize_document(
@@ -727,6 +789,11 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details={
+                "destination_path": path,
+                "expected_revision_id": expected_revision_id,
+                "summary": summary,
+            },
         )
 
     def move_document(
@@ -762,6 +829,12 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details={
+                "source_path": current.path,
+                "destination_path": path,
+                "expected_revision_id": expected_revision_id,
+                "summary": summary,
+            },
         )
 
     def delete_document(
@@ -786,6 +859,11 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details={
+                "source_path": current.path,
+                "expected_revision_id": expected_revision_id,
+                "summary": summary,
+            },
         )
 
     def history(self, principal: Principal, document_id: str) -> list[Revision]:
@@ -1181,7 +1259,18 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "folder", operation, path=path)
+        return self._run(
+            principal,
+            "create",
+            "folder",
+            operation,
+            path=path,
+            details={
+                "destination_path": path,
+                "category": category,
+                "tag_ids": tag_ids,
+            },
+        )
 
     def update_folder_metadata(
         self,
@@ -1210,7 +1299,18 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "tag", "folder", operation, resource_id=folder_id)
+        return self._run(
+            principal,
+            "tag",
+            "folder",
+            operation,
+            resource_id=folder_id,
+            details={
+                "category": category,
+                "tag_ids": tag_ids,
+                "expected_metadata_version": expected_metadata_version,
+            },
+        )
 
     def move_folder(
         self,
@@ -1237,7 +1337,17 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "move", "folder", operation, resource_id=folder_id, path=path)
+        return self._run(
+            principal,
+            "move",
+            "folder",
+            operation,
+            resource_id=folder_id,
+            path=path,
+            details={
+                "destination_path": path,
+            },
+        )
 
     def _normalize_organization_plan(self, plan: ApplyOrganizationPlan) -> ApplyOrganizationPlan:
         operations: list[dict[str, object]] = []
@@ -1566,6 +1676,7 @@ class WorkspaceAccessService:
         action: str,
         current: Document,
         operation: Callable[[], T],
+        details: dict[str, object] | None = None,
     ) -> T:
         def authorized() -> T:
             self.policy.require(principal, capability, current.path)
@@ -1578,6 +1689,7 @@ class WorkspaceAccessService:
             authorized,
             resource_id=current.document_id,
             path=current.path,
+            details=details,
         )
 
     def _require_global_read(self, principal: Principal) -> None:
@@ -1603,7 +1715,9 @@ class WorkspaceAccessService:
         *,
         resource_id: str | None = None,
         path: str | None = None,
+        details: dict[str, object] | None = None,
     ) -> T:
+        details_to_record = {k: v for k, v in (details or {}).items() if v is not None}
         try:
             result = operation()
         except SangamError as error:
@@ -1614,6 +1728,9 @@ class WorkspaceAccessService:
                 if isinstance(error, ConflictError)
                 else "failed"
             )
+            merged_details = dict(details_to_record)
+            if error.details:
+                merged_details.update(error.details)
             self.activity.record(
                 principal=principal,
                 action=action,
@@ -1622,7 +1739,7 @@ class WorkspaceAccessService:
                 path=path,
                 outcome=outcome,
                 error_code=error.code,
-                details=error.details,
+                details=merged_details,
             )
             raise
         result_resource_id = resource_id
@@ -1632,6 +1749,18 @@ class WorkspaceAccessService:
             result_resource_id = result.document_id
             result_path = result.path if result.path is not None else path
             revision_id = result.current_revision_id
+            if "title" not in details_to_record and result.title:
+                details_to_record["title"] = result.title
+            if "content_type" not in details_to_record and result.content_type:
+                details_to_record["content_type"] = result.content_type
+            if "current_revision_id" not in details_to_record and result.current_revision_id:
+                details_to_record["current_revision_id"] = result.current_revision_id
+            if "category" not in details_to_record and result.category:
+                details_to_record["category"] = result.category
+            if "tag_ids" not in details_to_record and result.tags:
+                details_to_record["tag_ids"] = [t.tag_id for t in result.tags]
+            if "destination_path" not in details_to_record and result.path:
+                details_to_record["destination_path"] = result.path
         if principal.identity_kind != "human" or action not in {
             "list",
             "search",
@@ -1649,5 +1778,6 @@ class WorkspaceAccessService:
                 path=result_path,
                 outcome="accepted",
                 revision_id=revision_id,
+                details=details_to_record,
             )
         return result

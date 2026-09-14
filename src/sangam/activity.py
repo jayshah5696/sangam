@@ -60,6 +60,8 @@ class ActivityService:
                 "content_type",
                 "category",
                 "tag_ids",
+                "slug",
+                "access_policy",
             }
         }
         with self.database.transaction() as connection:
