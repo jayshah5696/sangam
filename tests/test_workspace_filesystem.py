@@ -71,3 +71,74 @@ def test_scan_ignores_sangam_temporary_files(tmp_path: Path) -> None:
     assert workspace.scan_markdown() == {
         "kept.md": hashlib.sha256(b"kept").hexdigest(),
     }
+
+
+def test_write_atomic_bytes_verifies_hash_before_replace_and_cleans_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    workspace.write_atomic("doc.md", "original")
+
+    # Monkeypatch hashlib.sha256 in workspace module or mock temporary.read_bytes
+    # to simulate hash mismatch during written_hash calculation.
+    original_sha256 = hashlib.sha256
+
+    def corrupt_sha256(data: bytes = b"") -> hashlib._Hash:
+        digest = original_sha256(data)
+        if data == b"corrupted":
+            # Return mismatching digest
+            return original_sha256(b"wrong")
+        return digest
+
+    # Or simulate OSError during verification before os.replace
+    real_read_bytes = Path.read_bytes
+
+    def fake_read_bytes(path_obj: Path) -> bytes:
+        if ".sangam-" in path_obj.name:
+            return b"corrupted"
+        return real_read_bytes(path_obj)
+
+    monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+
+    with pytest.raises(OSError, match="Materialized file hash does not match"):
+        workspace.write_atomic_bytes("doc.md", b"new_content", overwrite=True)
+
+    # Verify destination was NOT overwritten with corrupted content
+    assert workspace.read_document("doc.md") == "original"
+
+    # Verify temporary file was unlinked and cleaned up
+    temp_files = list(workspace.root.glob("**/.doc.md.sangam-*"))
+    assert temp_files == []
+
+
+def test_trash_and_restore_clean_temp_on_hash_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    content = "trashed document content"
+    content_bytes = content.encode("utf-8")
+    content_hash = hashlib.sha256(content_bytes).hexdigest()
+    size_bytes = len(content_bytes)
+    doc_id = "doc-1234"
+
+    workspace.write_atomic("trashme.md", content)
+
+    # Intercept Path.read_bytes for temporary trash files to simulate mismatch
+    real_read_bytes = Path.read_bytes
+
+    def fake_read_bytes(path_obj: Path) -> bytes:
+        if ".sangam-trash-" in path_obj.name:
+            return b"corrupted"
+        return real_read_bytes(path_obj)
+
+    monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+
+    with pytest.raises(OSError, match="Retained trash file hash does not match"):
+        workspace.trash_document(doc_id, "trashme.md", content_hash, size_bytes)
+
+    # Verify source file is untouched on disk
+    assert workspace.read_document("trashme.md") == content
+    # Verify no trash target was created and no orphaned temp files remain
+    assert not workspace.has_trashed_document(doc_id)
+    temp_files = list(workspace._trash_root.glob(".*.sangam-trash-*"))
+    assert temp_files == []
