@@ -175,9 +175,14 @@ def normalize_scope_prefix(value: str | None) -> str | None:
         candidate = candidate[:-3]
     candidate = candidate.strip("/")
     pure = PurePosixPath(candidate)
-    if not candidate or pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+    raw_parts = candidate.split("/")
+    if (
+        not candidate
+        or pure.is_absolute()
+        or any(part.strip() in {"", ".", ".."} for part in raw_parts)
+    ):
         raise ValidationError("Token path scope must be a workspace-relative prefix")
-    if any(part.startswith(".") or ".sangam-" in part for part in pure.parts):
+    if any(part.strip().startswith(".") or ".sangam-" in part for part in raw_parts):
         raise ValidationError(
             "Token path scope prefix cannot access hidden or reserved system locations"
         )
