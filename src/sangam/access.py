@@ -390,7 +390,8 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "document", operation, path=path)
+        details: dict[str, object] = {"title": title, "content_type": content_type}
+        return self._run(principal, "create", "document", operation, path=path, details=details)
 
     def create_publication(
         self,
@@ -604,6 +605,11 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {"expected_revision_id": expected_revision_id}
+        if title is not None:
+            details["title"] = title
+        if summary is not None:
+            details["summary"] = summary
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -618,6 +624,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def duplicate_document(
@@ -755,6 +762,13 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "source_path": current.path,
+            "destination_path": path,
+        }
+        if summary:
+            details["summary"] = summary
         return self._run(
             principal,
             "move",
@@ -762,6 +776,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details=details,
         )
 
     def delete_document(
@@ -774,6 +789,9 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {"expected_revision_id": expected_revision_id}
+        if summary:
+            details["summary"] = summary
         return self._document_operation(
             principal,
             capability=Capability.DELETE,
@@ -786,6 +804,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def history(self, principal: Principal, document_id: str) -> list[Revision]:
@@ -832,6 +851,12 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id, include_deleted=True)
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "current_revision_id": revision_id,
+        }
+        if summary:
+            details["summary"] = summary
         return self._document_operation(
             principal,
             capability=Capability.RESTORE,
@@ -845,6 +870,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def inspect_workspace_organization(
@@ -1566,6 +1592,7 @@ class WorkspaceAccessService:
         action: str,
         current: Document,
         operation: Callable[[], T],
+        details: dict[str, object] | None = None,
     ) -> T:
         def authorized() -> T:
             self.policy.require(principal, capability, current.path)
@@ -1578,6 +1605,7 @@ class WorkspaceAccessService:
             authorized,
             resource_id=current.document_id,
             path=current.path,
+            details=details,
         )
 
     def _require_global_read(self, principal: Principal) -> None:
@@ -1603,6 +1631,7 @@ class WorkspaceAccessService:
         *,
         resource_id: str | None = None,
         path: str | None = None,
+        details: dict[str, object] | None = None,
     ) -> T:
         try:
             result = operation()
@@ -1614,6 +1643,9 @@ class WorkspaceAccessService:
                 if isinstance(error, ConflictError)
                 else "failed"
             )
+            combined_details = dict(details or {})
+            if error.details:
+                combined_details.update(error.details)
             self.activity.record(
                 principal=principal,
                 action=action,
@@ -1622,7 +1654,7 @@ class WorkspaceAccessService:
                 path=path,
                 outcome=outcome,
                 error_code=error.code,
-                details=error.details,
+                details=combined_details or None,
             )
             raise
         result_resource_id = resource_id
@@ -1649,5 +1681,6 @@ class WorkspaceAccessService:
                 path=result_path,
                 outcome="accepted",
                 revision_id=revision_id,
+                details=details,
             )
         return result
