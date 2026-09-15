@@ -155,6 +155,7 @@ class DiskWorkspaceFilesystem:
         actual_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
         expected_hash = hashlib.sha256(content).hexdigest()
         if actual_hash != expected_hash:
+            destination.unlink(missing_ok=True)
             raise OSError("Materialized file hash does not match the committed revision")
         return actual_hash
 
