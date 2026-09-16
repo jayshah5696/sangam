@@ -134,6 +134,71 @@ def test_folder_metadata_concurrency_and_path_validation(client: TestClient) -> 
         assert response.status_code == 422
 
 
+def test_metadata_sanitization_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    # Tag name and color rejecting null bytes and control characters
+    bad_tag_name_null = client.post(
+        "/api/v1/tags",
+        json={"name": "tag\x00invalid", "color": "#ff0000"},
+        headers=headers("bad-tag-null"),
+    )
+    assert bad_tag_name_null.status_code == 422
+    assert "Tag name cannot contain null bytes" in bad_tag_name_null.json()["error"]["message"]
+
+    bad_tag_name_ctrl = client.post(
+        "/api/v1/tags",
+        json={"name": "tag\x07invalid", "color": "#ff0000"},
+        headers=headers("bad-tag-ctrl"),
+    )
+    assert bad_tag_name_ctrl.status_code == 422
+    err_msg = bad_tag_name_ctrl.json()["error"]["message"]
+    assert "Tag name cannot contain control characters" in err_msg
+
+    bad_tag_color_null = client.post(
+        "/api/v1/tags",
+        json={"name": "validtag", "color": "#ff0000\x00"},
+        headers=headers("bad-color-null"),
+    )
+    assert bad_tag_color_null.status_code == 422
+
+    # Folder category rejecting null bytes and control characters
+    bad_folder_cat = client.post(
+        "/api/v1/folders",
+        json={"path": "projects/sanitized", "category": "Cat\x00egory"},
+        headers=headers("bad-folder-cat"),
+    )
+    assert bad_folder_cat.status_code == 422
+    assert "Folder category cannot contain null bytes" in bad_folder_cat.json()["error"]["message"]
+
+    bad_folder_cat_ctrl = client.post(
+        "/api/v1/folders",
+        json={"path": "projects/sanitized2", "category": "Cat\x1begory"},
+        headers=headers("bad-folder-cat-ctrl"),
+    )
+    assert bad_folder_cat_ctrl.status_code == 422
+    folder_err = bad_folder_cat_ctrl.json()["error"]["message"]
+    assert "Folder category cannot contain control characters" in folder_err
+
+    # Document category rejecting null bytes
+    doc = client.post(
+        "/api/v1/documents",
+        json={"title": "Sanitization Doc", "content": "content"},
+        headers=headers("doc-sanitization"),
+    ).json()
+    bad_doc_cat = client.patch(
+        f"/api/v1/documents/{doc['document_id']}/metadata",
+        json={
+            "expected_metadata_version": doc["metadata_version"],
+            "category": "Bad\x00Category",
+            "tag_ids": [],
+        },
+        headers=headers("bad-doc-cat"),
+    )
+    assert bad_doc_cat.status_code == 422
+    assert "Document category cannot contain null bytes" in bad_doc_cat.json()["error"]["message"]
+
+
 def test_tag_and_folder_mutation_retries_are_idempotent(client: TestClient) -> None:
     tag_headers = headers("retry-tag")
     first_tag = client.post(
