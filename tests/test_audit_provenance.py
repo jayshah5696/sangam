@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from conftest import headers
+from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.security import sanitize_headers, sanitize_sensitive_data
@@ -181,3 +181,70 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_agent_mutation_audit_provenance_and_attribution(client: TestClient) -> None:
+    agent_actor_id = "agent:writer"
+    agent_display_name = "Writer Agent"
+    token = issue_agent_token(
+        client,
+        actor_id=agent_actor_id,
+        display_name=agent_display_name,
+        capabilities=("read", "create", "update", "tag", "restore", "search"),
+    )
+    agent_headers = {
+        "Authorization": f"Bearer {token}",
+        "Idempotency-Key": "idemp_agent_audit_create",
+    }
+
+    # Agent creates a document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Provenance Doc",
+            "content": "# Agent Content\nWritten by agent.",
+            "path": "docs/agent_doc.md",
+        },
+        headers=agent_headers,
+    )
+    assert create_resp.status_code == 201
+    created_doc = create_resp.json()
+    doc_id = created_doc["document_id"]
+
+    # Agent updates document metadata (organize)
+    meta_headers = {
+        "Authorization": f"Bearer {token}",
+        "Idempotency-Key": "idemp_agent_audit_meta",
+    }
+    meta_resp = client.patch(
+        f"/api/v1/documents/{doc_id}/metadata",
+        json={
+            "expected_metadata_version": created_doc["metadata_version"],
+            "category": "agent-logs",
+            "tag_ids": [],
+        },
+        headers=meta_headers,
+    )
+    assert meta_resp.status_code == 200
+
+    # Retrieve agent activity events
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    agent_events = [e for e in events if e["actor_id"] == agent_actor_id]
+    assert len(agent_events) >= 2
+
+    create_event = next(e for e in agent_events if e["action"] == "create")
+    assert create_event["actor_kind"] == "agent"
+    assert create_event["actor_display_name"] == agent_display_name
+    assert create_event["resource_id"] == doc_id
+    assert create_event["path"] == "docs/agent_doc.md"
+    assert create_event["outcome"] == "accepted"
+    assert create_event["token_id"] is not None
+
+    tag_event = next(e for e in agent_events if e["action"] == "tag")
+    assert tag_event["actor_kind"] == "agent"
+    assert tag_event["actor_display_name"] == agent_display_name
+    assert tag_event["resource_id"] == doc_id
+    assert tag_event["outcome"] == "accepted"
