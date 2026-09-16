@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import tempfile
 import uuid
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from sangam.actors import ActorService
 from sangam.db import Database, utc_now
-from sangam.errors import ConflictError, NotFoundError, ValidationError
+from sangam.errors import ConflictError, NotFoundError, ValidationError, validate_metadata_text
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.mutations import MutationCoordinator
 from sangam.schemas import Folder, Tag
@@ -84,6 +86,8 @@ class WorkspaceOrganizationService:
         return [Tag.model_validate(dict(row)) for row in rows]
 
     def create_tag(self, *, name: str, color: str, actor_id: str, idempotency_key: str) -> Tag:
+        validate_metadata_text(name, "Tag name")
+        validate_metadata_text(color, "Tag color")
         normalized_name = " ".join(name.strip().split())
         if not normalized_name:
             raise ValidationError("Tag name cannot be blank")
@@ -162,6 +166,7 @@ class WorkspaceOrganizationService:
         idempotency_key: str,
     ) -> Folder:
         normalized_path = self.normalize_folder_path(path)
+        validate_metadata_text(category, "Folder category")
         normalized_category = category.strip() if category and category.strip() else None
         fingerprint = request_hash(
             {
@@ -243,6 +248,7 @@ class WorkspaceOrganizationService:
         actor_id: str,
         idempotency_key: str,
     ) -> Folder:
+        validate_metadata_text(category, "Folder category")
         normalized_category = category.strip() if category and category.strip() else None
         fingerprint = request_hash(
             {
@@ -643,8 +649,8 @@ class WorkspaceOrganizationService:
             updated_at=row["updated_at"],
         )
 
-    @staticmethod
     def _write_folder_metadata(
+        self,
         connection: sqlite3.Connection,
         *,
         row: sqlite3.Row,
@@ -700,3 +706,39 @@ class WorkspaceOrganizationService:
                 now,
             ),
         )
+
+        # Sync folder metadata manifest `.sangam-folder.json` atomically
+        if hasattr(self.workspace, "root"):
+            folder_dir = self.workspace.root.resolve() / row["path"]
+            folder_dir.mkdir(parents=True, exist_ok=True)
+            destination = folder_dir / ".sangam-folder.json"
+            content_bytes = (
+                json.dumps(
+                    {
+                        "folder_id": folder_id,
+                        "path": row["path"],
+                        "category": category,
+                        "tag_ids": tag_ids,
+                        "metadata_version": row["metadata_version"] + 1,
+                        "updated_at": now,
+                    },
+                    indent=2,
+                )
+                + "\n"
+            ).encode("utf-8")
+
+            descriptor, temporary_name = tempfile.mkstemp(prefix=".sangam-folder-", dir=folder_dir)
+            temporary = Path(temporary_name)
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    output.write(content_bytes)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, destination)
+                descriptor_dir = os.open(folder_dir, os.O_RDONLY)
+                try:
+                    os.fsync(descriptor_dir)
+                finally:
+                    os.close(descriptor_dir)
+            finally:
+                temporary.unlink(missing_ok=True)

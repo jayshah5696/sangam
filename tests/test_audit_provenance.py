@@ -134,15 +134,22 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     assert "update" in actions
     assert actions["update"]["path"] == "docs/audit_test.md"
     assert actions["update"]["actor_kind"] == "human"
+    assert actions["update"]["details"]["expected_revision_id"] == rev1
+    assert actions["update"]["details"]["title"] == "Audit Trail Test Doc (Updated)"
 
     assert "move" in actions
     assert actions["move"]["path"] == "docs/moved_audit_test.md"
+    assert actions["move"]["details"]["source_path"] == "docs/audit_test.md"
+    assert actions["move"]["details"]["destination_path"] == "docs/moved_audit_test.md"
 
     assert "delete" in actions
     assert actions["delete"]["path"] == "docs/moved_audit_test.md"
+    assert actions["delete"]["details"]["expected_revision_id"] == rev3
 
     assert "restore" in actions
     assert actions["restore"]["path"] == "docs/moved_audit_test.md"
+    assert actions["restore"]["details"]["expected_revision_id"] == rev4
+    assert actions["restore"]["details"]["current_revision_id"] == rev3
 
 
 def test_export_json_lines_audit_logs(client: TestClient) -> None:

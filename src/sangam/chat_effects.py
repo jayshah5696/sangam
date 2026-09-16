@@ -213,7 +213,9 @@ class ChatEffectService:
                 (effect_id,),
             ).fetchone()
         if row is None or (
-            row["thread_owner"] != principal.actor_id and not principal.administrator
+            row["thread_owner"] != principal.actor_id
+            and row["requested_by"] != principal.actor_id
+            and not principal.administrator
         ):
             raise NotFoundError(f"Chat effect not found: {effect_id}")
         return self._schema(row)
@@ -348,9 +350,10 @@ class ChatEffectService:
             placeholders = ",".join("?" for _ in effect_ids)
             rows = connection.execute(
                 f"""
-                SELECT effect_id, requested_by, status
-                FROM chat_effects
-                WHERE effect_id IN ({placeholders})
+                SELECT e.effect_id, e.requested_by, e.status, t.created_by AS thread_owner
+                FROM chat_effects e
+                JOIN chat_threads t ON t.thread_id = e.thread_id
+                WHERE e.effect_id IN ({placeholders})
                 """,
                 effect_ids,
             ).fetchall()
@@ -362,9 +365,13 @@ class ChatEffectService:
 
             for eid in effect_ids:
                 row = found_map[eid]
-                if row["requested_by"] != principal.actor_id:
+                if (
+                    row["thread_owner"] != principal.actor_id
+                    and row["requested_by"] != principal.actor_id
+                    and not principal.administrator
+                ):
                     raise AuthorizationError(
-                        f"Only the principal that requested this effect can acknowledge it: {eid}"
+                        f"Only the thread owner or administrator can acknowledge this effect: {eid}"
                     )
                 if row["status"] in {"pending_approval", "approved", "executing"}:
                     raise ConflictError(f"Active effects cannot be acknowledged: {eid}")
@@ -395,8 +402,6 @@ class ChatEffectService:
         reason: str | None,
     ) -> EffectExecution:
         effect = self.get(principal, effect_id)
-        if effect.requested_by != principal.actor_id:
-            raise AuthorizationError("Only the principal that requested this effect can decide it")
         if effect.argument_digest != argument_digest:
             raise ConflictError("The approval digest does not match the stored effect request")
         if effect.status == "completed":

@@ -622,6 +622,7 @@ class PublicationService:
         if parsed.scheme or parsed.netloc or parsed.path.startswith("/"):
             raise NotFoundError("Publication asset not found")
         document_parent = PurePosixPath(document.path).parent
+        parent_parts = [p for p in document_parent.parts if p not in {"", "."}]
         candidate = PurePosixPath(document_parent, parsed.path)
         normalized_parts: list[str] = []
         for part in candidate.parts:
@@ -633,7 +634,10 @@ class PublicationService:
                 normalized_parts.pop()
             else:
                 normalized_parts.append(part)
-        if not normalized_parts:
+        if (
+            len(normalized_parts) <= len(parent_parts)
+            or normalized_parts[: len(parent_parts)] != parent_parts
+        ):
             raise NotFoundError("Publication asset not found")
         try:
             content, media_type = self.workspace.read_asset(

@@ -765,6 +765,34 @@ def test_trusted_proxy_mode_rejects_spoofed_actor_and_agent_admin_access(
         assert agent_admin.status_code == 403
 
 
+def test_agent_token_metadata_sanitization_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    bad_name = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:badname",
+            "display_name": "Agent\x00Bad",
+            "label": "Valid label",
+            "scopes": [{"capability": "read", "path_prefix": None}],
+        },
+    )
+    assert bad_name.status_code == 422
+    assert "Agent display name cannot contain null bytes" in bad_name.json()["error"]["message"]
+
+    bad_label = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:badlabel",
+            "display_name": "Agent Valid",
+            "label": "Label\x07Bad",
+            "scopes": [{"capability": "read", "path_prefix": None}],
+        },
+    )
+    assert bad_label.status_code == 422
+    assert "Token label cannot contain control characters" in bad_label.json()["error"]["message"]
+
+
 def test_expired_and_malformed_tokens_fail_without_secret_disclosure(client: TestClient) -> None:
     issued = issue_token(client)
     services = client.app.state.services

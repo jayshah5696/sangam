@@ -14,7 +14,7 @@ from test_phase_seven_chat import install_fake_model
 
 from sangam.capabilities import Capability
 from sangam.chat_capabilities import CreateDocumentInput, WorkspaceSearchInput
-from sangam.errors import AuthorizationError, ValidationError
+from sangam.errors import AuthorizationError, NotFoundError, ValidationError
 from sangam.security import Principal, ScopeGrant
 
 
@@ -533,6 +533,126 @@ def test_cancelling_a_thread_clears_a_pending_effect_after_the_run_ended(
     )
 
 
+def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
+    client: TestClient,
+) -> None:
+    from sangam.schemas import TokenScope
+
+    # Ensure agent actors exist in the database for FK constraints
+    client.app.state.services.identity.issue_agent_token(
+        actor_id="agent:researcher",
+        display_name="Researcher",
+        label="Test Agent",
+        scopes=[TokenScope(capability=Capability.CREATE, path_prefix=None)],
+        expires_at=None,
+    )
+    client.app.state.services.identity.issue_agent_token(
+        actor_id="agent:other",
+        display_name="Other Agent",
+        label="Test Other Agent",
+        scopes=[TokenScope(capability=Capability.READ, path_prefix=None)],
+        expires_at=None,
+    )
+
+    chat = client.app.state.services.chat
+    agent_principal = Principal(
+        actor_id="agent:researcher",
+        display_name="Researcher",
+        identity_kind="agent",
+        operation_id="agent-effect-op",
+        scopes=(ScopeGrant(Capability.CREATE, None),),
+        administrator=False,
+    )
+    admin_principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="admin-review-op"
+    )
+    non_admin_agent = Principal(
+        actor_id="agent:other",
+        display_name="Other Agent",
+        identity_kind="agent",
+        operation_id="other-agent-op",
+        administrator=False,
+    )
+
+    thread_id = create_chat_thread(client)
+    turn = chat.evidence.create_turn_context(
+        agent_principal,
+        entry_point="workspace",
+        document_id=None,
+        revision_id=None,
+        selected_text="",
+    )
+    capability = chat.capabilities.get("create_document")
+    manifest = (capability.manifest_item(),)
+    turn = chat.evidence.attach_turn_context(
+        agent_principal,
+        context_id=turn.context_id,
+        thread_id=thread_id,
+        user_item_id="item_agent_effect",
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+    run_id = chat.evidence.begin_run(
+        agent_principal,
+        thread_id=thread_id,
+        user_item_id=turn.user_item_id,
+        context_id=turn.context_id,
+        connection_id="openrouter",
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+    effect = chat.effects.propose(
+        agent_principal,
+        run_id=run_id,
+        thread_id=thread_id,
+        tool_call_id="call_agent_effect",
+        capability=capability,
+        arguments={
+            "title": "Agent Created Doc",
+            "content": "# Hello from agent",
+            "content_type": "text/markdown",
+            "path": None,
+        },
+        preview={
+            "title": "Agent Created Doc",
+            "content": "# Hello from agent",
+            "content_type": "text/markdown",
+            "path": None,
+        },
+    )
+    assert effect.requested_by == "agent:researcher"
+
+    # A non-admin agent attempting to decide the effect is rejected
+    with pytest.raises((AuthorizationError, NotFoundError)):
+        chat.effects.decide(
+            non_admin_agent,
+            effect_id=effect.effect_id,
+            verdict="approve",
+            argument_digest=effect.argument_digest,
+            reason=None,
+        )
+
+    # The administrator successfully decides (approves) the agent's proposed effect
+    decision = chat.effects.decide(
+        admin_principal,
+        effect_id=effect.effect_id,
+        verdict="approve",
+        argument_digest=effect.argument_digest,
+        reason="Approved by admin",
+    )
+    assert decision.effect.status == "completed"
+    assert decision.client_result["title"] == "Agent Created Doc"
+
+    # Cross-owner acknowledgement is rejected
+    with pytest.raises((AuthorizationError, NotFoundError)):
+        chat.effects.acknowledge(non_admin_agent, effect_ids=[effect.effect_id])
+
+    # The administrator successfully acknowledges the agent's completed effect
+    ack_res = chat.effects.acknowledge(admin_principal, effect_ids=[effect.effect_id])
+    assert ack_res.acknowledged_ids == [effect.effect_id]
+    assert ack_res.effects[0].acknowledged_by == "human:jay"
+
+
 def test_expired_and_cross_actor_decisions_execute_nothing(client: TestClient) -> None:
     prepared = prepare_effect(
         client,
@@ -540,10 +660,14 @@ def test_expired_and_cross_actor_decisions_execute_nothing(client: TestClient) -
         arguments={"title": "Guarded", "content": "No", "content_type": "text/markdown"},
         tool_call_id="call_guarded",
     )
-    another_principal = Principal.trusted_human(
-        actor_id="system", display_name="System", operation_id="cross-actor-decision"
+    another_principal = Principal(
+        actor_id="agent:other",
+        display_name="Other Agent",
+        identity_kind="agent",
+        operation_id="cross-actor-decision",
+        administrator=False,
     )
-    with pytest.raises(AuthorizationError):
+    with pytest.raises((AuthorizationError, NotFoundError)):
         prepared.chat.effects.decide(
             another_principal,
             effect_id=prepared.effect.effect_id,
@@ -948,11 +1072,24 @@ def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
     )
     assert ack_again.status_code == 200
 
-    # Cross-owner acknowledgement is rejected
-    other_principal = Principal.trusted_human(
-        actor_id="human:other", display_name="Other", operation_id="other-op"
+    from sangam.schemas import TokenScope
+
+    # Issue token for other agent to register actor in DB
+    client.app.state.services.identity.issue_agent_token(
+        actor_id="agent:unprivileged",
+        display_name="Unprivileged Agent",
+        label="Test Unprivileged",
+        scopes=[TokenScope(capability=Capability.READ, path_prefix=None)],
+        expires_at=None,
     )
-    with pytest.raises(AuthorizationError):
+    other_principal = Principal(
+        actor_id="agent:unprivileged",
+        display_name="Unprivileged Agent",
+        identity_kind="agent",
+        operation_id="other-op",
+        administrator=False,
+    )
+    with pytest.raises((AuthorizationError, NotFoundError)):
         prepared.chat.effects.acknowledge(other_principal, effect_ids=[effect_id])
 
 

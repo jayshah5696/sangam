@@ -52,6 +52,9 @@ def test_idempotency_key_reuse_with_different_payload_is_rejected(client: TestCl
         ".sangam-trash/exploit.md",
         ".git/config.md",
         "sub/.sangam-trash/exploit.md",
+        " .. /escape.md",
+        "projects/ .. /escape.md",
+        "projects/ .hidden/exploit.md",
     ],
 )
 def test_invalid_paths_never_escape_workspace(client: TestClient, invalid_path: str) -> None:
@@ -91,3 +94,20 @@ def test_duplicate_materialized_path_is_rejected(client: TestClient) -> None:
     )
     assert first.status_code == 201
     assert second.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "invalid_scope",
+    [
+        " .. ",
+        "projects/ .. /escape",
+        "projects/ .hidden",
+        " .. /secret",
+    ],
+)
+def test_whitespace_padded_traversal_in_token_scope_is_rejected(invalid_scope: str) -> None:
+    from sangam.errors import ValidationError
+    from sangam.security import normalize_scope_prefix
+
+    with pytest.raises(ValidationError):
+        normalize_scope_prefix(invalid_scope)

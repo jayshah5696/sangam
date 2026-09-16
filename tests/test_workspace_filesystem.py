@@ -71,3 +71,82 @@ def test_scan_ignores_sangam_temporary_files(tmp_path: Path) -> None:
     assert workspace.scan_markdown() == {
         "kept.md": hashlib.sha256(b"kept").hexdigest(),
     }
+
+
+def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    destination_path = workspace.root / "corrupted.md"
+
+    # Simulate hash failure after replace
+    original_read_bytes = Path.read_bytes
+
+    def mocked_read_bytes(self: Path) -> bytes:
+        if self == destination_path:
+            return b"corrupted content"
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", mocked_read_bytes)
+
+    with pytest.raises(OSError, match="Materialized file hash does not match"):
+        workspace.write_atomic("corrupted.md", "expected content")
+
+    # Destination should be unlinked on failure
+    assert not destination_path.exists()
+
+    # No leftover temporary staging files
+    temp_files = [f for f in workspace.root.glob("*") if ".sangam-" in f.name]
+    assert temp_files == []
+
+
+def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
+    import threading
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    doc_path = "concurrent.md"
+    workspace.write_atomic(doc_path, "initial content")
+
+    stop_event = threading.Event()
+    read_results: list[str] = []
+    read_errors: list[str] = []
+    write_lock = threading.Lock()
+
+    def reader():
+        while not stop_event.is_set():
+            try:
+                content = workspace.read_document(doc_path)
+                read_results.append(content)
+            except Exception as exc:
+                read_errors.append(str(exc))
+
+    def writer(thread_id: int):
+        for i in range(20):
+            with write_lock:
+                workspace.write_atomic(doc_path, f"content from thread {thread_id} iteration {i}")
+
+    reader_threads = [threading.Thread(target=reader) for _ in range(2)]
+    writer_threads = [threading.Thread(target=writer, args=(t,)) for t in range(3)]
+
+    for r in reader_threads:
+        r.start()
+    for t in writer_threads:
+        t.start()
+
+    for t in writer_threads:
+        t.join()
+
+    stop_event.set()
+    for r in reader_threads:
+        r.join()
+
+    assert not read_errors
+    assert len(read_results) > 0
+    # Confirm every read was non-empty and zero-byte reads never occurred
+    for res in read_results:
+        assert len(res) > 0
+        assert "content" in res
+
+    # Confirm workspace clean of temporary staging files
+    temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
+    assert temp_files == []

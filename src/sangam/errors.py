@@ -48,3 +48,14 @@ class AuthenticationError(SangamError):
 
 class AuthorizationError(SangamError):
     code = "forbidden"
+
+
+def validate_metadata_text(value: str | None, field_name: str) -> str | None:
+    """Ensure metadata text fields reject null bytes and ASCII control characters."""
+    if value is None:
+        return None
+    if "\x00" in value:
+        raise ValidationError(f"{field_name} cannot contain null bytes")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValidationError(f"{field_name} cannot contain control characters")
+    return value

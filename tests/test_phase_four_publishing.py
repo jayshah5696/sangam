@@ -361,6 +361,60 @@ def test_publication_assets_require_policy_revision_and_exact_source_reference(
     )
 
 
+def test_publication_asset_path_traversal_prevention(
+    client: TestClient, settings: Settings
+) -> None:
+    secret_file = settings.workspace_root / "secret.txt"
+    secret_file.write_text("SUPER_SECRET_TOKEN")
+
+    subfolder_asset = settings.workspace_root / "docs" / "subfolder" / "valid.png"
+    subfolder_asset.parent.mkdir(parents=True, exist_ok=True)
+    subfolder_asset.write_bytes(b"VALID_IMAGE")
+
+    doc = create_document(
+        client,
+        title="Subfolder Document",
+        content=(
+            "# Subfolder Doc\n\n"
+            "![Valid](valid.png)\n"
+            "![Secret](../../secret.txt)\n"
+            "![RootSecret](../secret.txt)\n"
+        ),
+        path="docs/subfolder/doc.md",
+        key="subfolder-doc-key",
+    )
+    pub = client.post(
+        "/api/v1/publications",
+        headers=mutation_headers("publish-subfolder-doc"),
+        json={
+            "document_id": doc["document_id"],
+            "slug": "subfolder-doc",
+            "access_policy": "public",
+        },
+    )
+    assert pub.status_code == 201
+    rev_id = doc["current_revision_id"]
+
+    res_valid = client.get(
+        "/api/v1/publications/subfolder-doc/asset",
+        params={"revision": rev_id, "path": "valid.png"},
+    )
+    assert res_valid.status_code == 200
+    assert res_valid.content == b"VALID_IMAGE"
+
+    res_secret_1 = client.get(
+        "/api/v1/publications/subfolder-doc/asset",
+        params={"revision": rev_id, "path": "../../secret.txt"},
+    )
+    assert res_secret_1.status_code == 404
+
+    res_secret_2 = client.get(
+        "/api/v1/publications/subfolder-doc/asset",
+        params={"revision": rev_id, "path": "../secret.txt"},
+    )
+    assert res_secret_2.status_code == 404
+
+
 def test_publish_capability_is_path_scoped_and_trust_remains_human_only(client: TestClient) -> None:
     allowed = create_document(
         client,
