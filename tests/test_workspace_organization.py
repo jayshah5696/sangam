@@ -199,6 +199,101 @@ def test_metadata_sanitization_rejects_null_bytes_and_control_characters(
     assert "Document category cannot contain null bytes" in bad_doc_cat.json()["error"]["message"]
 
 
+def test_document_title_summary_and_annotation_sanitization_rejects_control_characters(
+    client: TestClient,
+) -> None:
+    # Title rejecting null bytes and control characters
+    bad_title_null = client.post(
+        "/api/v1/documents",
+        json={"title": "Bad\x00Title", "content": "text"},
+        headers=headers("bad-title-null"),
+    )
+    assert bad_title_null.status_code == 422
+    assert "Document title cannot contain null bytes" in bad_title_null.json()["error"]["message"]
+
+    bad_title_ctrl = client.post(
+        "/api/v1/documents",
+        json={"title": "Bad\x07Title", "content": "text"},
+        headers=headers("bad-title-ctrl"),
+    )
+    assert bad_title_ctrl.status_code == 422
+    assert (
+        "Document title cannot contain control characters"
+        in bad_title_ctrl.json()["error"]["message"]
+    )
+
+    # Create valid doc to test revision summary sanitization
+    doc = client.post(
+        "/api/v1/documents",
+        json={"title": "Valid Doc", "content": "content"},
+        headers=headers("doc-valid-summary"),
+    ).json()
+
+    bad_summary_null = client.patch(
+        f"/api/v1/documents/{doc['document_id']}",
+        json={
+            "expected_revision_id": doc["current_revision_id"],
+            "content": "updated content",
+            "summary": "Bad\x00Summary",
+        },
+        headers=headers("bad-summary-null"),
+    )
+    assert bad_summary_null.status_code == 422
+    assert (
+        "Revision summary cannot contain null bytes" in bad_summary_null.json()["error"]["message"]
+    )
+
+    bad_summary_ctrl = client.patch(
+        f"/api/v1/documents/{doc['document_id']}",
+        json={
+            "expected_revision_id": doc["current_revision_id"],
+            "content": "updated content",
+            "summary": "Bad\x1fSummary",
+        },
+        headers=headers("bad-summary-ctrl"),
+    )
+    assert bad_summary_ctrl.status_code == 422
+    assert (
+        "Revision summary cannot contain control characters"
+        in bad_summary_ctrl.json()["error"]["message"]
+    )
+
+    # PDF import title sanitization
+    bad_pdf_title_headers = headers("bad-pdf-title")
+    bad_pdf_title_headers["Content-Type"] = "application/pdf"
+    bad_pdf_title = client.post(
+        "/api/v1/pdfs?title=Bad%00PDF&path=bad.pdf",
+        content=b"%PDF-1.4 dummy",
+        headers=bad_pdf_title_headers,
+    )
+    assert bad_pdf_title.status_code == 422
+    assert "PDF title cannot contain null bytes" in bad_pdf_title.json()["error"]["message"]
+
+    # Annotation sanitization
+    good_pdf_headers = headers("good-pdf-annot")
+    good_pdf_headers["Content-Type"] = "application/pdf"
+    good_pdf = client.post(
+        "/api/v1/pdfs?title=Good%20PDF&path=good.pdf",
+        content=b"%PDF-1.4 dummy",
+        headers=good_pdf_headers,
+    ).json()
+
+    bad_annot_note = client.post(
+        f"/api/v1/pdfs/{good_pdf['document_id']}/annotations",
+        json={
+            "annotation_type": "page_note",
+            "page_number": 1,
+            "note": "Bad\x00Note",
+            "geometry": [],
+            "tags": [],
+            "color": "#ffff00",
+        },
+        headers=headers("bad-annot-note"),
+    )
+    assert bad_annot_note.status_code == 422
+    assert "Annotation note cannot contain null bytes" in bad_annot_note.json()["error"]["message"]
+
+
 def test_tag_and_folder_mutation_retries_are_idempotent(client: TestClient) -> None:
     tag_headers = headers("retry-tag")
     first_tag = client.post(
