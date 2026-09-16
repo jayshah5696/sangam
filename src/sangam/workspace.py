@@ -148,15 +148,15 @@ class DiskWorkspaceFilesystem:
                 output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
+            expected_hash = hashlib.sha256(content).hexdigest()
+            written_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+            if written_hash != expected_hash:
+                raise OSError("Materialized file hash does not match the committed revision")
             os.replace(temporary, destination)
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
-        actual_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        expected_hash = hashlib.sha256(content).hexdigest()
-        if actual_hash != expected_hash:
-            raise OSError("Materialized file hash does not match the committed revision")
-        return actual_hash
+        return expected_hash
 
     def delete_document(self, path: str) -> None:
         document = self._document_path(path)
@@ -194,13 +194,14 @@ class DiskWorkspaceFilesystem:
         source = self._document_path(path)
         if not source.is_file():
             raise NotFoundError(f"Workspace file not found to trash: {path}")
-        actual_size = source.stat().st_size
+        source_bytes = source.read_bytes()
+        actual_size = len(source_bytes)
         if actual_size != size_bytes:
             raise ConflictError(
                 "Document size does not match expected size for trash retention",
                 details={"expected_size": size_bytes, "actual_size": actual_size},
             )
-        actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        actual_hash = hashlib.sha256(source_bytes).hexdigest()
         if actual_hash != content_hash:
             raise ConflictError(
                 "Document hash does not match expected hash for trash retention",
@@ -213,17 +214,16 @@ class DiskWorkspaceFilesystem:
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as output:
-                output.write(source.read_bytes())
+                output.write(source_bytes)
                 output.flush()
                 os.fsync(output.fileno())
+            retained_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+            if retained_hash != content_hash:
+                raise OSError("Retained trash file hash does not match expected content hash")
             os.replace(temporary, target)
             self._fsync_directory(self._trash_root)
         finally:
             temporary.unlink(missing_ok=True)
-        retained_hash = hashlib.sha256(target.read_bytes()).hexdigest()
-        if retained_hash != content_hash:
-            target.unlink(missing_ok=True)
-            raise OSError("Retained trash file hash does not match expected content hash")
         source.unlink()
         self._fsync_directory(source.parent)
 
@@ -236,13 +236,14 @@ class DiskWorkspaceFilesystem:
         retained = self._trash_path(document_id)
         if not retained.is_file():
             raise NotFoundError(f"Retained trash copy not found for document: {document_id}")
-        actual_size = retained.stat().st_size
+        retained_bytes = retained.read_bytes()
+        actual_size = len(retained_bytes)
         if actual_size != size_bytes:
             raise ConflictError(
                 "Retained trash document size does not match expected size",
                 details={"expected_size": size_bytes, "actual_size": actual_size},
             )
-        actual_hash = hashlib.sha256(retained.read_bytes()).hexdigest()
+        actual_hash = hashlib.sha256(retained_bytes).hexdigest()
         if actual_hash != content_hash:
             raise ConflictError(
                 "Retained trash document hash does not match expected hash",
@@ -255,17 +256,16 @@ class DiskWorkspaceFilesystem:
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as output:
-                output.write(retained.read_bytes())
+                output.write(retained_bytes)
                 output.flush()
                 os.fsync(output.fileno())
+            restored_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+            if restored_hash != content_hash:
+                raise OSError("Restored document hash does not match expected content hash")
             os.replace(temporary, destination)
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
-        restored_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        if restored_hash != content_hash:
-            destination.unlink(missing_ok=True)
-            raise OSError("Restored document hash does not match expected content hash")
         retained.unlink(missing_ok=True)
         self._fsync_directory(self._trash_root)
 
