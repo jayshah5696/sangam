@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import mimetypes
 import os
@@ -144,10 +145,15 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(content)
-                output.flush()
-                os.fsync(output.fileno())
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    output.write(content)
+                    output.flush()
+                    os.fsync(output.fileno())
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
+                raise
             os.replace(temporary, destination)
             self._fsync_directory(destination.parent)
         finally:
@@ -213,10 +219,15 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(source.read_bytes())
-                output.flush()
-                os.fsync(output.fileno())
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    output.write(source.read_bytes())
+                    output.flush()
+                    os.fsync(output.fileno())
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
+                raise
             os.replace(temporary, target)
             self._fsync_directory(self._trash_root)
         finally:
@@ -255,10 +266,15 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(retained.read_bytes())
-                output.flush()
-                os.fsync(output.fileno())
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    output.write(retained.read_bytes())
+                    output.flush()
+                    os.fsync(output.fileno())
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
+                raise
             os.replace(temporary, destination)
             self._fsync_directory(destination.parent)
         finally:
