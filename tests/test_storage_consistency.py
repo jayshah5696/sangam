@@ -555,6 +555,7 @@ def test_concurrent_folder_metadata_atomic_write_and_cleanup(
     temp_files_after_fail = list(folder_dir.glob(".sangam-folder-*"))
     assert temp_files_after_fail == []
 
+
 @pytest.mark.parametrize(
     "malicious_member",
     ["../evil.txt", "/tmp/evil.txt", "../../etc/passwd", "sub/../../evil.txt"],
