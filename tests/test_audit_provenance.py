@@ -174,3 +174,189 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_agent_provenance_and_audit_attribution(client: TestClient) -> None:
+    from conftest import issue_agent_token
+
+    agent_token = issue_agent_token(
+        client,
+        actor_id="agent:auditor",
+        display_name="Auditor Agent",
+        capabilities=("create", "read", "update", "move", "delete", "restore"),
+    )
+    agent_headers = {
+        "Authorization": f"Bearer {agent_token}",
+        "Idempotency-Key": "agent_idemp_create",
+    }
+
+    # 1. Agent creates document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Document",
+            "content": "Line 1\nLine 2\nLine 3\n",
+            "path": "docs/agent_doc.md",
+        },
+        headers=agent_headers,
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # 2. Agent updates document
+    agent_headers["Idempotency-Key"] = "agent_idemp_update"
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "Line 1\nLine 2 modified\nLine 3\n",
+            "title": "Agent Document (Modified)",
+        },
+        headers=agent_headers,
+    )
+    assert update_resp.status_code == 200
+    rev2 = update_resp.json()["current_revision_id"]
+
+    # 3. Agent moves document
+    agent_headers["Idempotency-Key"] = "agent_idemp_move"
+    move_resp = client.post(
+        f"/api/v1/documents/{doc_id}/move",
+        json={
+            "expected_revision_id": rev2,
+            "path": "docs/moved_agent_doc.md",
+        },
+        headers=agent_headers,
+    )
+    assert move_resp.status_code == 200
+    rev3 = move_resp.json()["current_revision_id"]
+
+    # 4. Agent deletes document
+    agent_headers["Idempotency-Key"] = "agent_idemp_delete"
+    del_resp = client.request(
+        "DELETE",
+        f"/api/v1/documents/{doc_id}",
+        json={"expected_revision_id": rev3},
+        headers=agent_headers,
+    )
+    assert del_resp.status_code == 200
+    rev4 = del_resp.json()["current_revision_id"]
+
+    # 5. Agent restores document
+    agent_headers["Idempotency-Key"] = "agent_idemp_restore"
+    restore_resp = client.post(
+        f"/api/v1/documents/{doc_id}/restore",
+        json={
+            "expected_revision_id": rev4,
+            "revision_id": rev3,
+        },
+        headers=agent_headers,
+    )
+    assert restore_resp.status_code == 200
+
+    # Query activity logs filtered by actor_id
+    activity_resp = client.get("/api/v1/activity", params={"actor_id": "agent:auditor"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    agent_actions = {e["action"]: e for e in events if e["resource_id"] == doc_id}
+    assert agent_actions["create"]["actor_kind"] == "agent"
+    assert agent_actions["create"]["actor_id"] == "agent:auditor"
+    assert agent_actions["create"]["path"] == "docs/agent_doc.md"
+
+    assert agent_actions["update"]["actor_kind"] == "agent"
+    assert agent_actions["update"]["actor_id"] == "agent:auditor"
+    assert agent_actions["update"]["path"] == "docs/agent_doc.md"
+
+    assert agent_actions["move"]["actor_kind"] == "agent"
+    assert agent_actions["move"]["path"] == "docs/moved_agent_doc.md"
+
+    assert agent_actions["delete"]["actor_kind"] == "agent"
+    assert agent_actions["delete"]["path"] == "docs/moved_agent_doc.md"
+
+    assert agent_actions["restore"]["actor_kind"] == "agent"
+    assert agent_actions["restore"]["path"] == "docs/moved_agent_doc.md"
+
+
+def test_chat_proposal_patch_audit_logging(client: TestClient) -> None:
+    from sangam.security import Principal
+
+    # Human creates initial document
+    doc_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Chat Patch Doc",
+            "content": "Target Line Here\nAnother Line",
+            "path": "docs/patch_doc.md",
+        },
+        headers=headers("idemp_patch_init"),
+    )
+    assert doc_resp.status_code == 201
+    doc = doc_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # Create thread ID using chatkit helper behavior
+    thread_resp = client.post(
+        "/api/v1/chatkit",
+        json={
+            "type": "threads.create",
+            "params": {
+                "input": {
+                    "content": [{"type": "input_text", "text": "Review this document"}],
+                    "attachments": [],
+                    "inference_options": {"model": "openai/gpt-5.4-nano"},
+                }
+            },
+        },
+        headers={"X-Sangam-Document-ID": doc_id},
+    )
+    assert thread_resp.status_code == 200
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in thread_resp.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    thread_id = next(e["thread"]["id"] for e in events if e.get("type") == "thread.created")
+
+    # Create proposal directly via Chat service as the default trusted human principal
+    chat_service = client.app.state.services.chat
+    principal = Principal.trusted_human(
+        actor_id="human:jay",
+        display_name="Jay",
+        operation_id="audit-proposal",
+    )
+    proposal = chat_service.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=doc_id,
+        expected_revision_id=rev1,
+        mode="replace",
+        anchor="Target Line Here",
+        content="Replaced Line Content",
+        summary="Replace target line via proposal",
+    )
+
+    # Apply proposal via API endpoint
+    apply_resp = client.post(
+        f"/api/v1/chat/proposals/{proposal.proposal_id}/apply",
+        json={"expected_revision_id": rev1},
+        headers=headers("idemp_apply_prop"),
+    )
+    assert apply_resp.status_code == 200
+
+    # Retrieve audit events for this document
+    activity_resp = client.get(
+        "/api/v1/activity", params={"resource_id": doc_id, "actor_kind": "human"}
+    )
+    assert activity_resp.status_code == 200
+    activity_events = activity_resp.json()
+
+    updates = [e for e in activity_events if e["action"] == "update"]
+    assert len(updates) == 1
+    update_event = updates[0]
+    assert update_event["path"] == "docs/patch_doc.md"
+    assert update_event["outcome"] == "accepted"
+    assert update_event["actor_kind"] == "human"
+    assert update_event["revision_id"] is not None
