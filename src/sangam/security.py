@@ -63,7 +63,14 @@ def sanitize_headers(headers: object) -> dict[str, str]:
     items = headers.items() if hasattr(headers, "items") else headers
     for key, value in items:
         norm_key = str(key).strip().casefold()
-        if norm_key in SENSITIVE_HEADER_NAMES or "trusted-identity" in norm_key:
+        if (
+            norm_key in SENSITIVE_HEADER_NAMES
+            or "trusted-identity" in norm_key
+            or any(
+                term in norm_key
+                for term in ("secret", "password", "token", "credential", "api_key", "auth_token")
+            )
+        ):
             result[str(key)] = "[REDACTED]"
         else:
             result[str(key)] = _TOKEN_PATTERN.sub("[REDACTED]", str(value))
@@ -81,7 +88,16 @@ def sanitize_sensitive_data(value: object) -> object:
             k_norm = k_str.strip().casefold()
             if k_norm not in _SAFE_KEY_EXCEPTIONS and any(
                 term in k_norm
-                for term in ("secret", "password", "token", "credential", "api_key", "auth_token")
+                for term in (
+                    "secret",
+                    "password",
+                    "token",
+                    "credential",
+                    "api_key",
+                    "auth_token",
+                    "private_key",
+                    "jwt",
+                )
             ):
                 sanitized_dict[k_str] = "[REDACTED]"
             else:

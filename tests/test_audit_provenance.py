@@ -174,3 +174,97 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_agent_provenance_attribution_and_details(client: TestClient) -> None:
+    # 1. Issue an agent token
+    token_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:bot_auditor",
+            "display_name": "Auditor Agent",
+            "label": "Auditor Token",
+            "scopes": [
+                {"capability": "create"},
+                {"capability": "update"},
+                {"capability": "move"},
+            ],
+        },
+        headers=headers("idemp_issue_auditor_token"),
+    )
+    assert token_resp.status_code == 201
+    issued_data = token_resp.json()
+    token_id = issued_data["token_id"]
+    agent_token = issued_data["token"]
+
+    agent_auth_headers = {
+        "Authorization": f"Bearer {agent_token}",
+        "Idempotency-Key": "idemp_agent_create_1",
+    }
+
+    # 2. Agent creates document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Document",
+            "content": "# Agent Content",
+            "path": "docs/agent_doc.md",
+        },
+        headers=agent_auth_headers,
+    )
+    assert create_resp.status_code == 201
+    created_doc = create_resp.json()
+    doc_id = created_doc["document_id"]
+    rev1 = created_doc["current_revision_id"]
+
+    # 3. Agent updates document with summary
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "# Agent Content\nUpdated by agent.",
+            "summary": "Agent revision summary",
+        },
+        headers={
+            "Authorization": f"Bearer {agent_token}",
+            "Idempotency-Key": "idemp_agent_update_1",
+        },
+    )
+    assert update_resp.status_code == 200
+    updated_doc = update_resp.json()
+    rev2 = updated_doc["current_revision_id"]
+
+    # 4. Agent moves document
+    move_resp = client.post(
+        f"/api/v1/documents/{doc_id}/move",
+        json={
+            "expected_revision_id": rev2,
+            "path": "docs/agent_doc_moved.md",
+            "summary": "Agent move summary",
+        },
+        headers={"Authorization": f"Bearer {agent_token}", "Idempotency-Key": "idemp_agent_move_1"},
+    )
+    assert move_resp.status_code == 200
+
+    # Query activity logs specifically for agent:bot_auditor
+    activity_resp = client.get("/api/v1/activity", params={"actor_id": "agent:bot_auditor"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+    assert len(events) >= 3
+
+    create_event = next(e for e in events if e["action"] == "create")
+    assert create_event["actor_id"] == "agent:bot_auditor"
+    assert create_event["actor_kind"] == "agent"
+    assert create_event["token_id"] == token_id
+    assert create_event["path"] == "docs/agent_doc.md"
+
+    update_event = next(e for e in events if e["action"] == "update")
+    assert update_event["actor_id"] == "agent:bot_auditor"
+    assert update_event["details"].get("summary") == "Agent revision summary"
+    assert update_event["details"].get("expected_revision_id") == rev1
+
+    move_event = next(e for e in events if e["action"] == "move")
+    assert move_event["actor_id"] == "agent:bot_auditor"
+    assert move_event["details"].get("source_path") == "docs/agent_doc.md"
+    assert move_event["details"].get("destination_path") == "docs/agent_doc_moved.md"
+    assert move_event["details"].get("summary") == "Agent move summary"
