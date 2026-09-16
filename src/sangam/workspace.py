@@ -41,7 +41,7 @@ def _canonicalize_relative_path(
     if (
         not stripped_path
         or path.is_absolute()
-        or any(part in {"", ".", ".."} for part in raw_parts)
+        or any(part.strip() in {"", ".", ".."} for part in raw_parts)
     ):
         message = (
             "Path must be a relative path inside the workspace"
@@ -49,7 +49,7 @@ def _canonicalize_relative_path(
             else "Folder path must stay inside the workspace"
         )
         raise InvalidPathError(message)
-    if any(part.startswith(".") or ".sangam-" in part for part in raw_parts):
+    if any(part.strip().startswith(".") or ".sangam-" in part for part in raw_parts):
         raise InvalidPathError(f"{kind} path cannot access hidden or reserved system locations")
     return path.as_posix()
 
