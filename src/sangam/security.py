@@ -39,6 +39,10 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "api-key",
     "x-auth-token",
     "proxy-authorization",
+    "x-sangam-trusted-identity",
+    "x-csrf-token",
+    "x-xsrf-token",
+    "private-key",
 }
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -81,7 +85,16 @@ def sanitize_sensitive_data(value: object) -> object:
             k_norm = k_str.strip().casefold()
             if k_norm not in _SAFE_KEY_EXCEPTIONS and any(
                 term in k_norm
-                for term in ("secret", "password", "token", "credential", "api_key", "auth_token")
+                for term in (
+                    "secret",
+                    "password",
+                    "token",
+                    "credential",
+                    "api_key",
+                    "auth_token",
+                    "private_key",
+                    "bearer",
+                )
             ):
                 sanitized_dict[k_str] = "[REDACTED]"
             else:

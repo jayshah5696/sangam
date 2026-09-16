@@ -124,25 +124,82 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     assert activity_resp.status_code == 200
     events = activity_resp.json()
 
-    # Verify event types are recorded with accurate paths and actors
+    # Verify event types are recorded with accurate paths, actors, and details
     actions = {event["action"]: event for event in events if event["resource_id"] == doc_id}
     assert "create" in actions
     assert actions["create"]["path"] == "docs/audit_test.md"
     assert actions["create"]["actor_kind"] == "human"
     assert actions["create"]["outcome"] == "accepted"
+    assert actions["create"]["details"]["title"] == "Audit Trail Test Doc"
 
     assert "update" in actions
     assert actions["update"]["path"] == "docs/audit_test.md"
     assert actions["update"]["actor_kind"] == "human"
+    assert actions["update"]["details"]["title"] == "Audit Trail Test Doc (Updated)"
+    assert actions["update"]["details"]["expected_revision_id"] == rev1
 
     assert "move" in actions
     assert actions["move"]["path"] == "docs/moved_audit_test.md"
+    assert actions["move"]["details"]["source_path"] == "docs/audit_test.md"
+    assert actions["move"]["details"]["destination_path"] == "docs/moved_audit_test.md"
 
     assert "delete" in actions
     assert actions["delete"]["path"] == "docs/moved_audit_test.md"
+    assert actions["delete"]["details"]["source_path"] == "docs/moved_audit_test.md"
 
     assert "restore" in actions
     assert actions["restore"]["path"] == "docs/moved_audit_test.md"
+    assert actions["restore"]["details"]["destination_path"] == "docs/moved_audit_test.md"
+
+
+def test_agent_actor_audit_provenance(client: TestClient) -> None:
+    # Issue token for agent
+    issue_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:audit-bot",
+            "display_name": "Audit Bot",
+            "label": "Audit Token",
+            "scopes": [{"capability": "create"}],
+        },
+        headers=headers("idemp_agent_issue"),
+    )
+    assert issue_resp.status_code == 201
+    token_data = issue_resp.json()
+    bearer_token = token_data["token"]
+    token_id = token_data["token_id"]
+
+    agent_headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "Idempotency-Key": "idemp_agent_doc_create",
+    }
+
+    # Agent creates a document
+    agent_create = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Doc",
+            "content": "# Agent Content",
+            "path": "docs/agent_test.md",
+        },
+        headers=agent_headers,
+    )
+    assert agent_create.status_code == 201
+    doc_id = agent_create.json()["document_id"]
+
+    # Query activity logs for agent actor
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    agent_event = next(e for e in events if e["resource_id"] == doc_id)
+    assert agent_event["actor_id"] == "agent:audit-bot"
+    assert agent_event["actor_kind"] == "agent"
+    assert agent_event["token_id"] == token_id
+    assert agent_event["action"] == "create"
+    assert agent_event["outcome"] == "accepted"
+    assert agent_event["details"]["title"] == "Agent Doc"
+    assert agent_event["details"]["destination_path"] == "docs/agent_test.md"
 
 
 def test_export_json_lines_audit_logs(client: TestClient) -> None:
