@@ -381,6 +381,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(title, "Document title")
         with self.mutations.creation():
             fingerprint = request_hash(
                 {
@@ -692,6 +693,8 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(title, "Document title")
+        validate_metadata_text(summary, "Revision summary")
         self._require_text_document(document_id, "PDF source bytes cannot be edited in place")
         document, _ = self._append_revision(
             document_id=document_id,
@@ -742,6 +745,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(title, "Document title")
         source = self.get_document(document_id)
         if source.current_revision_id != expected_revision_id:
             raise ConflictError(
@@ -839,6 +843,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(summary, "Revision summary")
         normalized_path = self._normalize_path(path)
         current = self.get_document(document_id)
         if current.content_type == "application/pdf":
@@ -867,6 +872,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(summary, "Revision summary")
         normalized_path = self._normalize_path(path)
         current = self.get_document(document_id)
         self._validate_path_type(normalized_path, current.content_type)
@@ -1044,6 +1050,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(summary, "Revision summary")
         current = self.get_document(document_id)
         if current.content_type == "application/pdf":
             return self._delete_pdf_document(
@@ -1268,6 +1275,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(summary, "Revision summary")
         current = self.get_document(document_id, include_deleted=True)
         if current.content_type == "application/pdf":
             if not current.deleted:
