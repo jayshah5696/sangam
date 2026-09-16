@@ -153,7 +153,9 @@ class ChatEvidenceRepository:
                 "SELECT actor_id, user_item_id FROM chat_turn_contexts WHERE context_id = ?",
                 (context_id,),
             ).fetchone()
-            if row is None or row["actor_id"] != principal.actor_id:
+            if row is None or (
+                row["actor_id"] != principal.actor_id and not principal.administrator
+            ):
                 raise NotFoundError(f"Chat turn context not found: {context_id}")
             if row["user_item_id"] not in {None, user_item_id}:
                 raise ValidationError("Chat turn context is already attached to another turn")
@@ -240,7 +242,7 @@ class ChatEvidenceRepository:
             row = connection.execute(
                 """
                 SELECT r.run_id FROM chat_runs r
-                WHERE r.thread_id = ? AND r.actor_id = ?
+                WHERE r.thread_id = ? AND (r.actor_id = ? OR ?)
                   AND (
                     r.status = 'running'
                     OR EXISTS (
@@ -251,7 +253,7 @@ class ChatEvidenceRepository:
                   )
                 ORDER BY r.started_at DESC LIMIT 1
                 """,
-                (thread_id, principal.actor_id),
+                (thread_id, principal.actor_id, int(principal.administrator)),
             ).fetchone()
             if row is None:
                 return None

@@ -30,7 +30,7 @@ class ChatProposalRepository:
             row = connection.execute(
                 "SELECT created_by FROM chat_threads WHERE thread_id = ?", (thread_id,)
             ).fetchone()
-        if row is None or row["created_by"] != principal.actor_id:
+        if row is None or (row["created_by"] != principal.actor_id and not principal.administrator):
             raise NotFoundError(f"Chat thread not found: {thread_id}")
 
     def create(
@@ -70,8 +70,8 @@ class ChatProposalRepository:
     def list_owned(
         self, principal: Principal, *, thread_id: str | None, document_id: str | None
     ) -> list[ChatProposal]:
-        clauses = ["thread.created_by = ?"]
-        params: list[object] = [principal.actor_id]
+        clauses = ["(thread.created_by = ? OR ?)"]
+        params: list[object] = [principal.actor_id, int(principal.administrator)]
         if thread_id:
             clauses.append("proposal.thread_id = ?")
             params.append(thread_id)
@@ -191,9 +191,9 @@ class ChatProposalRepository:
             """
             SELECT proposal.* FROM chat_proposals AS proposal
             JOIN chat_threads AS thread ON thread.thread_id = proposal.thread_id
-            WHERE proposal.proposal_id = ? AND thread.created_by = ?
+            WHERE proposal.proposal_id = ? AND (thread.created_by = ? OR ?)
             """,
-            (proposal_id, principal.actor_id),
+            (proposal_id, principal.actor_id, int(principal.administrator)),
         ).fetchone()
         if row is None:
             raise NotFoundError(f"Chat proposal not found: {proposal_id}")
