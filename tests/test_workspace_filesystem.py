@@ -71,3 +71,58 @@ def test_scan_ignores_sangam_temporary_files(tmp_path: Path) -> None:
     assert workspace.scan_markdown() == {
         "kept.md": hashlib.sha256(b"kept").hexdigest(),
     }
+
+
+def test_concurrent_writes_and_reads_workspace_filesystem(tmp_path: Path) -> None:
+    import threading
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    path = "concurrent.md"
+    workspace.write_atomic(path, "initial content")
+
+    errors: list[Exception] = []
+    read_contents: list[str] = []
+    stop_flag = threading.Event()
+
+    def writer(thread_id: int):
+        for i in range(25):
+            if stop_flag.is_set():
+                break
+            content = f"writer-{thread_id} iteration-{i} " + ("data" * 500)
+            try:
+                workspace.write_atomic(path, content)
+            except Exception as exc:
+                errors.append(exc)
+
+    def reader():
+        while not stop_flag.is_set():
+            try:
+                content = workspace.read_document(path)
+                read_contents.append(content)
+            except Exception as exc:
+                errors.append(exc)
+
+    writers = [threading.Thread(target=writer, args=(i,)) for i in range(4)]
+    readers = [threading.Thread(target=reader) for _ in range(3)]
+
+    for r in readers:
+        r.start()
+    for w in writers:
+        w.start()
+
+    for w in writers:
+        w.join()
+
+    stop_flag.set()
+    for r in readers:
+        r.join()
+
+    assert not errors
+    assert len(read_contents) > 0
+    for text in read_contents:
+        assert len(text) > 0
+        assert text == "initial content" or "writer-" in text
+
+    # Ensure no leftover temporary files in workspace
+    leftover_temps = list(workspace.root.glob(".*.sangam-*"))
+    assert leftover_temps == []
