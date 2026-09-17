@@ -38,8 +38,13 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "set-cookie",
     "x-api-key",
     "api-key",
+    "x-api-token",
     "x-auth-token",
+    "x-access-token",
     "proxy-authorization",
+    "secret",
+    "x-secret",
+    "private-key",
 }
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -64,7 +69,14 @@ def sanitize_headers(headers: object) -> dict[str, str]:
     items = headers.items() if hasattr(headers, "items") else headers
     for key, value in items:
         norm_key = str(key).strip().casefold()
-        if norm_key in SENSITIVE_HEADER_NAMES or "trusted-identity" in norm_key:
+        if (
+            norm_key in SENSITIVE_HEADER_NAMES
+            or "trusted-identity" in norm_key
+            or any(
+                term in norm_key
+                for term in ("secret", "password", "credential", "auth-token", "api-key")
+            )
+        ):
             result[str(key)] = "[REDACTED]"
         else:
             result[str(key)] = _TOKEN_PATTERN.sub("[REDACTED]", str(value))

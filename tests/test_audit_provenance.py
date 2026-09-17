@@ -181,3 +181,143 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_provenance_attribution_for_agent_and_human_mutations(client: TestClient) -> None:
+    # 1. Issue an agent token
+    token_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:provenance_bot",
+            "display_name": "Provenance Bot",
+            "label": "Audit Test Token",
+            "scopes": [
+                {"capability": "create", "path_prefix": None},
+                {"capability": "update", "path_prefix": None},
+                {"capability": "move", "path_prefix": None},
+                {"capability": "delete", "path_prefix": None},
+                {"capability": "read", "path_prefix": None},
+            ],
+        },
+    )
+    assert token_resp.status_code == 201
+    agent_token = token_resp.json()["token"]
+    agent_headers = {"Authorization": f"Bearer {agent_token}"}
+
+    # 2. Agent creates document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Provenance Doc",
+            "content": "# Agent Content",
+            "path": "agents/provenance.md",
+        },
+        headers={**agent_headers, "Idempotency-Key": "idemp_agent_create"},
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # 3. Agent updates document
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "# Agent Content\nUpdated by agent.",
+        },
+        headers={**agent_headers, "Idempotency-Key": "idemp_agent_update"},
+    )
+    assert update_resp.status_code == 200
+    rev2 = update_resp.json()["current_revision_id"]
+
+    # 4. Agent moves document
+    move_resp = client.post(
+        f"/api/v1/documents/{doc_id}/move",
+        json={
+            "expected_revision_id": rev2,
+            "path": "agents/moved_provenance.md",
+        },
+        headers={**agent_headers, "Idempotency-Key": "idemp_agent_move"},
+    )
+    assert move_resp.status_code == 200
+    rev3 = move_resp.json()["current_revision_id"]
+
+    # 5. Agent deletes document
+    delete_resp = client.request(
+        "DELETE",
+        f"/api/v1/documents/{doc_id}",
+        json={"expected_revision_id": rev3},
+        headers={**agent_headers, "Idempotency-Key": "idemp_agent_delete"},
+    )
+    assert delete_resp.status_code == 200
+
+    # 6. Verify agent activity records
+    agent_activity = client.get(
+        "/api/v1/activity",
+        params={"actor_id": "agent:provenance_bot", "actor_kind": "agent"},
+    )
+    assert agent_activity.status_code == 200
+    events = agent_activity.json()
+    doc_events = [e for e in events if e["resource_id"] == doc_id]
+    assert len(doc_events) == 4
+
+    actions = {e["action"]: e for e in doc_events}
+    assert actions["create"]["actor_id"] == "agent:provenance_bot"
+    assert actions["create"]["actor_kind"] == "agent"
+    assert actions["create"]["path"] == "agents/provenance.md"
+    assert actions["create"]["outcome"] == "accepted"
+
+    assert actions["update"]["actor_id"] == "agent:provenance_bot"
+    assert actions["update"]["actor_kind"] == "agent"
+    assert actions["update"]["revision_id"] == rev2
+
+    assert actions["move"]["path"] == "agents/moved_provenance.md"
+    assert actions["move"]["details"]["source_path"] == "agents/provenance.md"
+    assert actions["move"]["details"]["destination_path"] == "agents/moved_provenance.md"
+
+    assert actions["delete"]["revision_id"] == doc_events[0]["revision_id"]
+
+
+def test_sensitive_data_sanitization_in_audit_records(client: TestClient) -> None:
+    # 1. Issue an agent token
+    token_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:security_bot",
+            "display_name": "Security Bot",
+            "label": "Sanitization Test Token",
+            "scopes": [{"capability": "read", "path_prefix": None}],
+        },
+    )
+    assert token_resp.status_code == 201
+    secret_token = token_resp.json()["token"]
+
+    # 2. Attempt unauthorized action sending sensitive data in query/headers/body
+    denied_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Leak Test",
+            "content": "Secret payload sgm_agt_123456789.supersecretkey",
+            "path": "unauthorized.md",
+        },
+        headers={
+            "Authorization": f"Bearer {secret_token}",
+            "Idempotency-Key": "idemp_unauth_leak",
+            "X-Api-Key": "secret_api_key_header",
+        },
+    )
+    assert denied_resp.status_code == 403
+
+    # 3. Query audit events and confirm secrets are redacted
+    activity_resp = client.get(
+        "/api/v1/activity", params={"actor_id": "agent:security_bot", "actor_kind": "agent"}
+    )
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+    assert len(events) >= 1
+
+    event_str = json.dumps(events)
+    assert secret_token not in event_str
+    assert "supersecretkey" not in event_str
+    assert "secret_api_key_header" not in event_str
