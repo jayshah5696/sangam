@@ -27,6 +27,7 @@ from sangam.errors import (
     validate_metadata_text,
 )
 from sangam.schemas import Actor, AgentToken, IssuedAgentToken, TokenScope
+from sangam.workspace import RESERVED_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,12 @@ def normalize_scope_prefix(value: str | None) -> str | None:
         or any(part.strip() in {"", ".", ".."} for part in raw_parts)
     ):
         raise ValidationError("Token path scope must be a workspace-relative prefix")
-    if any(part.strip().startswith(".") or ".sangam-" in part for part in raw_parts):
+    if any(
+        part.strip().startswith(".")
+        or ".sangam-" in part
+        or part.strip().split(".")[0].upper() in RESERVED_NAMES
+        for part in raw_parts
+    ):
         raise ValidationError(
             "Token path scope prefix cannot access hidden or reserved system locations"
         )

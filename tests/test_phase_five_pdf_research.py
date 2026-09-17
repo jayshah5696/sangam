@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 
+import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
@@ -491,3 +492,62 @@ def test_pdf_trash_retention_restore_and_collision(client: TestClient, settings)
         json={"expected_revision_id": restored["current_revision_id"], "revision_id": rev_1},
     )
     assert active_restore.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "bad_title",
+    [
+        "PDF\x00Title",
+        "PDF\x07Title",
+        "PDF\rTitle",
+        "PDF\nTitle",
+    ],
+)
+def test_pdf_import_title_sanitization(client: TestClient, bad_title: str) -> None:
+    response = import_pdf(
+        client,
+        content=text_pdf(),
+        key=f"bad-pdf-title:{bad_title.encode().hex()}",
+        title=bad_title,
+        path="research/valid.pdf",
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.parametrize(
+    "bad_field,body_patch",
+    [
+        ("selected_text", {"selected_text": "Bad\x00Text"}),
+        ("note", {"note": "Bad\x07Note"}),
+        ("color", {"color": "#FF\x0000"}),
+        ("tags", {"tags": ["GoodTag", "Bad\x1fTag"]}),
+    ],
+)
+def test_pdf_annotation_sanitization(client: TestClient, bad_field: str, body_patch: dict) -> None:
+    doc = import_pdf(
+        client,
+        content=text_pdf(),
+        key="pdf-annotation-sanitization-doc",
+        path="research/annot_san.pdf",
+    ).json()
+    doc_id = doc["document_id"]
+
+    base_body = {
+        "page_number": 1,
+        "annotation_type": "text_highlight",
+        "selected_text": "valid text",
+        "note": "valid note",
+        "geometry": [{"x": 0.1, "y": 0.1, "width": 0.3, "height": 0.04}],
+        "tags": ["valid"],
+        "color": "#f0c75e",
+    }
+    body = {**base_body, **body_patch}
+
+    response = client.post(
+        f"/api/v1/pdfs/{doc_id}/annotations",
+        json=body,
+        headers=headers(f"bad-annot-{bad_field}"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
