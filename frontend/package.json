@@ -31,7 +31,7 @@
     "@tanstack/react-router": "1.170.18",
     "dompurify": "^3.4.12",
     "lucide-react": "^1.24.0",
-    "markdown-it": "^14.3.0",
+    "markdown-it": "^15.0.2",
     "mermaid": "^11.17.2",
     "pdfjs-dist": "^6.1.200",
     "react": "19.2.8",
