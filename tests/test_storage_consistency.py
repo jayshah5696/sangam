@@ -600,3 +600,30 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
             database_path=restore_db_target,
             workspace_root=restore_ws_target,
         )
+
+
+def test_concurrent_write_atomic_bytes_no_post_rename_race(tmp_path: Path) -> None:
+    from sangam.workspace import DiskWorkspaceFilesystem
+
+    fs = DiskWorkspaceFilesystem(root=tmp_path)
+    file_path = "concurrent_write.md"
+
+    errors: list[Exception] = []
+
+    def writer(writer_id: int) -> None:
+        for i in range(20):
+            content = f"writer {writer_id} iteration {i}".encode()
+            try:
+                fs.write_atomic_bytes(file_path, content, overwrite=True)
+            except Exception as exc:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Concurrent write_atomic_bytes raised errors: {errors}"
+    assert (tmp_path / file_path).exists()
+    assert (tmp_path / file_path).stat().st_size > 0
