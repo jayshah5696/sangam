@@ -136,6 +136,8 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     assert actions["update"]["actor_kind"] == "human"
     assert actions["update"]["details"]["expected_revision_id"] == rev1
     assert actions["update"]["details"]["title"] == "Audit Trail Test Doc (Updated)"
+    assert "lines_added" in actions["update"]["details"]
+    assert "lines_removed" in actions["update"]["details"]
 
     assert "move" in actions
     assert actions["move"]["path"] == "docs/moved_audit_test.md"
@@ -181,3 +183,110 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_patch_and_tag_audit_metadata(client: TestClient) -> None:
+    # 1. Create a document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Patch Metadata Test Doc",
+            "content": "Line 1\nLine 2\nLine 3\n",
+            "path": "docs/patch_test.md",
+        },
+        headers=headers("idemp_patch_create"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # 2. Update document with changes
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "Line 1\nLine 2 Modified\nLine 3\nLine 4 Added\n",
+        },
+        headers=headers("idemp_patch_update"),
+    )
+    assert update_resp.status_code == 200
+
+    # 3. Update document metadata
+    meta_resp = client.patch(
+        f"/api/v1/documents/{doc_id}/metadata",
+        json={
+            "expected_metadata_version": 0,
+            "category": "Documentation",
+            "tag_ids": [],
+        },
+        headers=headers("idemp_patch_meta"),
+    )
+    assert meta_resp.status_code == 200
+
+    # Query activity log
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    doc_events = {e["action"]: e for e in events if e["resource_id"] == doc_id}
+    assert "update" in doc_events
+    update_details = doc_events["update"]["details"]
+    assert update_details["lines_added"] > 0
+    assert update_details["lines_removed"] > 0
+
+    assert "tag" in doc_events
+    tag_details = doc_events["tag"]["details"]
+    assert tag_details["expected_metadata_version"] == 0
+    assert tag_details["category"] == "Documentation"
+
+
+def test_agent_provenance_attribution(client: TestClient) -> None:
+    # Issue token for agent
+    issue_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:chronicle_test",
+            "display_name": "Chronicle Audit Agent",
+            "label": "Audit Test Token",
+            "scopes": [{"capability": "create"}],
+            "expires_at": None,
+        },
+    )
+    assert issue_resp.status_code == 201
+    issued = issue_resp.json()
+    token = issued["token"]
+    agent_token_id = issued["token_id"]
+
+    agent_headers = {
+        "Authorization": f"Bearer {token}",
+        "Idempotency-Key": "idemp_agent_create_doc",
+    }
+
+    # Agent creates a document
+    agent_create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Created Doc",
+            "content": "# Created by Agent\nProgrammatic content.",
+            "path": "agents/chronicle_doc.md",
+        },
+        headers=agent_headers,
+    )
+    assert agent_create_resp.status_code == 201
+    created_doc = agent_create_resp.json()
+    doc_id = created_doc["document_id"]
+
+    # Query activity logs for agent events
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    agent_events = [e for e in events if e["resource_id"] == doc_id]
+    assert len(agent_events) > 0
+    create_event = agent_events[0]
+    assert create_event["actor_id"] == "agent:chronicle_test"
+    assert create_event["actor_kind"] == "agent"
+    assert create_event["token_id"] == agent_token_id
+    assert create_event["path"] == "agents/chronicle_doc.md"
+    assert create_event["created_at"] is not None
