@@ -17,6 +17,8 @@ def test_sensitive_header_and_data_sanitization() -> None:
         "Cookie": "session=secret_session_id",
         "X-Api-Key": "secret_api_key",
         "X-Sangam-Trusted-Identity": "secret_trusted_header",
+        "X-Custom-Auth-Secret": "sensitive_custom_val",
+        "X-Custom-Jwt-Header": "jwt_val_str",
         "Content-Type": "application/json",
         "User-Agent": "SangamTestClient/1.0",
     }
@@ -27,6 +29,8 @@ def test_sensitive_header_and_data_sanitization() -> None:
     assert sanitized["Cookie"] == "[REDACTED]"
     assert sanitized["X-Api-Key"] == "[REDACTED]"
     assert sanitized["X-Sangam-Trusted-Identity"] == "[REDACTED]"
+    assert sanitized["X-Custom-Auth-Secret"] == "[REDACTED]"
+    assert sanitized["X-Custom-Jwt-Header"] == "[REDACTED]"
     assert sanitized["Content-Type"] == "application/json"
     assert sanitized["User-Agent"] == "SangamTestClient/1.0"
 
@@ -38,9 +42,15 @@ def test_sensitive_header_and_data_sanitization() -> None:
         "summary": "Updated document content",
         "nested": {
             "api_key": "secret_api_key_123",
+            "apikey": "another_apikey",
+            "private_key": "private_pem_contents",
             "title": "My Sensitive Note",
             "jwt": "eyA0NTY3OCB9.eyBjb250ZW50IH0.sig_string_here_123",
         },
+        "list_data": [
+            {"auth_token": "sgm_agt_77777.secret_key"},
+            "regular string",
+        ],
     }
     sanitized_data = sanitize_sensitive_data(sensitive_payload)
     assert isinstance(sanitized_data, dict)
@@ -50,8 +60,12 @@ def test_sensitive_header_and_data_sanitization() -> None:
     assert sanitized_data["bearer_token"] == "[REDACTED]"
     assert sanitized_data["summary"] == "Updated document content"
     assert sanitized_data["nested"]["api_key"] == "[REDACTED]"
+    assert sanitized_data["nested"]["apikey"] == "[REDACTED]"
+    assert sanitized_data["nested"]["private_key"] == "[REDACTED]"
     assert sanitized_data["nested"]["title"] == "My Sensitive Note"
     assert sanitized_data["nested"]["jwt"] == "[REDACTED]"
+    assert sanitized_data["list_data"][0]["auth_token"] == "[REDACTED]"
+    assert sanitized_data["list_data"][1] == "regular string"
 
 
 def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> None:
