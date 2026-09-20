@@ -112,9 +112,7 @@ def test_concurrent_unlocked_workspace_atomic_writes(tmp_path: Path) -> None:
     def writer(thread_id: int):
         for i in range(25):
             try:
-                workspace.write_atomic(
-                    doc_path, f"unlocked writer {thread_id} content {i}"
-                )
+                workspace.write_atomic(doc_path, f"unlocked writer {thread_id} content {i}")
             except Exception as exc:
                 write_errors.append(f"thread {thread_id} iteration {i}: {exc}")
 
