@@ -82,7 +82,17 @@ def sanitize_sensitive_data(value: object) -> object:
             k_norm = k_str.strip().casefold()
             if k_norm not in _SAFE_KEY_EXCEPTIONS and any(
                 term in k_norm
-                for term in ("secret", "password", "token", "credential", "api_key", "auth_token")
+                for term in (
+                    "secret",
+                    "password",
+                    "token",
+                    "credential",
+                    "api_key",
+                    "auth_token",
+                    "private_key",
+                    "authorization",
+                    "auth_header",
+                )
             ):
                 sanitized_dict[k_str] = "[REDACTED]"
             else:
