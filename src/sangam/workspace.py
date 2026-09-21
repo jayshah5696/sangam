@@ -139,6 +139,7 @@ class DiskWorkspaceFilesystem:
         if destination.exists() and not overwrite:
             raise InvalidPathError("A workspace file already exists at that path")
         destination.parent.mkdir(parents=True, exist_ok=True)
+        expected_hash = hashlib.sha256(content).hexdigest()
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{destination.name}.sangam-", dir=destination.parent
         )
@@ -148,16 +149,14 @@ class DiskWorkspaceFilesystem:
                 output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
+            temp_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+            if temp_hash != expected_hash:
+                raise OSError("Materialized file hash does not match the committed revision")
             os.replace(temporary, destination)
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
-        actual_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        expected_hash = hashlib.sha256(content).hexdigest()
-        if actual_hash != expected_hash:
-            destination.unlink(missing_ok=True)
-            raise OSError("Materialized file hash does not match the committed revision")
-        return actual_hash
+        return expected_hash
 
     def delete_document(self, path: str) -> None:
         document = self._document_path(path)
@@ -217,14 +216,13 @@ class DiskWorkspaceFilesystem:
                 output.write(source.read_bytes())
                 output.flush()
                 os.fsync(output.fileno())
+            temp_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+            if temp_hash != content_hash:
+                raise OSError("Retained trash file hash does not match expected content hash")
             os.replace(temporary, target)
             self._fsync_directory(self._trash_root)
         finally:
             temporary.unlink(missing_ok=True)
-        retained_hash = hashlib.sha256(target.read_bytes()).hexdigest()
-        if retained_hash != content_hash:
-            target.unlink(missing_ok=True)
-            raise OSError("Retained trash file hash does not match expected content hash")
         source.unlink()
         self._fsync_directory(source.parent)
 
@@ -259,14 +257,13 @@ class DiskWorkspaceFilesystem:
                 output.write(retained.read_bytes())
                 output.flush()
                 os.fsync(output.fileno())
+            temp_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+            if temp_hash != content_hash:
+                raise OSError("Restored document hash does not match expected content hash")
             os.replace(temporary, destination)
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
-        restored_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-        if restored_hash != content_hash:
-            destination.unlink(missing_ok=True)
-            raise OSError("Restored document hash does not match expected content hash")
         retained.unlink(missing_ok=True)
         self._fsync_directory(self._trash_root)
 
