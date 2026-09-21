@@ -186,7 +186,17 @@ class DiskWorkspaceFilesystem:
         return trash_dir
 
     def _trash_path(self, document_id: str) -> Path:
-        return self._trash_root / f"{document_id}.pdf"
+        if "\x00" in document_id:
+            raise InvalidPathError("Document ID cannot contain null bytes")
+        if any(ord(char) < 32 or ord(char) == 127 for char in document_id):
+            raise InvalidPathError("Document ID cannot contain control characters")
+        if "/" in document_id or "\\" in document_id or ".." in document_id:
+            raise InvalidPathError("Document ID cannot contain path traversal separators")
+        trash_root = self._trash_root
+        candidate = (trash_root / f"{document_id}.pdf").resolve(strict=False)
+        if not candidate.is_relative_to(trash_root):
+            raise InvalidPathError("Trash path escapes the configured trash root")
+        return candidate
 
     def trash_document(
         self, document_id: str, path: str, content_hash: str, size_bytes: int
