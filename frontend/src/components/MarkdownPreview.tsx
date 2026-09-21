@@ -12,7 +12,7 @@ const markdown = new MarkdownIt({
 const defaultLinkOpen = markdown.renderer.rules.link_open
 markdown.renderer.rules.link_open = (tokens, index, options, environment, self) => {
   const token = tokens[index]!
-  const href = token.attrGet('href') ?? ''
+  const href = String(token.attrGet('href') ?? '')
   const internal = internalDocumentHref(href)
   if (internal) {
     token.attrSet('href', internal)
