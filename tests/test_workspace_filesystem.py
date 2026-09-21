@@ -79,11 +79,11 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     destination_path = workspace.root / "corrupted.md"
 
-    # Simulate hash failure after replace
+    # Simulate hash failure on temporary staging file before replace
     original_read_bytes = Path.read_bytes
 
     def mocked_read_bytes(self: Path) -> bytes:
-        if self == destination_path:
+        if ".sangam-" in self.name:
             return b"corrupted content"
         return original_read_bytes(self)
 
@@ -92,11 +92,45 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     with pytest.raises(OSError, match="Materialized file hash does not match"):
         workspace.write_atomic("corrupted.md", "expected content")
 
-    # Destination should be unlinked on failure
+    # Destination should never be created on failure
     assert not destination_path.exists()
 
     # No leftover temporary staging files
     temp_files = [f for f in workspace.root.glob("*") if ".sangam-" in f.name]
+    assert temp_files == []
+
+
+def test_concurrent_unlocked_workspace_atomic_writes(tmp_path: Path) -> None:
+    import threading
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    doc_path = "unlocked_concurrent.md"
+    workspace.write_atomic(doc_path, "initial content")
+
+    write_errors: list[str] = []
+
+    def writer(thread_id: int):
+        for i in range(25):
+            try:
+                workspace.write_atomic(doc_path, f"unlocked writer {thread_id} content {i}")
+            except Exception as exc:
+                write_errors.append(f"thread {thread_id} iteration {i}: {exc}")
+
+    threads = [threading.Thread(target=writer, args=(t,)) for t in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not write_errors, f"Concurrent write errors occurred: {write_errors}"
+
+    # Confirm the destination document exists and was not unlinked
+    assert workspace.is_document_file(doc_path)
+    final_content = workspace.read_document(doc_path)
+    assert final_content.startswith("unlocked writer")
+
+    # Confirm no leftover temporary staging files
+    temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
     assert temp_files == []
 
 
