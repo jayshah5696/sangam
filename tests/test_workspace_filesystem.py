@@ -79,11 +79,11 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     destination_path = workspace.root / "corrupted.md"
 
-    # Simulate hash failure after replace
+    # Simulate hash failure on staging file
     original_read_bytes = Path.read_bytes
 
     def mocked_read_bytes(self: Path) -> bytes:
-        if self == destination_path:
+        if ".sangam-" in self.name or self == destination_path:
             return b"corrupted content"
         return original_read_bytes(self)
 
@@ -92,8 +92,34 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     with pytest.raises(OSError, match="Materialized file hash does not match"):
         workspace.write_atomic("corrupted.md", "expected content")
 
-    # Destination should be unlinked on failure
+    # Destination should not exist because replace was not called
     assert not destination_path.exists()
+
+    # No leftover temporary staging files
+    temp_files = [f for f in workspace.root.glob("*") if ".sangam-" in f.name]
+    assert temp_files == []
+
+
+def test_write_atomic_preserves_existing_file_on_staging_hash_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    workspace.write_atomic("doc.md", "initial valid content")
+
+    original_read_bytes = Path.read_bytes
+
+    def mocked_read_bytes(self: Path) -> bytes:
+        if ".sangam-" in self.name:
+            return b"corrupted bytes"
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", mocked_read_bytes)
+
+    with pytest.raises(OSError, match="Materialized file hash does not match"):
+        workspace.write_atomic("doc.md", "new updated content")
+
+    # Existing destination file must remain untouched and intact
+    assert workspace.read_document("doc.md") == "initial valid content"
 
     # No leftover temporary staging files
     temp_files = [f for f in workspace.root.glob("*") if ".sangam-" in f.name]
