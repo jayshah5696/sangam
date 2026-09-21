@@ -152,6 +152,59 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     assert actions["restore"]["details"]["current_revision_id"] == rev3
 
 
+def test_agent_actor_mutation_audit_provenance(client: TestClient) -> None:
+    # Issue token for agent
+    issue_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:chronicle_test",
+            "display_name": "Chronicle Audit Agent",
+            "label": "Audit Token",
+            "scopes": [{"capability": "create", "path_prefix": "/agents/**"}],
+        },
+        headers=headers("idemp_issue_chronicle_agent"),
+    )
+    assert issue_resp.status_code == 201
+    token_data = issue_resp.json()
+    agent_token = token_data["token"]
+    agent_token_id = token_data["token_id"]
+
+    agent_headers = {
+        "Authorization": f"Bearer {agent_token}",
+        "Idempotency-Key": "idemp_agent_create_doc",
+    }
+
+    # Perform mutation as agent
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Created Document",
+            "content": "# Agent Note\nContent from agent.",
+            "path": "agents/notes.md",
+        },
+        headers=agent_headers,
+    )
+    assert create_resp.status_code == 201
+    created_doc = create_resp.json()
+    doc_id = created_doc["document_id"]
+
+    # Query activity logs specifically for agent
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    agent_events = [e for e in events if e["resource_id"] == doc_id]
+    assert len(agent_events) == 1
+    event = agent_events[0]
+    assert event["actor_id"] == "agent:chronicle_test"
+    assert event["actor_kind"] == "agent"
+    assert event["actor_display_name"] == "Chronicle Audit Agent"
+    assert event["token_id"] == agent_token_id
+    assert event["action"] == "create"
+    assert event["path"] == "agents/notes.md"
+    assert event["outcome"] == "accepted"
+
+
 def test_export_json_lines_audit_logs(client: TestClient) -> None:
     # Create document to generate activity
     client.post(
