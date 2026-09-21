@@ -79,11 +79,11 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     destination_path = workspace.root / "corrupted.md"
 
-    # Simulate hash failure after replace
+    # Simulate hash failure on temporary staging file before replace
     original_read_bytes = Path.read_bytes
 
     def mocked_read_bytes(self: Path) -> bytes:
-        if self == destination_path:
+        if ".sangam-" in self.name:
             return b"corrupted content"
         return original_read_bytes(self)
 
@@ -92,11 +92,44 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     with pytest.raises(OSError, match="Materialized file hash does not match"):
         workspace.write_atomic("corrupted.md", "expected content")
 
-    # Destination should be unlinked on failure
+    # Destination should not exist on failure (replace was never performed)
     assert not destination_path.exists()
 
     # No leftover temporary staging files
     temp_files = [f for f in workspace.root.glob("*") if ".sangam-" in f.name]
+    assert temp_files == []
+
+
+def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> None:
+    import threading
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    doc_path = "race_write.md"
+
+    errors: list[Exception] = []
+
+    def writer(content: str):
+        try:
+            for _ in range(30):
+                workspace.write_atomic(doc_path, content)
+        except Exception as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=writer, args=("content A " * 100,))
+    t2 = threading.Thread(target=writer, args=("content B " * 100,))
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, f"Concurrent writes failed with errors: {errors}"
+    assert workspace.is_document_file(doc_path)
+    final_content = workspace.read_document(doc_path)
+    assert final_content in ("content A " * 100, "content B " * 100)
+
+    # Confirm workspace clean of temporary staging files
+    temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
     assert temp_files == []
 
 

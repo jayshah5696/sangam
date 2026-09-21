@@ -421,6 +421,7 @@ class DocumentService:
         idempotency_key: str,
         document_id: str,
     ) -> Document:
+        validate_metadata_text(title, "Document title")
         self._validate_content_size(content)
         normalized_path = self._normalize_path(path) if path is not None else None
         if content_type not in {"text/markdown", "text/html"}:
@@ -556,6 +557,8 @@ class DocumentService:
         idempotency_key: str,
         deleted: bool | None = None,
     ) -> tuple[Document, str | None]:
+        validate_metadata_text(title, "Document title")
+        validate_metadata_text(summary, "Revision summary")
         payload = {
             "document_id": document_id,
             "expected_revision_id": expected_revision_id,
@@ -742,6 +745,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(title, "Document title")
         source = self.get_document(document_id)
         if source.current_revision_id != expected_revision_id:
             raise ConflictError(

@@ -111,3 +111,67 @@ def test_whitespace_padded_traversal_in_token_scope_is_rejected(invalid_scope: s
 
     with pytest.raises(ValidationError):
         normalize_scope_prefix(invalid_scope)
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
+def test_document_title_rejects_null_bytes_and_control_characters(
+    client: TestClient, bad_char: str
+) -> None:
+    response = client.post(
+        "/api/v1/documents",
+        json={"title": f"Bad{bad_char}Title", "content": "hello"},
+        headers=headers(f"title-bad:{ord(bad_char)}"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
+def test_revision_summary_rejects_null_bytes_and_control_characters(
+    client: TestClient, bad_char: str
+) -> None:
+    created = client.post(
+        "/api/v1/documents",
+        json={"title": "Good Title", "content": "v1"},
+        headers=headers("summary-create"),
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/documents/{created['document_id']}",
+        json={
+            "expected_revision_id": created["current_revision_id"],
+            "content": "v2",
+            "summary": f"Bad{bad_char}Summary",
+        },
+        headers=headers(f"summary-update:{ord(bad_char)}"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
+def test_pdf_research_metadata_rejects_null_bytes_and_control_characters(
+    bad_char: str,
+) -> None:
+    from sangam.errors import ValidationError
+    from sangam.pdf_research import PdfResearchService
+
+    with pytest.raises(ValidationError):
+        PdfResearchService._normalize_annotation_fields(
+            annotation_type="comment",
+            selected_text=None,
+            note=f"Note{bad_char}Text",
+            geometry=[],
+            tags=[],
+            color="#ffffff",
+        )
+
+    with pytest.raises(ValidationError):
+        PdfResearchService._normalize_annotation_fields(
+            annotation_type="text_highlight",
+            selected_text=f"Selected{bad_char}Text",
+            note=None,
+            geometry=[],
+            tags=[],
+            color="#ffffff",
+        )

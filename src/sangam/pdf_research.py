@@ -13,7 +13,7 @@ from pypdf import PdfReader
 
 from sangam.actors import ActorService
 from sangam.db import Database, utc_now
-from sangam.errors import ConflictError, NotFoundError, ValidationError
+from sangam.errors import ConflictError, NotFoundError, ValidationError, validate_metadata_text
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.mutations import MutationCoordinator
 from sangam.schemas import (
@@ -90,6 +90,7 @@ class PdfResearchService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
+        validate_metadata_text(title, "Document title")
         title = title.strip()
         if not title:
             raise ValidationError("PDF title is required")
@@ -738,6 +739,8 @@ class PdfResearchService:
         tags: list[str],
         color: str,
     ) -> AnnotationFields:
+        validate_metadata_text(selected_text, "Selected text")
+        validate_metadata_text(note, "Note")
         selected_text = selected_text.strip() if selected_text and selected_text.strip() else None
         note = note.strip() if note and note.strip() else None
         normalized_tags = sorted({tag.strip() for tag in tags if tag.strip()}, key=str.casefold)
