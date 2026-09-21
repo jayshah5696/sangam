@@ -45,6 +45,38 @@ def test_workspace_filesystem_rejects_dangerous_paths(tmp_path: Path, bad_path: 
 
 
 @pytest.mark.parametrize(
+    "bad_doc_id",
+    [
+        "../stolen",
+        "sub/../../stolen",
+        "doc\x00_id",
+        "doc\n_id",
+        "doc\r_id",
+        "doc\x1f_id",
+        "doc\x7f_id",
+        "sub/folder",
+        "sub\\folder",
+        "..",
+    ],
+)
+def test_trash_path_rejects_dangerous_document_ids(tmp_path: Path, bad_doc_id: str) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    content = "test content"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    size_bytes = len(content.encode("utf-8"))
+    workspace.write_atomic("test.md", content)
+
+    with pytest.raises(InvalidPathError):
+        workspace.has_trashed_document(bad_doc_id)
+
+    with pytest.raises(InvalidPathError):
+        workspace.trash_document(bad_doc_id, "test.md", content_hash, size_bytes)
+
+    with pytest.raises(InvalidPathError):
+        workspace.restore_trash_document(bad_doc_id, "restored.md", content_hash, size_bytes)
+
+
+@pytest.mark.parametrize(
     "bad_scope",
     [
         "folder\x00",
