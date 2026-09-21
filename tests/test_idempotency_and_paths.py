@@ -55,6 +55,10 @@ def test_idempotency_key_reuse_with_different_payload_is_rejected(client: TestCl
         " .. /escape.md",
         "projects/ .. /escape.md",
         "projects/ .hidden/exploit.md",
+        "aux.md",
+        "CON/note.md",
+        "nul.html",
+        "com1.pdf",
     ],
 )
 def test_invalid_paths_never_escape_workspace(client: TestClient, invalid_path: str) -> None:
@@ -103,6 +107,8 @@ def test_duplicate_materialized_path_is_rejected(client: TestClient) -> None:
         "projects/ .. /escape",
         "projects/ .hidden",
         " .. /secret",
+        "aux",
+        "CON/docs",
     ],
 )
 def test_whitespace_padded_traversal_in_token_scope_is_rejected(invalid_scope: str) -> None:
@@ -111,3 +117,52 @@ def test_whitespace_padded_traversal_in_token_scope_is_rejected(invalid_scope: s
 
     with pytest.raises(ValidationError):
         normalize_scope_prefix(invalid_scope)
+
+
+@pytest.mark.parametrize(
+    "bad_title",
+    [
+        "Doc\x00Title",
+        "Doc\x07Title",
+        "Doc\rTitle",
+        "Doc\nTitle",
+        "Doc\x1fTitle",
+        "Doc\x7fTitle",
+    ],
+)
+def test_document_title_sanitization(client: TestClient, bad_title: str) -> None:
+    response = client.post(
+        "/api/v1/documents",
+        json={"title": bad_title, "content": "test content"},
+        headers=headers("bad-title-key"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.parametrize(
+    "bad_summary",
+    [
+        "Summary\x00Text",
+        "Summary\x07Text",
+        "Summary\rText",
+        "Summary\nText",
+    ],
+)
+def test_revision_summary_sanitization(client: TestClient, bad_summary: str) -> None:
+    created = client.post(
+        "/api/v1/documents",
+        json={"title": "Valid Title", "content": "v1"},
+        headers=headers("create-valid-doc"),
+    )
+    assert created.status_code == 201
+    doc_id = created.json()["document_id"]
+    rev_id = created.json()["current_revision_id"]
+
+    response = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"expected_revision_id": rev_id, "content": "v2", "summary": bad_summary},
+        headers=headers("patch-bad-summary"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"

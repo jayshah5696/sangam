@@ -10,6 +10,31 @@ from typing import Protocol
 
 from sangam.errors import ConflictError, InvalidPathError, NotFoundError
 
+RESERVED_NAMES: set[str] = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+}
+
 
 def canonicalize_document_path(raw_path: str) -> str:
     """Validate document-path syntax without consulting the filesystem."""
@@ -49,7 +74,12 @@ def _canonicalize_relative_path(
             else "Folder path must stay inside the workspace"
         )
         raise InvalidPathError(message)
-    if any(part.strip().startswith(".") or ".sangam-" in part for part in raw_parts):
+    if any(
+        part.strip().startswith(".")
+        or ".sangam-" in part
+        or part.strip().split(".")[0].upper() in RESERVED_NAMES
+        for part in raw_parts
+    ):
         raise InvalidPathError(f"{kind} path cannot access hidden or reserved system locations")
     return path.as_posix()
 
