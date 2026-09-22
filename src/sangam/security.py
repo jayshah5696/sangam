@@ -42,6 +42,42 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "proxy-authorization",
 }
 
+SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
+    "authorization",
+    "token",
+    "secret",
+    "password",
+    "key",
+    "auth",
+    "credential",
+    "cookie",
+    "session",
+    "jwt",
+    "bearer",
+    "trusted-identity",
+    "sangam-publication",
+    "cf-access-jwt-assertion",
+)
+
+SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
+    "secret",
+    "password",
+    "token",
+    "credential",
+    "api_key",
+    "auth",
+    "authorization",
+    "auth_header",
+    "private_key",
+    "access_key",
+    "secret_key",
+    "cookie",
+    "session",
+    "jwt",
+    "bearer",
+    "env",
+)
+
 _SAFE_KEY_EXCEPTIONS: set[str] = {
     "token_id",
     "token_label",
@@ -64,7 +100,9 @@ def sanitize_headers(headers: object) -> dict[str, str]:
     items = headers.items() if hasattr(headers, "items") else headers
     for key, value in items:
         norm_key = str(key).strip().casefold()
-        if norm_key in SENSITIVE_HEADER_NAMES or "trusted-identity" in norm_key:
+        if norm_key in SENSITIVE_HEADER_NAMES or any(
+            term in norm_key for term in SENSITIVE_HEADER_KEYWORDS
+        ):
             result[str(key)] = "[REDACTED]"
         else:
             result[str(key)] = _TOKEN_PATTERN.sub("[REDACTED]", str(value))
@@ -81,18 +119,7 @@ def sanitize_sensitive_data(value: object) -> object:
             k_str = str(k)
             k_norm = k_str.strip().casefold()
             if k_norm not in _SAFE_KEY_EXCEPTIONS and any(
-                term in k_norm
-                for term in (
-                    "secret",
-                    "password",
-                    "token",
-                    "credential",
-                    "api_key",
-                    "auth_token",
-                    "private_key",
-                    "authorization",
-                    "auth_header",
-                )
+                term in k_norm for term in SENSITIVE_DATA_KEY_TERMS
             ):
                 sanitized_dict[k_str] = "[REDACTED]"
             else:
