@@ -7,6 +7,32 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.12.3] - 2026-09-21
+
+### Security
+
+- Hardened workspace trash paths against path traversal, control characters, null bytes, and non-relative escaping (#259).
+- Hardened metadata text inputs to reject null bytes and control characters across all metadata surfaces (#215, #258).
+- Sanitized whitespace and special path components to prevent path traversal across workspace operations (#227, #258).
+- Hardened backup archive extraction to strictly reject traversal and absolute paths during restore operations (#221, #230).
+- Enforced document parent containment for publication assets to prevent cross-document asset exposure (#224, #230).
+- Fixed agent identity scoping to allow administrator identity to decide and acknowledge agent chat effects (#218, #230).
+- Overrode transitive `lodash-es` in `frontend/pnpm-workspace.yaml` to patch prototype pollution vulnerability GHSA-r5fr-rjxr-66jc (#260).
+
+### Fixed
+
+- Resolved file hash validation timing race condition in `DiskWorkspaceFilesystem` atomic staging operations (#258).
+- Guaranteed atomic replacement for folder metadata writes and automatic target file unlinking upon hash mismatch failures (#222, #229, #230).
+- Hardened mutation audit provenance recording, header redaction, and audit trail sanitization (#228, #258).
+- Fixed TypeScript type compatibility for `token.attrGet()` following `markdown-it` 15 upgrade (#260).
+
+### Changed
+
+- Upgraded frontend dependencies: `@tanstack/react-router` to 1.170.38, `@tanstack/history` to 1.162.4, `mermaid` to 12.0.0, `markdown-it` to 15.0.2, `@pierre/diffs` to 1.4.1, `@codemirror/view` to 6.43.11, `@codemirror/lang-markdown` to 6.5.2, and `@vitejs/plugin-react` to 6.1.1 (#231, #260).
+- Upgraded backend dependencies and tooling: `pypdf` to 6.18.1, `openai-agents` to 0.22.2, `httpx2` to 2.13.0, and `ruff` to 0.16.7 (#231, #258).
+- Updated GitHub Actions automation: `astral-sh/setup-uv` to 10.1.0, `pnpm/action-setup` to 6.1.0, and `docker/setup-qemu-action` to 4.3.0 (#231, #258).
+
+
 ## [0.12.2] - 2026-09-09
 
 ### Added
@@ -364,7 +390,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.3...HEAD
+[0.12.3]: https://github.com/jayshah5696/sangam/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.2
 [0.12.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.1
 [0.12.0]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.0
