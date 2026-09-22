@@ -175,3 +175,112 @@ def test_pdf_research_metadata_rejects_null_bytes_and_control_characters(
             tags=[],
             color="#ffffff",
         )
+
+    with pytest.raises(ValidationError):
+        PdfResearchService._normalize_annotation_fields(
+            annotation_type="comment",
+            selected_text=None,
+            note="Valid note",
+            geometry=[],
+            tags=[f"bad{bad_char}tag"],
+            color="#ffffff",
+        )
+
+    with pytest.raises(ValidationError):
+        PdfResearchService._normalize_annotation_fields(
+            annotation_type="comment",
+            selected_text=None,
+            note="Valid note",
+            geometry=[],
+            tags=[],
+            color=f"#ff{bad_char}ffff",
+        )
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
+def test_chat_proposal_summary_rejects_null_bytes_and_control_characters(
+    bad_char: str,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from sangam.chat_proposals import ChatProposalService
+    from sangam.errors import ValidationError
+
+    repo = MagicMock()
+    workspace = MagicMock()
+    service = ChatProposalService(repository=repo, workspace=workspace)
+    principal = MagicMock()
+
+    with pytest.raises(ValidationError):
+        service.create(
+            principal,
+            thread_id="th_1",
+            document_id="doc_1",
+            expected_revision_id="rev_1",
+            content="content",
+            summary=f"Bad{bad_char}Summary",
+        )
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
+def test_provider_connection_name_rejects_null_bytes_and_control_characters(
+    bad_char: str,
+) -> None:
+    from sangam.errors import ValidationError
+    from sangam.provider_connections import ProviderConnectionService
+
+    with pytest.raises(ValidationError):
+        ProviderConnectionService._validate_name(f"Bad{bad_char}Name")
+
+
+def test_write_folder_metadata_hash_mismatch_raises_os_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    from sangam.organization import WorkspaceOrganizationService
+
+    workspace = MagicMock()
+    workspace.root = tmp_path
+    database = MagicMock()
+    idempotency = MagicMock()
+    actors = MagicMock()
+    mutations = MagicMock()
+    service = WorkspaceOrganizationService(
+        database=database,
+        workspace=workspace,
+        idempotency=idempotency,
+        actors=actors,
+        mutations=mutations,
+    )
+
+    row = {
+        "folder_id": "f_1",
+        "path": "test_folder",
+        "category": "cat",
+        "metadata_version": 1,
+    }
+
+    conn = MagicMock()
+    conn.execute().fetchall.return_value = []
+
+    original_read_bytes = Path.read_bytes
+
+    def corrupt_read_bytes(self: Path) -> bytes:
+        if self.name.startswith(".sangam-folder-"):
+            return b"corrupted bytes"
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", corrupt_read_bytes)
+
+    with pytest.raises(
+        OSError, match="Materialized folder metadata hash does not match expected bytes"
+    ):
+        service._write_folder_metadata(
+            conn,
+            row=row,
+            category="new_cat",
+            tag_ids=[],
+            actor_id="human:test",
+            operation="organize",
+        )
