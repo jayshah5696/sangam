@@ -603,6 +603,9 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
 
 
 def test_concurrent_reads_and_atomic_writes(tmp_path: Path) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
     from sangam.workspace import DiskWorkspaceFilesystem
 
     ws = DiskWorkspaceFilesystem(root=tmp_path)

@@ -34,10 +34,10 @@ def _artifact(path: Path) -> BackupArtifact:
 
 
 def _write_manifest(path: Path, backup: BackupSet) -> None:
+    import tempfile
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.sangam-", dir=path.parent
-    )
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.sangam-", dir=path.parent)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
