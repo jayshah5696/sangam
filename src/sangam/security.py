@@ -40,6 +40,8 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "api-key",
     "x-auth-token",
     "proxy-authorization",
+    "sec-websocket-protocol",
+    "x-sangam-trusted-identity",
 }
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
