@@ -175,3 +175,47 @@ def test_pdf_research_metadata_rejects_null_bytes_and_control_characters(
             tags=[],
             color="#ffffff",
         )
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
+def test_chat_proposal_metadata_rejects_null_bytes_and_control_characters(
+    bad_char: str,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from sangam.chat_proposals import ChatProposalService
+    from sangam.errors import ValidationError
+    from sangam.security import Principal
+
+    proposal_service = ChatProposalService(repository=MagicMock(), workspace=MagicMock())
+    principal = Principal.trusted_human(
+        actor_id="human:owner", display_name="Owner", operation_id="op_1"
+    )
+
+    with pytest.raises(ValidationError):
+        proposal_service.create(
+            principal,
+            thread_id="thread_1",
+            document_id="doc_1",
+            expected_revision_id="rev_1",
+            content="content",
+            summary=f"Bad{bad_char}Summary",
+        )
+
+    with pytest.raises(ValidationError):
+        proposal_service.dismiss(
+            principal,
+            proposal_id="prop_1",
+            reason=f"Bad{bad_char}Reason",
+        )
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
+def test_provider_connection_name_rejects_null_bytes_and_control_characters(
+    bad_char: str,
+) -> None:
+    from sangam.errors import ValidationError
+    from sangam.provider_connections import ProviderConnectionService
+
+    with pytest.raises(ValidationError):
+        ProviderConnectionService._validate_name(f"Bad{bad_char}Name")
