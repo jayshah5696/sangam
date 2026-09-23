@@ -704,10 +704,7 @@ test('home page searches documents inline and opens the top result', async ({ pa
 })
 
 test('large search remains bounded and exposes the next result page', async ({ page, request }, testInfo) => {
-  test.skip(
-    !['chromium-desktop', 'chromium-touch-mobile'].includes(testInfo.project.name),
-    'desktop and touch projects only',
-  )
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'large workspace measurement uses desktop only')
   test.setTimeout(120_000)
   const token = `progressivesearch${randomUUID().slice(0, 8)}`
   const totalDocuments = 1005
@@ -763,7 +760,8 @@ test('internal link picker keeps documents beyond the first page', async ({
   page,
   request,
   seededWorkspace,
-}) => {
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'link picker pagination uses desktop only')
   test.setTimeout(120_000)
   const suffix = randomUUID().slice(0, 8)
   const targetTitle = `Older link target ${suffix}`

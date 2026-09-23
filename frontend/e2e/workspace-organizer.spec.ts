@@ -173,6 +173,8 @@ test('touch users can move one item without right-click and stay contained', asy
   await page.goto(`/documents/${document.document_id}`)
   await showFiles(page)
   const row = page.locator('.sangam-file-tree').getByRole('treeitem', { name: filename, exact: true })
+  await row.scrollIntoViewIfNeeded()
+  await expect(row).toBeVisible()
   await row.tap()
   await expect(page.getByLabel('Selected item actions')).toHaveCount(0)
   await page.getByRole('button', { name: 'Options', exact: true }).tap()
