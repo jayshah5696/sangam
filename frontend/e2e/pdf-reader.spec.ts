@@ -250,6 +250,7 @@ test('touch PDF reader supports page navigation and citation actions', async ({
   await expect(
     page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first(),
   ).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('touch-pdf-first-page.png'), fullPage: true })
   const text = page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first()
   await text.evaluate((element) => {
     const range = document.createRange()
@@ -267,6 +268,7 @@ test('touch PDF reader supports page navigation and citation actions', async ({
     .toContain('[PDF reader evidence, p. 1]')
   await page.getByRole('button', { name: 'Next PDF page' }).tap()
   await expect(page.getByRole('textbox', { name: 'PDF page number' })).toHaveValue('2')
+  await page.screenshot({ path: testInfo.outputPath('touch-pdf-second-page.png'), fullPage: true })
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(1)
 })

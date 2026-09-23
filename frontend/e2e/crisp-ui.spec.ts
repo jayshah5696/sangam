@@ -704,12 +704,16 @@ test('home page searches documents inline and opens the top result', async ({ pa
 })
 
 test('large search remains bounded and exposes the next result page', async ({ page, request }, testInfo) => {
-  test.skip(testInfo.project.name !== 'chromium-desktop', 'large workspace measurement uses desktop only')
+  test.skip(
+    !['chromium-desktop', 'chromium-touch-mobile'].includes(testInfo.project.name),
+    'desktop and touch projects only',
+  )
   test.setTimeout(120_000)
   const token = `progressivesearch${randomUUID().slice(0, 8)}`
-  for (let start = 0; start < 205; start += 10) {
+  const totalDocuments = 1005
+  for (let start = 0; start < totalDocuments; start += 10) {
     const responses = await Promise.all(
-      Array.from({ length: Math.min(10, 205 - start) }, (_, offset) => {
+      Array.from({ length: Math.min(10, totalDocuments - start) }, (_, offset) => {
         const index = start + offset
         return request.post('/api/v1/documents', {
           headers: { 'Idempotency-Key': randomUUID() },
@@ -740,14 +744,17 @@ test('large search remains bounded and exposes the next result page', async ({ p
 
   const quickSearch = page.getByRole('searchbox', { name: 'Quick search documents' })
   await quickSearch.fill(token)
-  await expect(page.getByRole('listitem').filter({ hasText: `${token}/0.md` })).toBeVisible({ timeout: 15_000 })
+  const matchingResults = page.getByRole('listitem').filter({ hasText: token })
+  await expect(matchingResults).toHaveCount(200, { timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Load more results' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('search-first-page.png'), fullPage: true })
   expect(searchRequests).toHaveLength(1)
   expect(searchRequests[0]).toContain('limit=200')
   expect(searchRequests[0]).toContain('offset=0')
 
   await page.getByRole('button', { name: 'Load more results' }).click()
-  await expect(page.getByRole('listitem').filter({ hasText: `${token}/204.md` })).toBeVisible()
+  await expect(matchingResults).toHaveCount(400)
+  await page.screenshot({ path: testInfo.outputPath('search-second-page.png'), fullPage: true })
   expect(searchRequests).toHaveLength(2)
   expect(searchRequests[1]).toContain('offset=200')
 })
