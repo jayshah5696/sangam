@@ -61,7 +61,9 @@ export function DocumentWorkspace({
   const saveState = session.saveState
   const mode = session.mode
   const selection = session.selection
-  const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  // Keep the complete document index in its own cache entry. The paged explorer
+  // and search queries use different shapes and must never share this key.
+  const documentsQuery = useQuery({ queryKey: ['documents', 'all'], queryFn: api.listDocuments })
   const htmlJavascript = useQuery({
     queryKey: ['html-javascript-settings'],
     queryFn: api.getHtmlJavascriptSettings,

@@ -25,7 +25,29 @@ rsync -av data/backups/ backup-host:sangam-backups/
 
 ## Rehearsal restore drill
 
-Run this before you need it, not during an incident:
+Run the automated rehearsal before you need it, not during an incident. It creates
+an isolated source instance, writes a document with two revisions and a PDF,
+creates and verifies a paired backup, restores into empty storage, boots a second
+instance, and checks readiness, revision history, FTS search, PDF search, and exact PDF bytes:
+
+```sh
+just verify-restore-drill
+```
+
+The drill uses port `8998` by default, writes a JSON evidence record under
+`artifacts/restore-drill/`, and removes its temporary state on success. Use
+`--keep` while investigating a failure. A manual rehearsal still follows the same
+paired-artifact rule:
+
+The verification harness also has a persistent negative-path check. It proves that
+an invalid benchmark count and a wrong per-token document identity fail, and that
+the isolated instance cleanup still runs:
+
+```sh
+just verify-negative
+```
+
+The command stores both rejection reports under `artifacts/verify-sangam/`.
 
 1. Stop the app (or run it against scratch paths).
 2. Restore both sides of the pair into `data/database` and `data/workspace`.

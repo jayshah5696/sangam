@@ -5,6 +5,7 @@ from pathlib import Path
 
 from sangam.backup import BackupManager
 from sangam.db import Database
+from sangam.mutations import MutationCoordinator
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,6 +26,7 @@ def main() -> None:
         workspace_root=args.workspace_root,
         backup_root=args.backup_root,
         retention_count=14,
+        mutations=MutationCoordinator(),
     )
     manager.restore_to(
         args.backup_id,

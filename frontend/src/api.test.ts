@@ -39,6 +39,53 @@ describe('response handling', () => {
   })
 })
 
+describe('bounded document pages', () => {
+  it('returns an explicit continuation when a page is full', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            document_id: 'doc-1',
+            title: 'First',
+            path: null,
+            content_type: 'text/markdown',
+            current_revision_id: 'rev-1',
+            content_hash: 'hash',
+            size_bytes: 5,
+            materialization_state: 'none',
+            file_hash: null,
+            deleted: false,
+            created_by: 'human:test',
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-01T00:00:00Z',
+            updated_by: 'human:test',
+            updated_by_name: 'Test',
+            revision_summary: '',
+            category: null,
+            metadata_version: 1,
+            trust_level: 'untrusted',
+            trust_version: 1,
+            tags: [],
+            search_snippet: null,
+            pdf_page_count: null,
+            pdf_extraction_status: null,
+            pdf_extraction_error: null,
+            supersedes_document_id: null,
+          },
+        ]),
+        { status: 200 },
+      ),
+    )
+
+    const result = await api.searchDocumentsPage('first', undefined, 'relevance', 20, 1)
+    expect(result).toEqual({ items: expect.any(Array), hasMore: true })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/search?q=first&sort=relevance&limit=1&offset=20',
+      expect.anything(),
+    )
+  })
+})
+
 describe('chat proposal requests', () => {
   it('keeps a stable idempotency key when an apply request is retried', async () => {
     const proposal: ChatProposal = {

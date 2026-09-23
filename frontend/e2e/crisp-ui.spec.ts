@@ -703,6 +703,105 @@ test('home page searches documents inline and opens the top result', async ({ pa
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
 })
 
+test('large search remains bounded and exposes the next result page', async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'large workspace measurement uses desktop only')
+  test.setTimeout(120_000)
+  const token = `progressivesearch${randomUUID().slice(0, 8)}`
+  for (let start = 0; start < 205; start += 10) {
+    const responses = await Promise.all(
+      Array.from({ length: Math.min(10, 205 - start) }, (_, offset) => {
+        const index = start + offset
+        return request.post('/api/v1/documents', {
+          headers: { 'Idempotency-Key': randomUUID() },
+          data: {
+            title: `${token} result ${index}`,
+            path: `${token}/${index}.md`,
+            content: `# ${token} result ${index}\n\nBounded search fixture.`,
+            content_type: 'text/markdown',
+          },
+        })
+      }),
+    )
+    for (const response of responses) expect(response.ok(), await response.text()).toBeTruthy()
+  }
+
+  const documentsRequests: string[] = []
+  const searchRequests: string[] = []
+  page.on('request', (requestEvent) => {
+    const url = new URL(requestEvent.url())
+    if (url.pathname.endsWith('/documents')) documentsRequests.push(url.search)
+    if (url.pathname.endsWith('/search') && url.searchParams.get('q') === token)
+      searchRequests.push(url.search)
+  })
+  await page.goto('/')
+  await expect(page.getByRole('searchbox', { name: 'Quick search documents' })).toBeVisible()
+  expect(documentsRequests.every((query) => query.includes('limit=200'))).toBeTruthy()
+  expect(documentsRequests.every((query) => !query.includes('offset=200'))).toBeTruthy()
+
+  const quickSearch = page.getByRole('searchbox', { name: 'Quick search documents' })
+  await quickSearch.fill(token)
+  await expect(page.getByRole('listitem').filter({ hasText: `${token}/0.md` })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Load more results' })).toBeVisible()
+  expect(searchRequests).toHaveLength(1)
+  expect(searchRequests[0]).toContain('limit=200')
+  expect(searchRequests[0]).toContain('offset=0')
+
+  await page.getByRole('button', { name: 'Load more results' }).click()
+  await expect(page.getByRole('listitem').filter({ hasText: `${token}/204.md` })).toBeVisible()
+  expect(searchRequests).toHaveLength(2)
+  expect(searchRequests[1]).toContain('offset=200')
+})
+
+test('internal link picker keeps documents beyond the first page', async ({
+  page,
+  request,
+  seededWorkspace,
+}) => {
+  test.setTimeout(120_000)
+  const suffix = randomUUID().slice(0, 8)
+  const targetTitle = `Older link target ${suffix}`
+  const targetResponse = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: targetTitle,
+      content: '# Link target',
+      content_type: 'text/markdown',
+    },
+  })
+  expect(targetResponse.ok(), await targetResponse.text()).toBeTruthy()
+  // Keep the target outside the first updated-at page returned by the picker.
+  for (let start = 0; start < 205; start += 10) {
+    const responses = await Promise.all(
+      Array.from({ length: Math.min(10, 205 - start) }, (_, offset) => {
+        const index = start + offset
+        return request.post('/api/v1/documents', {
+          headers: { 'Idempotency-Key': randomUUID() },
+          data: {
+            title: `Newer link filler ${suffix} ${index}`,
+            content: '# Link filler',
+            content_type: 'text/markdown',
+          },
+        })
+      }),
+    )
+    for (const response of responses) expect(response.ok(), await response.text()).toBeTruthy()
+  }
+
+  const documentRequests: string[] = []
+  page.on('request', (requestEvent) => {
+    const url = new URL(requestEvent.url())
+    if (url.pathname.endsWith('/documents')) documentRequests.push(url.search)
+  })
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
+  await page.getByRole('radio', { name: 'edit' }).click()
+  await expect(page.getByLabel('Internal link')).toBeVisible()
+  await expect(page.getByLabel('Internal link').locator('option', { hasText: targetTitle })).toHaveCount(1)
+  await page.getByLabel('Internal link').selectOption({ label: targetTitle })
+  await page.getByRole('button', { name: 'Insert link' }).click()
+  await expect(page.locator('.cm-content')).toContainText(`sangam://document/`)
+  expect(documentRequests.some((query) => query.includes('offset=200'))).toBeTruthy()
+})
+
 test('slash focuses workspace search from anywhere', async ({ page }) => {
   await page.goto('/')
   await page.locator('body').press('/')
