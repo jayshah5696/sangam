@@ -531,3 +531,161 @@ def test_folder_move_excludes_backup_generation(
             "SELECT path FROM documents WHERE document_id = ?", (document["document_id"],)
         ).fetchone()[0]
     assert path == "moved/note.md"
+
+
+def test_folder_metadata_staging_hash_mismatch_raises_error_and_cleans_up(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, settings
+) -> None:
+    folder = client.post(
+        "/api/v1/folders",
+        json={"path": "hash_test", "category": "Initial"},
+        headers=headers("folder-hash-init"),
+    ).json()
+
+    folder_dir = settings.workspace_root / "hash_test"
+    manifest = folder_dir / ".sangam-folder.json"
+    assert manifest.is_file()
+    initial_content = manifest.read_text(encoding="utf-8")
+
+    original_read_bytes = Path.read_bytes
+
+    def corrupting_read_bytes(self: Path) -> bytes:
+        content = original_read_bytes(self)
+        if ".sangam-folder-" in self.name:
+            return b"corrupted content"
+        return content
+
+    monkeypatch.setattr(Path, "read_bytes", corrupting_read_bytes)
+
+    organization = client.app.state.services.organization
+    with pytest.raises(
+        OSError, match="Materialized folder metadata hash does not match expected content"
+    ):
+        organization.update_folder_metadata(
+            folder_id=folder["folder_id"],
+            expected_metadata_version=folder["metadata_version"],
+            category="Updated",
+            tag_ids=[],
+            actor_id="human:jay",
+            idempotency_key="hash-mismatch-test",
+        )
+
+    # Destination file should remain unchanged
+    assert manifest.read_text(encoding="utf-8") == initial_content
+    # Temporary files should be cleaned up
+    temp_files = list(folder_dir.glob(".sangam-folder-*"))
+    assert temp_files == []
+
+
+def test_concurrent_folder_metadata_writes(client: TestClient, settings) -> None:
+    folder = client.post(
+        "/api/v1/folders",
+        json={"path": "concurrent_folder", "category": "Base"},
+        headers=headers("folder-concurrent-init"),
+    ).json()
+
+    folder_dir = settings.workspace_root / "concurrent_folder"
+    manifest = folder_dir / ".sangam-folder.json"
+
+    def perform_update(idx: int):
+        res = client.patch(
+            f"/api/v1/folders/{folder['folder_id']}",
+            json={
+                "expected_metadata_version": folder["metadata_version"],
+                "category": f"Category_{idx}",
+                "tag_ids": [],
+            },
+            headers=headers(f"concurrent-folder-update-{idx}"),
+        )
+        return res.status_code, res.json()
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(perform_update, i) for i in range(5)]
+        results = [f.result() for f in futures]
+
+    # Exactly one update should succeed with 200, others fail with 409 conflict (optimistic lock)
+    status_codes = [r[0] for r in results]
+    assert status_codes.count(200) == 1
+    assert status_codes.count(409) == 4
+
+    # The manifest on disk must be valid JSON and readable
+    assert manifest.is_file()
+    content = json.loads(manifest.read_text(encoding="utf-8"))
+    assert content["folder_id"] == folder["folder_id"]
+    assert content["metadata_version"] == folder["metadata_version"] + 1
+    # Check no temp files left behind
+    assert list(folder_dir.glob(".sangam-folder-*")) == []
+
+
+def test_concurrent_folder_metadata_simultaneous_reads_and_writes(
+    client: TestClient, settings
+) -> None:
+    folder = client.post(
+        "/api/v1/folders",
+        json={"path": "simultaneous_rw_folder", "category": "InitialCategory"},
+        headers=headers("folder-rw-init"),
+    ).json()
+
+    folder_dir = settings.workspace_root / "simultaneous_rw_folder"
+    manifest = folder_dir / ".sangam-folder.json"
+
+    stop_event = threading.Event()
+    read_errors: list[str] = []
+    read_count = 0
+
+    def reader_loop():
+        nonlocal read_count
+        while not stop_event.is_set():
+            try:
+                if manifest.is_file():
+                    text = manifest.read_text(encoding="utf-8")
+                    if len(text) == 0:
+                        read_errors.append(
+                            "Observed zero-byte manifest file during concurrent write"
+                        )
+                    else:
+                        data = json.loads(text)
+                        if data.get("folder_id") != folder["folder_id"]:
+                            read_errors.append("Observed corrupted folder manifest data")
+                res = client.get("/api/v1/folders")
+                if res.status_code == 200:
+                    folders = res.json()
+                    target = next(
+                        (f for f in folders if f["folder_id"] == folder["folder_id"]), None
+                    )
+                    if target is None:
+                        read_errors.append(
+                            "Folder missing from API listing during concurrent write"
+                        )
+                read_count += 1
+            except Exception as exc:
+                read_errors.append(f"Reader exception: {exc}")
+
+    def writer_loop():
+        for i in range(10):
+            client.patch(
+                f"/api/v1/folders/{folder['folder_id']}",
+                json={
+                    "expected_metadata_version": i,
+                    "category": f"Category_V{i + 1}",
+                    "tag_ids": [],
+                },
+                headers=headers(f"folder-rw-update-{i}"),
+            )
+
+    readers = [threading.Thread(target=reader_loop) for _ in range(3)]
+    writer = threading.Thread(target=writer_loop)
+
+    for r in readers:
+        r.start()
+    writer.start()
+
+    writer.join()
+    stop_event.set()
+    for r in readers:
+        r.join()
+
+    assert read_errors == [], (
+        f"Encountered read errors during simultaneous read/write: {read_errors}"
+    )
+    assert read_count > 0

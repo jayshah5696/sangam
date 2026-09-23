@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -734,6 +735,12 @@ class WorkspaceOrganizationService:
                     output.write(content_bytes)
                     output.flush()
                     os.fsync(output.fileno())
+                actual_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+                expected_hash = hashlib.sha256(content_bytes).hexdigest()
+                if actual_hash != expected_hash:
+                    raise OSError(
+                        "Materialized folder metadata hash does not match expected content"
+                    )
                 os.replace(temporary, destination)
                 descriptor_dir = os.open(folder_dir, os.O_RDONLY)
                 try:
