@@ -66,6 +66,11 @@ class ActivityService:
                 "lines_added",
                 "lines_removed",
                 "diff",
+                "slug",
+                "access_policy",
+                "annotation_id",
+                "page_number",
+                "reason",
             }
         }
         with self.database.transaction() as connection:

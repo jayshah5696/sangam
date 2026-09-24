@@ -300,3 +300,28 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_audit_patch_and_diff_metadata_sanitization() -> None:
+    patch_str = (
+        "--- old\n+++ new\n@@ -1 +1 @@\n-secret_token=sgm_agt_123.456\n+secret_token=[REDACTED]"
+    )
+    details = {
+        "patch": patch_str,
+        "diff": "diff --git a/doc.md b/doc.md\n+bearer_token: sgm_agt_999.888",
+        "secret_param": "sgm_agt_secret.token",
+        "title": "Safe Title",
+        "summary": "Safe Summary",
+        "slug": "safe-slug",
+        "access_policy": "public",
+    }
+    sanitized = sanitize_sensitive_data(details)
+    assert isinstance(sanitized, dict)
+    assert "[REDACTED]" in sanitized["patch"]
+    assert "sgm_agt_123.456" not in sanitized["patch"]
+    assert "sgm_agt_999.888" not in sanitized["diff"]
+    assert sanitized["secret_param"] == "[REDACTED]"
+    assert sanitized["title"] == "Safe Title"
+    assert sanitized["summary"] == "Safe Summary"
+    assert sanitized["slug"] == "safe-slug"
+    assert sanitized["access_policy"] == "public"
