@@ -8,7 +8,13 @@ from typing import Literal
 
 from sangam.access import WorkspaceAccessService
 from sangam.db import Database, utc_now
-from sangam.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from sangam.errors import (
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+    validate_metadata_text,
+)
 from sangam.schemas import ChatProposal
 from sangam.security import Principal
 
@@ -222,6 +228,7 @@ class ChatProposalService:
         anchor: str | None = None,
         replace_all: bool = False,
     ) -> ChatProposal:
+        validate_metadata_text(summary, "Proposal summary")
         self.repository.require_thread_owner(thread_id, principal)
         resolved_content = self.resolve_content(
             principal,
