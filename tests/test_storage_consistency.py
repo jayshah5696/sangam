@@ -600,3 +600,51 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
             database_path=restore_db_target,
             workspace_root=restore_ws_target,
         )
+
+
+def test_concurrent_reads_and_atomic_writes(tmp_path: Path) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sangam.workspace import DiskWorkspaceFilesystem
+
+    ws = DiskWorkspaceFilesystem(root=tmp_path)
+    file_path = "concurrent_test_doc.md"
+    ws.write_atomic(file_path, "initial content 0")
+
+    stop_event = threading.Event()
+    read_results: list[str] = []
+    read_errors: list[Exception] = []
+
+    def reader():
+        while not stop_event.is_set():
+            try:
+                content = ws.read_document(file_path)
+                read_results.append(content)
+            except Exception as exc:
+                read_errors.append(exc)
+
+    def writer(thread_id: int):
+        for i in range(20):
+            content = f"writer {thread_id} iteration {i} " + ("data" * 200)
+            ws.write_atomic(file_path, content)
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        reader_futures = [executor.submit(reader) for _ in range(2)]
+        writer_futures = [executor.submit(writer, tid) for tid in range(4)]
+
+        for wf in writer_futures:
+            wf.result()
+
+        stop_event.set()
+        for rf in reader_futures:
+            rf.result()
+
+    assert not read_errors
+    assert len(read_results) > 0
+    for res in read_results:
+        assert len(res) > 0
+        assert res.startswith("initial content 0") or res.startswith("writer ")
+
+    temp_files = [f for f in tmp_path.glob("*") if ".sangam-" in f.name]
+    assert temp_files == []
