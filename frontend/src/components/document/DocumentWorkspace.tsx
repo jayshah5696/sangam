@@ -1,15 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import {
-  Columns2,
-  MessageSquare,
-  MoreHorizontal,
-  PanelRightClose,
-  PanelRightOpen,
-  Pencil,
-  Rows2,
-} from 'lucide-react'
+import { Columns2, MessageSquare, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
 import { api, type Document, type Revision } from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
@@ -531,7 +523,7 @@ function DocumentToolbar({
       navigate({ to: '/documents/$documentId', params: { documentId: created.document_id } }),
   })
   const remove = useMutation({ mutationFn: () => api.deleteDocument(document), onSuccess: onDeleted })
-  const { updatePreferences } = useTheme()
+  const { preferences, updatePreferences } = useTheme()
   const busy =
     saveState !== 'saved' || rename.isPending || move.isPending || duplicate.isPending || remove.isPending
   const changeMode = (nextMode: EditorMode) => {
@@ -567,9 +559,6 @@ function DocumentToolbar({
       </div>
       <div className="document-toolbar-actions">
         <div className="mobile-document-actions" aria-label="Document actions">
-          <button type="button" className="secondary-action" onClick={() => changeMode('edit')}>
-            <Pencil size="var(--icon-inline)" /> Edit
-          </button>
           <button type="button" className="secondary-action" onClick={openChat}>
             <MessageSquare size="var(--icon-inline)" /> Ask
           </button>
@@ -666,16 +655,17 @@ function DocumentToolbar({
             </div>
           )}
         </ActionDialog>
-        <span className="mobile-more-label">More</span>
-        <button
-          type="button"
-          className="icon-button mobile-inspector-toggle"
-          aria-label="Open document inspector"
-          title="More document tools"
-          onClick={() => updatePreferences({ rightVisible: true })}
-        >
-          <PanelRightOpen size="var(--icon-control)" />
-        </button>
+        {!preferences.rightVisible && (
+          <button
+            type="button"
+            className="icon-button mobile-inspector-toggle"
+            aria-label="Open document inspector"
+            title="More document tools"
+            onClick={() => updatePreferences({ rightVisible: true })}
+          >
+            <PanelRightOpen size="var(--icon-control)" />
+          </button>
+        )}
       </div>
     </div>
   )
