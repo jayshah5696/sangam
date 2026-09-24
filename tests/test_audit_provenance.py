@@ -38,8 +38,11 @@ def test_sensitive_header_and_data_sanitization() -> None:
         "private_key_data": "my_private_key_value",
         "authorization_headers": "some_auth_string",
         "summary": "Updated document content",
+        "session_cookie": "session_val_123",
+        "env_var_secret": "ENV_SECRET_VALUE",
         "nested": {
             "api_key": "secret_api_key_123",
+            "access_key": "access_key_val",
             "title": "My Sensitive Note",
             "jwt": "eyA0NTY3OCB9.eyBjb250ZW50IH0.sig_string_here_123",
         },
@@ -53,9 +56,75 @@ def test_sensitive_header_and_data_sanitization() -> None:
     assert sanitized_data["private_key_data"] == "[REDACTED]"
     assert sanitized_data["authorization_headers"] == "[REDACTED]"
     assert sanitized_data["summary"] == "Updated document content"
+    assert sanitized_data["session_cookie"] == "[REDACTED]"
+    assert sanitized_data["env_var_secret"] == "[REDACTED]"
     assert sanitized_data["nested"]["api_key"] == "[REDACTED]"
+    assert sanitized_data["nested"]["access_key"] == "[REDACTED]"
     assert sanitized_data["nested"]["title"] == "My Sensitive Note"
     assert sanitized_data["nested"]["jwt"] == "[REDACTED]"
+
+
+def test_document_metadata_and_publication_audit_details(client: TestClient) -> None:
+    # 1. Create a document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Metadata Audit Doc",
+            "content": "# Metadata Content",
+            "path": "docs/meta_test.md",
+        },
+        headers=headers("idemp_meta_create"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+
+    # 2. Create tag and update document metadata
+    tag_resp = client.post(
+        "/api/v1/tags",
+        json={"name": "AuditTag", "color": "#00ff00"},
+        headers=headers("idemp_meta_tag_create"),
+    )
+    assert tag_resp.status_code == 201
+    tag_id = tag_resp.json()["tag_id"]
+
+    meta_resp = client.patch(
+        f"/api/v1/documents/{doc_id}/metadata",
+        json={
+            "expected_metadata_version": 0,
+            "category": "Testing",
+            "tag_ids": [tag_id],
+        },
+        headers=headers("idemp_meta_update"),
+    )
+    assert meta_resp.status_code == 200
+
+    # 3. Create publication for the document
+    pub_resp = client.post(
+        "/api/v1/publications",
+        json={
+            "document_id": doc_id,
+            "slug": "audit-test-pub",
+            "access_policy": "public",
+        },
+        headers=headers("idemp_pub_create"),
+    )
+    assert pub_resp.status_code == 201
+
+    # Check activity events for human actor
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    tag_events = [e for e in events if e["resource_id"] == doc_id and e["action"] == "tag"]
+    assert len(tag_events) > 0
+    assert tag_events[0]["details"]["category"] == "Testing"
+    assert tag_events[0]["details"]["tag_ids"] == [tag_id]
+
+    pub_events = [e for e in events if e["resource_id"] == doc_id and e["action"] == "publish"]
+    assert len(pub_events) > 0
+    assert pub_events[0]["details"]["slug"] == "audit-test-pub"
+    assert pub_events[0]["details"]["access_policy"] == "public"
 
 
 def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
