@@ -224,6 +224,55 @@ test('narrow PDF reader fits the viewport and opens research in the inspector sh
   await expect(page.getByRole('button', { name: 'Close document inspector' })).toBeVisible()
 })
 
+test('touch PDF reader supports page navigation and citation actions', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(
+    !['chromium-touch-mobile', 'webkit-mobile-pdf'].includes(testInfo.project.name),
+    'mobile PDF projects only',
+  )
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          // SAFETY: test spy sets __copiedText property on global window
+          const targetWindow = window as typeof window & { __copiedText?: string }
+          targetWindow.__copiedText = value
+          return Promise.resolve()
+        },
+      },
+    })
+  })
+  const document = await importSamplePdf(request)
+  await page.goto(`/documents/${document.document_id}`)
+  await expect(
+    page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first(),
+  ).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('touch-pdf-first-page.png'), fullPage: true })
+  const text = page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first()
+  await text.evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.closest('.pdf-page')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+  await expect(page.getByRole('toolbar', { name: 'Selected PDF text actions' })).toBeVisible()
+  await page.getByRole('button', { name: 'Copy Markdown citation' }).tap()
+  // SAFETY: test spy stores the copied citation on the browser window
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __copiedText?: string }).__copiedText))
+    .toContain('[PDF reader evidence, p. 1]')
+  await page.getByRole('button', { name: 'Next PDF page' }).tap()
+  await expect(page.getByRole('textbox', { name: 'PDF page number' })).toHaveValue('2')
+  await page.screenshot({ path: testInfo.outputPath('touch-pdf-second-page.png'), fullPage: true })
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+})
+
 test('PDF page and zoom survive workbench tab switches', async ({ page, request }) => {
   test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
   await request.post('/api/v1/documents', {

@@ -34,29 +34,28 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
           package-manager-cache: false
+      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2.0.0
+        with:
+          just-version: "1.40.0"
       - run: uv sync --frozen
       - run: pnpm --dir frontend install --frozen-lockfile
-      - name: Python and frontend gates
-        run: |
-          uv run ruff check .
-          uv run ruff format --check .
-          uv run pytest
-          pnpm --dir frontend run format:check
-          pnpm --dir frontend run build
-          pnpm --dir frontend run lint
-          pnpm --dir frontend run test
+      - name: Canonical source, frontend, docs, and release gates
+        run: just check
+      - name: Backup restore drill
+        run: just verify-restore-drill
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification-evidence
+          path: |
+            artifacts/restore-drill/**
+            artifacts/verify-sangam/**
+          if-no-files-found: ignore
       - name: Desktop and narrow browser gates
         run: |
-          pnpm --dir frontend exec playwright install --with-deps chromium
-          pnpm --dir frontend run test:e2e
-      - name: Documentation gates
-        run: |
-          uv run python scripts/verify-docs.py
-          node frontend/scripts/verify-mermaid.mjs
-          pnpm --dir frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
-      - run: uv run python scripts/verify-release-config.py
-      - run: uv run python scripts/verify-version.py --frontend-dist
-      - run: ./scripts/audit-dependencies.sh
+          just install-browsers
+          just test-e2e
 
   artifacts:
     name: Wheel and sdist clean install

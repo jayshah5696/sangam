@@ -61,6 +61,14 @@ vi.mock('@tanstack/react-query', () => ({
     isError: false,
     isLoading: false,
   }),
+  useInfiniteQuery: ({ queryKey }: { queryKey: string[] }) => ({
+    data: queryKey[0] === 'documents' ? { pages: [{ items: state.documents, hasMore: false }] } : undefined,
+    isError: false,
+    isLoading: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
   useQueryClient: () => ({
     cancelQueries: vi.fn(),
     getQueryData: vi.fn(),
@@ -105,6 +113,7 @@ vi.mock('../workbench', () => ({
 vi.mock('../splitPolicy', () => ({ preferredSplitDirection: () => 'horizontal' }))
 
 vi.mock('../api', () => ({
+  DOCUMENT_PAGE_SIZE: 200,
   api: {
     createDocument: vi.fn(),
     createFolder: vi.fn(),
@@ -112,6 +121,7 @@ vi.mock('../api', () => ({
     duplicateDocument: vi.fn(),
     getDocument: vi.fn(),
     listDocuments: vi.fn(),
+    listDocumentsPage: vi.fn(),
     listFolders: vi.fn(),
     moveDocument: vi.fn(),
     updateDocument: vi.fn(),

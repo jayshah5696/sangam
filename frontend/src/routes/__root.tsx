@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { useIsFetching, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useIsFetching, useQuery } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import {
@@ -16,7 +16,7 @@ import {
   Trash2,
   RefreshCw,
 } from 'lucide-react'
-import { api, type DocumentSummary } from '../api'
+import { api, DOCUMENT_PAGE_SIZE, type DocumentSummary } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
 import { SettingsRouteSidebar, SettingsSidebar } from '../components/SettingsSidebar'
@@ -407,10 +407,13 @@ function WorkspaceFreshness() {
 function SearchPanel() {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<'relevance' | 'updated' | 'title' | 'path'>('relevance')
-  const results = useQuery({
+  const results = useInfiniteQuery({
     queryKey: ['documents', 'search-panel', query, sort],
-    queryFn: () => api.searchDocuments(query, undefined, sort),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.searchDocumentsPage(query, undefined, sort, pageParam),
+    getNextPageParam: (lastPage, pages) => (lastPage.hasMore ? pages.length * DOCUMENT_PAGE_SIZE : undefined),
   })
+  const documents = results.data?.pages.flatMap((page) => page.items) ?? []
   return (
     <div className="sidebar-content search-panel">
       <label className="sidebar-search-input">
@@ -443,13 +446,26 @@ function SearchPanel() {
       </label>
       <div className="sidebar-section-title">
         <span>Results</span>
-        <small>{results.data?.length ?? 0}</small>
+        <small>{documents.length}</small>
       </div>
       <div className="search-results">
-        {results.data?.map((document) => (
+        {documents.map((document) => (
           <DocumentLink key={document.document_id} document={document} showPath />
         ))}
-        {results.data?.length === 0 && <p className="sidebar-message">No matching documents.</p>}
+        {results.isFetchingNextPage && <p className="sidebar-message">Loading more results…</p>}
+        {results.hasNextPage && (
+          <button
+            className="secondary-action search-load-more"
+            type="button"
+            disabled={results.isFetchingNextPage}
+            onClick={() => void results.fetchNextPage()}
+          >
+            Load more results
+          </button>
+        )}
+        {!results.isFetching && documents.length === 0 && (
+          <p className="sidebar-message">No matching documents.</p>
+        )}
       </div>
     </div>
   )
