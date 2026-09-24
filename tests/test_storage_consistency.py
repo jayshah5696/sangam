@@ -600,3 +600,60 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
             database_path=restore_db_target,
             workspace_root=restore_ws_target,
         )
+
+
+def test_concurrent_manifest_atomic_write_and_cleanup(tmp_path: Path) -> None:
+    from sangam.backup import BackupArtifact, BackupSet, _write_manifest
+
+    manifest_file = tmp_path / "manifest.json"
+    initial_backup = BackupSet(
+        backup_id="20250101T000000000000Z-00000000",
+        created_at="2025-01-01T00:00:00.000000Z",
+        document_count=0,
+        revision_count=0,
+        artifacts=[
+            BackupArtifact(name="database.sqlite3", sha256="0" * 64, size_bytes=100),
+            BackupArtifact(name="workspace.tar.gz", sha256="0" * 64, size_bytes=200),
+        ],
+    )
+    _write_manifest(manifest_file, initial_backup)
+    assert manifest_file.is_file()
+
+    stop_event = threading.Event()
+    read_results: list[bytes] = []
+    read_errors: list[str] = []
+
+    def reader():
+        while not stop_event.is_set():
+            if manifest_file.exists():
+                try:
+                    content = manifest_file.read_bytes()
+                    read_results.append(content)
+                except Exception as exc:
+                    read_errors.append(str(exc))
+
+    reader_thread = threading.Thread(target=reader)
+    reader_thread.start()
+
+    def writer(idx: int):
+        backup = initial_backup.model_copy(update={"document_count": idx + 1})
+        _write_manifest(manifest_file, backup)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(writer, i) for i in range(20)]
+        for f in futures:
+            f.result()
+
+    stop_event.set()
+    reader_thread.join()
+
+    assert not read_errors
+    assert len(read_results) > 0
+    for content in read_results:
+        assert len(content) > 0
+        parsed = json.loads(content.decode("utf-8"))
+        assert parsed["backup_id"] == "20250101T000000000000Z-00000000"
+
+    # Verify no temporary staging files left behind
+    temp_files = list(tmp_path.glob(".sangam-manifest-*"))
+    assert temp_files == []
