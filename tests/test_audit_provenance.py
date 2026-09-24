@@ -17,6 +17,7 @@ def test_sensitive_header_and_data_sanitization() -> None:
         "Cookie": "session=secret_session_id",
         "X-Api-Key": "secret_api_key",
         "X-Sangam-Trusted-Identity": "secret_trusted_header",
+        "Sec-WebSocket-Protocol": "sgm_agt_12345.secret_bearer_token",
         "Content-Type": "application/json",
         "User-Agent": "SangamTestClient/1.0",
     }
@@ -27,6 +28,7 @@ def test_sensitive_header_and_data_sanitization() -> None:
     assert sanitized["Cookie"] == "[REDACTED]"
     assert sanitized["X-Api-Key"] == "[REDACTED]"
     assert sanitized["X-Sangam-Trusted-Identity"] == "[REDACTED]"
+    assert sanitized["Sec-WebSocket-Protocol"] == "[REDACTED]"
     assert sanitized["Content-Type"] == "application/json"
     assert sanitized["User-Agent"] == "SangamTestClient/1.0"
 
