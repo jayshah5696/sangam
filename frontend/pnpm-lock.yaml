@@ -35,8 +35,8 @@ importers:
         specifier: ^1.5.1
         version: 1.7.0
       '@openai/chatkit-react':
-        specifier: ^1.5.1
-        version: 1.5.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: ^1.6.1
+        version: 1.6.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@pierre/diffs':
         specifier: 1.4.1
         version: 1.4.1(@shikijs/themes@4.3.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -547,14 +547,17 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openai/chatkit-react@1.5.1':
-    resolution: {integrity: sha512-iFIOfZ16MLi0dZUmLW273hzBlCsN/xnwefTvoiT6X96DR61jGcJIaCJoNL4OOvp53hmEfhvrp4kENNyDbNt+UA==}
+  '@openai/chatkit-react@1.6.1':
+    resolution: {integrity: sha512-NraG0KJMouWG4uuXS5mAlcU8DNvu8lNp4YfpJiA4yzR6S9hnPsiPwbwhGXnMk8JxBQEitmSB1lMivJn/I2wopg==}
     peerDependencies:
       react: '>=18'
       react-dom: '>=18'
 
   '@openai/chatkit@1.7.0':
     resolution: {integrity: sha512-uCUsShQO8PamPXt1gcFc8dbyV9Vic0yUgoUrEo7NT6z00azba8nU20rchVFHvjdgQsxgE/+BtsDtYoOVcq5Jjw==}
+
+  '@openai/chatkit@1.9.0':
+    resolution: {integrity: sha512-AbqNYaCkQfOauFIk/xL3LFmZ/zIBJuvV71EMUK1o1Tu3/qCG5qRjuDnTUVLkkX9Al2ZYQ6yB1oyWN0jNhoBRMQ==}
 
   '@oxc-project/types@0.139.0':
     resolution: {integrity: sha512-r9gHphtCs+1M7J0pw6Sn/hh/Wpa/iQrOOkrNAlVLF/gHq+/CJmHIWKKUUhdWjcD6CIa8idarspCsASiXCXvFUw==}
@@ -3213,13 +3216,15 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
-  '@openai/chatkit-react@1.5.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@openai/chatkit-react@1.6.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@openai/chatkit': 1.7.0
+      '@openai/chatkit': 1.9.0
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
   '@openai/chatkit@1.7.0': {}
+
+  '@openai/chatkit@1.9.0': {}
 
   '@oxc-project/types@0.139.0': {}
 

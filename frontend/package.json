@@ -23,7 +23,7 @@
     "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.43.11",
     "@openai/chatkit": "^1.5.1",
-    "@openai/chatkit-react": "^1.5.1",
+    "@openai/chatkit-react": "^1.6.1",
     "@pierre/diffs": "1.4.1",
     "@pierre/trees": "1.0.0-beta.5",
     "@tanstack/history": "1.162.4",
