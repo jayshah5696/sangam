@@ -123,6 +123,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         self.proposals = ChatProposalService(
             repository=proposal_repository,
             workspace=workspace,
+            evidence=self.evidence,
         )
         self.toolset = ChatToolset(
             workspace=workspace,

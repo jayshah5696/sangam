@@ -381,18 +381,41 @@ test('workspace switchboard searches documents and action-only mode', async ({ p
   await expect(page.getByText('Documents', { exact: true })).toHaveCount(0)
 })
 
-test('document workbench exposes active, save, and inspector state', async ({ page, seededWorkspace }) => {
+test('document workbench exposes active, save, and inspector state', async ({
+  page,
+  request,
+  seededWorkspace,
+}) => {
   await page.goto(`/documents/${seededWorkspace.documentId}`)
 
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
+  await expect(page.locator('.save-state')).toHaveText('Saved draft')
+
+  const materialized = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: 'Materialized save state',
+      content: '# Materialized save state\n\nThis document has a workspace path.',
+      content_type: 'text/markdown',
+      path: `e2e/materialized-${randomUUID()}.md`,
+    },
+  })
+  // SAFETY: POST /api/v1/documents returns document entity containing document_id
+  const materializedData = (await materialized.json()) as { document_id: string }
+  await page.goto(`/documents/${materializedData.document_id}`)
   await expect(page.locator('.save-state')).toHaveText('Saved')
+
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
   await expect(page.getByRole('radio', { name: 'preview' })).toBeChecked()
   const inspectorToggle = page.getByRole('button', { name: 'Open document inspector' })
-  if (await inspectorToggle.isVisible()) {
+  const inspectorTabs = page.getByRole('tablist', { name: 'Document inspector' })
+  if (!(await inspectorTabs.isVisible())) {
+    await expect(inspectorToggle).toBeVisible()
     await inspectorToggle.click()
   }
+  await expect(inspectorTabs).toBeVisible()
   await expect(page.getByRole('tab', { name: 'properties' })).toHaveAttribute('aria-selected', 'true')
-  if (await inspectorToggle.isVisible()) {
+  if (await page.getByRole('button', { name: 'Collapse document inspector' }).isVisible()) {
     await page.getByRole('button', { name: 'Collapse document inspector' }).click()
   }
 
@@ -561,12 +584,12 @@ test('settings exposes operational destinations and the compact footer keeps onl
   test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
 
   await page.goto('/')
+  const revealSidebar = page.getByRole('button', { name: 'Show workspace sidebar' })
+  if (await revealSidebar.isVisible()) await revealSidebar.click()
   const tools = page.getByRole('navigation', { name: 'Workspace tools' })
-  await expect(tools.getByRole('link')).toHaveCount(4)
-  await expect(tools.getByRole('link', { name: 'Workspace chat' })).toBeVisible()
-  await expect(tools.getByRole('link', { name: 'Publications' })).toBeVisible()
-  await expect(tools.getByRole('link', { name: 'Trash' })).toBeVisible()
-  await expect(tools.getByRole('link', { name: 'Settings' })).toBeVisible()
+  for (const label of ['Workspace chat', 'Review changes', 'Publications', 'Trash', 'Settings']) {
+    await expect(tools.getByRole('link', { name: label })).toBeVisible()
+  }
   await expect(page.getByText('Synced', { exact: true })).toHaveCount(0)
   await expect(page.locator('.workspace-freshness')).toHaveCount(0)
 

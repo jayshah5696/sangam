@@ -129,41 +129,92 @@ cmd_doctor() {
     exit 1
   fi
 
-  local health_code
-  health_code="$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$port/api/v1/health" || echo "000")"
-  if [[ "$health_code" != "200" ]]; then
-    echo "Doctor FAILED: /api/v1/health returned HTTP $health_code" >&2
-    exit 1
-  fi
+  local health_file readiness_file
+  health_file="$(mktemp)"
+  readiness_file="$(mktemp)"
+  trap 'rm -f "$health_file" "$readiness_file"' RETURN
 
-  local readiness_resp
-  readiness_resp="$(curl -s "http://127.0.0.1:$port/api/v1/readiness")"
+  local health_code readiness_code
+  health_code="$(curl -sS -o "$health_file" -w "%{http_code}" "http://127.0.0.1:$port/api/v1/health" || true)"
+  readiness_code="$(curl -sS -o "$readiness_file" -w "%{http_code}" "http://127.0.0.1:$port/api/v1/readiness" || true)"
+  [[ "$health_code" =~ ^[0-9]{3}$ ]] || health_code="000"
+  [[ "$readiness_code" =~ ^[0-9]{3}$ ]] || readiness_code="000"
 
-  # Database check using sqlite3
-  local sqlite_check
-  sqlite_check="$(sqlite3 "$SANGAM_DATABASE_PATH" "PRAGMA quick_check;" 2>&1 || echo "failed")"
+  if ! uv run python - "$health_file" "$readiness_file" "$SANGAM_DATABASE_PATH" "$out_file" "$run_id" "$pid" "$port" "$health_code" "$readiness_code" <<'PYEOF'
+import json
+import sqlite3
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
-  local schema_version
-  schema_version="$(sqlite3 "$SANGAM_DATABASE_PATH" "SELECT COALESCE(MAX(version), 0) FROM schema_migrations;" 2>/dev/null || echo "unknown")"
+health_path, readiness_path, database_path, out_path, run_id, pid, port, health_code, readiness_code = sys.argv[1:]
+errors: list[str] = []
 
-  cat > "$out_file" <<EOF
-{
-  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-  "run_id": "$run_id",
-  "pid": $pid,
-  "port": $port,
-  "health_http_code": $health_code,
-  "sqlite_quick_check": "$sqlite_check",
-  "schema_version": "$schema_version",
-  "readiness": $readiness_resp
+def load_json(path: str, label: str) -> object:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"{label} response is not valid JSON: {error}")
+        return None
+
+health = load_json(health_path, "health")
+readiness = load_json(readiness_path, "readiness")
+if health_code != "200":
+    errors.append(f"/health returned HTTP {health_code}")
+if not isinstance(health, dict) or health.get("status") != "ok":
+    errors.append("/health payload does not report status=ok")
+if readiness_code != "200":
+    errors.append(f"/readiness returned HTTP {readiness_code}")
+if not isinstance(readiness, dict) or readiness.get("status") != "ready":
+    errors.append("/readiness payload does not report status=ready")
+checks = readiness.get("checks") if isinstance(readiness, dict) else None
+if not isinstance(checks, dict) or not checks:
+    errors.append("/readiness payload has no checks")
+else:
+    for name, check in checks.items():
+        if not isinstance(check, dict) or check.get("ok") is not True:
+            errors.append(f"readiness check failed: {name}")
+
+sqlite_check = "unavailable"
+schema_version = "unknown"
+try:
+    with sqlite3.connect(database_path) as connection:
+        sqlite_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
+        schema_version = str(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0])
+except (OSError, sqlite3.Error) as error:
+    errors.append(f"SQLite verification failed: {error}")
+if sqlite_check != "ok":
+    errors.append(f"SQLite quick_check returned {sqlite_check!r}")
+if schema_version in {"None", "unknown"}:
+    errors.append("schema_migrations has no recorded version")
+
+evidence = {
+    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    "run_id": run_id,
+    "pid": int(pid),
+    "port": int(port),
+    "health_http_code": int(health_code),
+    "readiness_http_code": int(readiness_code),
+    "sqlite_quick_check": sqlite_check,
+    "schema_version": schema_version,
+    "health": health,
+    "readiness": readiness,
+    "ok": not errors,
+    "errors": errors,
 }
-EOF
-
-  echo "Doctor PASS: Sangam instance healthy and ready."
+Path(out_path).write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+if errors:
+    print("Doctor FAILED:")
+    print("\n".join(f"  - {error}" for error in errors), file=sys.stderr)
+    raise SystemExit(1)
+print(f"Doctor PASS: Sangam instance healthy and ready (schema {schema_version}, SQLite {sqlite_check}).")
+PYEOF
+  then
+    echo "  Evidence saved to: $out_file" >&2
+    return 1
+  fi
   echo "  URL: http://127.0.0.1:$port"
   echo "  PID: $pid"
-  echo "  Schema Version: $schema_version"
-  echo "  SQLite check: $sqlite_check"
   echo "  Evidence saved to: $out_file"
 }
 
@@ -244,6 +295,11 @@ from pathlib import Path
 base_url = "http://127.0.0.1:$port/api/v1"
 db_path = "$SANGAM_DATABASE_PATH"
 count = int("$count")
+if count < 1:
+    raise SystemExit("benchmark count must be a positive integer")
+benchmark_id = uuid.uuid4().hex[:12]
+title_prefix = f"Benchmark Document {benchmark_id} #"
+errors = []
 
 client = httpx.Client(timeout=10.0)
 
@@ -251,6 +307,16 @@ client = httpx.Client(timeout=10.0)
 t0 = time.perf_counter()
 r = client.get(f"{base_url}/readiness")
 readiness_latency_ms = (time.perf_counter() - t0) * 1000
+try:
+    readiness = r.json()
+except ValueError as error:
+    readiness = None
+    errors.append(f"readiness response is not valid JSON: {error}")
+if r.status_code != 200 or not isinstance(readiness, dict) or readiness.get("status") != "ready":
+    errors.append(f"readiness failed: HTTP {r.status_code}, payload={readiness!r}")
+checks = readiness.get("checks", {}) if isinstance(readiness, dict) else {}
+if not isinstance(checks, dict) or any(not isinstance(check, dict) or check.get("ok") is not True for check in checks.values()):
+    errors.append("readiness contains a failed or malformed check")
 
 # 2. Benchmark Document Creation throughput
 create_latencies = []
@@ -259,7 +325,7 @@ t_start = time.perf_counter()
 
 for i in range(count):
     payload = {
-        "title": f"Benchmark Document #{i}",
+        "title": f"{title_prefix}{i}",
         "content": f"# Benchmark Document {i}\n\nContent body with unique term benchmark_token_{i} and searchable metadata."
     }
     headers = {"Idempotency-Key": str(uuid.uuid4())}
@@ -267,8 +333,18 @@ for i in range(count):
     resp = client.post(f"{base_url}/documents", json=payload, headers=headers)
     req_ms = (time.perf_counter() - req_t0) * 1000
     create_latencies.append(req_ms)
-    if resp.status_code in (200, 201):
-        created_doc_ids.append(resp.json().get("document_id"))
+    if resp.status_code not in (200, 201):
+        errors.append(f"write {i} failed with HTTP {resp.status_code}: {resp.text[:200]}")
+        continue
+    try:
+        document_id = resp.json().get("document_id")
+    except ValueError as error:
+        errors.append(f"write {i} returned invalid JSON: {error}")
+        continue
+    if not document_id:
+        errors.append(f"write {i} returned no document_id")
+    else:
+        created_doc_ids.append(document_id)
 
 t_total_create = time.perf_counter() - t_start
 throughput_writes = count / t_total_create if t_total_create > 0 else 0
@@ -282,6 +358,19 @@ for i in range(count):
     s_resp = client.get(f"{base_url}/search", params={"q": token})
     search_ms = (time.perf_counter() - req_t0) * 1000
     search_latencies.append(search_ms)
+    if s_resp.status_code != 200:
+        errors.append(f"search {i} failed with HTTP {s_resp.status_code}: {s_resp.text[:200]}")
+        continue
+    try:
+        search_results = s_resp.json()
+    except ValueError as error:
+        errors.append(f"search {i} returned invalid JSON: {error}")
+        continue
+    if not isinstance(search_results, list) or not any(
+        isinstance(result, dict) and result.get("document_id") in created_doc_ids
+        for result in search_results
+    ):
+        errors.append(f"search {i} returned no benchmark document for {token}")
 
 t_total_search = time.perf_counter() - t_search_start
 throughput_searches = count / t_total_search if t_total_search > 0 else 0
@@ -298,7 +387,7 @@ def p(arr, percentile):
 # Verify DB state directly
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
-cur.execute("SELECT COUNT(*) FROM documents WHERE title LIKE 'Benchmark Document %'")
+cur.execute("SELECT COUNT(*) FROM documents WHERE title LIKE ?", (f"{title_prefix}%",))
 doc_count_db = cur.fetchone()[0]
 conn.close()
 
@@ -329,12 +418,26 @@ results = {
     },
     "database_verification": {
         "persisted_documents_in_sqlite": doc_count_db,
-        "match_expected": doc_count_db == count
+        "match_expected": doc_count_db == count,
+        "unique_document_ids": len(set(created_doc_ids)),
     }
 }
 
+if len(create_latencies) != count:
+    errors.append(f"only {len(create_latencies)} write responses were recorded; expected {count}")
+if len(created_doc_ids) != count or len(set(created_doc_ids)) != count:
+    errors.append("write responses did not contain unique document IDs for every request")
+if len(search_latencies) != count:
+    errors.append(f"only {len(search_latencies)} search responses were recorded; expected {count}")
+if doc_count_db != count:
+    errors.append(f"SQLite persisted {doc_count_db} benchmark documents; expected {count}")
+results["ok"] = not errors
+results["errors"] = errors
+
 Path("$report_file").write_text(json.dumps(results, indent=2), encoding="utf-8")
 print(json.dumps(results, indent=2))
+if errors:
+    raise SystemExit("Benchmark FAILED: " + "; ".join(errors))
 PYEOF
   echo "==> Benchmark report saved to: $report_file"
 }

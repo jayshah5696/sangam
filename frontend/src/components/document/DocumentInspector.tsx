@@ -1,8 +1,7 @@
 import { lazy, Suspense, useState, type KeyboardEvent } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { ArrowRight, Maximize2, Upload } from 'lucide-react'
+import { ArrowRight, Maximize2, NotebookTabs, Upload } from 'lucide-react'
 import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
 import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
@@ -17,6 +16,8 @@ import { MarkdownPreview } from '../MarkdownPreview'
 import { OneTimeSecret } from '../OneTimeSecret'
 import { activateTabFromKeyboard } from '../tabKeyboard'
 import { StateMessage } from '../ui/StateMessage'
+import { ActionMenu } from '../ActionMenu'
+import { workspaceLayoutPatch, workspaceLayoutPresets } from '../../workspaceLayout'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
@@ -159,14 +160,36 @@ export function DocumentInspector({
     >
       <div className="right-panel-header ui-rail-header">
         <strong>Inspector</strong>
-        <button
-          className="icon-button"
-          aria-label="Collapse document inspector"
-          title="Collapse document inspector"
-          onClick={onCollapse}
-        >
-          <ArrowRight size="var(--icon-control)" />
-        </button>
+        <div className="inspector-header-actions">
+          <ActionMenu label="Workspace layouts" icon={<NotebookTabs size="var(--icon-control)" />}>
+            {(close) =>
+              workspaceLayoutPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const patch = workspaceLayoutPatch(preset.id)
+                    sessions.updateSession(documentId, { mode: patch.editorMode })
+                    updatePreferences(patch)
+                    close()
+                  }}
+                >
+                  <strong>{preset.label}</strong>
+                  <small>{preset.description}</small>
+                </button>
+              ))
+            }
+          </ActionMenu>
+          <button
+            className="icon-button"
+            aria-label="Collapse document inspector"
+            title="Collapse document inspector"
+            onClick={onCollapse}
+          >
+            <ArrowRight size="var(--icon-control)" />
+          </button>
+        </div>
       </div>
       <div
         className={`inspector-tabs ${inspectorTabs.length === 5 ? 'inspector-tabs-5' : ''}`}
@@ -445,7 +468,7 @@ function HistoryList({
       {history.map((revision) => (
         <article className="revision" key={revision.revision_id}>
           <div>
-            <strong>{revision.operation}</strong>
+            <strong>{revisionStory(revision)}</strong>
             <time>{new Date(revision.created_at).toLocaleString()}</time>
           </div>
           <p>
@@ -456,7 +479,12 @@ function HistoryList({
             {revision.summary ? ` · ${revision.summary}` : ''}
           </p>
           {revision.operation_id && (
-            <small className="revision-operation-id">Operation {revision.operation_id}</small>
+            <details className="revision-technical-details">
+              <summary>Technical details</summary>
+              <small className="revision-operation-id">
+                {revision.operation} · operation {revision.operation_id}
+              </small>
+            </details>
           )}
           {!binary && (
             <div className="revision-actions">
@@ -479,6 +507,18 @@ function HistoryList({
       ))}
     </section>
   )
+}
+
+function revisionStory(revision: Revision) {
+  if (revision.summary) return revision.summary
+  const actor = revision.actor_kind === 'agent' ? 'Agent' : 'You'
+  const operation = revision.operation.toLowerCase()
+  if (operation.includes('restore')) return `${actor} restored an earlier revision`
+  if (operation.includes('merge')) return `${actor} merged document changes`
+  if (operation.includes('create')) return `${actor} created this document`
+  if (operation.includes('import')) return `${actor} imported this document`
+  if (operation.includes('update') || operation.includes('write')) return `${actor} revised this document`
+  return `${actor} changed this document`
 }
 
 function slugify(value: string) {
@@ -504,6 +544,7 @@ function PublicationEditor({
   const [accessPolicy, setAccessPolicy] = useState<Publication['access_policy']>(
     publication?.access_policy ?? 'private',
   )
+  const [setupOpen, setSetupOpen] = useState(Boolean(publication))
   const [oneTimeToken, setOneTimeToken] = useState<string | null>(null)
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['publication', document.document_id] })
@@ -527,6 +568,22 @@ function PublicationEditor({
     },
   })
   const publicationHref = publication?.url ?? `/p/${slug}`
+  if (!publication && !setupOpen) {
+    return (
+      <section className="metadata-editor publication-editor publication-editor-collapsed">
+        <header className="publication-section-header">
+          <div>
+            <strong>Publish</strong>
+            <p className="small-muted">Make a stable, shareable view when this document is ready.</p>
+          </div>
+          <span className="scope-badge">Not published</span>
+        </header>
+        <button type="button" className="panel-button" onClick={() => setSetupOpen(true)}>
+          Prepare publication
+        </button>
+      </section>
+    )
+  }
   return (
     <section className="metadata-editor publication-editor">
       <header className="publication-section-header">
@@ -621,9 +678,20 @@ function MetadataEditor({
 }) {
   const [category, setCategory] = useState(document.category ?? '')
   const [selectedTags, setSelectedTags] = useState(document.tags.map((tag) => tag.tag_id))
+  const [newTagName, setNewTagName] = useState('')
+  const [newTagColor, setNewTagColor] = useState('#327a62')
+  const queryClient = useQueryClient()
   const mutation = useMutation({
     mutationFn: () => api.updateDocumentMetadata(document, category || null, selectedTags),
     onSuccess: onUpdated,
+  })
+  const createTag = useMutation({
+    mutationFn: () => api.createTag(newTagName.trim(), newTagColor),
+    onSuccess: async (tag) => {
+      setNewTagName('')
+      setSelectedTags((current) => [...current, tag.tag_id])
+      await queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
   })
   return (
     <section className="metadata-editor">
@@ -665,7 +733,7 @@ function MetadataEditor({
       </label>
       <fieldset>
         <legend>Tags</legend>
-        {tags.length === 0 && <p className="small-muted">Create tags in Workspace settings.</p>}
+        {tags.length === 0 && <p className="small-muted">Create the first tag here.</p>}
         <div className="tag-checklist">
           {tags.map((tag) => (
             <label key={tag.tag_id}>
@@ -685,11 +753,34 @@ function MetadataEditor({
             </label>
           ))}
         </div>
+        <form
+          className="metadata-inline-tag-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (newTagName.trim()) createTag.mutate()
+          }}
+        >
+          <input
+            aria-label="New tag name"
+            value={newTagName}
+            placeholder="Create a tag"
+            onChange={(event) => setNewTagName(event.target.value)}
+          />
+          <input
+            aria-label="New tag color"
+            type="color"
+            value={newTagColor}
+            onChange={(event) => setNewTagColor(event.target.value)}
+          />
+          <button className="secondary-action" disabled={createTag.isPending || !newTagName.trim()}>
+            {createTag.isPending ? 'Adding…' : 'Add'}
+          </button>
+        </form>
       </fieldset>
       <button className="panel-button" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-        {mutation.isPending ? 'Saving…' : 'Save organization'}
+        {mutation.isPending ? 'Saving…' : 'Save tags'}
       </button>
-      {mutation.isError && <p className="error-text">{mutation.error.message}</p>}
+      {(mutation.isError || createTag.isError) && <p className="error-text">The tags could not be saved.</p>}
     </section>
   )
 }

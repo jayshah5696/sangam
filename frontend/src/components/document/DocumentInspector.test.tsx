@@ -110,6 +110,43 @@ describe('DocumentInspector', () => {
     expect(history.getAttribute('tabindex')).toBe('-1')
     expect(properties.getAttribute('aria-controls')).toBe('inspector-panel')
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('inspector-tab-properties')
+    expect(screen.getByRole('button', { name: 'Workspace layouts' })).toBeDefined()
+  })
+
+  it('offers inline tag creation without sending the user to Settings', () => {
+    render(
+      <DocumentInspector
+        width={320}
+        document={testDocument}
+        content={testDocument.content}
+        selectedText=""
+        onCollapse={vi.fn()}
+        onUpdated={vi.fn()}
+        onFocusEditor={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Create the first tag here.')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'New tag name' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save tags' })).toBeTruthy()
+    expect(screen.queryByText('Create tags in Workspace settings.')).toBeNull()
+  })
+
+  it('keeps publication fields behind an explicit setup action', () => {
+    render(
+      <DocumentInspector
+        width={320}
+        document={testDocument}
+        content={testDocument.content}
+        selectedText=""
+        onCollapse={vi.fn()}
+        onUpdated={vi.fn()}
+        onFocusEditor={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Prepare publication' })).toBeTruthy()
+    expect(screen.queryByText('Stable slug')).toBeNull()
   })
 
   it('mounts compact document chat and can expand it to the full route', async () => {

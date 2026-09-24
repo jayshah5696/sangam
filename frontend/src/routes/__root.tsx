@@ -319,6 +319,7 @@ function PrimarySidebar({
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   const links = [
     { to: '/chat' as const, label: 'Workspace chat', icon: MessageSquareText },
+    { to: '/review' as const, label: 'Review changes', icon: ShieldAlert },
     { to: '/publications' as const, label: 'Publications', icon: Globe2 },
     { to: '/trash' as const, label: 'Trash', icon: Trash2 },
     { to: '/settings' as const, label: 'Settings', icon: Settings },

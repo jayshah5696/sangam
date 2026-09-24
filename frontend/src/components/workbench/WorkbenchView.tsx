@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   NotebookTabs,
   PanelRightClose,
+  PanelRightOpen,
   Pin,
   PinOff,
   RotateCcw,
@@ -35,6 +36,7 @@ import {
   minimumVerticalGroupHeight,
 } from '../../splitPolicy'
 import { useMediaQuery } from '../../useMediaQuery'
+import { workspaceLayoutPatch, workspaceLayoutPresets } from '../../workspaceLayout'
 import { ActionMenu, ActionMenuItem } from '../ActionMenu'
 import { DocumentWorkspace } from '../document/DocumentWorkspace'
 import { DocumentInspector } from '../document/DocumentInspector'
@@ -303,6 +305,38 @@ function GroupInspector({ documentId }: { documentId: string }) {
     }
     return (
       <aside className="right-rail" aria-label="Collapsed inspector tools">
+        <ActionMenu
+          label="Workspace layouts"
+          icon={<MoreHorizontal size="var(--icon-control)" />}
+          className="workspace-layout-trigger"
+        >
+          {(close) =>
+            workspaceLayoutPresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const patch = workspaceLayoutPatch(preset.id)
+                  sessions.updateSession(documentId, { mode: patch.editorMode })
+                  updatePreferences(patch)
+                  close()
+                }}
+              >
+                <strong>{preset.label}</strong>
+                <small>{preset.description}</small>
+              </button>
+            ))
+          }
+        </ActionMenu>
+        <button
+          className="icon-button"
+          aria-label="Open document inspector"
+          data-tooltip="Open document inspector"
+          onClick={() => openToTab(preferences.rightTab)}
+        >
+          <PanelRightOpen size="var(--icon-control)" />
+        </button>
         <button
           className="icon-button"
           aria-label="Document properties"

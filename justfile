@@ -46,6 +46,10 @@ test-frontend:
     pnpm --dir frontend run lint
     pnpm --dir frontend run test
 
+# Run the focused frontend regressions for workspace, review, and API behavior.
+test-frontend-focused:
+    pnpm --dir frontend exec vitest run src/api.test.ts src/documentWorkspaceState.test.ts src/review.test.tsx src/workspaceHome.test.ts
+
 # Report the initial Vite entry graph and lazy chunks without a visualization dependency.
 bundle-report:
     pnpm --dir frontend run build
@@ -93,6 +97,10 @@ verify-doctor:
 verify-seed:
     ./scripts/control-sangam.sh seed
 
+# Restore a verified backup into empty storage and verify a fresh boot.
+verify-restore-drill:
+    uv run python scripts/restore-drill.py
+
 # Run chat agent capability policy and empirical eval verification saving evidence to artifacts.
 verify-eval model="openai/gpt-5.6-luna" limit="":
     ./scripts/control-sangam.sh eval "{{ model }}" "{{ limit }}" 
@@ -123,7 +131,7 @@ format:
 test-docs:
     uv run python scripts/verify-docs.py
     node frontend/scripts/verify-mermaid.mjs
-    pnpm --dir frontend exec markdownlint-cli2 "README.md" "SECURITY.md" "docs/**/*.md"
+    pnpm --dir frontend exec markdownlint-cli2 "../README.md" "../SECURITY.md" "../docs/**/*.md"
 
 # Serve the API and frontend development server with live reload.
 serve backend_port="8000" frontend_port="5173":

@@ -68,6 +68,15 @@ The default permission mode is **Review every effect**. It pauses every durable 
 
 The chat panel shows the active mode. Pending organization plans use a dedicated renderer that lists every operation and its before-and-after state. Completed effects collapse into one expandable summary. **Stop** persists run cancellation, cancels effects that have not started, and aborts the active browser stream. Starting another thread cancels the current run and clears its pending card.
 
+The **Review changes** inbox lists pending and stale document proposals. A proposal
+can include the turn context that recorded its source document, pinned revision,
+selected passage, PDF page, or annotation. The inbox exposes that recorded
+context with a source link and contextual diff. Tool runs store citation counts,
+not a complete list of source records, so the inbox does not claim to show every
+document read during a turn. Older proposals without a linked context say that
+no source evidence was recorded. A deleted or unauthorized source is shown as
+unavailable without exposing its stored passage.
+
 ## Add a capability
 
 Complete these steps in order:

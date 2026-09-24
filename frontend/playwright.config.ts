@@ -32,8 +32,13 @@ export default defineConfig({
     {
       name: 'chromium-touch-mobile',
       testMatch:
-        /(?:crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer)\.spec\.ts/,
+        /(?:crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader)\.spec\.ts/,
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
+    },
+    {
+      name: 'webkit-mobile',
+      testMatch: /pdf-reader\.spec\.ts/,
+      use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } },
     },
   ],
 })

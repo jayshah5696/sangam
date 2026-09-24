@@ -1,7 +1,15 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
+import {
+  Columns2,
+  MessageSquare,
+  MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  Rows2,
+} from 'lucide-react'
 import { api, type Document, type Revision } from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
@@ -18,6 +26,7 @@ import { internalDocumentMarkdown } from '../../internalLinks'
 import { useTheme } from '../../theme'
 import { useWorkbenchActions } from '../../workbench'
 import { canSplitActiveGroup } from '../../splitPolicy'
+import { initialDocumentMode, materializePath, saveLabel } from '../../documentWorkspaceState'
 import { ActionDialog } from '../ActionMenu'
 import type { MarkdownEditorHandle } from '../MarkdownEditor'
 import { ConflictRecoveryNotice } from './ConflictRecoveryNotice'
@@ -62,22 +71,41 @@ export function DocumentWorkspace({
   const mode = session.mode
   const selection = session.selection
   const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  const foldersQuery = useQuery({ queryKey: ['folders'], queryFn: api.listFolders, enabled: !document.path })
   const htmlJavascript = useQuery({
     queryKey: ['html-javascript-settings'],
     queryFn: api.getHtmlJavascriptSettings,
     enabled: document.content_type === 'text/html',
   })
-  const [materializePath, setMaterializePath] = useState(
-    document.content_type === 'text/html' ? 'projects/interactive.html' : 'projects/first-document.md',
+  const [materializeFolder, setMaterializeFolder] = useState('')
+  const [materializeFilename, setMaterializeFilename] = useState(
+    document.content_type === 'text/html' ? 'interactive.html' : 'first-document.md',
   )
   const [linkTarget, setLinkTarget] = useState('')
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(() =>
     citationTargetFromLocation(documentId),
   )
+  const [draftTitle, setDraftTitle] = useState(document.title)
+  const selectedMaterializePath = materializePath(materializeFolder, materializeFilename)
+
+  useEffect(() => {
+    if (materializeFolder || !foldersQuery.data?.some((folder) => folder.path === 'projects')) return
+    const frame = requestAnimationFrame(() => setMaterializeFolder('projects'))
+    return () => cancelAnimationFrame(frame)
+  }, [foldersQuery.data, materializeFolder])
 
   useEffect(() => {
     void sessions.initializeDocument(initialDocument)
-  }, [initialDocument, sessions])
+    if (initialDocument.path === null && initialDocument.content.trim().length === 0) {
+      const preferredMode = sessions.getSession(documentId).mode
+      sessions.updateSession(documentId, { mode: initialDocumentMode(initialDocument, preferredMode) })
+    }
+  }, [documentId, initialDocument, sessions])
+  useEffect(() => {
+    if (initialDocument.path !== null || initialDocument.content.trim().length > 0 || mode !== 'edit') return
+    const focusFrame = requestAnimationFrame(() => sessions.focusEditor(documentId))
+    return () => cancelAnimationFrame(focusFrame)
+  }, [documentId, initialDocument.content, initialDocument.path, mode, sessions])
   useEffect(
     () => updateDocumentTitle(documentId, document.title),
     [document.title, documentId, updateDocumentTitle],
@@ -116,6 +144,10 @@ export function DocumentWorkspace({
     void queryClient.invalidateQueries({ queryKey: ['history', documentId] })
     void queryClient.invalidateQueries({ queryKey: ['folders'] })
   }
+  const titleMutation = useMutation({
+    mutationFn: (title: string) => api.updateDocument(document, content, title),
+    onSuccess: (nextDocument) => updateCachedDocument(nextDocument),
+  })
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (content !== document.content) event.preventDefault()
@@ -176,11 +208,40 @@ export function DocumentWorkspace({
     >
       <header className="document-header">
         <div className="document-header-main">
-          <p className="eyebrow">{document.path ?? 'Unmaterialized draft'}</p>
-          <h1>{document.title}</h1>
+          <p className="eyebrow">{document.path ?? 'Saved draft'}</p>
+          <h1 aria-label={draftTitle || 'Untitled document'}>
+            <span className="document-title-accessible" aria-hidden="true">
+              {draftTitle}
+            </span>
+            <input
+              className="document-title-input"
+              aria-label="Document title"
+              value={draftTitle}
+              disabled={titleMutation.isPending}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onBlur={(event) => {
+                const title = event.currentTarget.value.trim()
+                if (title && title !== document.title) titleMutation.mutate(title)
+                else if (!title) setDraftTitle(document.title)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  event.currentTarget.blur()
+                }
+                if (event.key === 'Escape') {
+                  setDraftTitle(document.title)
+                  event.currentTarget.blur()
+                }
+              }}
+            />
+          </h1>
+          {titleMutation.isError && <small className="error-text">Title could not be saved.</small>}
         </div>
         <span className={`save-state ${saveState}`} role="status" aria-live="polite" aria-atomic="true">
-          {document.content_type === 'application/pdf' ? 'Immutable source' : saveLabel(saveState)}
+          {document.content_type === 'application/pdf'
+            ? 'Immutable source'
+            : saveLabel(saveState, Boolean(document.path))}
         </span>
       </header>
       {document.content_type === 'application/pdf' && <MobileInspectorToggle />}
@@ -244,16 +305,31 @@ export function DocumentWorkspace({
           className="materialize-bar"
           onSubmit={(event) => {
             event.preventDefault()
-            materialize.mutate({ base: document, path: materializePath })
+            materialize.mutate({ base: document, path: selectedMaterializePath })
           }}
         >
+          <p className="materialize-copy">
+            This document is a saved draft. Choose a workspace path when you want it to become a file.
+          </p>
+          <select
+            aria-label="Workspace folder"
+            value={materializeFolder}
+            onChange={(event) => setMaterializeFolder(event.target.value)}
+          >
+            <option value="">Workspace root</option>
+            {(foldersQuery.data ?? []).map((folder) => (
+              <option key={folder.folder_id} value={folder.path}>
+                {folder.path}
+              </option>
+            ))}
+          </select>
           <input
-            aria-label="Workspace path"
-            value={materializePath}
-            onChange={(event) => setMaterializePath(event.target.value)}
+            aria-label="Workspace filename"
+            value={materializeFilename}
+            onChange={(event) => setMaterializeFilename(event.target.value)}
           />
-          <button disabled={materialize.isPending || saveState !== 'saved'}>
-            {materialize.isPending ? 'Saving file…' : 'Save to workspace'}
+          <button disabled={materialize.isPending || saveState !== 'saved' || !materializeFilename.trim()}>
+            {materialize.isPending ? 'Moving…' : 'Move to folder'}
           </button>
         </form>
       )}
@@ -403,7 +479,8 @@ function shortRevision(value?: string) {
 }
 
 function MobileInspectorToggle() {
-  const { updatePreferences } = useTheme()
+  const { preferences, updatePreferences } = useTheme()
+  if (preferences.rightVisible) return null
   return (
     <button
       type="button"
@@ -461,6 +538,16 @@ function DocumentToolbar({
     onMode(nextMode)
     updatePreferences({ editorMode: nextMode })
   }
+  const openChat = () => {
+    void navigate({
+      to: '/chat',
+      search: {
+        document: document.document_id,
+        revision: document.current_revision_id,
+        returnTo: `/documents/${document.document_id}`,
+      },
+    })
+  }
   return (
     <div className="document-toolbar">
       <div className="mode-switch" role="radiogroup" aria-label="Editor view">
@@ -479,6 +566,14 @@ function DocumentToolbar({
         ))}
       </div>
       <div className="document-toolbar-actions">
+        <div className="mobile-document-actions" aria-label="Document actions">
+          <button type="button" className="secondary-action" onClick={() => changeMode('edit')}>
+            <Pencil size="var(--icon-inline)" /> Edit
+          </button>
+          <button type="button" className="secondary-action" onClick={openChat}>
+            <MessageSquare size="var(--icon-inline)" /> Ask
+          </button>
+        </div>
         <ActionDialog
           label="Document actions"
           icon={<MoreHorizontal size="var(--icon-control)" />}
@@ -571,11 +666,12 @@ function DocumentToolbar({
             </div>
           )}
         </ActionDialog>
+        <span className="mobile-more-label">More</span>
         <button
           type="button"
           className="icon-button mobile-inspector-toggle"
           aria-label="Open document inspector"
-          title="Open document inspector"
+          title="More document tools"
           onClick={() => updatePreferences({ rightVisible: true })}
         >
           <PanelRightOpen size="var(--icon-control)" />
@@ -583,15 +679,4 @@ function DocumentToolbar({
       </div>
     </div>
   )
-}
-
-function saveLabel(state: SaveState) {
-  return {
-    saved: 'Saved',
-    dirty: 'Unsaved changes',
-    saving: 'Saving…',
-    conflict: 'Conflict',
-    failed: 'Save failed',
-    offline: 'Offline · unsaved',
-  }[state]
 }
