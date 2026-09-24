@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import shutil
 import sqlite3
 import tarfile
@@ -554,6 +555,58 @@ def test_concurrent_folder_metadata_atomic_write_and_cleanup(
     # Clean up verified: no leftover temporary files in folder directory
     temp_files_after_fail = list(folder_dir.glob(".sangam-folder-*"))
     assert temp_files_after_fail == []
+
+
+def test_folder_metadata_hash_mismatch_aborts_replacement(
+    client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Create folder via API
+    res = client.post(
+        "/api/v1/folders",
+        json={"path": "projects/hash_test", "category": "initial", "tag_ids": []},
+        headers=headers("create-folder-hash-test"),
+    )
+    assert res.status_code == 201
+    folder_id = res.json()["folder_id"]
+    current_version = res.json()["metadata_version"]
+
+    folder_dir = settings.workspace_root / "projects/hash_test"
+    manifest_file = folder_dir / ".sangam-folder.json"
+    original_manifest_content = manifest_file.read_bytes()
+
+    original_fdopen = os.fdopen
+
+    def corrupting_fdopen(fd, *args, **kwargs):
+        handle = original_fdopen(fd, *args, **kwargs)
+        original_write = handle.write
+
+        def corrupt_write(data):
+            # Write corrupted data instead of intended content
+            return original_write(b"CORRUPTED_FOLDER_METADATA_DATA")
+
+        handle.write = corrupt_write
+        return handle
+
+    monkeypatch.setattr(os, "fdopen", corrupting_fdopen)
+
+    with pytest.raises(
+        OSError, match="Folder metadata manifest hash does not match expected content"
+    ):
+        client.patch(
+            f"/api/v1/folders/{folder_id}",
+            json={
+                "expected_metadata_version": current_version,
+                "category": "should-fail",
+                "tag_ids": [],
+            },
+            headers=headers("update-folder-meta-corrupt"),
+        )
+
+    # Manifest on disk should remain original and uncorrupted
+    assert manifest_file.read_bytes() == original_manifest_content
+    # Temporary files should be cleaned up
+    temp_files = list(folder_dir.glob(".sangam-folder-*"))
+    assert temp_files == []
 
 
 @pytest.mark.parametrize(
