@@ -192,7 +192,10 @@ test('PDF selection actions stay inside the narrow viewport', async ({ page, req
   test.skip(page.viewportSize()?.width !== 390, 'narrow project only')
   const document = await importSamplePdf(request)
   await page.goto(`/documents/${document.document_id}`)
-  const text = page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first()
+  const text = page
+    .locator('[data-pdf-page="2"] .textLayer span')
+    .filter({ hasText: 'Sangam Technical Architecture' })
+    .first()
   await expect(text).toBeVisible()
   await text.evaluate((element) => {
     const range = document.createRange()
@@ -229,6 +232,67 @@ test('narrow PDF reader fits the viewport and opens research in the inspector sh
   await expect(page.getByRole('button', { name: 'Close document inspector' })).toBeVisible()
 })
 
+test('PDF selection dismisses cleanly during scroll and follows the selected page', async ({
+  page,
+  request,
+}) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          // SAFETY: the init script defines this test-only property on window.
+          const targetWindow = window as typeof window & { __copiedText?: string }
+          targetWindow.__copiedText = value
+          return Promise.resolve()
+        },
+      },
+    })
+  })
+  const document = await importSamplePdf(request)
+  await page.goto(`/documents/${document.document_id}`)
+  await expect(page.locator('[data-pdf-page="1"] .textLayer')).toContainText('Sangam Technical Architecture')
+
+  const selectText = async (locator: import('@playwright/test').Locator) =>
+    locator.evaluate((element) => {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      element.closest('.pdf-page')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    })
+
+  await selectText(
+    page
+      .locator('[data-pdf-page="1"] .textLayer span')
+      .filter({ hasText: 'Sangam Technical Architecture' })
+      .first(),
+  )
+  await expect(page.getByRole('toolbar', { name: 'Selected PDF text actions' })).toBeVisible()
+
+  await page.locator('[data-pdf-page="2"]').scrollIntoViewIfNeeded()
+  await expect
+    .poll(() => page.locator('.pdf-page-scroll').evaluate((host) => host.scrollTop))
+    .toBeGreaterThan(0)
+  await expect(page.getByRole('toolbar', { name: 'Selected PDF text actions' })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('')
+
+  const pageTwoText = page
+    .locator('[data-pdf-page="2"] .textLayer span')
+    .filter({ hasText: 'Sangam Technical Architecture' })
+    .first()
+  await expect(pageTwoText).toBeVisible()
+  await selectText(pageTwoText)
+  await expect(page.getByRole('toolbar', { name: 'Selected PDF text actions' })).toBeVisible()
+  await page.getByRole('button', { name: 'Copy Markdown citation' }).click()
+  // SAFETY: the init script defines this test-only property on window.
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __copiedText?: string }).__copiedText))
+    .toContain('[PDF reader evidence, p. 2]')
+})
+
 test('touch PDF reader supports selection, annotation, and citation navigation', async ({
   page,
   request,
@@ -251,7 +315,10 @@ test('touch PDF reader supports selection, annotation, and citation navigation',
   })
   await page.goto(`/documents/${document.document_id}?page=2&annotation=${annotation.annotation_id}`)
   await expect(page.locator('[data-pdf-page="2"]')).toBeVisible()
-  const text = page.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first()
+  const text = page
+    .locator('[data-pdf-page="2"] .textLayer span')
+    .filter({ hasText: 'Sangam Technical Architecture' })
+    .first()
   await expect(text).toBeVisible()
   await text.evaluate((element) => {
     const range = document.createRange()
@@ -273,8 +340,11 @@ test('touch PDF reader supports selection, annotation, and citation navigation',
   await page.getByRole('tab', { name: 'research' }).tap()
   await expect(page.getByRole('region', { name: 'PDF research' })).toBeVisible()
   await expect(page.getByText('Created from touch reader')).toBeVisible()
-  await page
-    .getByRole('button', { name: /page note · p\. 2/i })
+  await expect(page.getByRole('button', { name: /comment · p\. 2/i })).toBeVisible()
+  const research = page.getByRole('region', { name: 'PDF research' })
+  await research
+    .locator('button')
+    .filter({ hasText: /page note · p\. 2/i })
     .first()
     .tap()
   await expect(page.getByRole('button', { name: 'Copy Markdown link' })).toBeVisible()
