@@ -523,7 +523,7 @@ function DocumentToolbar({
       navigate({ to: '/documents/$documentId', params: { documentId: created.document_id } }),
   })
   const remove = useMutation({ mutationFn: () => api.deleteDocument(document), onSuccess: onDeleted })
-  const { preferences, updatePreferences } = useTheme()
+  const { updatePreferences } = useTheme()
   const busy =
     saveState !== 'saved' || rename.isPending || move.isPending || duplicate.isPending || remove.isPending
   const changeMode = (nextMode: EditorMode) => {
@@ -655,17 +655,15 @@ function DocumentToolbar({
             </div>
           )}
         </ActionDialog>
-        {!preferences.rightVisible && (
-          <button
-            type="button"
-            className="icon-button mobile-inspector-toggle"
-            aria-label="Open document inspector"
-            title="More document tools"
-            onClick={() => updatePreferences({ rightVisible: true })}
-          >
-            <PanelRightOpen size="var(--icon-control)" />
-          </button>
-        )}
+        <button
+          type="button"
+          className="icon-button mobile-inspector-toggle"
+          aria-label="Open document inspector"
+          title="More document tools"
+          onClick={() => updatePreferences({ rightVisible: true })}
+        >
+          <PanelRightOpen size="var(--icon-control)" />
+        </button>
       </div>
     </div>
   )

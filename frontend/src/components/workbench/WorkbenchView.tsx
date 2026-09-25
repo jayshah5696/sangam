@@ -265,7 +265,12 @@ function GroupInspector({ documentId }: { documentId: string }) {
     }
     if (!sheetWasOpenRef.current) return
     sheetWasOpenRef.current = false
-    sheetTriggerRef.current?.focus()
+    const trigger = sheetTriggerRef.current
+    const restoreTarget =
+      trigger?.isConnected && trigger.matches('.mobile-inspector-toggle')
+        ? trigger
+        : globalThis.document.querySelector<HTMLElement>('.mobile-inspector-toggle')
+    restoreTarget?.focus()
     sheetTriggerRef.current = null
   }, [isNarrow, preferences.rightVisible])
   const pdfAnnotationsQuery = useQuery({
