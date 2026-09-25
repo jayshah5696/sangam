@@ -35,9 +35,7 @@ def _artifact(path: Path) -> BackupArtifact:
 
 def _write_manifest(path: Path, backup: BackupSet) -> None:
     content_bytes = (backup.model_dump_json(indent=2) + "\n").encode("utf-8")
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.sangam-", dir=path.parent
-    )
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.sangam-", dir=path.parent)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as handle:
