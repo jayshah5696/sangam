@@ -34,12 +34,18 @@ def _artifact(path: Path) -> BackupArtifact:
 
 
 def _write_manifest(path: Path, backup: BackupSet) -> None:
-    temporary = path.with_suffix(".json.tmp")
+    content_bytes = (backup.model_dump_json(indent=2) + "\n").encode("utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.sangam-", dir=path.parent)
+    temporary = Path(temporary_name)
     try:
-        with temporary.open("w", encoding="utf-8") as handle:
-            handle.write(backup.model_dump_json(indent=2) + "\n")
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content_bytes)
             handle.flush()
             os.fsync(handle.fileno())
+        actual_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
+        expected_hash = hashlib.sha256(content_bytes).hexdigest()
+        if actual_hash != expected_hash:
+            raise OSError("Backup manifest hash does not match expected state")
         os.replace(temporary, path)
         directory = os.open(path.parent, os.O_RDONLY)
         try:
