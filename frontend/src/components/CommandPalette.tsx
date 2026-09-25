@@ -49,7 +49,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
   const activeGroup = findGroup(workbench.root, workbench.activeGroupId)
   const activeDocumentId = activeGroup?.activeTabId
   const documents = useQuery({
-    queryKey: ['documents'],
+    queryKey: ['documents', 'all'],
     queryFn: api.listDocuments,
     enabled: open,
   })

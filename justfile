@@ -74,9 +74,17 @@ eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="
     mkdir -p test-results
     cd "{{ source }}" && uv run python "{{ justfile_directory() }}/scripts/run_chat_evals.py" --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
 
-# Exercise desktop and narrow browser interactions against isolated data.
-test-e2e:
-    pnpm --dir frontend run test:e2e
+# Run frontend unit tests, optionally passing Vitest filters or flags.
+test-frontend-unit args="":
+    pnpm --dir frontend exec vitest run {{ args }}
+
+# Exercise browser interactions, optionally passing Playwright projects or filters.
+test-e2e args="":
+    pnpm --dir frontend run test:e2e -- {{ args }}
+
+# Install the browser engines used by the Playwright suite.
+install-browsers:
+    pnpm --dir frontend exec playwright install --with-deps chromium webkit
 
 # Run empirical verification, performance benchmark, and chat agent evals across isolated Sangam services.
 verify-behavior port="8765" count="25" eval_limit="3":
@@ -88,6 +96,36 @@ verify-behavior port="8765" count="25" eval_limit="3":
     ./scripts/control-sangam.sh seed
     ./scripts/control-sangam.sh benchmark "{{ count }}"
     ./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" "{{ eval_limit }}"
+
+# Prove the verification harness rejects an invalid benchmark count and cleans up.
+verify-negative port="8995":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    trap './scripts/control-sangam.sh cleanup >/dev/null 2>&1 || true' EXIT
+    ./scripts/control-sangam.sh launch "{{ port }}"
+    # shellcheck disable=SC1090
+    source "${TMPDIR:-/tmp}/.sangam-active-verification"
+    invalid_report="$SANGAM_ARTIFACTS_DIR/negative-count.log"
+    mismatch_report="$SANGAM_ARTIFACTS_DIR/negative-document-match.log"
+    set +e
+    ./scripts/control-sangam.sh benchmark 0 >"$invalid_report" 2>&1
+    invalid_result=$?
+    SANGAM_VERIFY_BENCHMARK_NEGATIVE=wrong-document \
+      ./scripts/control-sangam.sh benchmark 3 >"$mismatch_report" 2>&1
+    mismatch_result=$?
+    set -e
+    if [[ $invalid_result -eq 0 ]] || ! rg -q "positive integer" "$invalid_report"; then
+      echo "Negative verification proof failed; expected the positive-count guard." >&2
+      cat "$invalid_report" >&2
+      exit 1
+    fi
+    if [[ $mismatch_result -eq 0 ]] || ! rg -q "did not return the expected benchmark document" "$mismatch_report"; then
+      echo "Negative verification proof failed; expected exact document identity validation." >&2
+      cat "$mismatch_report" >&2
+      exit 1
+    fi
+    echo "Negative verification proof passed: invalid count and wrong document identity rejected."
+    echo "  Evidence saved to: $invalid_report and $mismatch_report"
 
 # Run a read-only doctor health and integrity check on the active verification instance.
 verify-doctor:

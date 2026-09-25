@@ -39,6 +39,16 @@ The drill uses port `8998` by default, writes a JSON evidence record under
 `--keep` while investigating a failure. A manual rehearsal still follows the same
 paired-artifact rule:
 
+The verification harness also has a persistent negative-path check. It proves that
+an invalid benchmark count and a wrong per-token document identity fail, and that
+the isolated instance cleanup still runs:
+
+```sh
+just verify-negative
+```
+
+The command stores both rejection reports under `artifacts/verify-sangam/`.
+
 1. Stop the app (or run it against scratch paths).
 2. Restore both sides of the pair into `data/database` and `data/workspace`.
 3. Handle SQLite sidecars: remove stale `*.sqlite3-wal` / `*.sqlite3-shm` from the restored directory.

@@ -55,10 +55,11 @@ async function createDocument(
 async function showFiles(page: import('@playwright/test').Page) {
   const filesTab = page.locator('#workspace-tab-files')
   const reveal = page.getByRole('button', { name: 'Show workspace sidebar' })
-  if (!(await filesTab.isVisible())) {
-    await expect(reveal).toBeVisible()
+  await expect(filesTab.or(reveal)).toBeVisible()
+  if (await reveal.isVisible()) {
     await reveal.click()
   }
+  await expect(filesTab).toBeVisible()
   await filesTab.click()
 }
 
@@ -165,14 +166,18 @@ test('touch users can move one item without right-click and stay contained', asy
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-touch-mobile', 'true touch-mobile only')
   const suffix = randomUUID().slice(0, 7)
+  const source = `touch-source-${suffix}`
   const target = `touch-target-${suffix}`
   const filename = `touch-note-${suffix}.md`
+  await createFolder(request, source)
   await createFolder(request, target)
-  const document = await createDocument(request, `Touch note ${suffix}`, filename)
+  const document = await createDocument(request, `Touch note ${suffix}`, `${source}/${filename}`)
 
   await page.goto(`/documents/${document.document_id}`)
   await showFiles(page)
   const row = page.locator('.sangam-file-tree').getByRole('treeitem', { name: filename, exact: true })
+  await row.scrollIntoViewIfNeeded()
+  await expect(row).toBeVisible()
   await row.tap()
   await expect(page.getByLabel('Selected item actions')).toHaveCount(0)
   await page.getByRole('button', { name: 'Options', exact: true }).tap()

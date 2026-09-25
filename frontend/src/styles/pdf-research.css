@@ -675,6 +675,20 @@
   }
 }
 
+@media (pointer: coarse) {
+  .pdf-toolbar button,
+  .pdf-toolbar .icon-button,
+  .pdf-page-controls input {
+    min-height: var(--control-touch);
+  }
+
+  .pdf-toolbar .icon-button {
+    width: var(--control-touch);
+    min-width: var(--control-touch);
+    height: var(--control-touch);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pdf-page-scroll {
     scroll-behavior: auto;

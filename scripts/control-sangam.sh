@@ -145,6 +145,7 @@ import json
 import sqlite3
 import sys
 from datetime import UTC, datetime
+from importlib import resources
 from pathlib import Path
 
 health_path, readiness_path, database_path, out_path, run_id, pid, port, health_code, readiness_code = sys.argv[1:]
@@ -177,6 +178,15 @@ else:
 
 sqlite_check = "unavailable"
 schema_version = "unknown"
+expected_schema_version = "unknown"
+try:
+    expected_schema_version = max(
+        migration.name.split("_", 1)[0]
+        for migration in resources.files("sangam.migrations").iterdir()
+        if migration.name.endswith(".sql")
+    )
+except (OSError, ValueError) as error:
+    errors.append(f"Packaged migration inventory failed: {error}")
 try:
     with sqlite3.connect(database_path) as connection:
         sqlite_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
@@ -187,6 +197,10 @@ if sqlite_check != "ok":
     errors.append(f"SQLite quick_check returned {sqlite_check!r}")
 if schema_version in {"None", "unknown"}:
     errors.append("schema_migrations has no recorded version")
+if expected_schema_version != "unknown" and schema_version != expected_schema_version:
+    errors.append(
+        f"schema version {schema_version} does not match packaged version {expected_schema_version}"
+    )
 
 evidence = {
     "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -197,6 +211,7 @@ evidence = {
     "readiness_http_code": int(readiness_code),
     "sqlite_quick_check": sqlite_check,
     "schema_version": schema_version,
+    "expected_schema_version": expected_schema_version,
     "health": health,
     "readiness": readiness,
     "ok": not errors,
@@ -286,6 +301,7 @@ cmd_benchmark() {
   cd "$ROOT_DIR"
   uv run python - <<PYEOF
 import json
+import os
 import time
 import uuid
 import httpx
@@ -300,6 +316,7 @@ if count < 1:
 benchmark_id = uuid.uuid4().hex[:12]
 title_prefix = f"Benchmark Document {benchmark_id} #"
 errors = []
+negative_expected_id = os.environ.get("SANGAM_VERIFY_BENCHMARK_NEGATIVE") == "wrong-document"
 
 client = httpx.Client(timeout=10.0)
 
@@ -315,12 +332,27 @@ except ValueError as error:
 if r.status_code != 200 or not isinstance(readiness, dict) or readiness.get("status") != "ready":
     errors.append(f"readiness failed: HTTP {r.status_code}, payload={readiness!r}")
 checks = readiness.get("checks", {}) if isinstance(readiness, dict) else {}
+expected_checks = {
+    "database",
+    "schema",
+    "writable_roots",
+    "startup_reconciliation",
+    "pending_materializations",
+    "backup_freshness",
+}
+if not isinstance(checks, dict) or not checks:
+    errors.append("readiness contains no checks")
+elif set(checks) != expected_checks:
+    errors.append(
+        f"readiness checks do not match expected set: {sorted(checks)}"
+    )
 if not isinstance(checks, dict) or any(not isinstance(check, dict) or check.get("ok") is not True for check in checks.values()):
     errors.append("readiness contains a failed or malformed check")
 
 # 2. Benchmark Document Creation throughput
 create_latencies = []
 created_doc_ids = []
+created_documents = {}
 t_start = time.perf_counter()
 
 for i in range(count):
@@ -345,6 +377,7 @@ for i in range(count):
         errors.append(f"write {i} returned no document_id")
     else:
         created_doc_ids.append(document_id)
+        created_documents[f"benchmark_token_{i}"] = document_id
 
 t_total_create = time.perf_counter() - t_start
 throughput_writes = count / t_total_create if t_total_create > 0 else 0
@@ -366,11 +399,17 @@ for i in range(count):
     except ValueError as error:
         errors.append(f"search {i} returned invalid JSON: {error}")
         continue
+    expected_document_id = created_documents.get(token)
+    if negative_expected_id and created_doc_ids:
+        expected_document_id = created_doc_ids[(i + 1) % len(created_doc_ids)]
     if not isinstance(search_results, list) or not any(
-        isinstance(result, dict) and result.get("document_id") in created_doc_ids
+        isinstance(result, dict) and result.get("document_id") == expected_document_id
         for result in search_results
     ):
-        errors.append(f"search {i} returned no benchmark document for {token}")
+        errors.append(
+            f"search {i} did not return the expected benchmark document "
+            f"{expected_document_id!r} for {token}"
+        )
 
 t_total_search = time.perf_counter() - t_search_start
 throughput_searches = count / t_total_search if t_total_search > 0 else 0

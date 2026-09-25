@@ -1,8 +1,8 @@
 import { useDeferredValue, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { FilePlus2, FileText, FileUp, MessageSquareText, Pin, Search, ShieldCheck } from 'lucide-react'
-import { api } from '../api'
+import { api, DOCUMENT_PAGE_SIZE } from '../api'
 import { collectGroups, useWorkbench } from '../workbench'
 import { selectHomeDocuments } from '../workspaceHome'
 
@@ -15,10 +15,12 @@ function Welcome() {
   const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
-  const documents = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
-  const searchResults = useQuery({
+  const documents = useQuery({ queryKey: ['documents', 'welcome'], queryFn: () => api.listDocumentsPage() })
+  const searchResults = useInfiniteQuery({
     queryKey: ['documents', 'welcome-search', deferredSearch],
-    queryFn: () => api.searchDocuments(deferredSearch),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.searchDocumentsPage(deferredSearch, undefined, 'relevance', pageParam),
+    getNextPageParam: (lastPage, pages) => (lastPage.hasMore ? pages.length * DOCUMENT_PAGE_SIZE : undefined),
     enabled: deferredSearch.trim().length > 0,
   })
   const createDocument = useMutation({
@@ -47,14 +49,16 @@ function Welcome() {
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
     },
   })
-  const isEmpty = Boolean(documents.data && documents.data.length === 0)
+  const isEmpty = Boolean(documents.data && documents.data.items.length === 0 && !documents.data.hasMore)
   const openTabs = collectGroups(workbench.root).flatMap((group) => group.tabs)
-  const homeDocuments = selectHomeDocuments(documents.data ?? [], openTabs)
+  const homeDocuments = selectHomeDocuments(documents.data?.items ?? [], openTabs)
   const recentDocuments = homeDocuments.recent.slice(0, 4)
   const pinnedDocuments = homeDocuments.pinned.slice(0, 4)
-  const fallbackDocuments = recentDocuments.length === 0 ? (documents.data ?? []).slice(0, 4) : []
+  const fallbackDocuments = recentDocuments.length === 0 ? (documents.data?.items ?? []).slice(0, 4) : []
   const trimmedSearch = deferredSearch.trim()
-  const matchingDocuments = trimmedSearch ? (searchResults.data ?? []) : (documents.data ?? [])
+  const matchingDocuments = trimmedSearch
+    ? (searchResults.data?.pages.flatMap((page) => page.items) ?? [])
+    : []
   return (
     <section className="welcome">
       <div className="welcome-heading-row">
@@ -109,7 +113,7 @@ function Welcome() {
           {!searchResults.isFetching && matchingDocuments.length === 0 && (
             <p className="small-muted">No documents match “{trimmedSearch}”.</p>
           )}
-          {matchingDocuments.slice(0, 6).map((document) => (
+          {matchingDocuments.map((document) => (
             <Link
               key={document.document_id}
               to="/documents/$documentId"
@@ -121,6 +125,16 @@ function Welcome() {
               <span>{document.path ?? document.title}</span>
             </Link>
           ))}
+          {searchResults.hasNextPage && (
+            <button
+              className="secondary-action welcome-search-more"
+              type="button"
+              disabled={searchResults.isFetchingNextPage}
+              onClick={() => void searchResults.fetchNextPage()}
+            >
+              {searchResults.isFetchingNextPage ? 'Loading more…' : 'Load more results'}
+            </button>
+          )}
         </div>
       )}
       <div className="welcome-actions">

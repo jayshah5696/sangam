@@ -54,8 +54,8 @@ jobs:
           if-no-files-found: ignore
       - name: Desktop and narrow browser gates
         run: |
-          pnpm --dir frontend exec playwright install --with-deps chromium
-          pnpm --dir frontend run test:e2e
+          just install-browsers
+          just test-e2e
 
   artifacts:
     name: Wheel and sdist clean install

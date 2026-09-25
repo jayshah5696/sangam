@@ -72,6 +72,20 @@ def wait_ready(base_url: str, process: subprocess.Popen[str]) -> dict[str, Any]:
     raise RuntimeError(f"Sangam did not become ready: {last_error}")
 
 
+def wait_pdf_search(client: httpx.Client, document_id: str) -> list[dict[str, Any]]:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        response = client.get(
+            f"/api/v1/pdfs/{document_id}/search", params={"q": "PDF search phrase"}
+        )
+        if response.status_code == 200:
+            matches = response.json()
+            if isinstance(matches, list) and matches:
+                return matches
+        time.sleep(0.25)
+    raise RuntimeError("source PDF text extraction did not become searchable")
+
+
 def start_instance(root: Path, port: int) -> subprocess.Popen[str]:
     env = os.environ.copy()
     env.update(
@@ -168,6 +182,7 @@ def main() -> None:
                 ),
                 201,
             )
+            wait_pdf_search(client, pdf["document_id"])
             backup = require(
                 client.post("/api/v1/backups", headers={"Idempotency-Key": "restore-drill-backup"}),
                 201,
@@ -198,6 +213,8 @@ def main() -> None:
         restore_db = restored / "database" / "sangam.sqlite3"
         restore_workspace = restored / "workspace"
         restore_backup_root = restored / "backups"
+        if restore_db.exists() or restore_workspace.exists() and any(restore_workspace.iterdir()):
+            raise RuntimeError("restore targets were not empty before restore")
         restore_backup_root.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source / "backups", restore_backup_root)
         restore_command = [
@@ -227,6 +244,8 @@ def main() -> None:
             restored_pdf = client.get(f"/api/v1/pdfs/{pdf['document_id']}/content")
             if restored_doc["current_revision_id"] != updated["current_revision_id"]:
                 raise RuntimeError("restored current revision does not match backup")
+            if restored_doc["content"] != updated["content"]:
+                raise RuntimeError("restored current document content does not match backup")
             if len(history) != 2 or not any(
                 revision["content"] == document["content"] for revision in history
             ):
@@ -252,6 +271,7 @@ def main() -> None:
             result["checks"]["pdf_search"] = {"matches": len(pdf_search)}
             result["checks"]["pdf_sha256"] = hashlib.sha256(restored_pdf.content).hexdigest()
         artifact.parent.mkdir(parents=True, exist_ok=True)
+        result["ok"] = True
         result["artifact"] = str(artifact)
         artifact.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(json.dumps(result, indent=2, sort_keys=True))
@@ -267,6 +287,14 @@ def main() -> None:
             stop_instance(restored_process)
         if owned_root and not args.keep:
             shutil.rmtree(root, ignore_errors=True)
+            result["checks"]["cleanup"] = not root.exists()
+            if not result["checks"]["cleanup"]:
+                result["ok"] = False
+                result["error"] = f"temporary drill state was not removed: {root}"
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_text(
+                json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
 
 
 if __name__ == "__main__":

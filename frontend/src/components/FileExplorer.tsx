@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { z } from 'zod'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import type {
   ContextMenuItem,
@@ -28,7 +28,14 @@ import {
   Tag as TagIcon,
   Trash2,
 } from 'lucide-react'
-import { api, type DocumentSummary, type Folder, type OrganizationOperation, type Tag } from '../api'
+import {
+  api,
+  DOCUMENT_PAGE_SIZE,
+  type DocumentSummary,
+  type Folder,
+  type OrganizationOperation,
+  type Tag,
+} from '../api'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
@@ -72,12 +79,21 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const workbench = useWorkbench()
   const workbenchActions = useWorkbenchActions()
   const activeDocumentId = findGroup(workbench.root, workbench.activeGroupId)?.activeTabId
-  const documents = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  const documents = useInfiniteQuery({
+    queryKey: ['documents', 'tree'],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.listDocumentsPage(pageParam),
+    getNextPageParam: (lastPage, pages) => (lastPage.hasMore ? pages.length * DOCUMENT_PAGE_SIZE : undefined),
+  })
+  const documentItems = useMemo(
+    () => documents.data?.pages.flatMap((page) => page.items) ?? [],
+    [documents.data],
+  )
   const folders = useQuery({ queryKey: ['folders'], queryFn: api.listFolders })
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
   const adapter = useMemo(
-    () => buildWorkspaceTreeAdapter(documents.data ?? [], folders.data ?? []),
-    [documents.data, folders.data],
+    () => buildWorkspaceTreeAdapter(documentItems, folders.data ?? []),
+    [documentItems, folders.data],
   )
   const [selectedTreePaths, setSelectedTreePaths] = useState<string[]>([])
   const [movePickerOpen, setMovePickerOpen] = useState(false)
@@ -675,7 +691,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
             {explorerSort === 'name-asc' && <ArrowDownAZ size="var(--icon-detail)" />}
             {explorerSort === 'name-desc' && <ArrowUpZA size="var(--icon-detail)" />}
           </button>
-          <small>{documents.data?.length ?? 0}</small>
+          <small>{documentItems.length}</small>
         </span>
       </div>
       {error && (
@@ -750,6 +766,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           )}
         />
       </div>
+      {documents.hasNextPage && (
+        <button
+          className="secondary-action"
+          type="button"
+          disabled={documents.isFetchingNextPage}
+          onClick={() => void documents.fetchNextPage()}
+        >
+          {documents.isFetchingNextPage ? 'Loading more files…' : 'Load more files'}
+        </button>
+      )}
       {movePickerOpen && (
         <MoveDestinationDialog
           adapter={adapter}

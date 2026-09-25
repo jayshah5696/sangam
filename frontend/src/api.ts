@@ -811,10 +811,14 @@ async function request(path: string, init?: RequestInit): Promise<JsonPayload> {
   return payload
 }
 
-const PAGE_SIZE = 200
+export const DOCUMENT_PAGE_SIZE = 200
+const PAGE_SIZE = DOCUMENT_PAGE_SIZE
 const MAX_PAGES = 50
-const SEARCH_PAGE_SIZE = 50
-const MAX_SEARCH_RESULTS = 100
+
+export type DocumentPage = {
+  items: DocumentSummary[]
+  hasMore: boolean
+}
 
 export async function collectPages<T>(
   loadPage: (offset: number, limit: number) => Promise<T[]>,
@@ -1069,6 +1073,12 @@ export const api = {
       z.array(documentSummarySchema).parse(await request(`/documents?limit=${limit}&offset=${offset}`)),
     )
   },
+  async listDocumentsPage(offset = 0, limit = PAGE_SIZE): Promise<DocumentPage> {
+    const page = z
+      .array(documentSummarySchema)
+      .parse(await request(`/documents?limit=${limit}&offset=${offset}`))
+    return { items: page, hasMore: page.length === limit }
+  },
   async listDeletedDocuments(): Promise<DocumentSummary[]> {
     const documents = await collectPages(async (offset, limit) =>
       z
@@ -1082,21 +1092,25 @@ export const api = {
     tagId?: string,
     sort: 'relevance' | 'updated' | 'title' | 'path' = 'relevance',
   ): Promise<DocumentSummary[]> {
+    return collectPages(async (offset, limit) => {
+      return (await this.searchDocumentsPage(query, tagId, sort, offset, limit)).items
+    })
+  },
+  async searchDocumentsPage(
+    query = '',
+    tagId?: string,
+    sort: 'relevance' | 'updated' | 'title' | 'path' = 'relevance',
+    offset = 0,
+    limit = PAGE_SIZE,
+  ): Promise<DocumentPage> {
     const params = new URLSearchParams()
     if (query.trim()) params.set('q', query.trim())
     if (tagId) params.set('tag_id', tagId)
     params.set('sort', sort)
-    return collectPages(
-      async (offset, limit) => {
-        const pageParams = new URLSearchParams(params)
-        pageParams.set('limit', String(limit))
-        pageParams.set('offset', String(offset))
-        return z.array(documentSummarySchema).parse(await request(`/search?${pageParams.toString()}`))
-      },
-      SEARCH_PAGE_SIZE,
-      Math.ceil(MAX_SEARCH_RESULTS / SEARCH_PAGE_SIZE),
-      MAX_SEARCH_RESULTS,
-    )
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
+    const page = z.array(documentSummarySchema).parse(await request(`/search?${params.toString()}`))
+    return { items: page, hasMore: page.length === limit }
   },
   async listTags(): Promise<Tag[]> {
     return z.array(tagSchema).parse(await request('/tags'))
