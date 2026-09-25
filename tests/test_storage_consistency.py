@@ -600,3 +600,70 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
             database_path=restore_db_target,
             workspace_root=restore_ws_target,
         )
+
+
+def test_concurrent_backup_manifest_atomic_write_and_cleanup(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = client.app.state.services.backups.manager
+    backup = manager.create()
+    backup_dir = manager.backup_root / backup.backup_id
+    manifest_path = backup_dir / "manifest.json"
+    assert manifest_path.is_file()
+
+    stop_event = threading.Event()
+    read_results: list[bytes] = []
+    read_errors: list[str] = []
+
+    def reader():
+        while not stop_event.is_set():
+            if manifest_path.exists():
+                try:
+                    content = manifest_path.read_bytes()
+                    read_results.append(content)
+                except Exception as exc:
+                    read_errors.append(str(exc))
+
+    def verifier():
+        for _ in range(10):
+            try:
+                manager.verify(backup.backup_id)
+            except Exception as exc:
+                read_errors.append(f"Verification error: {exc}")
+
+    reader_threads = [threading.Thread(target=reader) for _ in range(2)]
+    verifier_threads = [threading.Thread(target=verifier) for _ in range(3)]
+
+    for t in reader_threads + verifier_threads:
+        t.start()
+
+    for t in verifier_threads:
+        t.join()
+
+    stop_event.set()
+    for t in reader_threads:
+        t.join()
+
+    assert not read_errors
+    assert len(read_results) > 0
+    # Confirm every read content was valid JSON and non-zero-byte
+    for content in read_results:
+        assert len(content) > 0
+        parsed = json.loads(content.decode("utf-8"))
+        assert parsed["backup_id"] == backup.backup_id
+
+    # Verify no temporary staging files left behind
+    temp_files = list(backup_dir.glob(".*.sangam-*"))
+    assert temp_files == []
+
+    # Test failure cleanup when writing manifest raises hash mismatch or disk error
+    def failing_write(*args, **kwargs):
+        raise OSError("Simulated disk error during backup manifest write")
+
+    monkeypatch.setattr(tempfile, "mkstemp", failing_write)
+    with pytest.raises(OSError, match="Simulated disk error"):
+        manager.verify(backup.backup_id)
+
+    # Clean up verified: no leftover temporary files in backup directory
+    temp_files_after_fail = list(backup_dir.glob(".*.sangam-*"))
+    assert temp_files_after_fail == []
