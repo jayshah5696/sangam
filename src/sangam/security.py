@@ -40,6 +40,7 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "api-key",
     "x-auth-token",
     "proxy-authorization",
+    "x-session-id",
 }
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -92,6 +93,8 @@ def sanitize_sensitive_data(value: object) -> object:
                     "private_key",
                     "authorization",
                     "auth_header",
+                    "session",
+                    "jwt",
                 )
             ):
                 sanitized_dict[k_str] = "[REDACTED]"
