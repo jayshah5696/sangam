@@ -13,7 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from sangam.db import Database, utc_now
-from sangam.errors import ConflictError, IntegrationError, NotFoundError, ValidationError
+from sangam.errors import (
+    ConflictError,
+    IntegrationError,
+    NotFoundError,
+    ValidationError,
+    validate_metadata_text,
+)
 
 ProviderProtocol = Literal["openai_responses", "openai_chat_completions"]
 ProviderHealth = Literal["unknown", "ready", "unreachable", "incompatible"]
@@ -437,6 +443,7 @@ class ProviderConnectionService:
 
     @staticmethod
     def _validate_name(value: str) -> str:
+        validate_metadata_text(value, "Connection name")
         normalized = " ".join(value.strip().split())
         if not 1 <= len(normalized) <= 120:
             raise ValidationError("Connection names must be between 1 and 120 characters")

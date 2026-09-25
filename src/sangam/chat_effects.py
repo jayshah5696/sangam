@@ -22,6 +22,7 @@ from sangam.errors import (
     NotFoundError,
     SangamError,
     ValidationError,
+    validate_metadata_text,
 )
 from sangam.idempotency import request_hash
 from sangam.schemas import (
@@ -401,6 +402,7 @@ class ChatEffectService:
         argument_digest: str,
         reason: str | None,
     ) -> EffectExecution:
+        validate_metadata_text(reason, "Decision reason")
         effect = self.get(principal, effect_id)
         if effect.argument_digest != argument_digest:
             raise ConflictError("The approval digest does not match the stored effect request")

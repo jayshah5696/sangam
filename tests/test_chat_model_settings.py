@@ -274,3 +274,38 @@ def test_legacy_curated_catalog_keeps_verified_compatibility(client: TestClient)
     model = next(item for item in state["catalog"] if item["model_id"] == "openai/gpt-5.4-mini")
     assert model["compatibility"] == "verified"
     assert model["supports_tools"] is True
+
+
+def test_provider_connection_name_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    bad_null = client.post(
+        "/api/v1/chat/connections",
+        json={
+            "connection_id": "bad-null",
+            "name": "Connection\x00Bad",
+            "protocol": "openai_chat_completions",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "credential_env": None,
+            "enabled": True,
+        },
+    )
+    assert bad_null.status_code == 422
+    assert "Connection name cannot contain null bytes" in bad_null.json()["error"]["message"]
+
+    bad_control = client.post(
+        "/api/v1/chat/connections",
+        json={
+            "connection_id": "bad-control",
+            "name": "Connection\x07Bad",
+            "protocol": "openai_chat_completions",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "credential_env": None,
+            "enabled": True,
+        },
+    )
+    assert bad_control.status_code == 422
+    assert (
+        "Connection name cannot contain control characters"
+        in bad_control.json()["error"]["message"]
+    )

@@ -1404,3 +1404,81 @@ def test_execution_budget_defaults_support_longer_runs() -> None:
     assert defaults["chat_max_tool_rounds"].default == 24
     with pytest.raises(PydanticValidationError):
         Settings(chat_max_tool_rounds=49, chat_max_output_tokens=32_769)
+
+
+def test_chat_proposal_metadata_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Proposal Sanitization", "content": "hello world"},
+        headers=headers("phase-seven-proposal-sanitization"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-sanitization"
+    )
+    proposals = client.app.state.services.chat.proposals
+
+    with pytest.raises(ValidationError, match="Chat proposal summary cannot contain null bytes"):
+        proposals.create(
+            principal,
+            thread_id=thread_id,
+            document_id=document["document_id"],
+            expected_revision_id=document["current_revision_id"],
+            content="hello new world",
+            summary="Summary\x00Bad",
+        )
+
+    with pytest.raises(
+        ValidationError, match="Chat proposal summary cannot contain control characters"
+    ):
+        proposals.create(
+            principal,
+            thread_id=thread_id,
+            document_id=document["document_id"],
+            expected_revision_id=document["current_revision_id"],
+            content="hello new world",
+            summary="Summary\x07Bad",
+        )
+
+    prop = proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="hello new world",
+        summary="Valid summary",
+    )
+
+    with pytest.raises(ValidationError, match="Dismissal reason cannot contain null bytes"):
+        proposals.dismiss(principal, prop.proposal_id, "Reason\x00Bad")
+
+    with pytest.raises(ValidationError, match="Dismissal reason cannot contain control characters"):
+        proposals.dismiss(principal, prop.proposal_id, "Reason\x07Bad")
+
+
+def test_chat_effect_decision_reason_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    effects = client.app.state.services.chat.effects
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="effect-sanitization"
+    )
+    with pytest.raises(ValidationError, match="Decision reason cannot contain null bytes"):
+        effects.decide(
+            principal,
+            effect_id="eff_fake",
+            verdict="deny",
+            argument_digest="a" * 64,
+            reason="Reason\x00Bad",
+        )
+
+    with pytest.raises(ValidationError, match="Decision reason cannot contain control characters"):
+        effects.decide(
+            principal,
+            effect_id="eff_fake",
+            verdict="deny",
+            argument_digest="a" * 64,
+            reason="Reason\x07Bad",
+        )
