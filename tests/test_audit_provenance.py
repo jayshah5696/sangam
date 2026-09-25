@@ -271,6 +271,34 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     assert actions["restore"]["details"]["current_revision_id"] == rev3
 
 
+def test_sensitive_header_and_payload_sanitization_edge_cases() -> None:
+    headers_to_sanitize = {
+        "x-auth-token": "secret_auth_token_value",
+        "X-Session-Id": "sess_1234567890",
+        "Authorization": "Bearer sgm_agt_abc.xyz",
+        "User-Agent": "Agent/1.0",
+    }
+    sanitized_h = sanitize_headers(headers_to_sanitize)
+    assert sanitized_h["x-auth-token"] == "[REDACTED]"
+    assert sanitized_h["X-Session-Id"] == "[REDACTED]"
+    assert sanitized_h["Authorization"] == "[REDACTED]"
+    assert sanitized_h["User-Agent"] == "Agent/1.0"
+
+    payload_to_sanitize = {
+        "session_token": "secret_session_token",
+        "client_secret": "secret_client_val",
+        "jwt_assertion": "v1.header.payload.signature",
+        "nested_data": [{"refresh_token": "rt_12345"}, "plain_text"],
+    }
+    sanitized_p = sanitize_sensitive_data(payload_to_sanitize)
+    assert isinstance(sanitized_p, dict)
+    assert sanitized_p["session_token"] == "[REDACTED]"
+    assert sanitized_p["client_secret"] == "[REDACTED]"
+    assert sanitized_p["jwt_assertion"] == "[REDACTED]"
+    assert sanitized_p["nested_data"][0]["refresh_token"] == "[REDACTED]"
+    assert sanitized_p["nested_data"][1] == "plain_text"
+
+
 def test_export_json_lines_audit_logs(client: TestClient) -> None:
     # Create document to generate activity
     client.post(
