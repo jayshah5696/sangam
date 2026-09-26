@@ -350,9 +350,7 @@ def test_update_patch_metadata_audit_event(client: TestClient) -> None:
     assert activity_resp.status_code == 200
     events = activity_resp.json()
 
-    update_events = [
-        e for e in events if e["resource_id"] == doc_id and e["action"] == "update"
-    ]
+    update_events = [e for e in events if e["resource_id"] == doc_id and e["action"] == "update"]
     assert len(update_events) == 1
     event_details = update_events[0]["details"]
     assert "lines_added" in event_details
