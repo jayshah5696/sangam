@@ -673,6 +673,17 @@ export const chatProposalSchema = z.object({
   applied_revision_id: z.string().nullable(),
   created_at: z.string(),
   applied_at: z.string().nullable(),
+  evidence: z
+    .object({
+      context_id: z.string(),
+      document_id: z.string(),
+      revision_id: z.string(),
+      selected_text: z.string(),
+      pdf_page_number: z.number().int().positive().nullable(),
+      annotation_id: z.string().nullable(),
+    })
+    .nullable(),
+  evidence_status: z.enum(['not_recorded', 'recorded', 'unavailable']),
 })
 
 export type ChatProposal = z.infer<typeof chatProposalSchema>
@@ -813,12 +824,15 @@ export async function collectPages<T>(
   loadPage: (offset: number, limit: number) => Promise<T[]>,
   pageSize = PAGE_SIZE,
   maxPages = MAX_PAGES,
+  maxItems?: number,
 ): Promise<T[]> {
   if (pageSize < 1 || maxPages < 1) throw new Error('Pagination bounds must be positive')
+  if (maxItems !== undefined && maxItems < 1) throw new Error('Pagination item bounds must be positive')
   const items: T[] = []
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     const page = await loadPage(pageIndex * pageSize, pageSize)
     items.push(...page)
+    if (maxItems !== undefined && items.length >= maxItems) return items.slice(0, maxItems)
     if (page.length < pageSize) return items
   }
   throw new Error(`Pagination exceeded the safety limit of ${maxPages * pageSize} items`)

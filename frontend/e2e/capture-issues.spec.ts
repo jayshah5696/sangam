@@ -425,6 +425,10 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
       .first()
       .screenshot({ path: path.join(outDir, 'issue-133-equal-width-tabs.png') })
 
+    // The inspector is closed by default; open its explicit tools before choosing chat.
+    await page.getByRole('button', { name: 'Open document inspector' }).click()
+    await expect(page.getByRole('tab', { name: 'chat', exact: true })).toBeVisible()
+
     // Open chat tab in inspector and resize to minimum 290px
     await page.getByRole('tab', { name: 'chat', exact: true }).click()
     await page.evaluate(() => {

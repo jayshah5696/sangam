@@ -11,11 +11,10 @@ export function floatingPosition(
   const inset = 8
   const idealLeft = anchor.left + anchor.width / 2 - floating.width / 2
   const left = Math.min(Math.max(inset, idealLeft), Math.max(inset, viewport.width - floating.width - inset))
+  const maxTop = Math.max(inset, viewport.height - floating.height - inset)
   const above = anchor.top - floating.height - gap
-  const top =
-    above >= inset
-      ? above
-      : Math.min(anchor.bottom + gap, Math.max(inset, viewport.height - floating.height - inset))
+  const below = Math.min(Math.max(inset, anchor.bottom + gap), maxTop)
+  const top = above >= inset && above <= maxTop ? above : below
   return { left, top }
 }
 

@@ -27,6 +27,7 @@ from openai.types.responses import (
     ResponseTextDoneEvent,
 )
 from pydantic import ValidationError as PydanticValidationError
+from test_phase_five_pdf_research import import_pdf, text_pdf
 
 from sangam.chat import _AGENT_INSTRUCTIONS, _durable_effect_tool_behavior
 from sangam.chat_capabilities import CAPABILITIES, ProposeUpdateInput, WorkspaceSearchInput
@@ -354,6 +355,270 @@ def test_reviewed_chat_proposal_uses_the_normal_document_update_path(
     history = client.get(f"/api/v1/documents/{document['document_id']}/history").json()
     assert history[0]["actor_id"] == "human:jay"
     assert history[0]["summary"] == "Add grounded conclusion from workspace chat"
+
+
+def test_chat_proposal_exposes_owner_scoped_turn_context_evidence(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Evidence source",
+            "content": "Quoted source passage",
+            "path": "evidence.md",
+        },
+        headers=headers("proposal-evidence-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-evidence"
+    )
+    chat = client.app.state.services.chat
+    context = chat.evidence.create_turn_context(
+        principal,
+        entry_point="document",
+        document_id=document["document_id"],
+        revision_id=document["current_revision_id"],
+        selected_text="Quoted source passage",
+    )
+    proposal = chat.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="Quoted source passage\n\nGrounded conclusion.",
+        summary="Add grounded conclusion",
+        context_id=context.context_id,
+    )
+
+    response = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id})
+
+    assert response.status_code == 200
+    assert response.json()[0]["proposal_id"] == proposal.proposal_id
+    assert response.json()[0]["evidence_status"] == "recorded"
+    assert response.json()[0]["evidence"] == {
+        "context_id": context.context_id,
+        "document_id": document["document_id"],
+        "revision_id": document["current_revision_id"],
+        "selected_text": "Quoted source passage",
+        "pdf_page_number": None,
+        "annotation_id": None,
+    }
+
+
+def test_legacy_chat_proposal_reports_missing_source_evidence(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Legacy proposal", "content": "Original", "path": "legacy.md"},
+        headers=headers("proposal-no-evidence-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-no-evidence"
+    )
+    client.app.state.services.chat.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=document["document_id"],
+        expected_revision_id=document["current_revision_id"],
+        content="Updated",
+        summary="Without context",
+    )
+
+    response = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id})
+
+    assert response.status_code == 200
+    assert response.json()[0]["evidence"] is None
+    assert response.json()[0]["evidence_status"] == "not_recorded"
+
+
+def test_chat_proposal_preserves_evidence_from_another_document(client: TestClient) -> None:
+    source = client.post(
+        "/api/v1/documents",
+        json={"title": "Source", "content": "Source", "path": "source.md"},
+        headers=headers("proposal-mismatch-source"),
+    ).json()
+    target = client.post(
+        "/api/v1/documents",
+        json={"title": "Target", "content": "Target", "path": "target.md"},
+        headers=headers("proposal-mismatch-target"),
+    ).json()
+    thread_id = create_thread(client, document_id=target["document_id"])
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-mismatch"
+    )
+    context = client.app.state.services.chat.evidence.create_turn_context(
+        principal,
+        entry_point="document",
+        document_id=source["document_id"],
+        revision_id=source["current_revision_id"],
+        selected_text="Source",
+    )
+
+    proposal = client.app.state.services.chat.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=target["document_id"],
+        expected_revision_id=target["current_revision_id"],
+        content="Updated target",
+        summary="Grounded in source",
+        context_id=context.context_id,
+    )
+
+    assert proposal.evidence is not None
+    assert proposal.evidence.document_id == source["document_id"]
+    assert proposal.evidence.revision_id == source["current_revision_id"]
+
+
+def test_chat_proposal_redacts_evidence_after_source_is_deleted(client: TestClient) -> None:
+    source = client.post(
+        "/api/v1/documents",
+        json={"title": "Deleted source", "content": "Private passage", "path": "source.md"},
+        headers=headers("proposal-deleted-source"),
+    ).json()
+    target = client.post(
+        "/api/v1/documents",
+        json={"title": "Target", "content": "Target", "path": "target.md"},
+        headers=headers("proposal-deleted-target"),
+    ).json()
+    thread_id = create_thread(client, document_id=target["document_id"])
+    principal = _proposal_principal("proposal-deleted-evidence")
+    chat = client.app.state.services.chat
+    context = chat.evidence.create_turn_context(
+        principal,
+        entry_point="document",
+        document_id=source["document_id"],
+        revision_id=source["current_revision_id"],
+        selected_text="Private passage",
+    )
+    chat.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=target["document_id"],
+        expected_revision_id=target["current_revision_id"],
+        content="Updated target",
+        summary="Grounded in deleted source",
+        context_id=context.context_id,
+    )
+    deleted = client.request(
+        "DELETE",
+        f"/api/v1/documents/{source['document_id']}",
+        json={"expected_revision_id": source["current_revision_id"]},
+        headers=headers("proposal-delete-source"),
+    )
+    assert deleted.status_code == 200
+
+    response = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id})
+
+    assert response.status_code == 200
+    payload = response.json()[0]
+    assert payload["evidence"] is None
+    assert payload["evidence_status"] == "unavailable"
+    assert source["document_id"] not in response.text
+    assert "Private passage" not in response.text
+
+
+def test_propose_update_tool_persists_turn_context_linkage(client: TestClient) -> None:
+    document = client.post(
+        "/api/v1/documents",
+        json={"title": "Tool source", "content": "Original"},
+        headers=headers("proposal-tool-source"),
+    ).json()
+    thread_id = create_thread(client, document_id=document["document_id"])
+    principal = _proposal_principal("proposal-tool-linkage")
+    chat = client.app.state.services.chat
+    context = chat.evidence.create_turn_context(
+        principal,
+        entry_point="document",
+        document_id=document["document_id"],
+        revision_id=document["current_revision_id"],
+        selected_text="Original",
+    )
+    request_context = ChatRequestContext(
+        principal=principal,
+        document_id=document["document_id"],
+        pinned_revision_id=document["current_revision_id"],
+        context_snapshot_id=context.context_id,
+    )
+    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    agent_context = AgentContext(
+        thread=thread,
+        store=chat.store_adapter,
+        request_context=request_context,
+    )
+    tool = next(tool for tool in chat.tools if tool.name == "propose_update")
+    arguments = {
+        "document_id": document["document_id"],
+        "expected_revision_id": document["current_revision_id"],
+        "summary": "Grounded tool proposal",
+        "content": "Original\n\nUpdated from source context.",
+    }
+    run_context = AgentsToolContext(
+        context=agent_context,
+        tool_name=tool.name,
+        tool_call_id="call-propose-context-linkage",
+        tool_arguments=json.dumps(arguments),
+    )
+
+    result = asyncio.run(tool.on_invoke_tool(run_context, json.dumps(arguments)))
+    proposal_id = json.loads(result)["proposal_id"]
+    proposal = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id}).json()[0]
+
+    assert proposal["proposal_id"] == proposal_id
+    assert proposal["evidence"]["context_id"] == context.context_id
+    assert proposal["evidence"]["document_id"] == document["document_id"]
+
+
+def test_chat_proposal_exposes_pdf_page_and_annotation_evidence(client: TestClient) -> None:
+    source = import_pdf(client, content=text_pdf(), key="proposal-pdf-source").json()
+    annotation = client.post(
+        f"/api/v1/pdfs/{source['document_id']}/annotations",
+        json={
+            "page_number": 1,
+            "annotation_type": "text_highlight",
+            "selected_text": "research phrase",
+            "note": "Important evidence",
+            "geometry": [{"x": 0.1, "y": 0.1, "width": 0.3, "height": 0.04}],
+            "tags": ["Evidence"],
+            "color": "#F0C75E",
+        },
+        headers=headers("proposal-pdf-annotation"),
+    ).json()
+    target = client.post(
+        "/api/v1/documents",
+        json={"title": "PDF target", "content": "Target", "path": "target.md"},
+        headers=headers("proposal-pdf-target"),
+    ).json()
+    thread_id = create_thread(client, document_id=target["document_id"])
+    principal = _proposal_principal("proposal-pdf-evidence")
+    chat = client.app.state.services.chat
+    context = chat.evidence.create_turn_context(
+        principal,
+        entry_point="document",
+        document_id=source["document_id"],
+        revision_id=source["current_revision_id"],
+        selected_text="research phrase",
+        pdf_page_number=1,
+        annotation_id=annotation["annotation_id"],
+    )
+    chat.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=target["document_id"],
+        expected_revision_id=target["current_revision_id"],
+        content="Updated target",
+        summary="Grounded in PDF",
+        context_id=context.context_id,
+    )
+
+    proposal = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id}).json()[0]
+
+    assert proposal["evidence"] == {
+        "context_id": context.context_id,
+        "document_id": source["document_id"],
+        "revision_id": source["current_revision_id"],
+        "selected_text": "research phrase",
+        "pdf_page_number": 1,
+        "annotation_id": annotation["annotation_id"],
+    }
 
 
 def test_chat_proposal_detects_a_concurrent_edit(client: TestClient) -> None:

@@ -25,6 +25,22 @@ describe('collectPages', () => {
       'Pagination exceeded the safety limit of 4 items',
     )
   })
+
+  it('returns a bounded result window without waiting for a terminal page', async () => {
+    const offsets: number[] = []
+    const values = await collectPages(
+      async (offset, limit) => {
+        offsets.push(offset)
+        return Array.from({ length: limit }, (_, index) => offset + index)
+      },
+      2,
+      50,
+      5,
+    )
+
+    expect(values).toEqual([0, 1, 2, 3, 4])
+    expect(offsets).toEqual([0, 2, 4])
+  })
 })
 
 describe('response handling', () => {
@@ -99,6 +115,8 @@ describe('chat proposal requests', () => {
       applied_revision_id: null,
       created_at: '2026-07-19T00:00:00Z',
       applied_at: null,
+      evidence: null,
+      evidence_status: 'not_recorded',
     }
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

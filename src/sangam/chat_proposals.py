@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 from sangam.access import WorkspaceAccessService
+from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.db import Database, utc_now
 from sangam.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
-from sangam.schemas import ChatProposal
+from sangam.schemas import ChatProposal, ChatProposalEvidence
 from sangam.security import Principal
 
 
@@ -25,13 +26,14 @@ class ChatProposalRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    def require_thread_owner(self, thread_id: str, principal: Principal) -> None:
+    def require_thread_owner(self, thread_id: str, principal: Principal) -> str:
         with self.database.connection() as connection:
             row = connection.execute(
                 "SELECT created_by FROM chat_threads WHERE thread_id = ?", (thread_id,)
             ).fetchone()
         if row is None or (row["created_by"] != principal.actor_id and not principal.administrator):
             raise NotFoundError(f"Chat thread not found: {thread_id}")
+        return row["created_by"]
 
     def create(
         self,
@@ -43,6 +45,7 @@ class ChatProposalRepository:
         expected_revision_id: str,
         content: str,
         summary: str | None,
+        context_id: str | None,
     ) -> ChatProposal:
         self.require_thread_owner(thread_id, principal)
         with self.database.transaction() as connection:
@@ -51,8 +54,8 @@ class ChatProposalRepository:
                 INSERT INTO chat_proposals(
                     proposal_id, thread_id, document_id, expected_revision_id,
                     content, summary, status, applied_revision_id, created_at, applied_at,
-                    apply_idempotency_key
-                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL, NULL)
+                    apply_idempotency_key, context_id
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL, NULL, ?)
                 ON CONFLICT(proposal_id) DO NOTHING
                 """,
                 (
@@ -63,6 +66,7 @@ class ChatProposalRepository:
                     content,
                     summary,
                     utc_now(),
+                    context_id,
                 ),
             )
         return self.get_owned(principal, proposal_id)
@@ -81,8 +85,16 @@ class ChatProposalRepository:
         with self.database.connection() as connection:
             rows = connection.execute(
                 f"""
-                SELECT proposal.* FROM chat_proposals AS proposal
+                SELECT proposal.*, thread.created_by AS proposal_owner_id,
+                    context.actor_id AS evidence_actor_id,
+                    context.document_id AS evidence_document_id,
+                    context.revision_id AS evidence_revision_id,
+                    context.selection_text AS evidence_selected_text,
+                    context.pdf_page_number AS evidence_pdf_page_number,
+                    context.annotation_id AS evidence_annotation_id
+                FROM chat_proposals AS proposal
                 JOIN chat_threads AS thread ON thread.thread_id = proposal.thread_id
+                LEFT JOIN chat_turn_contexts AS context ON context.context_id = proposal.context_id
                 WHERE {" AND ".join(clauses)}
                 ORDER BY proposal.created_at DESC
                 """,
@@ -189,8 +201,16 @@ class ChatProposalRepository:
     ) -> sqlite3.Row:
         row = connection.execute(
             """
-            SELECT proposal.* FROM chat_proposals AS proposal
+            SELECT proposal.*, thread.created_by AS proposal_owner_id,
+                context.actor_id AS evidence_actor_id,
+                context.document_id AS evidence_document_id,
+                context.revision_id AS evidence_revision_id,
+                context.selection_text AS evidence_selected_text,
+                context.pdf_page_number AS evidence_pdf_page_number,
+                context.annotation_id AS evidence_annotation_id
+            FROM chat_proposals AS proposal
             JOIN chat_threads AS thread ON thread.thread_id = proposal.thread_id
+            LEFT JOIN chat_turn_contexts AS context ON context.context_id = proposal.context_id
             WHERE proposal.proposal_id = ? AND (thread.created_by = ? OR ?)
             """,
             (proposal_id, principal.actor_id, int(principal.administrator)),
@@ -204,10 +224,15 @@ class ChatProposalService:
     """Coordinates proposal review through Sangam's canonical document mutation path."""
 
     def __init__(
-        self, *, repository: ChatProposalRepository, workspace: WorkspaceAccessService
+        self,
+        *,
+        repository: ChatProposalRepository,
+        workspace: WorkspaceAccessService,
+        evidence: ChatEvidenceRepository,
     ) -> None:
         self.repository = repository
         self.workspace = workspace
+        self.evidence = evidence
 
     def create(
         self,
@@ -221,8 +246,17 @@ class ChatProposalService:
         mode: Literal["full", "replace", "insert_before", "insert_after", "append"] = "full",
         anchor: str | None = None,
         replace_all: bool = False,
+        context_id: str | None = None,
     ) -> ChatProposal:
-        self.repository.require_thread_owner(thread_id, principal)
+        thread_owner = self.repository.require_thread_owner(thread_id, principal)
+        if context_id is not None:
+            context = self.evidence.get_turn_context(principal, context_id)
+            if context.actor_id != thread_owner:
+                raise ValidationError("Source context actor does not match the proposal thread")
+            if context.thread_id not in {None, thread_id}:
+                raise ValidationError("Source context does not match the proposal thread")
+            if context.document_id is None or context.revision_id is None:
+                raise ValidationError("Source context has no document evidence")
         resolved_content = self.resolve_content(
             principal,
             document_id=document_id,
@@ -246,7 +280,7 @@ class ChatProposalService:
                 f"{hashlib.sha256(resolved_content.encode()).hexdigest()}",
             )
         )
-        return self.repository.create(
+        proposal = self.repository.create(
             principal,
             proposal_id=proposal_id,
             thread_id=thread_id,
@@ -254,7 +288,9 @@ class ChatProposalService:
             expected_revision_id=expected_revision_id,
             content=resolved_content,
             summary=_bounded_text(summary, 500),
+            context_id=context_id,
         )
+        return self._visible_evidence(principal, proposal)
 
     def resolve_content(
         self,
@@ -321,7 +357,12 @@ class ChatProposalService:
     def list(
         self, principal: Principal, *, thread_id: str | None, document_id: str | None
     ) -> list[ChatProposal]:
-        return self.repository.list_owned(principal, thread_id=thread_id, document_id=document_id)
+        return [
+            self._visible_evidence(principal, proposal)
+            for proposal in self.repository.list_owned(
+                principal, thread_id=thread_id, document_id=document_id
+            )
+        ]
 
     def apply(
         self,
@@ -354,14 +395,28 @@ class ChatProposalService:
                 principal, proposal_id, reserved.idempotency_key
             )
             raise
-        return self.repository.mark_applied(principal, proposal_id, document.current_revision_id)
+        return self._visible_evidence(
+            principal,
+            self.repository.mark_applied(principal, proposal_id, document.current_revision_id),
+        )
 
     def dismiss(self, principal: Principal, proposal_id: str, reason: str | None) -> ChatProposal:
         proposal = self.repository.get_owned(principal, proposal_id)
         summary = proposal.summary
         if reason:
             summary = f"{summary or 'Proposal'} — {_bounded_text(reason, 500)}"
-        return self.repository.dismiss(principal, proposal_id, summary)
+        return self._visible_evidence(
+            principal, self.repository.dismiss(principal, proposal_id, summary)
+        )
+
+    def _visible_evidence(self, principal: Principal, proposal: ChatProposal) -> ChatProposal:
+        if proposal.evidence is None:
+            return proposal
+        try:
+            self.workspace.get_document(principal, proposal.evidence.document_id)
+        except (AuthorizationError, NotFoundError):
+            return proposal.model_copy(update={"evidence": None, "evidence_status": "unavailable"})
+        return proposal
 
 
 def _patch_error(code: str, message: str) -> ValidationError:
@@ -371,6 +426,21 @@ def _patch_error(code: str, message: str) -> ValidationError:
 
 
 def _proposal_from_row(row: sqlite3.Row) -> ChatProposal:
+    context_id = row["context_id"]
+    evidence = None
+    evidence_status = "not_recorded"
+    if context_id is not None and row["evidence_actor_id"] == row["proposal_owner_id"]:
+        evidence = ChatProposalEvidence(
+            context_id=context_id,
+            document_id=row["evidence_document_id"],
+            revision_id=row["evidence_revision_id"],
+            selected_text=row["evidence_selected_text"],
+            pdf_page_number=row["evidence_pdf_page_number"],
+            annotation_id=row["evidence_annotation_id"],
+        )
+        evidence_status = "recorded"
+    elif context_id is not None:
+        evidence_status = "unavailable"
     return ChatProposal(
         proposal_id=row["proposal_id"],
         thread_id=row["thread_id"],
@@ -382,6 +452,8 @@ def _proposal_from_row(row: sqlite3.Row) -> ChatProposal:
         applied_revision_id=row["applied_revision_id"],
         created_at=row["created_at"],
         applied_at=row["applied_at"],
+        evidence=evidence,
+        evidence_status=evidence_status,
     )
 
 

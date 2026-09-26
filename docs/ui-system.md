@@ -109,6 +109,36 @@ Open-document tabs in an editor group use equal-width fluid distribution:
 - Activating an offscreen tab via pointer, keyboard navigation, route
   restoration, or tab reopen scrolls the active tab into view.
 
+## Workspace home and layouts
+
+The Home route uses the persisted workbench tabs to show up to four recently
+open documents and up to four pinned documents. It removes stale and duplicate
+tabs before rendering either list. If no persisted tab is available, Home uses
+the server document list under **Recently active** and does not label that list
+as recently opened.
+
+New documents open in Edit mode. The document inspector provides three layout
+presets:
+
+- **Writing** selects Edit mode and hides the inspector.
+- **Research** selects Split mode and opens the Research tab.
+- **Review** selects Preview mode and opens revision history.
+
+## Review and document organization
+
+The **Review changes** route lists pending and stale agent proposals. Each card
+shows the target revision, a contextual diff, and Apply or Dismiss actions. A
+recorded turn context can add a source document, source revision, selected
+passage, PDF page, and annotation link. The inbox shows recorded turn context
+only. Tool citation counts do not reconstruct every source read during a turn.
+Legacy proposals say that no source evidence was recorded. If a recorded
+source is deleted or no longer readable, the inbox says that the evidence is
+unavailable and hides the stored source details.
+
+Document properties let you create and apply a tag without leaving the
+document. Enter a name and color, select the new tag, then choose **Save tags**.
+Use Settings for workspace-wide tag management.
+
 ## Interaction states
 
 Every interactive surface must define the states that apply to it. Reuse the
@@ -216,8 +246,9 @@ adds a second adjacent rail.
 - On narrow and touch screens, Settings uses the existing sidebar drawer. The
   content remains free of page-level horizontal scrolling.
 
-The workspace sidebar footer contains four compact primary destinations: Chat,
-Publications, Trash, and Settings. Operational tools belong under Settings:
+The workspace sidebar footer contains five compact primary destinations: Chat,
+Review changes, Publications, Trash, and Settings. Operational tools belong
+under Settings:
 Agent activity under Agents & access; Reconciliation, Backups, and configured
 Karakeep imports under Operations. Their direct URLs remain valid and the
 command palette keeps them discoverable.

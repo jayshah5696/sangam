@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getRouteApi, useNavigate } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import {
   ArrowLeft,
   Cpu,
@@ -172,10 +172,9 @@ const settingsSearchIndex: Array<{
   },
 ]
 
-const settingsRoute = getRouteApi('/settings')
-
 export function SettingsRouteSidebar({ onBack }: { onBack: () => void }) {
-  const { category: activeCategory } = settingsRoute.useSearch()
+  const search = useSearch({ strict: false })
+  const activeCategory = settingsCategories.find(({ id }) => id === search.category)?.id ?? 'appearance'
   return <SettingsSidebar activeCategory={activeCategory} onBack={onBack} />
 }
 

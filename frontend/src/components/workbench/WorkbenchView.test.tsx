@@ -183,6 +183,11 @@ describe('WorkbenchView - Issue #62 & #74', () => {
     expect(screen.getByLabelText('Ask about this document')).toBeDefined()
   })
 
+  it('exposes persistent workspace layout presets', () => {
+    render(<WorkbenchView routeDocumentId="doc-1" />)
+    expect(screen.getByRole('button', { name: 'Workspace layouts' })).toBeDefined()
+  })
+
   it('scrolls active tab into view', () => {
     const scrollIntoViewMock = vi.fn()
     window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock
