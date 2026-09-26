@@ -165,6 +165,26 @@ def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> 
     assert temp_files == []
 
 
+def test_write_atomic_bytes_no_overwrite_atomic_collision(tmp_path: Path) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    doc_path = "unique.pdf"
+
+    # First write creates the file
+    workspace.write_atomic_bytes(doc_path, b"initial bytes", overwrite=False)
+    assert workspace.read_binary(doc_path) == b"initial bytes"
+
+    # Second write with overwrite=False raises InvalidPathError
+    with pytest.raises(InvalidPathError, match="file already exists"):
+        workspace.write_atomic_bytes(doc_path, b"second bytes", overwrite=False)
+
+    # Initial file remains untouched
+    assert workspace.read_binary(doc_path) == b"initial bytes"
+
+    # Confirm no leftover temporary staging files
+    temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
+    assert temp_files == []
+
+
 def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
     import threading
 

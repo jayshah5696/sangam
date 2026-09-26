@@ -128,8 +128,10 @@ class PdfResearchService:
         revision_id = str(uuid.uuid4())
         with self.mutations.document(document_id):
             created_file = not self.workspace.is_document_file(normalized_path)
+            file_written_by_this_call = False
             if created_file:
                 file_hash = self.workspace.write_atomic_bytes(normalized_path, content)
+                file_written_by_this_call = True
             else:
                 # An import may have been interrupted after the durable file rename but
                 # before SQLite committed. Adopt only the exact bytes the caller supplied;
@@ -212,9 +214,25 @@ class PdfResearchService:
                         resource_type="pdf_document",
                         resource_id=document_id,
                     )
+            except sqlite3.IntegrityError as error:
+                if file_written_by_this_call:
+                    with self.database.connection() as connection:
+                        doc_exists = connection.execute(
+                            "SELECT 1 FROM documents WHERE path = ? AND deleted = 0",
+                            (normalized_path,),
+                        ).fetchone()
+                    if not doc_exists:
+                        self.workspace.delete_document(normalized_path)
+                raise ValidationError("A document already uses that path") from error
             except Exception:
-                if created_file:
-                    self.workspace.delete_document(normalized_path)
+                if file_written_by_this_call:
+                    with self.database.connection() as connection:
+                        doc_exists = connection.execute(
+                            "SELECT 1 FROM documents WHERE path = ? AND deleted = 0",
+                            (normalized_path,),
+                        ).fetchone()
+                    if not doc_exists:
+                        self.workspace.delete_document(normalized_path)
                 raise
             document = self.documents.get_document(document_id)
             self.search_index.sync(document)

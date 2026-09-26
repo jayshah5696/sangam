@@ -491,3 +491,23 @@ def test_pdf_trash_retention_restore_and_collision(client: TestClient, settings)
         json={"expected_revision_id": restored["current_revision_id"], "revision_id": rev_1},
     )
     assert active_restore.status_code == 422
+
+
+def test_pdf_import_failure_cleanup_does_not_delete_committed_file(
+    client: TestClient, settings
+) -> None:
+    source = text_pdf("Import concurrency test")
+    first = import_pdf(
+        client, content=source, key="import-first", path="concurrent/doc.pdf", title="First"
+    )
+    assert first.status_code == 201
+
+    # Attempting to import to the exact same path raises validation error
+    second = import_pdf(
+        client, content=source, key="import-second", path="concurrent/doc.pdf", title="Second"
+    )
+    assert second.status_code == 422
+
+    # The original file on disk must still exist and be intact
+    assert (settings.workspace_root / "concurrent/doc.pdf").exists()
+    assert (settings.workspace_root / "concurrent/doc.pdf").read_bytes() == source
