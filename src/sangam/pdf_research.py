@@ -741,6 +741,9 @@ class PdfResearchService:
     ) -> AnnotationFields:
         validate_metadata_text(selected_text, "Selected text")
         validate_metadata_text(note, "Note")
+        validate_metadata_text(color, "Annotation color")
+        for tag in tags:
+            validate_metadata_text(tag, "Annotation tag")
         selected_text = selected_text.strip() if selected_text and selected_text.strip() else None
         note = note.strip() if note and note.strip() else None
         normalized_tags = sorted({tag.strip() for tag in tags if tag.strip()}, key=str.casefold)

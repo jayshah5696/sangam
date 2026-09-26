@@ -1228,3 +1228,123 @@ def test_attention_vs_history_queries_and_summary(client: TestClient) -> None:
     ).json()
     assert len(page2) == 1
     assert page2[0]["effect_id"] != page1[0]["effect_id"]
+
+
+def test_metadata_text_sanitization_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    # 1. Provider connection names reject null bytes and control characters
+    bad_conn_res = client.post(
+        "/api/v1/chat/connections",
+        json={
+            "connection_id": "test-bad-name",
+            "name": "Bad\x00Connection",
+            "protocol": "openai_chat_completions",
+            "base_url": "https://api.example.com/v1",
+            "credential_env": None,
+            "enabled": True,
+        },
+    )
+    assert bad_conn_res.status_code == 422
+    assert "cannot contain null bytes" in bad_conn_res.json()["error"]["message"]
+
+    bad_conn_res2 = client.post(
+        "/api/v1/chat/connections",
+        json={
+            "connection_id": "test-bad-name-2",
+            "name": "Bad\x07Connection",
+            "protocol": "openai_chat_completions",
+            "base_url": "https://api.example.com/v1",
+            "credential_env": None,
+            "enabled": True,
+        },
+    )
+    assert bad_conn_res2.status_code == 422
+    assert "cannot contain control characters" in bad_conn_res2.json()["error"]["message"]
+
+    # 2. Chat proposal summary and dismiss reason reject null bytes and control characters
+    doc = client.post(
+        "/api/v1/documents",
+        json={"title": "Proposal Doc", "content": "Content", "path": "proposal_doc.md"},
+        headers=headers("create-proposal-doc"),
+    ).json()
+
+    chat = client.app.state.services.chat
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="proposal-sanitization"
+    )
+    thread_id = create_chat_thread(client, document_id=doc["document_id"])
+
+    with pytest.raises(ValidationError, match="Proposal summary cannot contain null bytes"):
+        chat.proposals.create(
+            principal,
+            thread_id=thread_id,
+            document_id=doc["document_id"],
+            expected_revision_id=doc["current_revision_id"],
+            content="New Content",
+            summary="Bad\x00Summary",
+        )
+
+    valid_proposal = chat.proposals.create(
+        principal,
+        thread_id=thread_id,
+        document_id=doc["document_id"],
+        expected_revision_id=doc["current_revision_id"],
+        content="New Content",
+        summary="Valid Summary",
+    )
+
+    with pytest.raises(
+        ValidationError, match="Proposal dismiss reason cannot contain control characters"
+    ):
+        chat.proposals.dismiss(principal, valid_proposal.proposal_id, reason="Bad\x1fReason")
+
+    # 3. Annotation colors and tags reject null bytes and control characters
+    pdf_bytes = _pdf_fixture_bytes()
+    pdf_doc = client.post(
+        "/api/v1/pdfs",
+        params={"title": "Annotation PDF", "path": "pdf/annot.pdf"},
+        content=pdf_bytes,
+        headers={**headers("context-pdf-annot"), "Content-Type": "application/pdf"},
+    ).json()
+
+    bad_tag_res = client.post(
+        f"/api/v1/pdfs/{pdf_doc['document_id']}/annotations",
+        json={
+            "page_number": 1,
+            "annotation_type": "page_note",
+            "selected_text": "",
+            "note": "Note",
+            "geometry": [],
+            "tags": ["bad\x00tag"],
+            "color": "#F0C75E",
+        },
+        headers=headers("bad-tag-annotation"),
+    )
+    assert bad_tag_res.status_code == 422
+    assert "cannot contain null bytes" in bad_tag_res.json()["error"]["message"]
+
+    pdf_service = client.app.state.services.pdf_research
+    with pytest.raises(
+        ValidationError, match="Annotation color cannot contain control characters"
+    ):
+        pdf_service.create_annotation(
+            document_id=pdf_doc["document_id"],
+            page_number=1,
+            annotation_type="page_note",
+            selected_text="",
+            note="Note",
+            geometry=[],
+            tags=["tag"],
+            color="#f0c75\x07",
+            actor_id="human:jay",
+            idempotency_key="bad-color-annot",
+        )
+
+
+def _pdf_fixture_bytes() -> bytes:
+    output = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.write(output)
+    return output.getvalue()
