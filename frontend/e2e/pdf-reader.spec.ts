@@ -197,6 +197,8 @@ test('PDF selection actions stay inside the narrow viewport', async ({ page, req
     .filter({ hasText: 'Sangam Technical Architecture' })
     .first()
   await expect(text).toBeVisible()
+  await text.scrollIntoViewIfNeeded()
+  await expect(page.locator('[data-pdf-page="2"] .textLayer')).toContainText('Sangam Technical Architecture')
   await text.evaluate((element) => {
     const range = document.createRange()
     range.selectNodeContents(element)
@@ -320,6 +322,8 @@ test('touch PDF reader supports selection, annotation, and citation navigation',
     .filter({ hasText: 'Sangam Technical Architecture' })
     .first()
   await expect(text).toBeVisible()
+  await text.scrollIntoViewIfNeeded()
+  await expect(page.locator('[data-pdf-page="2"] .textLayer')).toContainText('Sangam Technical Architecture')
   await text.evaluate((element) => {
     const range = document.createRange()
     range.selectNodeContents(element)
@@ -389,6 +393,7 @@ test('touch PDF reader supports page navigation and citation actions', async ({
   })
   await expect(page.getByRole('toolbar', { name: 'Selected PDF text actions' })).toBeVisible()
   await page.getByRole('button', { name: 'Copy Markdown citation' }).tap()
+  // SAFETY: the init script above defines the test-only clipboard capture property.
   await expect
     .poll(() => page.evaluate(() => (window as typeof window & { __copiedText?: string }).__copiedText))
     .toContain('[PDF reader evidence, p. 1]')
