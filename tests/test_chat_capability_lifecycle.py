@@ -1325,9 +1325,7 @@ def test_metadata_text_sanitization_rejects_null_bytes_and_control_characters(
     assert "cannot contain null bytes" in bad_tag_res.json()["error"]["message"]
 
     pdf_service = client.app.state.services.pdf_research
-    with pytest.raises(
-        ValidationError, match="Annotation color cannot contain control characters"
-    ):
+    with pytest.raises(ValidationError, match="Annotation color cannot contain control characters"):
         pdf_service.create_annotation(
             document_id=pdf_doc["document_id"],
             page_number=1,
