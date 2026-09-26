@@ -16,6 +16,9 @@ def test_sensitive_header_and_data_sanitization() -> None:
         "Cf-Access-Jwt-Assertion": jwt_claim,
         "Cookie": "session=secret_session_id",
         "X-Api-Key": "secret_api_key",
+        "X-Access-Token": "secret_access_token",
+        "X-Secret-Key": "ultra_secret_value",
+        "X-Session-ID": "session_identifier_abc",
         "X-Sangam-Trusted-Identity": "secret_trusted_header",
         "Content-Type": "application/json",
         "User-Agent": "SangamTestClient/1.0",
@@ -26,6 +29,9 @@ def test_sensitive_header_and_data_sanitization() -> None:
     assert sanitized["Cf-Access-Jwt-Assertion"] == "[REDACTED]"
     assert sanitized["Cookie"] == "[REDACTED]"
     assert sanitized["X-Api-Key"] == "[REDACTED]"
+    assert sanitized["X-Access-Token"] == "[REDACTED]"
+    assert sanitized["X-Secret-Key"] == "[REDACTED]"
+    assert sanitized["X-Session-ID"] == "[REDACTED]"
     assert sanitized["X-Sangam-Trusted-Identity"] == "[REDACTED]"
     assert sanitized["Content-Type"] == "application/json"
     assert sanitized["User-Agent"] == "SangamTestClient/1.0"
@@ -37,12 +43,16 @@ def test_sensitive_header_and_data_sanitization() -> None:
         "bearer_token": "Bearer sgm_agt_88888.another_secret",
         "private_key_data": "my_private_key_value",
         "authorization_headers": "some_auth_string",
-        "summary": "Updated document content",
+        "summary": (
+            "Updated document content with sk-123456789012345678 key "
+            "and ghp_0123456789abcdef0123 token"
+        ),
         "nested": {
             "api_key": "secret_api_key_123",
             "title": "My Sensitive Note",
             "jwt": "eyA0NTY3OCB9.eyBjb250ZW50IH0.sig_string_here_123",
         },
+        "set_values": {"sk-987654321098765432", "safe_value"},
     }
     sanitized_data = sanitize_sensitive_data(sensitive_payload)
     assert isinstance(sanitized_data, dict)
@@ -52,10 +62,15 @@ def test_sensitive_header_and_data_sanitization() -> None:
     assert sanitized_data["bearer_token"] == "[REDACTED]"
     assert sanitized_data["private_key_data"] == "[REDACTED]"
     assert sanitized_data["authorization_headers"] == "[REDACTED]"
-    assert sanitized_data["summary"] == "Updated document content"
+    assert "[REDACTED]" in str(sanitized_data["summary"])
+    assert "sk-" not in str(sanitized_data["summary"])
+    assert "ghp_" not in str(sanitized_data["summary"])
     assert sanitized_data["nested"]["api_key"] == "[REDACTED]"
     assert sanitized_data["nested"]["title"] == "My Sensitive Note"
     assert sanitized_data["nested"]["jwt"] == "[REDACTED]"
+    assert isinstance(sanitized_data["set_values"], set)
+    assert "[REDACTED]" in sanitized_data["set_values"]
+    assert "safe_value" in sanitized_data["set_values"]
 
 
 def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
@@ -300,3 +315,139 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_update_patch_metadata_audit_event(client: TestClient) -> None:
+    # 1. Create a document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Patch Metadata Test Doc",
+            "content": "Line 1\nLine 2\nLine 3\n",
+            "path": "docs/patch_meta_test.md",
+        },
+        headers=headers("idemp_patch_create"),
+    )
+    assert create_resp.status_code == 201
+    created_doc = create_resp.json()
+    doc_id = created_doc["document_id"]
+    rev1 = created_doc["current_revision_id"]
+
+    # 2. Update document content (add 2 lines, remove 1 line)
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "Line 1\nLine 2 modified\nLine 3\nLine 4\nLine 5\n",
+            "summary": "Added lines 4 and 5, modified line 2",
+        },
+        headers=headers("idemp_patch_update"),
+    )
+    assert update_resp.status_code == 200
+
+    # 3. Reread activity log
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    update_events = [
+        e for e in events if e["resource_id"] == doc_id and e["action"] == "update"
+    ]
+    assert len(update_events) == 1
+    event_details = update_events[0]["details"]
+    assert "lines_added" in event_details
+    assert "lines_removed" in event_details
+    assert event_details["lines_added"] > 0
+    assert event_details["lines_removed"] > 0
+    assert event_details["expected_revision_id"] == rev1
+    assert event_details["summary"] == "Added lines 4 and 5, modified line 2"
+
+
+def test_materialize_duplicate_tag_import_audit_details(client: TestClient) -> None:
+    # 1. Create an unmaterialized draft document
+    draft_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Draft Document",
+            "content": "# Draft Content",
+            "path": None,
+        },
+        headers=headers("idemp_draft_create"),
+    )
+    assert draft_resp.status_code == 201
+    draft_doc = draft_resp.json()
+    draft_id = draft_doc["document_id"]
+    draft_rev = draft_doc["current_revision_id"]
+
+    # 2. Materialize draft
+    mat_resp = client.post(
+        f"/api/v1/documents/{draft_id}/materialize",
+        json={
+            "expected_revision_id": draft_rev,
+            "path": "docs/materialized_draft.md",
+            "summary": "Materialized draft",
+        },
+        headers=headers("idemp_draft_mat"),
+    )
+    assert mat_resp.status_code == 200
+    mat_doc = mat_resp.json()
+    mat_rev = mat_doc["current_revision_id"]
+
+    # 3. Duplicate document
+    dup_resp = client.post(
+        f"/api/v1/documents/{draft_id}/duplicate",
+        json={
+            "expected_revision_id": mat_rev,
+            "title": "Draft Copy",
+            "path": "docs/materialized_draft_copy.md",
+        },
+        headers=headers("idemp_draft_dup"),
+    )
+    assert dup_resp.status_code == 201
+    dup_doc = dup_resp.json()
+    dup_id = dup_doc["document_id"]
+
+    # 4. Tag document metadata
+    tag_resp = client.post(
+        "/api/v1/tags",
+        json={"name": "AuditTag", "color": "#00ff00"},
+        headers=headers("idemp_create_audit_tag"),
+    )
+    assert tag_resp.status_code == 201
+    tag_data = tag_resp.json()
+
+    meta_resp = client.patch(
+        f"/api/v1/documents/{draft_id}/metadata",
+        json={
+            "expected_metadata_version": mat_doc["metadata_version"],
+            "category": "Documentation",
+            "tag_ids": [tag_data["tag_id"]],
+        },
+        headers=headers("idemp_update_meta"),
+    )
+    assert meta_resp.status_code == 200
+
+    # Verify activity events for materialize, duplicate, tag
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    draft_events = {e["action"]: e for e in events if e["resource_id"] == draft_id}
+    dup_events = {e["action"]: e for e in events if e["resource_id"] == dup_id}
+
+    assert "materialize" in draft_events
+    mat_details = draft_events["materialize"]["details"]
+    assert mat_details["destination_path"] == "docs/materialized_draft.md"
+    assert mat_details["expected_revision_id"] == draft_rev
+
+    assert "duplicate" in dup_events
+    dup_details = dup_events["duplicate"]["details"]
+    assert dup_details["source_path"] == "docs/materialized_draft.md"
+    assert dup_details["destination_path"] == "docs/materialized_draft_copy.md"
+    assert dup_details["title"] == "Draft Copy"
+
+    assert "tag" in draft_events
+    tag_details = draft_events["tag"]["details"]
+    assert tag_details["expected_metadata_version"] == mat_doc["metadata_version"]
+    assert tag_details["category"] == "Documentation"
+    assert tag_details["tag_ids"] == [tag_data["tag_id"]]

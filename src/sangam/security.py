@@ -39,6 +39,14 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-api-key",
     "api-key",
     "x-auth-token",
+    "x-access-token",
+    "x-secret-key",
+    "x-private-key",
+    "x-user-token",
+    "x-bearer-token",
+    "x-session-id",
+    "x-csrf-token",
+    "x-xsrf-token",
     "proxy-authorization",
 }
 
@@ -53,8 +61,19 @@ _SAFE_KEY_EXCEPTIONS: set[str] = {
     "revoked_at",
 }
 
+_SAFE_HEADER_EXCEPTIONS: set[str] = {
+    "idempotency-key",
+    "x-sangam-operation-id",
+    "x-sangam-document-id",
+    "x-sangam-revision-id",
+    "x-sangam-context-id",
+    "x-sangam-chat-entry",
+    "x-sangam-workspace-context",
+    "sec-ch-ua-key",
+}
+
 _TOKEN_PATTERN = re.compile(
-    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"
+    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9_-]{16,})\b"
 )
 
 
@@ -64,7 +83,26 @@ def sanitize_headers(headers: object) -> dict[str, str]:
     items = headers.items() if hasattr(headers, "items") else headers
     for key, value in items:
         norm_key = str(key).strip().casefold()
-        if norm_key in SENSITIVE_HEADER_NAMES or "trusted-identity" in norm_key:
+        if (
+            norm_key in SENSITIVE_HEADER_NAMES
+            or "trusted-identity" in norm_key
+            or (
+                norm_key not in _SAFE_HEADER_EXCEPTIONS
+                and any(
+                    term in norm_key
+                    for term in (
+                        "secret",
+                        "password",
+                        "token",
+                        "credential",
+                        "api-key",
+                        "auth",
+                        "private-key",
+                        "session",
+                    )
+                )
+            )
+        ):
             result[str(key)] = "[REDACTED]"
         else:
             result[str(key)] = _TOKEN_PATTERN.sub("[REDACTED]", str(value))
@@ -92,16 +130,24 @@ def sanitize_sensitive_data(value: object) -> object:
                     "private_key",
                     "authorization",
                     "auth_header",
+                    "access_token",
+                    "refresh_token",
+                    "bearer_token",
+                    "cookie",
+                    "session",
                 )
             ):
                 sanitized_dict[k_str] = "[REDACTED]"
             else:
                 sanitized_dict[k_str] = sanitize_sensitive_data(v)
         return sanitized_dict
-    if isinstance(value, list):
-        return [sanitize_sensitive_data(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(sanitize_sensitive_data(item) for item in value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        sanitized_items = [sanitize_sensitive_data(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(sanitized_items)
+        if isinstance(value, (set, frozenset)):
+            return set(sanitized_items) if isinstance(value, set) else frozenset(sanitized_items)
+        return sanitized_items
     return value
 
 

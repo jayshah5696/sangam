@@ -66,6 +66,7 @@ class ActivityService:
                 "lines_added",
                 "lines_removed",
                 "diff",
+                "supersedes_document_id",
             }
         }
         with self.database.transaction() as connection:
