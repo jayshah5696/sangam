@@ -82,6 +82,7 @@ test.describe('Restrained motion language and workbench interactions', () => {
     test('inspector tabs preserve geometry when changing active tab', async ({ page, seededWorkspace }) => {
       await page.setViewportSize({ width: 1440, height: 900 })
       await page.goto(`/documents/${seededWorkspace.documentId}`)
+      await page.getByRole('button', { name: 'Open document inspector' }).click()
 
       const tabsContainer = page.locator('.inspector-tabs')
       await expect(tabsContainer).toBeVisible()
@@ -180,6 +181,7 @@ test.describe('Restrained motion language and workbench interactions', () => {
     }) => {
       await page.setViewportSize({ width: 901, height: 844 })
       await page.goto(`/documents/${seededWorkspace.documentId}`)
+      await page.getByRole('button', { name: 'Open document inspector' }).click()
       const desktopInspector = page.locator('.document-inspector')
       await expect(desktopInspector).toBeVisible()
       await expect(desktopInspector).not.toHaveAttribute('role', 'dialog')

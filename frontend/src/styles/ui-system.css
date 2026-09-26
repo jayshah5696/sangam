@@ -218,6 +218,7 @@ textarea::placeholder {
   .metadata-editor input,
   .metadata-editor select,
   .materialize-bar input,
+  .materialize-bar select,
   .folder-setting > input,
   .tag-creator input[type="text"],
   .document-actions-form > label input,

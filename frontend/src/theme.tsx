@@ -247,7 +247,7 @@ const defaults: WorkspacePreferences = {
   leftWidth: 282,
   rightWidth: 320,
   leftVisible: true,
-  rightVisible: true,
+  rightVisible: false,
   rightTab: 'properties',
   editorMode: 'preview',
 }
@@ -308,12 +308,11 @@ const rawStoredPreferencesSchema = z.object({
 })
 
 function loadPreferences(): WorkspacePreferences {
-  const isNarrow = Boolean(globalThis.window && globalThis.window.innerWidth <= 900)
   try {
     const raw = JSON.parse(localStorage.getItem(storageKey) ?? '{}')
     const parsed = rawStoredPreferencesSchema.safeParse(raw)
     if (!parsed.success) {
-      return { ...defaults, rightVisible: isNarrow ? false : true }
+      return { ...defaults, rightVisible: false }
     }
     const stored = parsed.data
     const customThemes = parseCustomThemes(stored.customThemes)
@@ -335,10 +334,10 @@ function loadPreferences(): WorkspacePreferences {
       editorSize: stored.editorSize ?? defaults.editorSize,
       editorMode: stored.editorMode ?? defaults.editorMode,
       customThemes,
-      rightVisible: isNarrow ? false : (stored.rightVisible ?? true),
+      rightVisible: stored.rightVisible ?? false,
     }
   } catch {
-    return { ...defaults, rightVisible: isNarrow ? false : true }
+    return { ...defaults, rightVisible: false }
   }
 }
 

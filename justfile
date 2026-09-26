@@ -46,6 +46,10 @@ test-frontend:
     pnpm --dir frontend run lint
     pnpm --dir frontend run test
 
+# Run the focused frontend regressions for workspace, review, and API behavior.
+test-frontend-focused:
+    pnpm --dir frontend exec vitest run src/api.test.ts src/documentWorkspaceState.test.ts src/review.test.tsx src/workspaceHome.test.ts
+
 # Report the initial Vite entry graph and lazy chunks without a visualization dependency.
 bundle-report:
     pnpm --dir frontend run build

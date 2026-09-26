@@ -871,6 +871,15 @@ class ProviderConnectionTest(BaseModel):
     message: str
 
 
+class ChatProposalEvidence(BaseModel):
+    context_id: str
+    document_id: str
+    revision_id: str
+    selected_text: str
+    pdf_page_number: int | None
+    annotation_id: str | None
+
+
 class ChatProposal(BaseModel):
     proposal_id: str
     thread_id: str
@@ -882,6 +891,8 @@ class ChatProposal(BaseModel):
     applied_revision_id: str | None
     created_at: str
     applied_at: str | None
+    evidence: ChatProposalEvidence | None = None
+    evidence_status: Literal["not_recorded", "recorded", "unavailable"] = "not_recorded"
 
 
 class ApplyChatProposal(MutationRequest):

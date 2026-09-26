@@ -84,7 +84,7 @@ test('document chat hands exact context to the full-page route', async ({
   await page.goto(`/documents/${seededWorkspace.documentId}`)
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
   const isMobileLayout = testInfo.project.name !== 'chromium-desktop'
-  if (isMobileLayout) await page.getByRole('button', { name: 'Open document inspector' }).click()
+  await page.getByRole('button', { name: 'Open document inspector' }).click()
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
   if (!isMobileLayout) {
     await expect(page.getByText('Document chat', { exact: true })).toBeVisible()
@@ -145,6 +145,7 @@ test('compact chat exposes shared new-chat and history controls', async ({
   })
   await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
   await page.goto(`/documents/${seededWorkspace.documentId}`)
+  await page.getByRole('button', { name: 'Open document inspector' }).click()
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
 
   const compact = page.locator('.inspector-chat-surface')
@@ -198,6 +199,7 @@ test('compact document chat stays contained across supported inspector widths an
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop inspector only')
   await page.goto(`/documents/${seededWorkspace.documentId}`)
+  await page.getByRole('button', { name: 'Open document inspector' }).click()
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
 
   const chatSurface = page.locator('.inspector-chat-surface')

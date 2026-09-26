@@ -21,6 +21,16 @@ describe('floatingPosition', () => {
       ),
     ).toEqual({ left: 70, top: 32 })
   })
+
+  it('keeps a toolbar for a below-viewport selection inside the viewport', () => {
+    expect(
+      floatingPosition(
+        { left: 100, right: 140, top: 220, bottom: 240, width: 40 },
+        { width: 100, height: 40 },
+        { width: 300, height: 200 },
+      ),
+    ).toEqual({ left: 70, top: 152 })
+  })
 })
 
 describe('markdownSelectionCitation', () => {
