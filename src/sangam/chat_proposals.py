@@ -9,7 +9,13 @@ from typing import Literal
 from sangam.access import WorkspaceAccessService
 from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.db import Database, utc_now
-from sangam.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from sangam.errors import (
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+    validate_metadata_text,
+)
 from sangam.schemas import ChatProposal, ChatProposalEvidence
 from sangam.security import Principal
 
@@ -248,6 +254,7 @@ class ChatProposalService:
         replace_all: bool = False,
         context_id: str | None = None,
     ) -> ChatProposal:
+        validate_metadata_text(summary, "Proposal summary")
         thread_owner = self.repository.require_thread_owner(thread_id, principal)
         if context_id is not None:
             context = self.evidence.get_turn_context(principal, context_id)
@@ -401,6 +408,7 @@ class ChatProposalService:
         )
 
     def dismiss(self, principal: Principal, proposal_id: str, reason: str | None) -> ChatProposal:
+        validate_metadata_text(reason, "Dismissal reason")
         proposal = self.repository.get_owned(principal, proposal_id)
         summary = proposal.summary
         if reason:
