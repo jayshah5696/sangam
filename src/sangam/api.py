@@ -967,13 +967,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = admin_dependency,
     ) -> Document:
-        return documents.update_trust(
+        result = documents.update_trust(
             document_id=document_id,
             expected_trust_version=body.expected_trust_version,
             trust_level=body.trust_level,
             actor_id=principal.actor_id,
             idempotency_key=idempotency_key,
         )
+        activity.record(
+            principal=principal,
+            action="trust",
+            resource_type="document",
+            resource_id=document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+            details={
+                "trust_level": body.trust_level,
+                "expected_trust_version": body.expected_trust_version,
+            },
+        )
+        return result
 
     @app.post(
         "/api/v1/documents/{document_id}/trusted-preview",
@@ -1449,30 +1463,70 @@ else fetch('/api/v1/trusted-previews/content', {
     @app.post("/api/v1/reconciliation/reindex", response_model=Document, status_code=201)
     def reconciliation_reindex(
         body: ReindexPath,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.reindex_path(body.path)
+        result = reconciliation.reindex_path(body.path)
+        activity.record(
+            principal=principal,
+            action="reconcile_reindex",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/accept-disk", response_model=Document)
     def reconciliation_accept_disk(
         conflict_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.accept_disk_content(conflict_id)
+        result = reconciliation.accept_disk_content(conflict_id)
+        activity.record(
+            principal=principal,
+            action="reconcile_accept_disk",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/restore-database", response_model=Document)
     def reconciliation_restore_database(
         conflict_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.restore_database_content(conflict_id)
+        result = reconciliation.restore_database_content(conflict_id)
+        activity.record(
+            principal=principal,
+            action="reconcile_restore_database",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/recognize-move", response_model=Document)
     def reconciliation_recognize_move(
         conflict_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.recognize_move(conflict_id)
+        result = reconciliation.recognize_move(conflict_id)
+        activity.record(
+            principal=principal,
+            action="reconcile_recognize_move",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/ignore", response_model=ReconciliationReport)
     def reconciliation_ignore(

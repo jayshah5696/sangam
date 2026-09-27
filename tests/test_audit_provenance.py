@@ -334,3 +334,104 @@ def test_audit_line_counts_include_content_starting_with_diff_markers(client: Te
     )
     assert update_event["details"]["lines_added"] == 1
     assert update_event["details"]["lines_removed"] == 1
+
+
+def test_document_trust_audit_provenance(client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Trust Audit Doc",
+            "content": "<h1>Trust Level Test</h1>",
+            "path": "docs/trust_audit.html",
+            "content_type": "text/html",
+        },
+        headers=headers("idemp_trust_doc_create"),
+    )
+    assert create_resp.status_code == 201
+    created_doc = create_resp.json()
+    doc_id = created_doc["document_id"]
+
+    trust_resp = client.patch(
+        f"/api/v1/documents/{doc_id}/trust",
+        json={
+            "expected_trust_version": 0,
+            "trust_level": "trusted_interactive",
+        },
+        headers=headers("idemp_trust_doc_update"),
+    )
+    assert trust_resp.status_code == 200
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    trust_events = [
+        e for e in activity_resp.json() if e["resource_id"] == doc_id and e["action"] == "trust"
+    ]
+    assert len(trust_events) == 1
+    event = trust_events[0]
+    assert event["resource_type"] == "document"
+    assert event["path"] == "docs/trust_audit.html"
+    assert event["outcome"] == "accepted"
+    assert event["details"]["trust_level"] == "trusted_interactive"
+    assert event["details"]["expected_trust_version"] == 0
+
+
+def test_reconciliation_audit_provenance(client: TestClient, settings) -> None:
+    unindexed_path = settings.workspace_root / "docs" / "reconcile_audit.md"
+    unindexed_path.parent.mkdir(parents=True, exist_ok=True)
+    unindexed_path.write_text("# Unindexed File\nContent.", encoding="utf-8")
+
+    scan_resp = client.post("/api/v1/reconciliation/scan")
+    assert scan_resp.status_code == 200
+
+    reindex_resp = client.post(
+        "/api/v1/reconciliation/reindex",
+        json={"path": "docs/reconcile_audit.md"},
+        headers=headers("idemp_reconcile_reindex"),
+    )
+    assert reindex_resp.status_code == 201
+    doc = reindex_resp.json()
+    doc_id = doc["document_id"]
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    reconcile_events = [
+        e
+        for e in activity_resp.json()
+        if e["resource_id"] == doc_id and e["action"] == "reconcile_reindex"
+    ]
+    assert len(reconcile_events) == 1
+    event = reconcile_events[0]
+    assert event["resource_type"] == "document"
+    assert event["path"] == "docs/reconcile_audit.md"
+    assert event["outcome"] == "accepted"
+
+
+def test_extended_sensitive_header_and_data_sanitization() -> None:
+    request_headers = {
+        "Sangam-Preview": "sgm_prv_123.preview_token_value",
+        "Proxy-Authenticate": "Basic realm=secret_realm",
+        "Passphrase": "my_secret_passphrase",
+    }
+    sanitized_headers = sanitize_headers(request_headers)
+    assert sanitized_headers["Sangam-Preview"] == "[REDACTED]"
+    assert sanitized_headers["Proxy-Authenticate"] == "[REDACTED]"
+    assert sanitized_headers["Passphrase"] == "[REDACTED]"
+
+    sensitive_payload = {
+        "private_payload": "sensitive_data_blob",
+        "passphrase": "super_secret_passphrase",
+        "database_url": "postgresql://user:pass@localhost/db",
+        "dsn": "sqlite:///data/secret.db",
+        "connection_string": "Server=myServerAddress;Database=db;Uid=usr;Pwd=pass;",
+        "client_secret": "secret_client_val",
+        "auth_token": "sgm_agt_11111.secret_auth",
+        "refresh_token": "sgm_agt_22222.secret_refresh",
+        "access_token": "sgm_agt_33333.secret_access",
+        "api_token": "sgm_agt_44444.secret_api",
+        "tls_key": "my_tls_key_data",
+        "priv_key": "my_priv_key_data",
+    }
+    sanitized_data = sanitize_sensitive_data(sensitive_payload)
+    assert isinstance(sanitized_data, dict)
+    for key in sensitive_payload:
+        assert sanitized_data[key] == "[REDACTED]"

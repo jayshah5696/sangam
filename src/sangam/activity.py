@@ -84,6 +84,8 @@ class ActivityService:
                 "operation_key",
                 "reason",
                 "proposal_id",
+                "trust_level",
+                "expected_trust_version",
             }
         }
         with self.database.transaction() as connection:
