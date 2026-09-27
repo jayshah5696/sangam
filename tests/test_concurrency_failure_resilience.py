@@ -335,3 +335,338 @@ def test_audit_service_enforces_memory_budget_under_expansion(client: TestClient
         assert events[0].details.get("diff") == payload
     finally:
         service.close()
+
+
+def test_chat_store_cancellation_before_executor_start_releases_permit() -> None:
+    runner = BoundedThreadRunner(max_concurrency=2, max_waiting=5)
+    runner._executor.shutdown(wait=False)
+    runner._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    block_first = threading.Event()
+    first_started = threading.Event()
+
+    def first_task():
+        first_started.set()
+        block_first.wait(timeout=5.0)
+        return "first"
+
+    def second_task():
+        return "second"
+
+    async def scenario():
+        t1 = asyncio.create_task(runner.run(first_task))
+        while not first_started.is_set():
+            await asyncio.sleep(0.01)
+
+        assert runner._active_workers == 1
+
+        t2 = asyncio.create_task(runner.run(second_task))
+        await asyncio.sleep(0.01)
+        assert runner._active_workers == 2
+
+        t2.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await t2
+
+        await asyncio.sleep(0.05)
+        assert runner._active_workers == 1
+
+        block_first.set()
+        assert await t1 == "first"
+        await asyncio.sleep(0.05)
+        assert runner._active_workers == 0
+        await runner.close()
+
+    asyncio.run(scenario())
+
+
+def test_chat_store_shutdown_times_out_and_raises_runtime_error_on_unfinished_writes() -> None:
+    runner = BoundedThreadRunner(max_concurrency=1, max_waiting=2)
+
+    block_worker = threading.Event()
+    worker_started = threading.Event()
+
+    def hanging_task():
+        worker_started.set()
+        block_worker.wait(timeout=5.0)
+        return "done"
+
+    async def scenario():
+        t = asyncio.create_task(runner.run(hanging_task))
+        while not worker_started.is_set():
+            await asyncio.sleep(0.01)
+
+        with pytest.raises(RuntimeError, match="ChatKitStore shutdown timed out with 1 operations"):
+            await runner.close(timeout=0.05)
+
+        block_worker.set()
+        await t
+
+    asyncio.run(scenario())
+
+
+def test_audit_service_enforces_budget_and_backpressure_while_batch_is_committing(
+    client: TestClient,
+) -> None:
+    real_db = client.app.state.services.activity.database
+    principal = Principal.trusted_human(
+        actor_id="human:jay",
+        display_name="Jay",
+        operation_id="op_mem_budget_committing",
+    )
+
+    pause_commit = threading.Event()
+    commit_started = threading.Event()
+
+    class PausableConnection:
+        def __init__(self, raw):
+            self._raw = raw
+
+        def executemany(self, sql, params):
+            commit_started.set()
+            pause_commit.wait(timeout=5.0)
+            return self._raw.executemany(sql, params)
+
+        def __getattr__(self, item):
+            return getattr(self._raw, item)
+
+    mock_db = MagicMock(wraps=real_db)
+    mock_db.connect = lambda: PausableConnection(real_db.connect())
+    mock_db.connection = real_db.connection
+    mock_db.transaction = real_db.transaction
+
+    service = ActivityService(mock_db, max_queue_bytes=16 * 1024)
+
+    try:
+        res1 = service.admit(estimated_bytes=1024)
+        res2 = service.admit(estimated_bytes=1024)
+
+        payload_12k = "y" * 12_000
+        p1_done = threading.Event()
+
+        def producer_1():
+            res1.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_mem_batch_1",
+                details={"diff": payload_12k},
+            )
+            p1_done.set()
+
+        t1 = threading.Thread(target=producer_1)
+        t1.start()
+
+        assert commit_started.wait(timeout=2.0)
+        assert service._committing_items == 1
+        assert len(service._queue) == 0
+
+        p2_blocked = threading.Event()
+        p2_done = threading.Event()
+
+        def producer_2():
+            p2_blocked.set()
+            res2.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_mem_batch_2",
+                details={"diff": payload_12k},
+            )
+            p2_done.set()
+
+        t2 = threading.Thread(target=producer_2)
+        t2.start()
+
+        assert p2_blocked.wait(timeout=1.0)
+        time.sleep(0.1)
+        assert not p2_done.is_set(), "Producer 2 bypassed waiting while batch was committing!"
+
+        pause_commit.set()
+        t1.join(timeout=2.0)
+        t2.join(timeout=2.0)
+        assert p1_done.is_set()
+        assert p2_done.is_set()
+
+        events = service.list_events(operation_id="op_mem_budget_committing")
+        assert len(events) == 2
+    finally:
+        pause_commit.set()
+        service.close()
+
+
+def test_audit_service_oversized_event_commits_without_deadlock_or_truncation(
+    client: TestClient,
+) -> None:
+    real_db = client.app.state.services.activity.database
+    principal = Principal.trusted_human(
+        actor_id="human:jay",
+        display_name="Jay",
+        operation_id="op_oversized_event",
+    )
+    service = ActivityService(real_db, max_queue_bytes=16 * 1024)
+
+    try:
+        huge_payload = "Z" * 32_000
+        service.record(
+            principal=principal,
+            action="create",
+            resource_type="document",
+            outcome="accepted",
+            resource_id="doc_oversized",
+            details={"diff": huge_payload},
+        )
+
+        events = service.list_events(resource_id="doc_oversized")
+        assert len(events) == 1
+        assert events[0].details.get("diff") == huge_payload
+    finally:
+        service.close()
+
+
+def test_chat_store_attachments_column_created_by_and_ownership_isolation(
+    client: TestClient,
+) -> None:
+    from chatkit.types import FileAttachment
+
+    from sangam.chat_context import ChatRequestContext
+    from sangam.chat_store import SQLiteChatKitStore
+    from sangam.errors import NotFoundError
+
+    database = client.app.state.services.activity.database
+    store = SQLiteChatKitStore(database)
+
+    principal_jay = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_jay_att"
+    )
+    principal_cli = Principal.trusted_human(
+        actor_id="client:cli", display_name="CLI", operation_id="op_cli_att"
+    )
+
+    ctx_jay = ChatRequestContext(principal=principal_jay)
+    ctx_cli = ChatRequestContext(principal=principal_cli)
+
+    attachment = FileAttachment(
+        id="att_123",
+        name="notes.txt",
+        mime_type="text/plain",
+    )
+
+    async def scenario():
+        await store.save_attachment(attachment, ctx_jay)
+
+        with database.connection() as conn:
+            row = conn.execute(
+                "SELECT created_by, data_json FROM chat_attachments WHERE attachment_id = ?",
+                ("att_123",),
+            ).fetchone()
+            assert row is not None
+            assert row["created_by"] == "human:jay"
+
+        loaded = await store.load_attachment("att_123", ctx_jay)
+        assert loaded.id == "att_123"
+        assert loaded.name == "notes.txt"
+
+        with pytest.raises(NotFoundError):
+            await store.load_attachment("att_123", ctx_cli)
+
+        cli_fake = FileAttachment(
+            id="att_123",
+            name="malicious.txt",
+            mime_type="text/plain",
+        )
+        with pytest.raises(NotFoundError):
+            await store.save_attachment(cli_fake, ctx_cli)
+
+        await store.delete_attachment("att_123", ctx_jay)
+        with pytest.raises(NotFoundError):
+            await store.load_attachment("att_123", ctx_jay)
+
+        await store.close()
+
+    asyncio.run(scenario())
+
+
+def test_chat_store_pagination_returns_continuation_cursor(client: TestClient) -> None:
+    from datetime import UTC, datetime
+
+    from chatkit.types import (
+        InferenceOptions,
+        ThreadMetadata,
+        UserMessageItem,
+        UserMessageTextContent,
+    )
+
+    from sangam.chat_context import ChatRequestContext
+    from sangam.chat_store import SQLiteChatKitStore
+
+    database = client.app.state.services.activity.database
+    store = SQLiteChatKitStore(database)
+
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_pag"
+    )
+    ctx = ChatRequestContext(principal=principal)
+
+    async def scenario():
+        thread = ThreadMetadata(id="thread_pag_1", created_at=datetime.now(UTC))
+        await store.save_thread(thread, ctx)
+
+        for i in range(5):
+            item = UserMessageItem(
+                id=f"item_{i:02d}",
+                thread_id=thread.id,
+                content=[UserMessageTextContent(text=f"Hello {i}")],
+                inference_options=InferenceOptions(model="test"),
+                created_at=datetime.now(UTC),
+            )
+            await store.save_item(thread.id, item, ctx)
+
+        page1 = await store.load_thread_items(
+            thread.id, after=None, limit=2, order="asc", context=ctx
+        )
+        assert len(page1.data) == 2
+        assert page1.has_more is True
+        assert page1.after is not None
+        cursor1 = page1.after
+        assert page1.data[0].id == "item_00"
+        assert page1.data[1].id == "item_01"
+
+        page2 = await store.load_thread_items(
+            thread.id, after=cursor1, limit=2, order="asc", context=ctx
+        )
+        assert len(page2.data) == 2
+        assert page2.has_more is True
+        assert page2.after is not None
+        assert page2.data[0].id == "item_02"
+        assert page2.data[1].id == "item_03"
+
+        page3 = await store.load_thread_items(
+            thread.id, after=page2.after, limit=2, order="asc", context=ctx
+        )
+        assert len(page3.data) == 1
+        assert page3.has_more is False
+        assert page3.after is None
+        assert page3.data[0].id == "item_04"
+
+        for i in range(2, 6):
+            t = ThreadMetadata(id=f"thread_pag_{i}", created_at=datetime.now(UTC))
+            await store.save_thread(t, ctx)
+
+        tpage1 = await store.load_threads(after=None, limit=2, order="asc", context=ctx)
+        assert len(tpage1.data) == 2
+        assert tpage1.has_more is True
+        assert tpage1.after is not None
+
+        tpage2 = await store.load_threads(after=tpage1.after, limit=2, order="asc", context=ctx)
+        assert len(tpage2.data) == 2
+        assert tpage2.has_more is True
+        assert tpage2.after is not None
+        assert tpage2.data[0].id != tpage1.data[0].id
+        assert tpage2.data[0].id != tpage1.data[1].id
+
+        await store.close()
+
+    asyncio.run(scenario())

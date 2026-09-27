@@ -118,6 +118,8 @@ class ActivityService:
         self._queue_bytes = 0
         self._admitted_items = 0
         self._admitted_bytes = 0
+        self._committing_items = 0
+        self._committing_bytes = 0
         self._active_producers = 0
         self._queue_lock = threading.Lock()
         self._queue_condition = threading.Condition(self._queue_lock)
@@ -222,6 +224,10 @@ class ActivityService:
                     drain_count = min(len(self._queue), self.max_batch_size)
                     batch = self._queue[:drain_count]
                     del self._queue[:drain_count]
+                    batch_bytes = sum(item.size_bytes for item in batch)
+                    self._queue_bytes = max(0, self._queue_bytes - batch_bytes)
+                    self._committing_items = len(batch)
+                    self._committing_bytes = batch_bytes
 
                 if batch:
                     self._process_batch(connection, batch)
@@ -302,7 +308,8 @@ class ActivityService:
 
         batch_bytes = sum(item.size_bytes for item in batch)
         with self._queue_lock:
-            self._queue_bytes = max(0, self._queue_bytes - batch_bytes)
+            self._committing_items = max(0, self._committing_items - len(batch))
+            self._committing_bytes = max(0, self._committing_bytes - batch_bytes)
             self._admitted_items = max(0, self._admitted_items - len(batch))
             self._admitted_bytes = max(0, self._admitted_bytes - batch_bytes)
             self._queue_condition.notify_all()
@@ -372,9 +379,22 @@ class ActivityService:
         )
 
         expansion = max(0, size_bytes - reservation._estimated_bytes)
+        deadline = time.monotonic() + 60.0
         with self._queue_lock:
-            while self._queue_bytes + expansion > self.max_queue_bytes and self._queue:
-                self._queue_condition.wait(timeout=0.1)
+            while self._admitted_bytes + expansion > self.max_queue_bytes and (
+                self._admitted_items > 1 or self._committing_items > 0 or len(self._queue) > 0
+            ):
+                if self._shutting_down:
+                    raise ServiceUnavailableError("Activity audit logging is shutting down")
+                if not self._worker_healthy:
+                    raise ServiceUnavailableError(
+                        f"Audit persistence is unavailable: {self._worker_error}"
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ServiceUnavailableError("Audit queue memory budget exceeded")
+                self._queue_condition.wait(min(remaining, 0.1))
+
             self._admitted_bytes = max(
                 0, self._admitted_bytes - reservation._estimated_bytes + size_bytes
             )
