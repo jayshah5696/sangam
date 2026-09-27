@@ -31,6 +31,10 @@ check: test test-docs validate-compose
 test-backend:
     uv run pytest
 
+# Run reproducible concurrency, backpressure saturation, and audit integrity benchmark.
+benchmark-concurrency workers="20" ops="15":
+    uv run python scripts/benchmark_concurrency.py --workers "{{ workers }}" --ops-per-worker "{{ ops }}" 
+
 # Type-check the provider and chat boundary introduced by the architecture foundation.
 typecheck:
     uv run mypy \

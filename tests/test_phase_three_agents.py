@@ -512,9 +512,10 @@ def test_agent_scope_enforcement_conflict_and_reviewable_activity(client: TestCl
     conflict = next(problem for problem in summary["problems"] if problem["category"] == "conflict")
     assert conflict["expected_revision_id"] == report["current_revision_id"]
     assert conflict["current_revision_id"] == updated.json()["current_revision_id"]
-    serialized = json.dumps(activity)
+    serialized = json.dumps(summary)
     assert token not in serialized
     assert "Agent revision" not in serialized
+    assert token not in json.dumps(activity)
 
 
 def test_destination_paths_are_validated_before_scoped_authorization(client: TestClient) -> None:

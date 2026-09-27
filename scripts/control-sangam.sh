@@ -69,8 +69,9 @@ cmd_launch() {
 
   echo "==> Launching isolated Sangam on port $port (Run ID: $run_id)..."
   cd "$ROOT_DIR"
-  uv run uvicorn sangam.main:app --host 127.0.0.1 --port "$port" --no-access-log > "$run_dir/sangam.log" 2>&1 &
+  nohup uv run uvicorn sangam.main:app --host 127.0.0.1 --port "$port" --no-access-log > "$run_dir/sangam.log" 2>&1 &
   local server_pid=$!
+  disown "$server_pid" 2>/dev/null || true
 
   # Record state
   cat > "$STATE_FILE" <<EOF
@@ -414,6 +415,45 @@ for i in range(count):
 t_total_search = time.perf_counter() - t_search_start
 throughput_searches = count / t_total_search if t_total_search > 0 else 0
 
+# 4. Benchmark Live Server SSE Streaming (ChatKit protocol & Async SQLite ChatStore)
+streaming_latencies = []
+streaming_events_count = 0
+chatkit_thread_id = None
+t_stream_start = time.perf_counter()
+try:
+    with client.stream(
+        "POST",
+        f"{base_url}/chatkit",
+        json={
+            "type": "threads.create",
+            "params": {
+                "input": {
+                    "content": [{"type": "input_text", "text": "Live benchmark streaming probe"}],
+                    "attachments": [],
+                    "inference_options": {"model": "openai/gpt-5.4-nano"},
+                }
+            },
+        },
+        headers={"Content-Type": "application/json"},
+    ) as stream_resp:
+        if stream_resp.status_code != 200:
+            errors.append(f"streaming failed with HTTP {stream_resp.status_code}")
+        else:
+            sse_events = []
+            for line in stream_resp.iter_lines():
+                if line.startswith("data: "):
+                    ev = json.loads(line[6:])
+                    sse_events.append(ev)
+                    streaming_latencies.append((time.perf_counter() - t_stream_start) * 1000)
+            streaming_events_count = len(sse_events)
+            if sse_events and sse_events[0].get("type") == "thread.created":
+                chatkit_thread_id = sse_events[0].get("thread", {}).get("id")
+            if streaming_events_count < 4:
+                errors.append(f"streaming returned only {streaming_events_count} events; expected >= 4")
+except Exception as error:
+    errors.append(f"streaming error: {error}")
+t_total_stream = time.perf_counter() - t_stream_start
+
 create_latencies.sort()
 search_latencies.sort()
 
@@ -459,6 +499,13 @@ results = {
         "persisted_documents_in_sqlite": doc_count_db,
         "match_expected": doc_count_db == count,
         "unique_document_ids": len(set(created_doc_ids)),
+    },
+    "live_streaming": {
+        "events_count": streaming_events_count,
+        "thread_id": chatkit_thread_id,
+        "total_time_seconds": round(t_total_stream, 3),
+        "first_event_latency_ms": round(streaming_latencies[0], 2) if streaming_latencies else 0.0,
+        "stream_duration_ms": round(streaming_latencies[-1], 2) if streaming_latencies else 0.0,
     }
 }
 

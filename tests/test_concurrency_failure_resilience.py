@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 import sqlite3
 import threading
 import time
@@ -1801,3 +1802,224 @@ def test_worker_recovery_from_real_sqlite_write_lock(client: TestClient, setting
         headers=headers("after-lock-k1"),
     )
     assert res_after.status_code == 201
+
+
+def test_document_update_persists_actual_diff_not_placeholder(client: TestClient) -> None:
+    """Finding 1: Document updates and restores persist real diffs, not placeholders."""
+
+    # 1. Create document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Original Doc",
+            "content": "Line one\nold text\nLine three\n",
+            "path": "diff_test.md",
+        },
+        headers=headers("create-diff-test-1"),
+    )
+    assert create_resp.status_code == 201
+    doc_id = create_resp.json()["document_id"]
+    rev1 = create_resp.json()["current_revision_id"]
+
+    # 2. Update document
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "content": "Line one\nnew text\nLine three\n",
+            "expected_revision_id": rev1,
+            "title": "Updated Doc",
+        },
+        headers=headers("update-diff-test-2"),
+    )
+    assert update_resp.status_code == 200
+    rev2 = update_resp.json()["current_revision_id"]
+
+    # Query operation_events for the update
+    activity_svc = client.app.state.services.activity
+    with activity_svc.database.connection() as conn:
+        row = conn.execute(
+            """
+            SELECT detail_json, revision_id FROM operation_events
+            WHERE resource_id = ? AND action = 'update'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (doc_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["revision_id"] == rev2
+        details = json.loads(row["detail_json"])
+        diff_text = details.get("diff", "")
+        assert "XXXXXXXX" not in diff_text
+        assert "-old text" in diff_text
+        assert "+new text" in diff_text
+        assert details.get("lines_added") == 1
+        assert details.get("lines_removed") == 1
+
+    # 3. Update to third version
+    update3 = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "content": "Line one\nthird text\nLine three\n",
+            "expected_revision_id": rev2,
+        },
+        headers=headers("update-diff-test-3"),
+    )
+    assert update3.status_code == 200
+    rev3 = update3.json()["current_revision_id"]
+
+    # 4. Restore back to rev1
+    restore_resp = client.post(
+        f"/api/v1/documents/{doc_id}/restore",
+        json={
+            "expected_revision_id": rev3,
+            "revision_id": rev1,
+        },
+        headers=headers("restore-diff-test-4"),
+    )
+    assert restore_resp.status_code == 200
+    rev4 = restore_resp.json()["current_revision_id"]
+
+    with activity_svc.database.connection() as conn:
+        row = conn.execute(
+            """
+            SELECT detail_json, revision_id FROM operation_events
+            WHERE resource_id = ? AND action = 'restore'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (doc_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["revision_id"] == rev4
+        details = json.loads(row["detail_json"])
+        diff_text = details.get("diff", "")
+        # Restore diff is from rev3 ("third text") to rev1 ("old text")
+        assert "-third text" in diff_text
+        assert "+old text" in diff_text
+
+
+def test_full_budget_expansion_strictly_enforces_advertised_bound(client: TestClient) -> None:
+    """Finding 2: 16 KB budget with two 8 KB reservations; Res 1 expands to 12 KB diff.
+    Peak total memory must NEVER exceed 16,384 bytes. Res 1 must wait until Res 2 finishes.
+    """
+    activity_svc = client.app.state.services.activity
+    orig_total = activity_svc.max_total_bytes
+    orig_queue = activity_svc.max_queue_bytes
+    activity_svc.max_total_bytes = 16_384
+    activity_svc.max_queue_bytes = 16_384
+
+    try:
+        res1 = activity_svc.admit(estimated_bytes=8192)
+        res2 = activity_svc.admit(estimated_bytes=8192)
+
+        principal = Principal.trusted_human(
+            actor_id="human:jay", display_name="Jay", operation_id="op_expansion_bound"
+        )
+        large_diff = "A" * 12_000
+
+        res1_completed = threading.Event()
+        res1_error = []
+
+        def worker1():
+            try:
+                res1.record(
+                    principal=principal,
+                    action="update",
+                    resource_type="document",
+                    outcome="accepted",
+                    resource_id="doc_res1",
+                    details={"diff": large_diff},
+                )
+                res1_completed.set()
+            except Exception as e:
+                res1_error.append(e)
+
+        t1 = threading.Thread(target=worker1)
+        t1.start()
+
+        # Res 1 cannot expand yet because total_in_flight (16,384) + expansion > 16,384!
+        time.sleep(0.1)
+        assert not res1_completed.is_set(), "Res 1 should wait while Res 2 is holding capacity"
+
+        # Now Res 2 releases its capacity
+        res2.release()
+
+        # Res 1 can now expand within the 16,384 budget!
+        t1.join(timeout=5.0)
+        assert res1_completed.is_set()
+        assert not res1_error
+
+        # CRITICAL ASSERTION: Peak total memory must NEVER exceed 16,384!
+        assert activity_svc.peak_total_bytes <= 16_384, (
+            f"Peak total bytes {activity_svc.peak_total_bytes} exceeded budget 16,384!"
+        )
+    finally:
+        activity_svc.max_total_bytes = orig_total
+        activity_svc.max_queue_bytes = orig_queue
+
+
+def test_transactional_admitted_oversized_owner_permitted(client: TestClient) -> None:
+    """Finding 2 Part B: Admitted oversized owner is permitted during transaction."""
+    activity_svc = client.app.state.services.activity
+    orig_total = activity_svc.max_total_bytes
+    activity_svc.max_total_bytes = 10_000
+
+    try:
+        # Admitted as exclusive oversized owner
+        res = activity_svc.admit(estimated_bytes=15_000)
+        assert res._is_oversized_owner is True
+
+        principal = Principal.trusted_human(
+            actor_id="human:jay", display_name="Jay", operation_id="op_tx_oversized"
+        )
+        with activity_svc.database.connection() as conn:
+            # Must succeed without raising ServiceUnavailableError
+            res.record_with_connection(
+                conn,
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_tx_oversized",
+                details={"diff": "O" * 15_000},
+            )
+    finally:
+        activity_svc.max_total_bytes = orig_total
+
+
+def test_failure_audit_persistence_failure_is_not_swallowed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 3: When audit persistence fails during request failure handling,
+    the original error is preserved, chained with audit failure, reporting audit_persisted=False.
+    """
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={"title": "Doc For Fail Audit", "content": "initial", "path": "fail_audit.md"},
+        headers=headers("fail-audit-seed"),
+    )
+    assert create_resp.status_code == 201
+    doc_id = create_resp.json()["document_id"]
+
+    from sangam.activity import AuditReservation
+
+    def failing_reservation_record(self, *args, **kwargs):
+        raise RuntimeError("Simulated audit queue failure")
+
+    monkeypatch.setattr(AuditReservation, "record", failing_reservation_record)
+
+    # Make request that fails with 409 (revision conflict)
+    resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "content": "updated",
+            "expected_revision_id": "rev_wrong",
+        },
+        headers=headers("fail-audit-k1"),
+    )
+    # The original 409 Conflict status code is returned
+    assert resp.status_code == 409
+    body = resp.json()
+    # The error details explicitly record the audit persistence failure
+    assert body["error"]["code"] == "revision_conflict"
+    assert body["error"]["details"].get("audit_persisted") is False
+    assert "Simulated audit queue failure" in str(body["error"]["details"].get("audit_error"))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import sqlite3
 import uuid
@@ -418,11 +419,20 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        lines = list(
+            difflib.unified_diff(
+                [],
+                content.splitlines(),
+                lineterm="",
+            )
+        )
+        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "title": title,
             "content_type": content_type,
-            "diff": content,
+            "diff": diff_text,
             "lines_added": len(content.splitlines()),
+            "lines_removed": 0,
         }
         return self._run(principal, "create", "document", operation, path=path, details=details)
 
@@ -640,10 +650,25 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        diff_bound = max(len(content), len(current.content)) * 2
+        lines = list(
+            difflib.unified_diff(
+                current.content.splitlines(),
+                content.splitlines(),
+                fromfile=current.current_revision_id or "before",
+                tofile="current",
+                lineterm="",
+            )
+        )
+        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
-            "diff": "X" * diff_bound,
+            "diff": diff_text,
+            "lines_added": sum(
+                line.startswith("+") and not line.startswith("+++") for line in lines
+            ),
+            "lines_removed": sum(
+                line.startswith("-") and not line.startswith("---") for line in lines
+            ),
         }
         if title is not None:
             details["title"] = title
@@ -705,9 +730,19 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        lines = list(
+            difflib.unified_diff(
+                [],
+                current.content.splitlines(),
+                lineterm="",
+            )
+        )
+        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
-            "diff": current.content,
+            "diff": diff_text,
+            "lines_added": len(current.content.splitlines()),
+            "lines_removed": 0,
         }
         if title is not None:
             details["title"] = title
@@ -897,10 +932,34 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id, include_deleted=True)
+        target_content = ""
+        with self.documents.database.connection() as conn:
+            row = conn.execute(
+                "SELECT content FROM revisions WHERE revision_id = ? AND document_id = ?",
+                (revision_id, document_id),
+            ).fetchone()
+            if row:
+                target_content = row["content"]
+        lines = list(
+            difflib.unified_diff(
+                current.content.splitlines(),
+                target_content.splitlines(),
+                fromfile=current.current_revision_id or "before",
+                tofile=revision_id,
+                lineterm="",
+            )
+        )
+        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "current_revision_id": revision_id,
-            "diff": current.content,
+            "diff": diff_text,
+            "lines_added": sum(
+                line.startswith("+") and not line.startswith("+++") for line in lines
+            ),
+            "lines_removed": sum(
+                line.startswith("-") and not line.startswith("---") for line in lines
+            ),
         }
         if summary:
             details["summary"] = summary
@@ -1640,6 +1699,7 @@ class WorkspaceAccessService:
         current: Document,
         operation: Callable[[], T],
         details: dict[str, object] | None = None,
+        estimated_bytes: int | None = None,
     ) -> T:
         def authorized() -> T:
             self.policy.require(principal, capability, current.path)
@@ -1653,6 +1713,7 @@ class WorkspaceAccessService:
             resource_id=current.document_id,
             path=current.path,
             details=details,
+            estimated_bytes=estimated_bytes,
         )
 
     def _require_global_read(self, principal: Principal) -> None:
@@ -1679,6 +1740,7 @@ class WorkspaceAccessService:
         resource_id: str | None = None,
         path: str | None = None,
         details: dict[str, object] | None = None,
+        estimated_bytes: int | None = None,
     ) -> T:
         is_mutation = action not in {
             "list",
@@ -1689,13 +1751,14 @@ class WorkspaceAccessService:
             "list_tags",
             "list_folders",
         }
-        estimated_bytes = 2048
-        if details:
-            with suppress(Exception):
-                estimated_bytes = max(
-                    estimated_bytes,
-                    self.activity.estimate_payload_bytes(details),
-                )
+        if estimated_bytes is None:
+            estimated_bytes = 2048
+            if details:
+                with suppress(Exception):
+                    estimated_bytes = max(
+                        estimated_bytes,
+                        self.activity.estimate_payload_bytes(details),
+                    )
         with self.activity.admit(estimated_bytes=estimated_bytes) as reservation:
             audit_inserted = False
             audit_committed = False
@@ -1749,12 +1812,13 @@ class WorkspaceAccessService:
                 ):
                     result = operation()
             except Exception as error:
+                audit_err: Exception | None = None
                 if audit_committed:
                     error_code = getattr(error, "code", "INTERNAL_ERROR")
                     fail_details = dict(recorded_details)
                     fail_details["stage"] = "materialization"
                     fail_details["error"] = str(error)
-                    with suppress(Exception):
+                    try:
                         self.activity.record(
                             principal=principal,
                             action=action,
@@ -1766,6 +1830,8 @@ class WorkspaceAccessService:
                             revision_id=recorded_revision_id,
                             details=fail_details,
                         )
+                    except Exception as ae:
+                        audit_err = ae
                 elif (
                     audit_inserted
                     or getattr(reservation, "_used", False)
@@ -1783,7 +1849,7 @@ class WorkspaceAccessService:
                         fail_details.update(error.details)
                     fail_details["stage"] = "commit" if audit_inserted else "mutation"
                     fail_details["error"] = str(error)
-                    with suppress(Exception):
+                    try:
                         self.activity.record(
                             principal=principal,
                             action=action,
@@ -1794,6 +1860,8 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=fail_details or None,
                         )
+                    except Exception as ae:
+                        audit_err = ae
                 else:
                     outcome = (
                         "denied"
@@ -1805,7 +1873,7 @@ class WorkspaceAccessService:
                     combined_details = dict(details or {})
                     if isinstance(error, SangamError) and error.details:
                         combined_details.update(error.details)
-                    with suppress(Exception):
+                    try:
                         reservation.record(
                             principal=principal,
                             action=action,
@@ -1816,6 +1884,14 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=combined_details or None,
                         )
+                    except Exception as ae:
+                        audit_err = ae
+
+                if audit_err is not None:
+                    if isinstance(error, SangamError):
+                        error.details["audit_persisted"] = False
+                        error.details["audit_error"] = str(audit_err)
+                    raise error from audit_err
                 raise
 
             if not audit_committed and (is_mutation or principal.identity_kind != "human"):

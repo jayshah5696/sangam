@@ -809,17 +809,7 @@ class ActivityService:
                         self._oversized_owner_id is None
                         and (total_in_flight + expansion) <= self.max_total_bytes
                     )
-                    empty_drain_progress = (
-                        len(self._queue) == 0
-                        and self._committing_items == 0
-                        and self._oversized_owner_id is None
-                        and (
-                            self._expansion_owner_id is None
-                            or self._expansion_owner_id == id(reservation)
-                        )
-                        and queue_ok
-                    )
-                    can_expand = (queue_ok and total_ok) or empty_drain_progress
+                    can_expand = queue_ok and total_ok
 
                 if can_expand:
                     self._reserved_producer_bytes += expansion
@@ -827,9 +817,6 @@ class ActivityService:
                     if is_oversized:
                         self._oversized_owner_id = id(reservation)
                         reservation._is_oversized_owner = True
-                    elif empty_drain_progress and not total_ok:
-                        self._expansion_owner_id = id(reservation)
-                        reservation._is_expansion_owner = True
                     self._peak_reserved_bytes = max(
                         self._peak_reserved_bytes, self._reserved_producer_bytes
                     )
@@ -947,7 +934,10 @@ class ActivityService:
             total_in_flight = (
                 self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
             )
-            if (total_in_flight + expansion) > self.max_total_bytes:
+            if (
+                not reservation._is_oversized_owner
+                and (total_in_flight + expansion) > self.max_total_bytes
+            ):
                 raise ServiceUnavailableError(
                     "Audit total memory limit exceeded during transaction"
                 )
