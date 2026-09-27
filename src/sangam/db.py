@@ -53,6 +53,33 @@ class Database:
         finally:
             connection.close()
 
+    def set_audit_target(
+        self,
+        *,
+        resource_id: str | None = None,
+        revision_id: str | None = None,
+        path: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        target = getattr(self._local, "audit_target", None)
+        if target is None:
+            target = {}
+            self._local.audit_target = target
+        if resource_id is not None:
+            target["resource_id"] = resource_id
+        if revision_id is not None:
+            target["revision_id"] = revision_id
+        if path is not None:
+            target["path"] = path
+        if details is not None:
+            target.setdefault("details", {}).update(details)
+
+    def get_audit_target(self) -> dict[str, object]:
+        return getattr(self._local, "audit_target", None) or {}
+
+    def clear_audit_target(self) -> None:
+        self._local.audit_target = None
+
     @contextmanager
     def commit_hook(self, callback: Callable[[sqlite3.Connection], None]) -> Iterator[None]:
         hooks = getattr(self._local, "commit_hooks", None)
@@ -101,6 +128,7 @@ class Database:
             self._local.active_connection = None
             self._local.transaction_depth = 0
             self._local.rollback_required = False
+            self._local.audit_target = None
             connection.close()
 
     def initialize(self) -> None:

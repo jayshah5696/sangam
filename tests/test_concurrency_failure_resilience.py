@@ -906,14 +906,14 @@ def test_audit_queue_capacity_accounts_for_full_event_size_preventing_undercount
         assert not p2_completed.is_set(), "P2 should be waiting on budget capacity!"
         max_b = 16 * 1024
         assert service._queue_bytes + service._committing_bytes <= max_b, "Exceeded budget!"
-        assert service._waiting_bytes > 0, "Waiting payload bytes must be accounted for!"
+        # Crucially: P2 has not serialized its payload while waiting, preserving total memory bounds
+        assert len(service._queue) == 0, "P2 must not enter the queue while waiting!"
 
         # Unblock worker so P1 finishes and P2 can proceed
         pause_commit.set()
         t1.join(timeout=3.0)
         t2.join(timeout=3.0)
         assert p2_completed.is_set(), "P2 must successfully complete once P1 frees capacity!"
-        assert service._waiting_bytes == 0, "Waiting payload bytes must be 0 after completion!"
     finally:
         pause_commit.set()
         service.close()
@@ -969,3 +969,113 @@ def test_mutation_and_audit_event_are_atomic_in_same_transaction(
     with db.connection() as conn:
         failed_doc = conn.execute("SELECT * FROM documents WHERE path = ?", ("fail.md",)).fetchone()
         assert failed_doc is None, "Document must NOT have committed if audit write failed!"
+
+
+def test_audit_records_correct_document_and_revision_on_pathless_create_and_duplicate(
+    client: TestClient, settings
+) -> None:
+    db = Database(settings.database_path)
+
+    # 1. Pathless create
+    res = client.post(
+        "/api/v1/documents",
+        json={"title": "Pathless Doc", "content": "Hello world from pathless", "path": None},
+        headers=headers("pathless-create-k1"),
+    )
+    assert res.status_code == 201
+    created = res.json()
+    created_id = created["document_id"]
+    created_rev = created["current_revision_id"]
+    assert created["path"] is None
+
+    # Check operation_events in SQLite
+    with db.connection() as conn:
+        event = conn.execute(
+            "SELECT resource_id, revision_id, path, action, outcome FROM operation_events "
+            "WHERE resource_id = ? AND action = 'create'",
+            (created_id,),
+        ).fetchone()
+        assert event is not None, "Audit event for pathless create was not found with document_id"
+        assert event["resource_id"] == created_id
+        assert event["revision_id"] == created_rev
+        assert event["path"] is None
+        assert event["outcome"] == "accepted"
+
+    # 2. Duplicate document
+    dup_res = client.post(
+        f"/api/v1/documents/{created_id}/duplicate",
+        json={"expected_revision_id": created_rev, "title": "Duplicated Doc"},
+        headers=headers("dup-doc-k1"),
+    )
+    assert dup_res.status_code == 201
+    dup_doc = dup_res.json()
+    dup_id = dup_doc["document_id"]
+    dup_rev = dup_doc["current_revision_id"]
+    assert dup_id != created_id
+
+    # Check operation_events for the duplicate action
+    with db.connection() as conn:
+        dup_event = conn.execute(
+            "SELECT resource_id, revision_id, action, outcome FROM operation_events "
+            "WHERE resource_id = ? AND action = 'duplicate'",
+            (dup_id,),
+        ).fetchone()
+        assert dup_event is not None, "Audit event must identify the newly created document"
+        assert dup_event["resource_id"] == dup_id
+        assert dup_event["revision_id"] == dup_rev
+        assert dup_event["outcome"] == "accepted"
+
+        # Ensure source document ID was NOT recorded as the duplicate target
+        source_dup_event = conn.execute(
+            "SELECT event_id FROM operation_events "
+            "WHERE resource_id = ? AND action = 'duplicate'",
+            (created_id,),
+        ).fetchone()
+        assert source_dup_event is None, "Source doc ID must not be recorded as target"
+
+
+def test_audit_service_enforces_total_memory_bound_before_serialization(
+    client: TestClient,
+) -> None:
+    real_db = client.app.state.services.activity.database
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_mem_bound_pre_alloc"
+    )
+
+    # max_queue_bytes = 16 KB, max_total_bytes = 16 KB
+    service = ActivityService(real_db, max_queue_bytes=16 * 1024, max_total_bytes=16 * 1024)
+
+    try:
+        # Producer 1 reserves 8 KB
+        res1 = service.admit(estimated_bytes=8 * 1024)
+        # Producer 2 reserves 8 KB -> admitted_bytes is now 16 KB (total memory fully reserved)
+        res2 = service.admit(estimated_bytes=8 * 1024)
+        assert service._admitted_bytes == 16 * 1024
+
+        # Producer 3 tries to admit -> must fail or block because total memory is at budget
+        with pytest.raises(ServiceUnavailableError, match="Audit queue capacity exceeded"):
+            service.admit(estimated_bytes=1024, timeout=0.05)
+
+        # Producer 1 records an event with diff
+        res1.record(
+            principal=principal,
+            action="read",
+            resource_type="document",
+            outcome="accepted",
+            details={"diff": "A" * 6000},
+        )
+
+        # After Producer 1 is committed, capacity is freed
+        # Producer 2 can now record
+        res2.record(
+            principal=principal,
+            action="read",
+            resource_type="document",
+            outcome="accepted",
+            details={"diff": "B" * 6000},
+        )
+
+        assert service._admitted_bytes == 0
+        assert service._queue_bytes == 0
+    finally:
+        service.close()

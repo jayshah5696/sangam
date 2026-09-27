@@ -140,15 +140,18 @@ class ActivityService:
         *,
         max_queue_items: int = 5000,
         max_queue_bytes: int = 16 * 1024 * 1024,
+        max_total_bytes: int | None = None,
         max_batch_size: int = 250,
     ) -> None:
         self.database = database
         self.max_queue_items = max_queue_items
         self.max_queue_bytes = max_queue_bytes
+        self.max_total_bytes = (
+            max_total_bytes if max_total_bytes is not None else max_queue_bytes * 2
+        )
         self.max_batch_size = max_batch_size
         self._queue: list[_AuditEventItem] = []
         self._queue_bytes = 0
-        self._waiting_bytes = 0
         self._admitted_items = 0
         self._admitted_bytes = 0
         self._committing_items = 0
@@ -185,8 +188,7 @@ class ActivityService:
                     )
 
                 has_capacity = self._admitted_items < self.max_queue_items and (
-                    (self._admitted_bytes + self._waiting_bytes + estimated_bytes)
-                    <= self.max_queue_bytes
+                    (self._admitted_bytes + estimated_bytes) <= self.max_total_bytes
                     or self._admitted_items == 0
                 )
                 if has_capacity:
@@ -357,8 +359,6 @@ class ActivityService:
         with self._queue_lock:
             self._committing_items = max(0, self._committing_items - len(batch))
             self._committing_bytes = max(0, self._committing_bytes - batch_bytes)
-            self._admitted_items = max(0, self._admitted_items - len(batch))
-            self._admitted_bytes = max(0, self._admitted_bytes - batch_bytes)
             self._queue_condition.notify_all()
 
     def _prepare_event_row(
@@ -455,6 +455,27 @@ class ActivityService:
             row,
         )
 
+    def _estimate_payload_bytes(self, details: dict[str, object] | None) -> int:
+        if not details:
+            return 512
+        size = 512
+        for k, v in details.items():
+            size += len(str(k).encode("utf-8")) + 16
+            if isinstance(v, str):
+                size += len(v.encode("utf-8"))
+            elif isinstance(v, (bytes, bytearray)):
+                size += len(v)
+            elif isinstance(v, (list, tuple)):
+                size += sum(len(str(x).encode("utf-8")) + 16 for x in v) + 32
+            elif isinstance(v, dict):
+                size += sum(
+                    len(str(dk).encode("utf-8")) + len(str(dv).encode("utf-8")) + 32
+                    for dk, dv in v.items()
+                )
+            else:
+                size += 64
+        return size
+
     def _record_with_reservation(
         self,
         *,
@@ -469,6 +490,26 @@ class ActivityService:
         revision_id: str | None = None,
         details: dict[str, object] | None = None,
     ) -> None:
+        estimated_payload_size = self._estimate_payload_bytes(details)
+        expansion = max(0, estimated_payload_size - reservation._estimated_bytes)
+        deadline = time.monotonic() + 60.0
+
+        with self._queue_lock:
+            while (
+                (
+                    self._queue_bytes + self._committing_bytes + estimated_payload_size
+                    > self.max_queue_bytes
+                    or self._admitted_bytes + expansion > self.max_total_bytes
+                )
+                and (len(self._queue) > 0 or self._committing_items > 0)
+            ):
+                if not self._worker_healthy:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._queue_condition.wait(min(remaining, 0.1))
+
         row, size_bytes = self._prepare_event_row(
             principal=principal,
             action=action,
@@ -487,29 +528,16 @@ class ActivityService:
             future=concurrent.futures.Future(),
         )
 
-        deadline = time.monotonic() + 60.0
         with self._queue_lock:
-            self._waiting_bytes += size_bytes
-            while (
-                self._queue_bytes + self._committing_bytes + size_bytes > self.max_queue_bytes
-                and (len(self._queue) > 0 or self._committing_items > 0)
-            ):
-                if not self._worker_healthy:
-                    break
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                self._queue_condition.wait(min(remaining, 0.1))
-
-            self._waiting_bytes = max(0, self._waiting_bytes - size_bytes)
             can_queue = self._worker_healthy and (
                 self._queue_bytes + self._committing_bytes + size_bytes <= self.max_queue_bytes
                 or (len(self._queue) == 0 and self._committing_items == 0)
             )
             if can_queue:
                 self._admitted_bytes = max(
-                    0, self._admitted_bytes - reservation._estimated_bytes + size_bytes
+                    0, self._admitted_bytes - reservation._estimated_bytes
                 )
+                self._admitted_items = max(0, self._admitted_items - 1)
                 self._queue.append(item)
                 self._queue_bytes += size_bytes
                 self._active_producers = max(0, self._active_producers - 1)
@@ -518,7 +546,7 @@ class ActivityService:
                     self._producers_done.notify_all()
                 self._queue_condition.notify_all()
 
-        if not reservation._transferred:
+        if not can_queue:
             self._persist_row_direct(row)
             return
 

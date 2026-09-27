@@ -525,6 +525,12 @@ class DocumentService:
                         revision_id=revision_id,
                     )
                     duplicate = (document_id, revision_id)
+                if duplicate is not None:
+                    self.database.set_audit_target(
+                        resource_id=duplicate[0],
+                        revision_id=duplicate[1],
+                        path=normalized_path,
+                    )
         except sqlite3.IntegrityError as error:
             raise ValidationError("A document already uses that path") from error
         if duplicate is None:
@@ -690,6 +696,17 @@ class DocumentService:
                         revision_id=revision_id,
                     )
                     result = (document_id, revision_id)
+                    self.database.set_audit_target(
+                        resource_id=result[0],
+                        revision_id=result[1],
+                        path=next_path,
+                    )
+                else:
+                    self.database.set_audit_target(
+                        resource_id=result[0],
+                        revision_id=result[1],
+                        path=path,
+                    )
         except sqlite3.IntegrityError as error:
             raise ValidationError("A document already uses that path") from error
         if result is None:
@@ -1040,6 +1057,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, revision_id)
+                if result is not None:
+                    self.database.set_audit_target(
+                        resource_id=result[0],
+                        revision_id=result[1],
+                        path=path,
+                    )
             except Exception:
                 try:
                     if (
@@ -1198,6 +1221,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, revision_id)
+                if result is not None:
+                    self.database.set_audit_target(
+                        resource_id=result[0],
+                        revision_id=result[1],
+                        path=old_path,
+                    )
             except Exception:
                 try:
                     if self.workspace.has_trashed_document(
@@ -1459,6 +1488,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, new_revision_id)
+                if result is not None:
+                    self.database.set_audit_target(
+                        resource_id=result[0],
+                        revision_id=result[1],
+                        path=target_path,
+                    )
             except Exception:
                 try:
                     if self.workspace.is_document_file(
@@ -1633,6 +1668,11 @@ class DocumentService:
                     request_hash=fingerprint,
                     document_id=document_id,
                     revision_id=current.current_revision_id,
+                )
+                self.database.set_audit_target(
+                    resource_id=document_id,
+                    revision_id=current.current_revision_id,
+                    path=current.path,
                 )
         updated = self.get_document(document_id)
         self.search_index.sync(updated)

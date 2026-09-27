@@ -1657,30 +1657,13 @@ class WorkspaceAccessService:
             def audit_commit_hook(connection: sqlite3.Connection) -> None:
                 nonlocal audit_recorded
                 if not audit_recorded and is_mutation:
-                    hook_resource_id = resource_id
-                    hook_path = path
-                    hook_revision_id = None
-                    if not hook_resource_id and path:
-                        with suppress(Exception):
-                            stmt = (
-                                "SELECT document_id, current_revision_id FROM documents "
-                                "WHERE path = ?"
-                            )
-                            row = connection.execute(stmt, (path,)).fetchone()
-                            if row:
-                                hook_resource_id = row["document_id"]
-                                hook_revision_id = row["current_revision_id"]
-                    elif hook_resource_id and resource_type in {"document", "pdf_document"}:
-                        with suppress(Exception):
-                            stmt = (
-                                "SELECT current_revision_id, path FROM documents "
-                                "WHERE document_id = ?"
-                            )
-                            row = connection.execute(stmt, (hook_resource_id,)).fetchone()
-                            if row:
-                                hook_revision_id = row["current_revision_id"]
-                                if not hook_path and row["path"]:
-                                    hook_path = row["path"]
+                    target = self.documents.database.get_audit_target()
+                    hook_resource_id = target.get("resource_id") or resource_id
+                    hook_revision_id = target.get("revision_id")
+                    hook_path = target.get("path") if target.get("path") is not None else path
+                    hook_details = dict(details or {})
+                    if "details" in target and isinstance(target["details"], dict):
+                        hook_details.update(target["details"])
 
                     reservation.record_with_connection(
                         connection,
@@ -1691,7 +1674,7 @@ class WorkspaceAccessService:
                         path=hook_path,
                         outcome="accepted",
                         revision_id=hook_revision_id,
-                        details=details,
+                        details=hook_details or None,
                     )
                     audit_recorded = True
 

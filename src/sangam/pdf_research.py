@@ -225,6 +225,11 @@ class PdfResearchService:
                         resource_type="pdf_document",
                         resource_id=document_id,
                     )
+                    self.database.set_audit_target(
+                        resource_id=document_id,
+                        revision_id=revision_id,
+                        path=normalized_path,
+                    )
             except Exception:
                 if created_file:
                     with self.database.connection() as connection:
