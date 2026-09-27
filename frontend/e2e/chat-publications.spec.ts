@@ -207,6 +207,21 @@ test('compact document chat stays contained across supported inspector widths an
   await expect(chatSurface).toBeVisible()
   await expect(chatShell).toBeVisible()
 
+  const expectChatToFit = async () => {
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const surface = document.querySelector('.inspector-chat-surface')
+          const shell = document.querySelector('.chat-panel-compact .chatkit-shell')
+          if (!(surface instanceof HTMLElement) || !(shell instanceof HTMLElement)) return false
+          const surfaceBox = surface.getBoundingClientRect()
+          const shellBox = shell.getBoundingClientRect()
+          return shellBox.right <= surfaceBox.right + 1.5 && shellBox.width <= surfaceBox.width + 1.5
+        }),
+      )
+      .toBe(true)
+  }
+
   const handle = page.locator('.resize-handle[aria-label="Resize right sidebar"]')
   await expect(handle).toBeVisible()
 
@@ -218,14 +233,7 @@ test('compact document chat stays contained across supported inspector widths an
       localStorage.setItem('sangam.theme-preferences', JSON.stringify(stored))
       window.dispatchEvent(new Event('storage'))
     }, width)
-    await page.waitForTimeout(50)
-
-    const surfaceBox = await chatSurface.boundingBox()
-    const shellBox = await chatShell.boundingBox()
-    expect(surfaceBox).not.toBeNull()
-    expect(shellBox).not.toBeNull()
-    expect(shellBox!.x + shellBox!.width).toBeLessThanOrEqual(surfaceBox!.x + surfaceBox!.width + 1.5)
-    expect(shellBox!.width).toBeLessThanOrEqual(surfaceBox!.width + 1.5)
+    await expectChatToFit()
 
     const overflows = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -236,20 +244,14 @@ test('compact document chat stays contained across supported inspector widths an
   // Keyboard resize with Home (min 290) and End (max 720) and arrow keys
   await handle.focus()
   await page.keyboard.press('Home')
-  const atMinBox = await chatShell.boundingBox()
-  const surfaceMinBox = await chatSurface.boundingBox()
-  expect(atMinBox!.width).toBeLessThanOrEqual(surfaceMinBox!.width + 1.5)
+  await expectChatToFit()
 
   await page.keyboard.press('End')
-  const atMaxBox = await chatShell.boundingBox()
-  const surfaceMaxBox = await chatSurface.boundingBox()
-  expect(atMaxBox!.width).toBeLessThanOrEqual(surfaceMaxBox!.width + 1.5)
+  await expectChatToFit()
 
   await page.keyboard.press('ArrowRight')
   await page.keyboard.press('Shift+ArrowLeft')
-  const atShiftBox = await chatShell.boundingBox()
-  const surfaceShiftBox = await chatSurface.boundingBox()
-  expect(atShiftBox!.width).toBeLessThanOrEqual(surfaceShiftBox!.width + 1.5)
+  await expectChatToFit()
 
   const overflows = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

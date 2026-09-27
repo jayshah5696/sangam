@@ -80,7 +80,7 @@ test-frontend-unit args="":
 
 # Exercise browser interactions, optionally passing Playwright projects or filters.
 test-e2e args="":
-    pnpm --dir frontend run test:e2e -- {{ args }}
+    pnpm --dir frontend run test:e2e {{ args }}
 
 # Install the browser engines used by the Playwright suite.
 install-browsers:
