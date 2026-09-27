@@ -77,10 +77,11 @@ def print_stats(name: str, latencies: list[float], errors: int, total_time: floa
 
 def run_read_benchmark(
     client: TestClient, token: str, workers: int, requests_per_worker: int
-) -> int:
-    # Seed 50 documents first
+) -> tuple[int, list[str]]:
+    # Seed 50 documents first and assert HTTP 201
+    seed_doc_ids: list[str] = []
     for i in range(50):
-        client.post(
+        resp = client.post(
             "/api/v1/documents",
             json={"title": f"Bench Doc {i}", "content": f"Content {i} for benchmark"},
             headers={
@@ -88,6 +89,8 @@ def run_read_benchmark(
                 "Idempotency-Key": f"seed-doc-{i}",
             },
         )
+        assert resp.status_code == 201, f"Seed doc {i} failed: {resp.text}"
+        seed_doc_ids.append(resp.json()["document_id"])
 
     latencies: list[float] = []
     errors = 0
@@ -123,19 +126,21 @@ def run_read_benchmark(
     print_stats(f"Agent Read-Heavy ({workers} workers)", latencies, errors, total_time)
     if errors > 0:
         raise RuntimeError(f"Read benchmark encountered {errors} errors")
-    return len(latencies)
+    return len(latencies), seed_doc_ids
 
 
 def run_write_benchmark(
     client: TestClient, token: str, workers: int, requests_per_worker: int
-) -> int:
+) -> tuple[int, list[str]]:
     latencies: list[float] = []
     errors = 0
+    created_doc_ids: list[str] = []
     start = time.perf_counter()
 
     def worker(worker_id: int):
         w_latencies = []
         w_errors = 0
+        w_ids = []
         for req in range(requests_per_worker):
             t0 = time.perf_counter()
             resp = client.post(
@@ -153,34 +158,38 @@ def run_write_benchmark(
             elapsed = time.perf_counter() - t0
             if resp.status_code == 201:
                 w_latencies.append(elapsed)
+                w_ids.append(resp.json()["document_id"])
             else:
                 w_errors += 1
-        return w_latencies, w_errors
+        return w_latencies, w_errors, w_ids
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(worker, i) for i in range(workers)]
         for f in concurrent.futures.as_completed(futures):
-            wl, we = f.result()
+            wl, we, w_ids = f.result()
             latencies.extend(wl)
             errors += we
+            created_doc_ids.extend(w_ids)
 
     total_time = time.perf_counter() - start
     print_stats(f"Agent Write-Heavy ({workers} workers)", latencies, errors, total_time)
     if errors > 0:
         raise RuntimeError(f"Write benchmark encountered {errors} errors")
-    return len(latencies)
+    return len(latencies), created_doc_ids
 
 
 def run_mixed_benchmark(
     client: TestClient, token: str, workers: int, requests_per_worker: int
-) -> int:
+) -> tuple[int, list[str]]:
     latencies: list[float] = []
     errors = 0
+    mixed_doc_ids: list[str] = []
     start = time.perf_counter()
 
     def worker(worker_id: int):
         w_latencies = []
         w_errors = 0
+        w_ids = []
         for req in range(requests_per_worker):
             is_write = req % 5 == 0  # 20% writes, 80% reads
             t0 = time.perf_counter()
@@ -198,6 +207,8 @@ def run_mixed_benchmark(
                     },
                 )
                 success = resp.status_code == 201
+                if success:
+                    w_ids.append(resp.json()["document_id"])
             else:
                 resp = client.get(
                     "/api/v1/documents",
@@ -212,20 +223,21 @@ def run_mixed_benchmark(
                 w_latencies.append(elapsed)
             else:
                 w_errors += 1
-        return w_latencies, w_errors
+        return w_latencies, w_errors, w_ids
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(worker, i) for i in range(workers)]
         for f in concurrent.futures.as_completed(futures):
-            wl, we = f.result()
+            wl, we, w_ids = f.result()
             latencies.extend(wl)
             errors += we
+            mixed_doc_ids.extend(w_ids)
 
     total_time = time.perf_counter() - start
     print_stats(f"Agent Mixed 80/20 ({workers} workers)", latencies, errors, total_time)
     if errors > 0:
         raise RuntimeError(f"Mixed benchmark encountered {errors} errors")
-    return len(latencies)
+    return len(latencies), mixed_doc_ids
 
 
 def main() -> None:
@@ -249,7 +261,9 @@ def main() -> None:
             # 50 seed documents created
             expected_audits += 50
 
-            read_ops = run_read_benchmark(
+            import json
+
+            read_ops, seed_doc_ids = run_read_benchmark(
                 client,
                 token=token,
                 workers=min(args.workers * 2, 40),
@@ -257,7 +271,7 @@ def main() -> None:
             )
             expected_audits += read_ops
 
-            write_ops = run_write_benchmark(
+            write_ops, write_doc_ids = run_write_benchmark(
                 client,
                 token=token,
                 workers=args.workers,
@@ -265,13 +279,15 @@ def main() -> None:
             )
             expected_audits += write_ops
 
-            mixed_ops = run_mixed_benchmark(
+            mixed_ops, mixed_doc_ids = run_mixed_benchmark(
                 client,
                 token=token,
                 workers=args.workers,
                 requests_per_worker=args.ops_per_worker,
             )
             expected_audits += mixed_ops
+
+            all_created_doc_ids = set(seed_doc_ids + write_doc_ids + mixed_doc_ids)
 
             # Deep audit validation & database integrity verification
             activity_svc = client.app.state.services.activity
@@ -285,8 +301,10 @@ def main() -> None:
                 # Deep validation on document create events
                 rows = conn.execute(
                     "SELECT event_id, resource_id, revision_id, path, action, outcome, detail_json "
-                    "FROM operation_events WHERE action = 'create'"
+                    "FROM operation_events WHERE action = 'create' AND resource_type = 'document'"
                 ).fetchall()
+
+                found_doc_ids = set()
                 for r in rows:
                     assert r["resource_id"] is not None, (
                         f"Event {r['event_id']} missing resource_id"
@@ -295,6 +313,21 @@ def main() -> None:
                         f"Event {r['event_id']} missing revision_id"
                     )
                     assert r["outcome"] == "accepted", f"Event {r['event_id']} outcome not accepted"
+
+                    # Validate parsed detail_json payload structure
+                    assert r["detail_json"] is not None, (
+                        f"Event {r['event_id']} missing detail_json"
+                    )
+                    details = json.loads(r["detail_json"])
+                    assert isinstance(details, dict), (
+                        f"Event {r['event_id']} detail_json is not dict"
+                    )
+                    assert "title" in details, f"Event {r['event_id']} detail_json missing title"
+                    if "diff" in details:
+                        assert isinstance(details["diff"], str), (
+                            f"Event {r['event_id']} diff not str"
+                        )
+
                     # Correlate with documents table
                     doc = conn.execute(
                         "SELECT document_id, current_revision_id, path FROM documents "
@@ -303,6 +336,13 @@ def main() -> None:
                     ).fetchone()
                     assert doc is not None, f"Document {r['resource_id']} not found in DB"
                     assert doc["current_revision_id"] == r["revision_id"]
+                    found_doc_ids.add(r["resource_id"])
+
+                # Verify every created document has a matching audit row
+                assert all_created_doc_ids == found_doc_ids, (
+                    f"Mismatch between created documents and audit events! "
+                    f"Missing audits: {all_created_doc_ids - found_doc_ids}"
+                )
 
             print(
                 f"\nAudit Log Durability Check: {persisted_events} persisted / "
@@ -319,6 +359,24 @@ def main() -> None:
             assert activity_svc._admitted_bytes == 0, "Leaked admitted bytes in ActivityService"
             assert activity_svc._queue_bytes == 0, "Drained queue bytes not zero"
             assert activity_svc._reserved_producer_bytes == 0, "Leaked reserved producer bytes"
+
+            # Enforce bounded peak queue and peak total memory invariants
+            peak_queue = activity_svc.peak_queue_bytes
+            peak_total = activity_svc.peak_total_bytes
+            assert peak_queue <= activity_svc.max_queue_bytes, (
+                f"Peak queue {peak_queue} exceeded max {activity_svc.max_queue_bytes}"
+            )
+            assert peak_total <= activity_svc.max_total_bytes, (
+                f"Peak total {peak_total} exceeded max {activity_svc.max_total_bytes}"
+            )
+            assert peak_total > 0, "Peak total bytes should be non-zero during concurrent workload"
+
+            print(
+                f"Memory Invariant Metrics: Peak Queue = {peak_queue / 1024:.1f} KB / "
+                f"{activity_svc.max_queue_bytes / 1024:.1f} KB, "
+                f"Peak Total = {peak_total / 1024:.1f} KB / "
+                f"{activity_svc.max_total_bytes / 1024:.1f} KB"
+            )
 
             db_size = Path(settings.database_path).stat().st_size
             wal_path = Path(str(settings.database_path) + "-wal")

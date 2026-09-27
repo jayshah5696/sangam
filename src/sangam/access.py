@@ -418,7 +418,12 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        details: dict[str, object] = {"title": title, "content_type": content_type}
+        details: dict[str, object] = {
+            "title": title,
+            "content_type": content_type,
+            "diff": content,
+            "lines_added": len(content.splitlines()),
+        }
         return self._run(principal, "create", "document", operation, path=path, details=details)
 
     def create_publication(
@@ -635,7 +640,11 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        details: dict[str, object] = {"expected_revision_id": expected_revision_id}
+        diff_bound = max(len(content), len(current.content)) * 2
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "diff": "X" * diff_bound,
+        }
         if title is not None:
             details["title"] = title
         if summary is not None:
@@ -696,6 +705,12 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "diff": current.content,
+        }
+        if title is not None:
+            details["title"] = title
         return self._run(
             principal,
             "duplicate",
@@ -703,6 +718,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details=details,
         )
 
     def update_document_metadata(
@@ -884,6 +900,7 @@ class WorkspaceAccessService:
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "current_revision_id": revision_id,
+            "diff": current.content,
         }
         if summary:
             details["summary"] = summary
@@ -1737,18 +1754,47 @@ class WorkspaceAccessService:
                     fail_details = dict(recorded_details)
                     fail_details["stage"] = "materialization"
                     fail_details["error"] = str(error)
-                    reservation.record(
-                        principal=principal,
-                        action=action,
-                        resource_type=resource_type,
-                        resource_id=recorded_resource_id,
-                        path=recorded_path,
-                        outcome="failed",
-                        error_code=error_code,
-                        revision_id=recorded_revision_id,
-                        details=fail_details,
+                    with suppress(Exception):
+                        self.activity.record(
+                            principal=principal,
+                            action=action,
+                            resource_type=resource_type,
+                            resource_id=recorded_resource_id,
+                            path=recorded_path,
+                            outcome="failed",
+                            error_code=error_code,
+                            revision_id=recorded_revision_id,
+                            details=fail_details,
+                        )
+                elif (
+                    audit_inserted
+                    or getattr(reservation, "_used", False)
+                    or getattr(reservation, "_released", False)
+                ):
+                    outcome = (
+                        "denied"
+                        if isinstance(error, AuthorizationError)
+                        else "conflict"
+                        if isinstance(error, ConflictError)
+                        else "failed"
                     )
-                elif not audit_inserted:
+                    fail_details = dict(recorded_details)
+                    if isinstance(error, SangamError) and error.details:
+                        fail_details.update(error.details)
+                    fail_details["stage"] = "commit" if audit_inserted else "mutation"
+                    fail_details["error"] = str(error)
+                    with suppress(Exception):
+                        self.activity.record(
+                            principal=principal,
+                            action=action,
+                            resource_type=resource_type,
+                            resource_id=recorded_resource_id or resource_id,
+                            path=recorded_path or path,
+                            outcome=outcome,
+                            error_code=getattr(error, "code", "INTERNAL_ERROR"),
+                            details=fail_details or None,
+                        )
+                else:
                     outcome = (
                         "denied"
                         if isinstance(error, AuthorizationError)
@@ -1759,16 +1805,17 @@ class WorkspaceAccessService:
                     combined_details = dict(details or {})
                     if isinstance(error, SangamError) and error.details:
                         combined_details.update(error.details)
-                    reservation.record(
-                        principal=principal,
-                        action=action,
-                        resource_type=resource_type,
-                        resource_id=resource_id,
-                        path=path,
-                        outcome=outcome,
-                        error_code=getattr(error, "code", "INTERNAL_ERROR"),
-                        details=combined_details or None,
-                    )
+                    with suppress(Exception):
+                        reservation.record(
+                            principal=principal,
+                            action=action,
+                            resource_type=resource_type,
+                            resource_id=resource_id,
+                            path=path,
+                            outcome=outcome,
+                            error_code=getattr(error, "code", "INTERNAL_ERROR"),
+                            details=combined_details or None,
+                        )
                 raise
 
             if not audit_committed and (is_mutation or principal.identity_kind != "human"):

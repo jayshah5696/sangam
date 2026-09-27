@@ -1326,65 +1326,86 @@ def test_audit_exclusive_oversized_ownership_and_atomic_capacity(client: TestCli
 
 
 def test_overlap_write_transaction_and_oversized_audit_event(client: TestClient) -> None:
-    """Area 1 acceptance: Overlapping write transaction and oversized audit event."""
-    db = client.app.state.services.activity.database
+    """Area 1 acceptance: Overlapping write mutation with audit hook and oversized audit event."""
     activity_service = client.app.state.services.activity
     principal = Principal.trusted_human(
         actor_id="human:jay", display_name="Jay", operation_id="op_overlap_tx"
     )
 
-    oversized_payload = "W" * 70_000
-    tx_started = threading.Event()
-    audit_submitted = threading.Event()
-    audit_finished = threading.Event()
-    tx_finished = threading.Event()
+    orig_q = activity_service.max_queue_bytes
+    orig_t = activity_service.max_total_bytes
+    activity_service.max_queue_bytes = 32_000
+    activity_service.max_total_bytes = 64_000
 
-    def write_tx():
-        with db.transaction() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO folders(path, name, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?)",
-                ("overlap_folder", "overlap_folder", "2026-01-01", "2026-01-01"),
-            )
+    try:
+        oversized_payload = "W" * 70_000
+        tx_started = threading.Event()
+        audit_submitted = threading.Event()
+        audit_finished = threading.Event()
+        tx_finished = threading.Event()
+        created_doc_id = None
+
+        def write_tx():
+            nonlocal created_doc_id
             tx_started.set()
             assert audit_submitted.wait(timeout=5.0)
-            time.sleep(0.1)
-        tx_finished.set()
-
-    def audit_record():
-        assert tx_started.wait(timeout=5.0)
-        with activity_service.admit(estimated_bytes=80_000) as res:
-            audit_submitted.set()
-            res.record(
-                principal=principal,
-                action="create",
-                resource_type="document",
-                outcome="accepted",
-                resource_id="doc_overlap_audit",
-                details={"diff": oversized_payload},
+            resp = client.post(
+                "/api/v1/documents",
+                json={"title": "Overlap Doc", "content": "doc content", "path": "overlap_doc.md"},
+                headers=headers("overlap-tx-key-1"),
             )
-        audit_finished.set()
+            assert resp.status_code == 201
+            created_doc_id = resp.json()["document_id"]
+            tx_finished.set()
 
-    t_tx = threading.Thread(target=write_tx)
-    t_aud = threading.Thread(target=audit_record)
+        def audit_record():
+            assert tx_started.wait(timeout=5.0)
+            with activity_service.admit(estimated_bytes=80_000) as res:
+                audit_submitted.set()
+                res.record(
+                    principal=principal,
+                    action="create",
+                    resource_type="document",
+                    outcome="accepted",
+                    resource_id="doc_overlap_audit",
+                    details={"diff": oversized_payload},
+                )
+            audit_finished.set()
 
-    t_tx.start()
-    t_aud.start()
+        t_tx = threading.Thread(target=write_tx)
+        t_aud = threading.Thread(target=audit_record)
 
-    t_tx.join(timeout=10.0)
-    t_aud.join(timeout=10.0)
+        t_tx.start()
+        t_aud.start()
 
-    assert tx_finished.is_set(), "Write transaction deadlocked or timed out"
-    assert audit_finished.is_set(), "Audit recording deadlocked or timed out"
+        t_tx.join(timeout=10.0)
+        t_aud.join(timeout=10.0)
 
-    with db.connection() as conn:
-        fld = conn.execute("SELECT * FROM folders WHERE path = ?", ("overlap_folder",)).fetchone()
-        assert fld is not None
-        event = conn.execute(
-            "SELECT * FROM operation_events WHERE resource_id = ?", ("doc_overlap_audit",)
-        ).fetchone()
-        assert event is not None
-        assert event["outcome"] == "accepted"
+        assert tx_finished.is_set(), "Write transaction deadlocked or timed out"
+        assert audit_finished.is_set(), "Audit recording deadlocked or timed out"
+
+        db = activity_service.database
+        with db.connection() as conn:
+            doc = conn.execute(
+                "SELECT * FROM documents WHERE document_id = ?", (created_doc_id,)
+            ).fetchone()
+            assert doc is not None
+            # Verify mutation audit event has document_id and revision_id
+            mut_event = conn.execute(
+                "SELECT * FROM operation_events WHERE resource_id = ?", (created_doc_id,)
+            ).fetchone()
+            assert mut_event is not None
+            assert mut_event["outcome"] == "accepted"
+            assert mut_event["revision_id"] == doc["current_revision_id"]
+
+            event = conn.execute(
+                "SELECT * FROM operation_events WHERE resource_id = ?", ("doc_overlap_audit",)
+            ).fetchone()
+            assert event is not None
+            assert event["outcome"] == "accepted"
+    finally:
+        activity_service.max_queue_bytes = orig_q
+        activity_service.max_total_bytes = orig_t
 
 
 def test_recursive_payload_bound_covers_nested_structures_and_numeric_boundaries() -> None:
@@ -1557,3 +1578,226 @@ def test_annotation_validation_rejects_control_characters(client: TestClient) ->
             actor_id="human:jay",
             idempotency_key="ann-val-2",
         )
+
+
+def test_materialization_failure_does_not_corrupt_unrelated_reservation_accounting(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Probe 1: Materialization failure must not reuse or corrupt an active reservation."""
+    activity_svc = client.app.state.services.activity
+    workspace = client.app.state.services.documents.workspace
+
+    res_probe = activity_svc.admit(estimated_bytes=2048)
+    assert activity_svc._reserved_producer_bytes == 2048
+    initial_admitted = activity_svc._admitted_items
+
+    def failing_write_atomic(*args: object, **kwargs: object) -> str:
+        raise OSError("Simulated disk failure during atomic write")
+
+    monkeypatch.setattr(workspace, "write_atomic", failing_write_atomic)
+
+    resp = client.post(
+        "/api/v1/documents",
+        json={"title": "Failing Materialization", "content": "hello", "path": "fail_mat_probe.md"},
+        headers=headers("fail-mat-probe-1"),
+    )
+    assert resp.status_code in (500, 503)
+
+    assert activity_svc._reserved_producer_bytes == 2048, (
+        f"Expected 2048 reserved bytes remaining, got {activity_svc._reserved_producer_bytes}"
+    )
+    assert activity_svc._admitted_items == initial_admitted
+
+    res_probe.release()
+    assert activity_svc._reserved_producer_bytes == 0
+
+
+def test_nested_structures_deep_bound_vs_actual_json() -> None:
+    """Probe 2: 12 nested lists wrapping a 100,000-char string must estimate bound >= actual."""
+    import json
+
+    from sangam.activity import _estimate_value_bound
+
+    s = "a" * 100_000
+    val = s
+    for _ in range(12):
+        val = [val]
+
+    bound = _estimate_value_bound(val)
+    actual = len(json.dumps(val))
+    assert bound >= actual, f"Bound {bound} was less than actual serialized JSON length {actual}"
+    assert bound > 100_000, f"Bound {bound} undercounted large nested string"
+
+    deep_val = "x"
+    for _ in range(35):
+        deep_val = [deep_val]
+    with pytest.raises(ValueError, match="maximum nesting depth"):
+        _estimate_value_bound(deep_val)
+
+
+def test_two_expanding_producers_do_not_deadlock_on_empty_queue(client: TestClient) -> None:
+    """Finding 2: Two expanding producers when queue is empty take turns rather than deadlocking."""
+    activity_svc = client.app.state.services.activity
+    orig_q = activity_svc.max_queue_bytes
+    orig_t = activity_svc.max_total_bytes
+    activity_svc.max_queue_bytes = 16_000
+    activity_svc.max_total_bytes = 32_000
+
+    try:
+        res1 = activity_svc.admit(estimated_bytes=8_000)
+        res2 = activity_svc.admit(estimated_bytes=8_000)
+
+        payload = "E" * 10_000
+        p1 = Principal.trusted_human(actor_id="human:jay", display_name="P1", operation_id="op_p1")
+        p2 = Principal.trusted_human(actor_id="human:jay", display_name="P2", operation_id="op_p2")
+
+        errors: list[Exception] = []
+
+        def worker(res, princ, doc_id):
+            try:
+                res.record(
+                    principal=princ,
+                    action="create",
+                    resource_type="document",
+                    outcome="accepted",
+                    resource_id=doc_id,
+                    details={"diff": payload},
+                )
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=worker, args=(res1, p1, "doc_p1"))
+        t2 = threading.Thread(target=worker, args=(res2, p2, "doc_p2"))
+
+        t1.start()
+        t2.start()
+
+        t1.join(timeout=10.0)
+        t2.join(timeout=10.0)
+
+        assert not t1.is_alive(), "Producer 1 deadlocked during expansion"
+        assert not t2.is_alive(), "Producer 2 deadlocked during expansion"
+        assert len(errors) == 0, f"Expansion workers encountered errors: {errors}"
+    finally:
+        activity_svc.max_queue_bytes = orig_q
+        activity_svc.max_total_bytes = orig_t
+
+
+def test_transactional_expansion_enforces_total_memory_limit(client: TestClient) -> None:
+    """Finding 2: Transactional expansion enforces total memory bound."""
+    activity_svc = client.app.state.services.activity
+    orig_t = activity_svc.max_total_bytes
+    activity_svc.max_total_bytes = 10_000
+
+    try:
+        res = activity_svc.admit(estimated_bytes=1000)
+        principal = Principal.trusted_human(
+            actor_id="human:jay", display_name="Jay", operation_id="op_tx_mem"
+        )
+        with (
+            activity_svc.database.connection() as conn,
+            pytest.raises(ServiceUnavailableError, match="Audit total memory limit exceeded"),
+        ):
+            res.record_with_connection(
+                conn,
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_overflow",
+                details={"diff": "X" * 15_000},
+            )
+    finally:
+        activity_svc.max_total_bytes = orig_t
+
+
+def test_commit_failure_records_correlated_failure_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 4: When SQLite commit fails after audit insert, a failure audit event is logged."""
+    db = client.app.state.services.activity.database
+    orig_connect = db.connect
+    fail_commit = False
+
+    class ConnectionProxy:
+        def __init__(self, target):
+            self._target = target
+
+        def commit(self):
+            if fail_commit:
+                raise sqlite3.OperationalError("Simulated disk error on commit")
+            return self._target.commit()
+
+        def __getattr__(self, name):
+            return getattr(self._target, name)
+
+    monkeypatch.setattr(db, "connect", lambda: ConnectionProxy(orig_connect()))
+
+    resp = client.post(
+        "/api/v1/documents",
+        json={"title": "Commit Normal", "content": "content", "path": "commit_ok.md"},
+        headers=headers("commit-ok-1"),
+    )
+    assert resp.status_code == 201
+
+    fail_commit = True
+    with pytest.raises(sqlite3.OperationalError, match="Simulated disk error on commit"):
+        client.post(
+            "/api/v1/documents",
+            json={"title": "Commit Fail", "content": "content", "path": "commit_fail.md"},
+            headers=headers("commit-fail-1"),
+        )
+
+    fail_commit = False
+    db = client.app.state.services.activity.database
+    with db.connection() as conn:
+        doc = conn.execute("SELECT * FROM documents WHERE path = ?", ("commit_fail.md",)).fetchone()
+        assert doc is None, "Document must be rolled back on commit failure"
+
+        events = conn.execute(
+            "SELECT action, outcome, path, detail_json FROM operation_events "
+            "WHERE path = ? ORDER BY created_at ASC",
+            ("commit_fail.md",),
+        ).fetchall()
+        assert len(events) >= 1
+        fail_ev = [e for e in events if e["outcome"] == "failed"]
+        assert len(fail_ev) >= 1
+        assert "commit" in fail_ev[0]["detail_json"]
+        assert "Simulated disk error on commit" in fail_ev[0]["detail_json"]
+
+
+def test_worker_recovery_from_real_sqlite_write_lock(client: TestClient, settings) -> None:
+    """Probe 3 & 5: Audit worker exhausts retries against a held SQLite lock, then recovers."""
+    activity_svc = client.app.state.services.activity
+    orig_timeout = getattr(activity_svc.database, "timeout", 10.0)
+    activity_svc.database.timeout = 0.05
+
+    lock_conn = sqlite3.connect(settings.database_path, timeout=0.1)
+    lock_conn.execute("BEGIN IMMEDIATE")
+
+    try:
+        res = activity_svc.admit(estimated_bytes=500)
+        p = Principal.trusted_human(
+            actor_id="human:jay", display_name="Jay", operation_id="op_lock_test"
+        )
+
+        with pytest.raises(sqlite3.OperationalError):
+            res.record(
+                principal=p,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_lock_held",
+            )
+    finally:
+        lock_conn.rollback()
+        lock_conn.close()
+        activity_svc.database.timeout = orig_timeout
+
+    assert activity_svc.is_healthy() is True
+    res_after = client.post(
+        "/api/v1/documents",
+        json={"title": "After Lock Release", "content": "content", "path": "after_lock.md"},
+        headers=headers("after-lock-k1"),
+    )
+    assert res_after.status_code == 201
