@@ -153,10 +153,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
+        shutdown_error: Exception | None = None
         if hasattr(services, "chat") and hasattr(services.chat, "store_adapter"):
-            with suppress(Exception):
+            try:
                 await services.chat.store_adapter.close()
-        services.activity.close()
+            except Exception as error:
+                shutdown_error = error
+        try:
+            services.activity.close()
+        except Exception as error:
+            if shutdown_error is None:
+                shutdown_error = error
+        if shutdown_error is not None:
+            raise shutdown_error
 
     app = FastAPI(
         title="Sangam API",

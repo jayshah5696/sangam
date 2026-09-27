@@ -57,7 +57,7 @@ class AuditReservation:
     def __init__(self, service: ActivityService, estimated_bytes: int) -> None:
         self._service = service
         self._estimated_bytes = estimated_bytes
-        self._committed = False
+        self._transferred = False
         self._released = False
 
     def record(
@@ -73,22 +73,24 @@ class AuditReservation:
         revision_id: str | None = None,
         details: dict[str, object] | None = None,
     ) -> None:
-        self._committed = True
-        self._service._record_with_reservation(
-            reservation=self,
-            principal=principal,
-            action=action,
-            resource_type=resource_type,
-            outcome=outcome,
-            resource_id=resource_id,
-            path=path,
-            error_code=error_code,
-            revision_id=revision_id,
-            details=details,
-        )
+        try:
+            self._service._record_with_reservation(
+                reservation=self,
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                outcome=outcome,
+                resource_id=resource_id,
+                path=path,
+                error_code=error_code,
+                revision_id=revision_id,
+                details=details,
+            )
+        finally:
+            self.release()
 
     def release(self) -> None:
-        if not self._committed and not self._released:
+        if not self._transferred and not self._released:
             self._released = True
             self._service._release_reservation(self._estimated_bytes)
 
@@ -169,6 +171,19 @@ class ActivityService:
                     )
 
                 self._queue_condition.wait(remaining)
+
+    def _persist_row_direct(self, row: tuple[object, ...]) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO operation_events(
+                    event_id, operation_id, actor_id, token_id, action, resource_type,
+                    resource_id, path, outcome, error_code, revision_id,
+                    detail_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                row,
+            )
 
     def _release_reservation(self, estimated_bytes: int) -> None:
         with self._queue_lock:
@@ -381,29 +396,36 @@ class ActivityService:
         expansion = max(0, size_bytes - reservation._estimated_bytes)
         deadline = time.monotonic() + 60.0
         with self._queue_lock:
-            while self._admitted_bytes + expansion > self.max_queue_bytes and (
-                self._admitted_items > 1 or self._committing_items > 0 or len(self._queue) > 0
+            while (
+                self._queue_bytes + self._committing_bytes + expansion > self.max_queue_bytes
+                and (len(self._queue) > 0 or self._committing_items > 0)
             ):
-                if self._shutting_down:
-                    raise ServiceUnavailableError("Activity audit logging is shutting down")
                 if not self._worker_healthy:
-                    raise ServiceUnavailableError(
-                        f"Audit persistence is unavailable: {self._worker_error}"
-                    )
+                    break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise ServiceUnavailableError("Audit queue memory budget exceeded")
+                    break
                 self._queue_condition.wait(min(remaining, 0.1))
 
-            self._admitted_bytes = max(
-                0, self._admitted_bytes - reservation._estimated_bytes + size_bytes
+            can_queue = self._worker_healthy and (
+                self._queue_bytes + self._committing_bytes + expansion <= self.max_queue_bytes
+                or (len(self._queue) == 0 and self._committing_items == 0)
             )
-            self._queue.append(item)
-            self._queue_bytes += size_bytes
-            self._active_producers = max(0, self._active_producers - 1)
-            if self._active_producers == 0:
-                self._producers_done.notify_all()
-            self._queue_condition.notify_all()
+            if can_queue:
+                self._admitted_bytes = max(
+                    0, self._admitted_bytes - reservation._estimated_bytes + size_bytes
+                )
+                self._queue.append(item)
+                self._queue_bytes += size_bytes
+                self._active_producers = max(0, self._active_producers - 1)
+                reservation._transferred = True
+                if self._active_producers == 0:
+                    self._producers_done.notify_all()
+                self._queue_condition.notify_all()
+
+        if not reservation._transferred:
+            self._persist_row_direct(row)
+            return
 
         try:
             item.future.result(timeout=60.0)

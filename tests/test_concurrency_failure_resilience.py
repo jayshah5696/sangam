@@ -14,7 +14,9 @@ from test_phase_five_pdf_research import import_pdf, text_pdf
 
 from sangam.activity import ActivityService
 from sangam.chat_store import BoundedThreadRunner
+from sangam.config import Settings
 from sangam.errors import ServiceUnavailableError
+from sangam.main import create_app
 from sangam.security import Principal
 
 
@@ -670,3 +672,161 @@ def test_chat_store_pagination_returns_continuation_cursor(client: TestClient) -
         await store.close()
 
     asyncio.run(scenario())
+
+
+def test_audit_service_multiple_expanding_producers_progress_without_deadlock(
+    client: TestClient,
+) -> None:
+    real_db = client.app.state.services.activity.database
+    service = ActivityService(real_db, max_queue_bytes=16 * 1024)
+    principal = Principal.trusted_human(
+        actor_id="human:jay",
+        display_name="Jay",
+        operation_id="op_two_expanding_prod",
+    )
+
+    try:
+        res1 = service.admit(estimated_bytes=1024)
+        res2 = service.admit(estimated_bytes=1024)
+        payload_32k = "W" * 32_000
+
+        t1 = threading.Thread(
+            target=lambda: res1.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_exp_prod_1",
+                details={"diff": payload_32k},
+            )
+        )
+        t2 = threading.Thread(
+            target=lambda: res2.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_exp_prod_2",
+                details={"diff": payload_32k},
+            )
+        )
+
+        t1.start()
+        t2.start()
+        t1.join(timeout=10.0)
+        t2.join(timeout=10.0)
+
+        assert not t1.is_alive(), "Producer 1 deadlocked/timed out"
+        assert not t2.is_alive(), "Producer 2 deadlocked/timed out"
+
+        events = service.list_events(operation_id="op_two_expanding_prod")
+        assert len(events) == 2
+        assert service._admitted_items == 0
+        assert service._admitted_bytes == 0
+        assert service._active_producers == 0
+    finally:
+        service.close()
+
+
+def test_audit_service_pre_transfer_failure_releases_reservation_without_counter_leak(
+    client: TestClient,
+) -> None:
+    real_db = client.app.state.services.activity.database
+    service = ActivityService(real_db, max_queue_bytes=16 * 1024)
+
+    try:
+        with (
+            pytest.raises(RuntimeError, match="Operation failed before recording"),
+            service.admit(estimated_bytes=2048),
+        ):
+            assert service._admitted_items == 1
+            assert service._admitted_bytes == 2048
+            assert service._active_producers == 1
+            raise RuntimeError("Operation failed before recording")
+
+        assert service._admitted_items == 0
+        assert service._admitted_bytes == 0
+        assert service._active_producers == 0
+    finally:
+        service.close()
+
+
+def test_audit_service_executed_operation_survives_worker_failure_via_direct_persistence(
+    client: TestClient,
+) -> None:
+    real_db = client.app.state.services.activity.database
+    service = ActivityService(real_db, max_queue_bytes=16 * 1024)
+    principal = Principal.trusted_human(
+        actor_id="human:jay",
+        display_name="Jay",
+        operation_id="op_fallback_persist",
+    )
+
+    try:
+        res = service.admit(estimated_bytes=1024)
+        service._worker_healthy = False
+        service._worker_error = RuntimeError("Disk IO simulated failure")
+
+        res.record(
+            principal=principal,
+            action="create",
+            resource_type="document",
+            outcome="accepted",
+            resource_id="doc_fallback_direct",
+            details={"diff": "survived_payload"},
+        )
+
+        assert res._transferred is False
+        assert service._admitted_items == 0
+        assert service._admitted_bytes == 0
+        assert service._active_producers == 0
+
+        events = service.list_events(resource_id="doc_fallback_direct")
+        assert len(events) == 1
+        assert events[0].details.get("diff") == "survived_payload"
+    finally:
+        service.close()
+
+
+def test_app_lifespan_reports_chat_shutdown_error_while_preserving_activity_cleanup(
+    tmp_path: object,
+) -> None:
+    app = create_app(Settings(workspace_root=str(tmp_path)))
+    runner = app.state.services.chat.store_adapter._runner
+
+    block_task = threading.Event()
+    task_started = threading.Event()
+
+    def hanging_task():
+        task_started.set()
+        block_task.wait(timeout=5.0)
+
+    fut = runner._executor.submit(hanging_task)
+    assert task_started.wait(timeout=2.0)
+    runner._active_futures.add(fut)
+
+    orig_close = runner.close
+
+    async def fast_close(timeout: float = 0.05) -> None:
+        await orig_close(timeout=0.05)
+
+    runner.close = fast_close
+
+    activity_closed = [False]
+    orig_activity_close = app.state.services.activity.close
+
+    def spy_activity_close(*args: object, **kwargs: object) -> None:
+        activity_closed[0] = True
+        orig_activity_close(*args, **kwargs)
+
+    app.state.services.activity.close = spy_activity_close
+
+    try:
+        with (
+            pytest.raises(RuntimeError, match="ChatKitStore shutdown timed out"),
+            TestClient(app),
+        ):
+            pass
+        assert activity_closed[0] is True, "Activity service was NOT closed!"
+    finally:
+        block_task.set()
