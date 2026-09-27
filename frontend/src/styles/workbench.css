@@ -400,7 +400,6 @@
   .sidebar-collapsed .karakeep-header { padding-left: calc(var(--control-height) + var(--space-3)); }
   .sidebar-collapsed .html-publication-page > header { padding-left: calc(var(--control-height) + var(--space-3)); }
   .workbench-shell > .resize-handle { display: none; }
-  .workbench-main { min-width: 100vw; }
   .sidebar-footer-nav a { min-height: var(--control-touch); }
   .split-workbench .document-workspace { padding: 18px 22px 22px; }
   .split-workbench .document-header { flex-direction: column; gap: 7px; }
