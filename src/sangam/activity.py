@@ -89,6 +89,36 @@ class AuditReservation:
         finally:
             self.release()
 
+    def record_with_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        try:
+            self._service.record_with_connection(
+                connection,
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                outcome=outcome,
+                resource_id=resource_id,
+                path=path,
+                error_code=error_code,
+                revision_id=revision_id,
+                details=details,
+            )
+        finally:
+            self.release()
+
     def release(self) -> None:
         if not self._transferred and not self._released:
             self._released = True
@@ -118,6 +148,7 @@ class ActivityService:
         self.max_batch_size = max_batch_size
         self._queue: list[_AuditEventItem] = []
         self._queue_bytes = 0
+        self._waiting_bytes = 0
         self._admitted_items = 0
         self._admitted_bytes = 0
         self._committing_items = 0
@@ -154,7 +185,8 @@ class ActivityService:
                     )
 
                 has_capacity = self._admitted_items < self.max_queue_items and (
-                    self._admitted_bytes + estimated_bytes <= self.max_queue_bytes
+                    (self._admitted_bytes + self._waiting_bytes + estimated_bytes)
+                    <= self.max_queue_bytes
                     or self._admitted_items == 0
                 )
                 if has_capacity:
@@ -329,10 +361,9 @@ class ActivityService:
             self._admitted_bytes = max(0, self._admitted_bytes - batch_bytes)
             self._queue_condition.notify_all()
 
-    def _record_with_reservation(
+    def _prepare_event_row(
         self,
         *,
-        reservation: AuditReservation,
         principal: Principal,
         action: str,
         resource_type: str,
@@ -342,7 +373,7 @@ class ActivityService:
         error_code: str | None = None,
         revision_id: str | None = None,
         details: dict[str, object] | None = None,
-    ) -> None:
+    ) -> tuple[tuple[object, ...], int]:
         safe_details = {
             key: sanitize_sensitive_data(value)
             for key, value in (details or {}).items()
@@ -386,6 +417,69 @@ class ActivityService:
             detail_json,
             utc_now(),
         )
+        return row, size_bytes
+
+    def record_with_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        row, _ = self._prepare_event_row(
+            principal=principal,
+            action=action,
+            resource_type=resource_type,
+            outcome=outcome,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            revision_id=revision_id,
+            details=details,
+        )
+        connection.execute(
+            """
+            INSERT INTO operation_events(
+                event_id, operation_id, actor_id, token_id, action, resource_type,
+                resource_id, path, outcome, error_code, revision_id,
+                detail_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+
+    def _record_with_reservation(
+        self,
+        *,
+        reservation: AuditReservation,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        row, size_bytes = self._prepare_event_row(
+            principal=principal,
+            action=action,
+            resource_type=resource_type,
+            outcome=outcome,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            revision_id=revision_id,
+            details=details,
+        )
 
         item = _AuditEventItem(
             row=row,
@@ -393,11 +487,11 @@ class ActivityService:
             future=concurrent.futures.Future(),
         )
 
-        expansion = max(0, size_bytes - reservation._estimated_bytes)
         deadline = time.monotonic() + 60.0
         with self._queue_lock:
+            self._waiting_bytes += size_bytes
             while (
-                self._queue_bytes + self._committing_bytes + expansion > self.max_queue_bytes
+                self._queue_bytes + self._committing_bytes + size_bytes > self.max_queue_bytes
                 and (len(self._queue) > 0 or self._committing_items > 0)
             ):
                 if not self._worker_healthy:
@@ -407,8 +501,9 @@ class ActivityService:
                     break
                 self._queue_condition.wait(min(remaining, 0.1))
 
+            self._waiting_bytes = max(0, self._waiting_bytes - size_bytes)
             can_queue = self._worker_healthy and (
-                self._queue_bytes + self._committing_bytes + expansion <= self.max_queue_bytes
+                self._queue_bytes + self._committing_bytes + size_bytes <= self.max_queue_bytes
                 or (len(self._queue) == 0 and self._committing_items == 0)
             )
             if can_queue:

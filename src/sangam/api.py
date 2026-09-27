@@ -570,21 +570,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: CreateAgentToken,
         principal: Principal = admin_dependency,
     ) -> IssuedAgentToken:
-        issued = identity.issue_agent_token(
-            actor_id=body.actor_id,
-            display_name=body.display_name,
-            label=body.label,
-            scopes=body.scopes,
-            expires_at=body.expires_at,
-        )
-        activity.record(
-            principal=principal,
-            action="issue",
-            resource_type="agent_token",
-            resource_id=issued.token_id,
-            outcome="accepted",
-        )
-        return issued
+        with identity.database.transaction() as connection:
+            issued = identity.issue_agent_token(
+                actor_id=body.actor_id,
+                display_name=body.display_name,
+                label=body.label,
+                scopes=body.scopes,
+                expires_at=body.expires_at,
+            )
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="issue",
+                resource_type="agent_token",
+                resource_id=issued.token_id,
+                outcome="accepted",
+            )
+            return issued
 
     @app.patch("/api/v1/agent-tokens/{token_id}", response_model=AgentToken)
     def update_agent_token(
@@ -592,53 +594,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: UpdateAgentToken,
         principal: Principal = admin_dependency,
     ) -> AgentToken:
-        updated = identity.update_token(
-            token_id,
-            expected_version=body.expected_version,
-            label=body.label,
-            scopes=body.scopes,
-            expires_at=body.expires_at,
-            actor_id=principal.actor_id,
-        )
-        activity.record(
-            principal=principal,
-            action="update",
-            resource_type="agent_token",
-            resource_id=token_id,
-            outcome="accepted",
-            details={"current_metadata_version": updated.version},
-        )
-        return updated
+        with identity.database.transaction() as connection:
+            updated = identity.update_token(
+                token_id,
+                expected_version=body.expected_version,
+                label=body.label,
+                scopes=body.scopes,
+                expires_at=body.expires_at,
+                actor_id=principal.actor_id,
+            )
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="update",
+                resource_type="agent_token",
+                resource_id=token_id,
+                outcome="accepted",
+                details={"current_metadata_version": updated.version},
+            )
+            return updated
 
     @app.post("/api/v1/agent-tokens/{token_id}/rotate", response_model=IssuedAgentToken)
     def rotate_agent_token(
         token_id: str,
         principal: Principal = admin_dependency,
     ) -> IssuedAgentToken:
-        issued = identity.rotate_token(token_id)
-        activity.record(
-            principal=principal,
-            action="rotate",
-            resource_type="agent_token",
-            resource_id=issued.token_id,
-            outcome="accepted",
-        )
-        return issued
+        with identity.database.transaction() as connection:
+            issued = identity.rotate_token(token_id)
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="rotate",
+                resource_type="agent_token",
+                resource_id=issued.token_id,
+                outcome="accepted",
+            )
+            return issued
 
     @app.delete("/api/v1/agent-tokens/{token_id}", response_model=AgentToken)
     def revoke_agent_token(
         token_id: str,
         principal: Principal = admin_dependency,
     ) -> AgentToken:
-        revoked = identity.revoke_token(token_id)
-        activity.record(
-            principal=principal,
-            action="revoke",
-            resource_type="agent_token",
-            resource_id=token_id,
-            outcome="accepted",
-        )
-        return revoked
+        with identity.database.transaction() as connection:
+            revoked = identity.revoke_token(token_id)
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="revoke",
+                resource_type="agent_token",
+                resource_id=token_id,
+                outcome="accepted",
+            )
+            return revoked
 
     @app.get("/api/v1/activity/export.jsonl", response_class=PlainTextResponse)
     def export_activity_jsonl(

@@ -98,15 +98,17 @@ def create_chat_router(
         body: CreateProviderConnection,
         principal: Principal = admin_dependency,
     ) -> ProviderConnection:
-        result = chat.provider_connections.create(**body.model_dump())
-        chat.workspace.activity.record(
-            principal=principal,
-            action="create",
-            resource_type="provider_connection",
-            resource_id=result.connection_id,
-            outcome="accepted",
-        )
-        return _connection_schema(result)
+        with chat.workspace.documents.database.transaction() as connection:
+            result = chat.provider_connections.create(**body.model_dump())
+            chat.workspace.activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="create",
+                resource_type="provider_connection",
+                resource_id=result.connection_id,
+                outcome="accepted",
+            )
+            return _connection_schema(result)
 
     @router.put("/chat/connections/{connection_id}", response_model=ProviderConnection)
     def update_connection(
@@ -114,15 +116,17 @@ def create_chat_router(
         body: UpdateProviderConnection,
         principal: Principal = admin_dependency,
     ) -> ProviderConnection:
-        result = chat.provider_connections.update(connection_id, **body.model_dump())
-        chat.workspace.activity.record(
-            principal=principal,
-            action="update",
-            resource_type="provider_connection",
-            resource_id=result.connection_id,
-            outcome="accepted",
-        )
-        return _connection_schema(result)
+        with chat.workspace.documents.database.transaction() as connection:
+            result = chat.provider_connections.update(connection_id, **body.model_dump())
+            chat.workspace.activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="update",
+                resource_type="provider_connection",
+                resource_id=result.connection_id,
+                outcome="accepted",
+            )
+            return _connection_schema(result)
 
     @router.post("/chat/connections/{connection_id}/test", response_model=ProviderConnectionTest)
     def test_connection(

@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ def utc_now() -> str:
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._local = threading.local()
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -40,6 +42,11 @@ class Database:
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._local, "active_connection", None)
+        if active is not None:
+            yield active
+            return
+
         connection = self.connect()
         try:
             yield connection
@@ -47,16 +54,53 @@ class Database:
             connection.close()
 
     @contextmanager
+    def commit_hook(self, callback: Callable[[sqlite3.Connection], None]) -> Iterator[None]:
+        hooks = getattr(self._local, "commit_hooks", None)
+        if hooks is None:
+            hooks = []
+            self._local.commit_hooks = hooks
+        hooks.append(callback)
+        try:
+            yield
+        finally:
+            if callback in hooks:
+                hooks.remove(callback)
+
+    @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._local, "active_connection", None)
+        if active is not None:
+            depth = getattr(self._local, "transaction_depth", 1)
+            self._local.transaction_depth = depth + 1
+            try:
+                yield active
+            except Exception:
+                self._local.rollback_required = True
+                raise
+            finally:
+                self._local.transaction_depth = depth
+            return
+
         connection = self.connect()
+        self._local.active_connection = connection
+        self._local.transaction_depth = 1
+        self._local.rollback_required = False
         try:
             connection.execute("BEGIN IMMEDIATE")
             yield connection
+            if getattr(self._local, "rollback_required", False):
+                raise RuntimeError("Transaction aborted due to error in nested transaction block")
+            hooks = list(getattr(self._local, "commit_hooks", []))
+            for hook in hooks:
+                hook(connection)
             connection.commit()
         except Exception:
             connection.rollback()
             raise
         finally:
+            self._local.active_connection = None
+            self._local.transaction_depth = 0
+            self._local.rollback_required = False
             connection.close()
 
     def initialize(self) -> None:

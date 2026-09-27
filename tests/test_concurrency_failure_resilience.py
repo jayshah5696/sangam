@@ -15,6 +15,7 @@ from test_phase_five_pdf_research import import_pdf, text_pdf
 from sangam.activity import ActivityService
 from sangam.chat_store import BoundedThreadRunner
 from sangam.config import Settings
+from sangam.db import Database
 from sangam.errors import ServiceUnavailableError
 from sangam.main import create_app
 from sangam.security import Principal
@@ -830,3 +831,141 @@ def test_app_lifespan_reports_chat_shutdown_error_while_preserving_activity_clea
         assert activity_closed[0] is True, "Activity service was NOT closed!"
     finally:
         block_task.set()
+
+
+def test_audit_queue_capacity_accounts_for_full_event_size_preventing_undercount(
+    client: TestClient,
+) -> None:
+    real_db = client.app.state.services.documents.database
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_cap"
+    )
+
+    pause_commit = threading.Event()
+    commit_started = threading.Event()
+
+    class PausableConnection:
+        def __init__(self, raw):
+            self._raw = raw
+
+        def executemany(self, sql, params):
+            commit_started.set()
+            pause_commit.wait(timeout=5.0)
+            return self._raw.executemany(sql, params)
+
+        def __getattr__(self, item):
+            return getattr(self._raw, item)
+
+    mock_db = MagicMock(wraps=real_db)
+    mock_db.connect = lambda: PausableConnection(real_db.connect())
+    mock_db.connection = real_db.connection
+    mock_db.transaction = real_db.transaction
+
+    service = ActivityService(mock_db, max_queue_bytes=16 * 1024)
+
+    try:
+        res1 = service.admit(estimated_bytes=8 * 1024)
+        res2 = service.admit(estimated_bytes=8 * 1024)
+
+        # P1 expands to 12 KB
+        payload_12k = "A" * (12 * 1024 - 400)
+        # P2 produces 8 KB
+        payload_8k = "B" * (8 * 1024 - 400)
+
+        # Thread 1 records P1
+        t1 = threading.Thread(
+            target=lambda: res1.record(
+                principal=principal,
+                action="read",
+                resource_type="document",
+                outcome="accepted",
+                details={"diff": payload_12k},
+            )
+        )
+        t1.start()
+        assert commit_started.wait(timeout=3.0)
+
+        # Thread 2 records P2 while P1 is committing
+        p2_completed = threading.Event()
+
+        def run_p2():
+            res2.record(
+                principal=principal,
+                action="read",
+                resource_type="document",
+                outcome="accepted",
+                details={"diff": payload_8k},
+            )
+            p2_completed.set()
+
+        t2 = threading.Thread(target=run_p2)
+        t2.start()
+
+        time.sleep(0.15)
+        # P2 must be waiting because 12 KB + 8 KB > 16 KB budget
+        assert not p2_completed.is_set(), "P2 should be waiting on budget capacity!"
+        max_b = 16 * 1024
+        assert service._queue_bytes + service._committing_bytes <= max_b, "Exceeded budget!"
+        assert service._waiting_bytes > 0, "Waiting payload bytes must be accounted for!"
+
+        # Unblock worker so P1 finishes and P2 can proceed
+        pause_commit.set()
+        t1.join(timeout=3.0)
+        t2.join(timeout=3.0)
+        assert p2_completed.is_set(), "P2 must successfully complete once P1 frees capacity!"
+        assert service._waiting_bytes == 0, "Waiting payload bytes must be 0 after completion!"
+    finally:
+        pause_commit.set()
+        service.close()
+
+
+def test_mutation_and_audit_event_are_atomic_in_same_transaction(
+    client: TestClient, settings
+) -> None:
+    db = Database(settings.database_path)
+
+    # Verify successful mutation persists both document and audit event
+    res = client.post(
+        "/api/v1/documents",
+        json={"title": "Atomic Doc", "content": "content", "path": "atomic.md"},
+        headers=headers("atomic-k1"),
+    )
+    assert res.status_code == 201
+    doc_id = res.json()["document_id"]
+
+    # Verify both exist in sqlite
+    with db.connection() as conn:
+        doc_row = conn.execute(
+            "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
+        ).fetchone()
+        assert doc_row is not None
+
+        audit_row = conn.execute(
+            "SELECT event_id, outcome FROM operation_events WHERE resource_id = ? AND action = ?",
+            (doc_id, "create"),
+        ).fetchone()
+        assert audit_row is not None
+        assert audit_row["outcome"] == "accepted"
+
+    # Now verify failed transaction rolls back both document mutation and audit event
+    orig_record_with_conn = client.app.state.services.activity.record_with_connection
+
+    def fail_audit(*args, **kwargs):
+        raise sqlite3.OperationalError("Simulated disk I/O error during audit insert")
+
+    client.app.state.services.activity.record_with_connection = fail_audit
+
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="Simulated disk I/O error"):
+            client.post(
+                "/api/v1/documents",
+                json={"title": "Should Fail Completely", "content": "c", "path": "fail.md"},
+                headers=headers("atomic-k2"),
+            )
+    finally:
+        client.app.state.services.activity.record_with_connection = orig_record_with_conn
+
+    # Verify fail.md does NOT exist in documents table at all!
+    with db.connection() as conn:
+        failed_doc = conn.execute("SELECT * FROM documents WHERE path = ?", ("fail.md",)).fetchone()
+        assert failed_doc is None, "Document must NOT have committed if audit write failed!"
