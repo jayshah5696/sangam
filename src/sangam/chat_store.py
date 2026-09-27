@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Protocol, TypeVar
 
@@ -49,7 +50,7 @@ class SQLiteChatKitStore(Store[TContext]):
         if row is None or row["created_by"] != self._actor_id(context):
             raise NotFoundError(f"Chat thread not found: {thread_id}")
 
-    async def load_thread(self, thread_id: str, context: TContext) -> ThreadMetadata:
+    def _load_thread_sync(self, thread_id: str, context: TContext) -> ThreadMetadata:
         with self.database.connection() as connection:
             row = connection.execute(
                 "SELECT created_by, data_json FROM chat_threads WHERE thread_id = ?",
@@ -59,7 +60,10 @@ class SQLiteChatKitStore(Store[TContext]):
             raise NotFoundError(f"Chat thread not found: {thread_id}")
         return ThreadMetadata.model_validate(_decode_payload(row["data_json"]))
 
-    async def save_thread(self, thread: ThreadMetadata, context: TContext) -> None:
+    async def load_thread(self, thread_id: str, context: TContext) -> ThreadMetadata:
+        return await asyncio.to_thread(self._load_thread_sync, thread_id, context)
+
+    def _save_thread_sync(self, thread: ThreadMetadata, context: TContext) -> None:
         now = utc_now()
         metadata = dict(thread.metadata)
         document_id = self._document_id(context) or metadata.get("document_id")
@@ -92,7 +96,10 @@ class SQLiteChatKitStore(Store[TContext]):
                 ),
             )
 
-    async def load_thread_items(
+    async def save_thread(self, thread: ThreadMetadata, context: TContext) -> None:
+        await asyncio.to_thread(self._save_thread_sync, thread, context)
+
+    def _load_thread_items_sync(
         self,
         thread_id: str,
         after: str | None,
@@ -140,7 +147,19 @@ class SQLiteChatKitStore(Store[TContext]):
             after=visible[-1]["item_id"] if has_more and visible else None,
         )
 
-    async def load_threads(
+    async def load_thread_items(
+        self,
+        thread_id: str,
+        after: str | None,
+        limit: int,
+        order: str,
+        context: TContext,
+    ) -> Page[ThreadItem]:
+        return await asyncio.to_thread(
+            self._load_thread_items_sync, thread_id, after, limit, order, context
+        )
+
+    def _load_threads_sync(
         self,
         limit: int,
         after: str | None,
@@ -185,10 +204,19 @@ class SQLiteChatKitStore(Store[TContext]):
             after=visible[-1]["thread_id"] if has_more and visible else None,
         )
 
+    async def load_threads(
+        self,
+        limit: int,
+        after: str | None,
+        order: str,
+        context: TContext,
+    ) -> Page[ThreadMetadata]:
+        return await asyncio.to_thread(self._load_threads_sync, limit, after, order, context)
+
     async def add_thread_item(self, thread_id: str, item: ThreadItem, context: TContext) -> None:
         await self.save_item(thread_id, item, context)
 
-    async def save_item(self, thread_id: str, item: ThreadItem, context: TContext) -> None:
+    def _save_item_sync(self, thread_id: str, item: ThreadItem, context: TContext) -> None:
         self._require_thread_owner(thread_id, context)
         with self.database.transaction() as connection:
             connection.execute(
@@ -204,7 +232,10 @@ class SQLiteChatKitStore(Store[TContext]):
                 (utc_now(), thread_id),
             )
 
-    async def load_item(self, thread_id: str, item_id: str, context: TContext) -> ThreadItem:
+    async def save_item(self, thread_id: str, item: ThreadItem, context: TContext) -> None:
+        await asyncio.to_thread(self._save_item_sync, thread_id, item, context)
+
+    def _load_item_sync(self, thread_id: str, item_id: str, context: TContext) -> ThreadItem:
         self._require_thread_owner(thread_id, context)
         with self.database.connection() as connection:
             row = connection.execute(
@@ -218,12 +249,18 @@ class SQLiteChatKitStore(Store[TContext]):
             raise NotFoundError(f"Chat item not found: {item_id}")
         return _THREAD_ITEM_ADAPTER.validate_python(_decode_payload(row["data_json"]))
 
-    async def delete_thread(self, thread_id: str, context: TContext) -> None:
+    async def load_item(self, thread_id: str, item_id: str, context: TContext) -> ThreadItem:
+        return await asyncio.to_thread(self._load_item_sync, thread_id, item_id, context)
+
+    def _delete_thread_sync(self, thread_id: str, context: TContext) -> None:
         self._require_thread_owner(thread_id, context)
         with self.database.transaction() as connection:
             connection.execute("DELETE FROM chat_threads WHERE thread_id = ?", (thread_id,))
 
-    async def delete_thread_item(self, thread_id: str, item_id: str, context: TContext) -> None:
+    async def delete_thread(self, thread_id: str, context: TContext) -> None:
+        await asyncio.to_thread(self._delete_thread_sync, thread_id, context)
+
+    def _delete_thread_item_sync(self, thread_id: str, item_id: str, context: TContext) -> None:
         self._require_thread_owner(thread_id, context)
         with self.database.transaction() as connection:
             connection.execute(
@@ -231,7 +268,10 @@ class SQLiteChatKitStore(Store[TContext]):
                 (thread_id, item_id),
             )
 
-    async def save_attachment(self, attachment: Attachment, context: TContext) -> None:
+    async def delete_thread_item(self, thread_id: str, item_id: str, context: TContext) -> None:
+        await asyncio.to_thread(self._delete_thread_item_sync, thread_id, item_id, context)
+
+    def _save_attachment_sync(self, attachment: Attachment, context: TContext) -> None:
         with self.database.transaction() as connection:
             existing = connection.execute(
                 "SELECT created_by FROM chat_attachments WHERE attachment_id = ?",
@@ -248,7 +288,10 @@ class SQLiteChatKitStore(Store[TContext]):
                 (attachment.id, self._actor_id(context), _encode_payload(attachment), utc_now()),
             )
 
-    async def load_attachment(self, attachment_id: str, context: TContext) -> Attachment:
+    async def save_attachment(self, attachment: Attachment, context: TContext) -> None:
+        await asyncio.to_thread(self._save_attachment_sync, attachment, context)
+
+    def _load_attachment_sync(self, attachment_id: str, context: TContext) -> Attachment:
         with self.database.connection() as connection:
             row = connection.execute(
                 """
@@ -260,12 +303,18 @@ class SQLiteChatKitStore(Store[TContext]):
             raise NotFoundError(f"Chat attachment not found: {attachment_id}")
         return _ATTACHMENT_ADAPTER.validate_python(_decode_payload(row["data_json"]))
 
-    async def delete_attachment(self, attachment_id: str, context: TContext) -> None:
-        attachment = await self.load_attachment(attachment_id, context)
+    async def load_attachment(self, attachment_id: str, context: TContext) -> Attachment:
+        return await asyncio.to_thread(self._load_attachment_sync, attachment_id, context)
+
+    def _delete_attachment_sync(self, attachment_id: str, context: TContext) -> None:
+        attachment = self._load_attachment_sync(attachment_id, context)
         with self.database.transaction() as connection:
             connection.execute(
                 "DELETE FROM chat_attachments WHERE attachment_id = ?", (attachment.id,)
             )
+
+    async def delete_attachment(self, attachment_id: str, context: TContext) -> None:
+        await asyncio.to_thread(self._delete_attachment_sync, attachment_id, context)
 
 
 def _encode_payload(value) -> str:

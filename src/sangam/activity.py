@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import queue
+import sqlite3
+import threading
 import uuid
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sangam.db import Database, utc_now
@@ -24,11 +30,137 @@ EXPIRY_WARNING_DAYS = 7
 RECENT_DENIED_DAYS = 1
 
 
+@dataclass
+class _AuditEventItem:
+    row: tuple[
+        str,
+        str,
+        str,
+        str | None,
+        str,
+        str,
+        str | None,
+        str | None,
+        str,
+        str | None,
+        str | None,
+        str,
+        str,
+    ]
+    size_bytes: int
+    future: concurrent.futures.Future[None]
+
+
 class ActivityService:
     """Stores safe, reviewable request outcomes without request bodies or credentials."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        max_queue_items: int = 5000,
+        max_queue_bytes: int = 16 * 1024 * 1024,
+        max_batch_size: int = 250,
+    ) -> None:
         self.database = database
+        self.max_queue_items = max_queue_items
+        self.max_queue_bytes = max_queue_bytes
+        self.max_batch_size = max_batch_size
+        self._queue: queue.Queue[_AuditEventItem] = queue.Queue()
+        self._queue_bytes = 0
+        self._queue_lock = threading.Lock()
+        self._queue_not_full = threading.Condition(self._queue_lock)
+        self._shutdown_event = threading.Event()
+        self._worker_healthy = True
+        self._worker_error: Exception | None = None
+        self._worker_thread = threading.Thread(
+            target=self._commit_worker_loop,
+            name="sangam-audit-commit-worker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+
+    def is_healthy(self) -> bool:
+        return self._worker_healthy and (
+            self._worker_thread is not None and self._worker_thread.is_alive()
+        )
+
+    def close(self, timeout: float = 5.0) -> None:
+        self._shutdown_event.set()
+        if self._worker_thread is not None and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=timeout)
+
+    def _commit_worker_loop(self) -> None:
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self.database.connect()
+        except Exception as error:
+            self._worker_healthy = False
+            self._worker_error = error
+            return
+
+        try:
+            while not self._shutdown_event.is_set():
+                try:
+                    item = self._queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                batch = [item]
+                while len(batch) < self.max_batch_size:
+                    try:
+                        batch.append(self._queue.get_nowait())
+                    except queue.Empty:
+                        break
+
+                self._process_batch(connection, batch)
+        finally:
+            remaining: list[_AuditEventItem] = []
+            while True:
+                try:
+                    remaining.append(self._queue.get_nowait())
+                except queue.Empty:
+                    break
+
+            if remaining and connection is not None:
+                for i in range(0, len(remaining), self.max_batch_size):
+                    chunk = remaining[i : i + self.max_batch_size]
+                    self._process_batch(connection, chunk)
+
+            if connection is not None:
+                with suppress(Exception):
+                    connection.close()
+
+    def _process_batch(self, connection: sqlite3.Connection, batch: list[_AuditEventItem]) -> None:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.executemany(
+                """
+                INSERT INTO operation_events(
+                    event_id, operation_id, actor_id, token_id, action, resource_type,
+                    resource_id, path, outcome, error_code, revision_id,
+                    detail_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [item.row for item in batch],
+            )
+            connection.commit()
+            for item in batch:
+                if not item.future.done():
+                    item.future.set_result(None)
+        except Exception as error:
+            with suppress(Exception):
+                connection.rollback()
+            self._worker_healthy = False
+            self._worker_error = error
+            for item in batch:
+                if not item.future.done():
+                    item.future.set_exception(error)
+        finally:
+            batch_bytes = sum(item.size_bytes for item in batch)
+            with self._queue_lock:
+                self._queue_bytes = max(0, self._queue_bytes - batch_bytes)
+                self._queue_not_full.notify_all()
 
     def record(
         self,
@@ -68,31 +200,48 @@ class ActivityService:
                 "diff",
             }
         }
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                INSERT INTO operation_events(
-                    event_id, operation_id, actor_id, token_id, action, resource_type,
-                    resource_id, path, outcome, error_code, revision_id,
-                    detail_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    principal.operation_id,
-                    principal.actor_id,
-                    principal.token_id,
-                    action,
-                    resource_type,
-                    resource_id,
-                    path,
-                    outcome,
-                    error_code,
-                    revision_id,
-                    json.dumps(safe_details, sort_keys=True),
-                    utc_now(),
-                ),
-            )
+        detail_json = json.dumps(safe_details, sort_keys=True)
+        size_bytes = len(detail_json.encode("utf-8")) + 256
+        row = (
+            str(uuid.uuid4()),
+            principal.operation_id,
+            principal.actor_id,
+            principal.token_id,
+            action,
+            resource_type,
+            resource_id,
+            path,
+            outcome,
+            error_code,
+            revision_id,
+            detail_json,
+            utc_now(),
+        )
+
+        item = _AuditEventItem(
+            row=row,
+            size_bytes=size_bytes,
+            future=concurrent.futures.Future(),
+        )
+
+        with self._queue_lock:
+            while (
+                self._queue.qsize() >= self.max_queue_items
+                or (self._queue_bytes + size_bytes) > self.max_queue_bytes
+            ):
+                if self._shutdown_event.is_set():
+                    raise RuntimeError("ActivityService is shutting down")
+                if not self._worker_healthy:
+                    raise RuntimeError(f"Audit commit worker is unhealthy: {self._worker_error}")
+                if not self._queue_not_full.wait(timeout=10.0):
+                    raise RuntimeError("Audit commit queue capacity exceeded")
+
+            if not self._worker_healthy:
+                raise RuntimeError(f"Audit commit worker is unhealthy: {self._worker_error}")
+            self._queue_bytes += size_bytes
+            self._queue.put(item)
+
+        item.future.result(timeout=15.0)
 
     def acknowledge_problem(
         self, *, principal: Principal, event_id: str

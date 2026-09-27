@@ -152,6 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
+        services.activity.close()
 
     app = FastAPI(
         title="Sangam API",

@@ -70,7 +70,7 @@ class PdfResearchService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.creation():
+        with self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key):
             return self._import_pdf_locked(
                 title=title,
                 path=path,

@@ -381,7 +381,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.creation():
+        with self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key):
             fingerprint = request_hash(
                 {
                     "title": title,

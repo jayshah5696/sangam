@@ -21,13 +21,30 @@ class MutationCoordinator:
         self._waiting_backups = 0
         self._document_locks: dict[str, threading.RLock] = {}
         self._document_lock_users: dict[str, int] = {}
+        self._keyed_creation_locks: dict[tuple[str, str], threading.RLock] = {}
+        self._keyed_creation_users: dict[tuple[str, str], int] = {}
         self._creation_lock = threading.RLock()
 
     @contextmanager
-    def creation(self) -> Iterator[None]:
-        """Serialize idempotent identity selection for newly created documents."""
-        with self._creation_lock:
-            yield
+    def creation(
+        self, actor_id: str | None = None, idempotency_key: str | None = None
+    ) -> Iterator[None]:
+        """Serialize idempotent identity selection for newly created documents.
+
+        When actor_id and idempotency_key are provided, locking is scoped to the
+        idempotent request identity so independent creations can execute concurrently.
+        """
+        if actor_id is not None and idempotency_key is not None:
+            key = (actor_id, idempotency_key)
+            lock = self._retain_keyed_creation_lock(key)
+            try:
+                with lock:
+                    yield
+            finally:
+                self._release_keyed_creation_lock(key)
+        else:
+            with self._creation_lock:
+                yield
 
     @contextmanager
     def document(self, document_id: str) -> Iterator[None]:
@@ -97,3 +114,18 @@ class MutationCoordinator:
             else:
                 del self._document_lock_users[document_id]
                 del self._document_locks[document_id]
+
+    def _retain_keyed_creation_lock(self, key: tuple[str, str]) -> threading.RLock:
+        with self._condition:
+            lock = self._keyed_creation_locks.setdefault(key, threading.RLock())
+            self._keyed_creation_users[key] = self._keyed_creation_users.get(key, 0) + 1
+            return lock
+
+    def _release_keyed_creation_lock(self, key: tuple[str, str]) -> None:
+        with self._condition:
+            remaining = self._keyed_creation_users[key] - 1
+            if remaining:
+                self._keyed_creation_users[key] = remaining
+            else:
+                del self._keyed_creation_users[key]
+                del self._keyed_creation_locks[key]

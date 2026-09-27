@@ -140,6 +140,7 @@ def build_application_services(
         access_identity_verifier=access_verifier,
     )
     activity = ActivityService(database)
+    readiness.activity = activity
     authorization = AuthorizationPolicy()
     html_javascript = HtmlJavascriptSettingsService(database)
     publications = PublicationService(
