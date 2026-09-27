@@ -32,6 +32,7 @@ from sangam.errors import (
     MaterializationError,
     NotFoundError,
     SangamError,
+    ServiceUnavailableError,
     ValidationError,
 )
 from sangam.schemas import (
@@ -467,7 +468,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status = 409
         elif isinstance(error, (InvalidPathError, ValidationError)):
             status = 422
-        elif isinstance(error, MaterializationError):
+        elif isinstance(error, (MaterializationError, ServiceUnavailableError)):
             status = 503
         elif isinstance(error, IntegrationError):
             status = 502

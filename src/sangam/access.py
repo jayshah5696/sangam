@@ -1633,54 +1633,55 @@ class WorkspaceAccessService:
         path: str | None = None,
         details: dict[str, object] | None = None,
     ) -> T:
-        try:
-            result = operation()
-        except SangamError as error:
-            outcome = (
-                "denied"
-                if isinstance(error, AuthorizationError)
-                else "conflict"
-                if isinstance(error, ConflictError)
-                else "failed"
-            )
-            combined_details = dict(details or {})
-            if error.details:
-                combined_details.update(error.details)
-            self.activity.record(
-                principal=principal,
-                action=action,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                path=path,
-                outcome=outcome,
-                error_code=error.code,
-                details=combined_details or None,
-            )
-            raise
-        result_resource_id = resource_id
-        result_path = path
-        revision_id: str | None = None
-        if isinstance(result, Document):
-            result_resource_id = result.document_id
-            result_path = result.path if result.path is not None else path
-            revision_id = result.current_revision_id
-        if principal.identity_kind != "human" or action not in {
-            "list",
-            "search",
-            "read",
-            "history",
-            "diff",
-            "list_tags",
-            "list_folders",
-        }:
-            self.activity.record(
-                principal=principal,
-                action=action,
-                resource_type=resource_type,
-                resource_id=result_resource_id,
-                path=result_path,
-                outcome="accepted",
-                revision_id=revision_id,
-                details=details,
-            )
-        return result
+        with self.activity.admit() as reservation:
+            try:
+                result = operation()
+            except SangamError as error:
+                outcome = (
+                    "denied"
+                    if isinstance(error, AuthorizationError)
+                    else "conflict"
+                    if isinstance(error, ConflictError)
+                    else "failed"
+                )
+                combined_details = dict(details or {})
+                if error.details:
+                    combined_details.update(error.details)
+                reservation.record(
+                    principal=principal,
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    path=path,
+                    outcome=outcome,
+                    error_code=error.code,
+                    details=combined_details or None,
+                )
+                raise
+            result_resource_id = resource_id
+            result_path = path
+            revision_id: str | None = None
+            if isinstance(result, Document):
+                result_resource_id = result.document_id
+                result_path = result.path if result.path is not None else path
+                revision_id = result.current_revision_id
+            if principal.identity_kind != "human" or action not in {
+                "list",
+                "search",
+                "read",
+                "history",
+                "diff",
+                "list_tags",
+                "list_folders",
+            }:
+                reservation.record(
+                    principal=principal,
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=result_resource_id,
+                    path=result_path,
+                    outcome="accepted",
+                    revision_id=revision_id,
+                    details=details,
+                )
+            return result

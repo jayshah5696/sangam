@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable
 
 from sangam.db import Database
 from sangam.schemas import Document
@@ -12,7 +12,7 @@ class SearchIndex:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    def rebuild(self, documents: Sequence[Document]) -> None:
+    def rebuild(self, documents: Iterable[Document]) -> None:
         with self.database.transaction() as connection:
             connection.execute("DELETE FROM document_search")
             for document in documents:

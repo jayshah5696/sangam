@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import queue
 import sqlite3
 import threading
+import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sangam.db import Database, utc_now
-from sangam.errors import NotFoundError, ValidationError
+from sangam.errors import NotFoundError, ServiceUnavailableError, ValidationError
 from sangam.schemas import (
     ActivityActorSummary,
     ActivityBucket,
@@ -51,6 +51,54 @@ class _AuditEventItem:
     future: concurrent.futures.Future[None]
 
 
+class AuditReservation:
+    """Pre-admission ticket guaranteeing capacity in the audit commit ledger."""
+
+    def __init__(self, service: ActivityService, estimated_bytes: int) -> None:
+        self._service = service
+        self._estimated_bytes = estimated_bytes
+        self._committed = False
+        self._released = False
+
+    def record(
+        self,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        self._committed = True
+        self._service._record_with_reservation(
+            reservation=self,
+            principal=principal,
+            action=action,
+            resource_type=resource_type,
+            outcome=outcome,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            revision_id=revision_id,
+            details=details,
+        )
+
+    def release(self) -> None:
+        if not self._committed and not self._released:
+            self._released = True
+            self._service._release_reservation(self._estimated_bytes)
+
+    def __enter__(self) -> AuditReservation:
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.release()
+
+
 class ActivityService:
     """Stores safe, reviewable request outcomes without request bodies or credentials."""
 
@@ -66,11 +114,15 @@ class ActivityService:
         self.max_queue_items = max_queue_items
         self.max_queue_bytes = max_queue_bytes
         self.max_batch_size = max_batch_size
-        self._queue: queue.Queue[_AuditEventItem] = queue.Queue()
+        self._queue: list[_AuditEventItem] = []
         self._queue_bytes = 0
+        self._admitted_items = 0
+        self._admitted_bytes = 0
+        self._active_producers = 0
         self._queue_lock = threading.Lock()
-        self._queue_not_full = threading.Condition(self._queue_lock)
-        self._shutdown_event = threading.Event()
+        self._queue_condition = threading.Condition(self._queue_lock)
+        self._producers_done = threading.Condition(self._queue_lock)
+        self._shutting_down = False
         self._worker_healthy = True
         self._worker_error: Exception | None = None
         self._worker_thread = threading.Thread(
@@ -85,10 +137,68 @@ class ActivityService:
             self._worker_thread is not None and self._worker_thread.is_alive()
         )
 
-    def close(self, timeout: float = 5.0) -> None:
-        self._shutdown_event.set()
+    def admit(self, estimated_bytes: int = 1024, timeout: float = 10.0) -> AuditReservation:
+        start_time = time.monotonic()
+        with self._queue_lock:
+            while True:
+                if self._shutting_down:
+                    raise ServiceUnavailableError("Activity audit logging is shutting down")
+                if not self._worker_healthy:
+                    raise ServiceUnavailableError(
+                        f"Audit persistence is unavailable: {self._worker_error}"
+                    )
+
+                has_capacity = self._admitted_items < self.max_queue_items and (
+                    self._admitted_bytes + estimated_bytes <= self.max_queue_bytes
+                    or self._admitted_items == 0
+                )
+                if has_capacity:
+                    self._admitted_items += 1
+                    self._admitted_bytes += estimated_bytes
+                    self._active_producers += 1
+                    return AuditReservation(self, estimated_bytes=estimated_bytes)
+
+                elapsed = time.monotonic() - start_time
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    raise ServiceUnavailableError(
+                        "Audit queue capacity exceeded: service overloaded"
+                    )
+
+                self._queue_condition.wait(remaining)
+
+    def _release_reservation(self, estimated_bytes: int) -> None:
+        with self._queue_lock:
+            self._admitted_items = max(0, self._admitted_items - 1)
+            self._admitted_bytes = max(0, self._admitted_bytes - estimated_bytes)
+            self._active_producers = max(0, self._active_producers - 1)
+            if self._active_producers == 0:
+                self._producers_done.notify_all()
+            self._queue_condition.notify_all()
+
+    def close(self, timeout: float = 35.0) -> None:
+        deadline = time.monotonic() + timeout
+        with self._queue_lock:
+            self._shutting_down = True
+            self._queue_condition.notify_all()
+
+            while self._active_producers > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._producers_done.wait(remaining)
+
         if self._worker_thread is not None and self._worker_thread.is_alive():
-            self._worker_thread.join(timeout=timeout)
+            with self._queue_lock:
+                self._queue_condition.notify_all()
+            remaining = max(1.0, deadline - time.monotonic())
+            self._worker_thread.join(timeout=remaining)
+            if self._worker_thread.is_alive():
+                msg = (
+                    "ActivityService shutdown timed out while worker was still "
+                    "committing pending audit records"
+                )
+                raise RuntimeError(msg)
 
     def _commit_worker_loop(self) -> None:
         connection: sqlite3.Connection | None = None
@@ -100,27 +210,25 @@ class ActivityService:
             return
 
         try:
-            while not self._shutdown_event.is_set():
-                try:
-                    item = self._queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
+            while True:
+                batch: list[_AuditEventItem] = []
+                with self._queue_lock:
+                    while not self._queue:
+                        if self._shutting_down and self._active_producers == 0:
+                            return
+                        self._queue_condition.wait(timeout=0.1)
 
-                batch = [item]
-                while len(batch) < self.max_batch_size:
-                    try:
-                        batch.append(self._queue.get_nowait())
-                    except queue.Empty:
-                        break
+                    drain_count = min(len(self._queue), self.max_batch_size)
+                    batch = self._queue[:drain_count]
+                    del self._queue[:drain_count]
 
-                self._process_batch(connection, batch)
+                if batch:
+                    self._process_batch(connection, batch)
         finally:
             remaining: list[_AuditEventItem] = []
-            while True:
-                try:
-                    remaining.append(self._queue.get_nowait())
-                except queue.Empty:
-                    break
+            with self._queue_lock:
+                remaining = list(self._queue)
+                self._queue.clear()
 
             if remaining and connection is not None:
                 for i in range(0, len(remaining), self.max_batch_size):
@@ -131,40 +239,86 @@ class ActivityService:
                 with suppress(Exception):
                     connection.close()
 
-    def _process_batch(self, connection: sqlite3.Connection, batch: list[_AuditEventItem]) -> None:
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.executemany(
-                """
-                INSERT INTO operation_events(
-                    event_id, operation_id, actor_id, token_id, action, resource_type,
-                    resource_id, path, outcome, error_code, revision_id,
-                    detail_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [item.row for item in batch],
-            )
-            connection.commit()
-            for item in batch:
-                if not item.future.done():
-                    item.future.set_result(None)
-        except Exception as error:
-            with suppress(Exception):
-                connection.rollback()
-            self._worker_healthy = False
-            self._worker_error = error
-            for item in batch:
-                if not item.future.done():
-                    item.future.set_exception(error)
-        finally:
-            batch_bytes = sum(item.size_bytes for item in batch)
-            with self._queue_lock:
-                self._queue_bytes = max(0, self._queue_bytes - batch_bytes)
-                self._queue_not_full.notify_all()
+    @staticmethod
+    def _is_recoverable_error(error: Exception) -> bool:
+        if isinstance(error, sqlite3.OperationalError):
+            msg = str(error).lower()
+            if "busy" in msg or "locked" in msg:
+                return True
+        return False
 
-    def record(
+    @staticmethod
+    def _is_terminal_error(error: Exception) -> bool:
+        if isinstance(error, sqlite3.DatabaseError):
+            msg = str(error).lower()
+            if "malformed" in msg or "corrupt" in msg or "not a database" in msg:
+                return True
+        return isinstance(error, (OSError, MemoryError))
+
+    def _process_batch(self, connection: sqlite3.Connection, batch: list[_AuditEventItem]) -> None:
+        max_retries = 5
+        base_delay = 0.05
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.executemany(
+                    """
+                    INSERT INTO operation_events(
+                        event_id, operation_id, actor_id, token_id, action, resource_type,
+                        resource_id, path, outcome, error_code, revision_id,
+                        detail_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [item.row for item in batch],
+                )
+                connection.commit()
+                self._worker_healthy = True
+                self._worker_error = None
+                for item in batch:
+                    if not item.future.done():
+                        item.future.set_result(None)
+                last_error = None
+                break
+            except Exception as error:
+                with suppress(Exception):
+                    connection.rollback()
+                last_error = error
+
+                if self._is_recoverable_error(error) and attempt < max_retries - 1:
+                    time.sleep(base_delay * (2**attempt))
+                    continue
+                break
+
+        if last_error is not None:
+            if self._is_terminal_error(last_error):
+                self._worker_healthy = False
+                self._worker_error = last_error
+            else:
+                try:
+                    connection.execute("SELECT 1")
+                    self._worker_healthy = True
+                    self._worker_error = None
+                except Exception as conn_err:
+                    self._worker_healthy = False
+                    self._worker_error = conn_err
+
+            for item in batch:
+                if not item.future.done():
+                    item.future.set_exception(last_error)
+
+        batch_bytes = sum(item.size_bytes for item in batch)
+        with self._queue_lock:
+            self._queue_bytes = max(0, self._queue_bytes - batch_bytes)
+            self._admitted_items = max(0, self._admitted_items - len(batch))
+            self._admitted_bytes = max(0, self._admitted_bytes - batch_bytes)
+            self._queue_condition.notify_all()
+
+    def _record_with_reservation(
         self,
         *,
+        reservation: AuditReservation,
         principal: Principal,
         action: str,
         resource_type: str,
@@ -200,6 +354,13 @@ class ActivityService:
                 "diff",
             }
         }
+        if "diff" in safe_details and isinstance(safe_details["diff"], str):
+            diff_text = safe_details["diff"]
+            if len(diff_text) > 32_768:
+                safe_details["diff"] = (
+                    diff_text[:2000] + f"\n... [diff truncated from {len(diff_text)} bytes]"
+                )
+
         detail_json = json.dumps(safe_details, sort_keys=True)
         size_bytes = len(detail_json.encode("utf-8")) + 256
         row = (
@@ -225,23 +386,43 @@ class ActivityService:
         )
 
         with self._queue_lock:
-            while (
-                self._queue.qsize() >= self.max_queue_items
-                or (self._queue_bytes + size_bytes) > self.max_queue_bytes
-            ):
-                if self._shutdown_event.is_set():
-                    raise RuntimeError("ActivityService is shutting down")
-                if not self._worker_healthy:
-                    raise RuntimeError(f"Audit commit worker is unhealthy: {self._worker_error}")
-                if not self._queue_not_full.wait(timeout=10.0):
-                    raise RuntimeError("Audit commit queue capacity exceeded")
-
-            if not self._worker_healthy:
-                raise RuntimeError(f"Audit commit worker is unhealthy: {self._worker_error}")
+            self._admitted_bytes = max(
+                0, self._admitted_bytes - reservation._estimated_bytes + size_bytes
+            )
+            self._queue.append(item)
             self._queue_bytes += size_bytes
-            self._queue.put(item)
+            self._active_producers = max(0, self._active_producers - 1)
+            if self._active_producers == 0:
+                self._producers_done.notify_all()
+            self._queue_condition.notify_all()
 
         item.future.result(timeout=15.0)
+
+    def record(
+        self,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        with self.admit() as reservation:
+            reservation.record(
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                outcome=outcome,
+                resource_id=resource_id,
+                path=path,
+                error_code=error_code,
+                revision_id=revision_id,
+                details=details,
+            )
 
     def acknowledge_problem(
         self, *, principal: Principal, event_id: str

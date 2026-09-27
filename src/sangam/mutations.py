@@ -23,6 +23,8 @@ class MutationCoordinator:
         self._document_lock_users: dict[str, int] = {}
         self._keyed_creation_locks: dict[tuple[str, str], threading.RLock] = {}
         self._keyed_creation_users: dict[tuple[str, str], int] = {}
+        self._path_locks: dict[str, threading.RLock] = {}
+        self._path_lock_users: dict[str, int] = {}
         self._creation_lock = threading.RLock()
 
     @contextmanager
@@ -129,3 +131,28 @@ class MutationCoordinator:
             else:
                 del self._keyed_creation_users[key]
                 del self._keyed_creation_locks[key]
+
+    @contextmanager
+    def path(self, normalized_path: str) -> Iterator[None]:
+        """Coordinate file operations targeting the exact same workspace path."""
+        lock = self._retain_path_lock(normalized_path)
+        try:
+            with lock:
+                yield
+        finally:
+            self._release_path_lock(normalized_path)
+
+    def _retain_path_lock(self, path: str) -> threading.RLock:
+        with self._condition:
+            lock = self._path_locks.setdefault(path, threading.RLock())
+            self._path_lock_users[path] = self._path_lock_users.get(path, 0) + 1
+            return lock
+
+    def _release_path_lock(self, path: str) -> None:
+        with self._condition:
+            remaining = self._path_lock_users[path] - 1
+            if remaining:
+                self._path_lock_users[path] = remaining
+            else:
+                del self._path_lock_users[path]
+                del self._path_locks[path]

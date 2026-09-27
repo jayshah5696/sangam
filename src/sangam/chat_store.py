@@ -31,8 +31,13 @@ _CHAT_PAYLOAD_VERSION = 1
 class SQLiteChatKitStore(Store[TContext]):
     """Owner-scoped ChatKit persistence backed by Sangam's canonical SQLite database."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, max_concurrency: int = 32) -> None:
         self.database = database
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def _run_bounded(self, func, *args):
+        async with self._semaphore:
+            return await asyncio.to_thread(func, *args)
 
     @staticmethod
     def _actor_id(context: TContext) -> str:
@@ -61,7 +66,7 @@ class SQLiteChatKitStore(Store[TContext]):
         return ThreadMetadata.model_validate(_decode_payload(row["data_json"]))
 
     async def load_thread(self, thread_id: str, context: TContext) -> ThreadMetadata:
-        return await asyncio.to_thread(self._load_thread_sync, thread_id, context)
+        return await self._run_bounded(self._load_thread_sync, thread_id, context)
 
     def _save_thread_sync(self, thread: ThreadMetadata, context: TContext) -> None:
         now = utc_now()
@@ -97,7 +102,7 @@ class SQLiteChatKitStore(Store[TContext]):
             )
 
     async def save_thread(self, thread: ThreadMetadata, context: TContext) -> None:
-        await asyncio.to_thread(self._save_thread_sync, thread, context)
+        await self._run_bounded(self._save_thread_sync, thread, context)
 
     def _load_thread_items_sync(
         self,
@@ -155,7 +160,7 @@ class SQLiteChatKitStore(Store[TContext]):
         order: str,
         context: TContext,
     ) -> Page[ThreadItem]:
-        return await asyncio.to_thread(
+        return await self._run_bounded(
             self._load_thread_items_sync, thread_id, after, limit, order, context
         )
 
@@ -211,7 +216,7 @@ class SQLiteChatKitStore(Store[TContext]):
         order: str,
         context: TContext,
     ) -> Page[ThreadMetadata]:
-        return await asyncio.to_thread(self._load_threads_sync, limit, after, order, context)
+        return await self._run_bounded(self._load_threads_sync, limit, after, order, context)
 
     async def add_thread_item(self, thread_id: str, item: ThreadItem, context: TContext) -> None:
         await self.save_item(thread_id, item, context)
@@ -233,7 +238,7 @@ class SQLiteChatKitStore(Store[TContext]):
             )
 
     async def save_item(self, thread_id: str, item: ThreadItem, context: TContext) -> None:
-        await asyncio.to_thread(self._save_item_sync, thread_id, item, context)
+        await self._run_bounded(self._save_item_sync, thread_id, item, context)
 
     def _load_item_sync(self, thread_id: str, item_id: str, context: TContext) -> ThreadItem:
         self._require_thread_owner(thread_id, context)
@@ -250,7 +255,7 @@ class SQLiteChatKitStore(Store[TContext]):
         return _THREAD_ITEM_ADAPTER.validate_python(_decode_payload(row["data_json"]))
 
     async def load_item(self, thread_id: str, item_id: str, context: TContext) -> ThreadItem:
-        return await asyncio.to_thread(self._load_item_sync, thread_id, item_id, context)
+        return await self._run_bounded(self._load_item_sync, thread_id, item_id, context)
 
     def _delete_thread_sync(self, thread_id: str, context: TContext) -> None:
         self._require_thread_owner(thread_id, context)
@@ -258,7 +263,7 @@ class SQLiteChatKitStore(Store[TContext]):
             connection.execute("DELETE FROM chat_threads WHERE thread_id = ?", (thread_id,))
 
     async def delete_thread(self, thread_id: str, context: TContext) -> None:
-        await asyncio.to_thread(self._delete_thread_sync, thread_id, context)
+        await self._run_bounded(self._delete_thread_sync, thread_id, context)
 
     def _delete_thread_item_sync(self, thread_id: str, item_id: str, context: TContext) -> None:
         self._require_thread_owner(thread_id, context)
@@ -269,7 +274,7 @@ class SQLiteChatKitStore(Store[TContext]):
             )
 
     async def delete_thread_item(self, thread_id: str, item_id: str, context: TContext) -> None:
-        await asyncio.to_thread(self._delete_thread_item_sync, thread_id, item_id, context)
+        await self._run_bounded(self._delete_thread_item_sync, thread_id, item_id, context)
 
     def _save_attachment_sync(self, attachment: Attachment, context: TContext) -> None:
         with self.database.transaction() as connection:
@@ -289,7 +294,7 @@ class SQLiteChatKitStore(Store[TContext]):
             )
 
     async def save_attachment(self, attachment: Attachment, context: TContext) -> None:
-        await asyncio.to_thread(self._save_attachment_sync, attachment, context)
+        await self._run_bounded(self._save_attachment_sync, attachment, context)
 
     def _load_attachment_sync(self, attachment_id: str, context: TContext) -> Attachment:
         with self.database.connection() as connection:
@@ -304,7 +309,7 @@ class SQLiteChatKitStore(Store[TContext]):
         return _ATTACHMENT_ADAPTER.validate_python(_decode_payload(row["data_json"]))
 
     async def load_attachment(self, attachment_id: str, context: TContext) -> Attachment:
-        return await asyncio.to_thread(self._load_attachment_sync, attachment_id, context)
+        return await self._run_bounded(self._load_attachment_sync, attachment_id, context)
 
     def _delete_attachment_sync(self, attachment_id: str, context: TContext) -> None:
         attachment = self._load_attachment_sync(attachment_id, context)
@@ -314,7 +319,7 @@ class SQLiteChatKitStore(Store[TContext]):
             )
 
     async def delete_attachment(self, attachment_id: str, context: TContext) -> None:
-        await asyncio.to_thread(self._delete_attachment_sync, attachment_id, context)
+        await self._run_bounded(self._delete_attachment_sync, attachment_id, context)
 
 
 def _encode_payload(value) -> str:

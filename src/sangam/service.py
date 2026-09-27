@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 import uuid
+from collections.abc import Iterator
 from pathlib import PurePosixPath
 
 from sangam.actors import ActorService
@@ -272,6 +273,24 @@ class DocumentService:
                 + " ORDER BY d.updated_at DESC, d.document_id"
             ).fetchall()
         return [self._document_from_row(row) for row in rows]
+
+    def iter_documents(
+        self, *, include_deleted: bool = False, batch_size: int = 500
+    ) -> Iterator[Document]:
+        offset = 0
+        while True:
+            with self.database.connection() as connection:
+                rows = connection.execute(
+                    self._document_query()
+                    + ("" if include_deleted else " WHERE d.deleted = 0")
+                    + " ORDER BY d.updated_at DESC, d.document_id LIMIT ? OFFSET ?",
+                    (batch_size, offset),
+                ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                yield self._document_from_row(row)
+            offset += len(rows)
 
     def list_document_summaries(
         self,
@@ -1681,6 +1700,14 @@ class DocumentService:
         return [self._document_summary_from_row(row) for row in rows]
 
     def rebuild_search_index(self) -> int:
-        documents = self.list_documents(include_deleted=True)
-        self.search_index.rebuild(documents)
-        return sum(not document.deleted for document in documents)
+        count = 0
+
+        def count_and_yield():
+            nonlocal count
+            for doc in self.iter_documents(include_deleted=True):
+                if not doc.deleted:
+                    count += 1
+                yield doc
+
+        self.search_index.rebuild(count_and_yield())
+        return count
