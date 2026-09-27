@@ -124,7 +124,10 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "import", "pdf_document", operation, path=path)
+        details: dict[str, object] = {"title": title, "content_type": "application/pdf"}
+        if supersedes_document_id:
+            details["supersedes_document_id"] = supersedes_document_id
+        return self._run(principal, "import", "pdf_document", operation, path=path, details=details)
 
     def pdf_bytes(self, principal: Principal, document_id: str) -> tuple[Document, bytes]:
         current = self.documents.get_document(document_id)
@@ -225,6 +228,14 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Annotation:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "annotation_type": str(annotation_type),
+            "page_number": page_number,
+            "color": color,
+            "tags": tags,
+        }
+        if note:
+            details["note"] = note
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -242,6 +253,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def update_annotation(
@@ -259,6 +271,14 @@ class WorkspaceAccessService:
     ) -> Annotation:
         annotation = self.pdf_research.get_annotation(annotation_id)
         current = self.documents.get_document(annotation.document_id)
+        details: dict[str, object] = {
+            "annotation_type": str(annotation.annotation_type),
+            "page_number": annotation.page_number,
+            "color": color,
+            "tags": tags,
+        }
+        if note:
+            details["note"] = note
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -275,6 +295,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def delete_annotation(
@@ -287,6 +308,10 @@ class WorkspaceAccessService:
     ) -> Annotation:
         annotation = self.pdf_research.get_annotation(annotation_id)
         current = self.documents.get_document(annotation.document_id)
+        details: dict[str, object] = {
+            "annotation_type": str(annotation.annotation_type),
+            "page_number": annotation.page_number,
+        }
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -298,6 +323,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def annotation_history(self, principal: Principal, annotation_id: str) -> list[AnnotationEvent]:
@@ -416,6 +442,7 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {"slug": slug, "access_policy": access_policy}
         return self._run(
             principal,
             "publish",
@@ -423,6 +450,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=current.path,
+            details=details,
         )
 
     def preflight_create_document(
@@ -1652,11 +1680,21 @@ class WorkspaceAccessService:
                     self.activity.estimate_payload_bytes(details),
                 )
         with self.activity.admit(estimated_bytes=estimated_bytes) as reservation:
-            audit_recorded = False
+            audit_inserted = False
+            audit_committed = False
+            recorded_resource_id = resource_id
+            recorded_path = path
+            recorded_revision_id = None
+            recorded_details = dict(details or {})
 
             def audit_commit_hook(connection: sqlite3.Connection) -> None:
-                nonlocal audit_recorded
-                if not audit_recorded and is_mutation:
+                nonlocal \
+                    audit_inserted, \
+                    recorded_resource_id, \
+                    recorded_path, \
+                    recorded_revision_id, \
+                    recorded_details
+                if not audit_inserted and is_mutation:
                     target = self.documents.database.get_audit_target()
                     hook_resource_id = target.get("resource_id") or resource_id
                     hook_revision_id = target.get("revision_id")
@@ -1676,36 +1714,64 @@ class WorkspaceAccessService:
                         revision_id=hook_revision_id,
                         details=hook_details or None,
                     )
-                    audit_recorded = True
+                    audit_inserted = True
+                    recorded_resource_id = hook_resource_id
+                    recorded_path = hook_path
+                    recorded_revision_id = hook_revision_id
+                    recorded_details = hook_details
 
-            with self.documents.database.commit_hook(audit_commit_hook):
-                try:
+            def audit_post_commit_hook() -> None:
+                nonlocal audit_committed
+                if audit_inserted:
+                    audit_committed = True
+
+            try:
+                with (
+                    self.documents.database.commit_hook(audit_commit_hook),
+                    self.documents.database.post_commit_hook(audit_post_commit_hook),
+                ):
                     result = operation()
-                except SangamError as error:
-                    if not audit_recorded:
-                        outcome = (
-                            "denied"
-                            if isinstance(error, AuthorizationError)
-                            else "conflict"
-                            if isinstance(error, ConflictError)
-                            else "failed"
-                        )
-                        combined_details = dict(details or {})
-                        if error.details:
-                            combined_details.update(error.details)
-                        reservation.record(
-                            principal=principal,
-                            action=action,
-                            resource_type=resource_type,
-                            resource_id=resource_id,
-                            path=path,
-                            outcome=outcome,
-                            error_code=error.code,
-                            details=combined_details or None,
-                        )
-                    raise
+            except Exception as error:
+                if audit_committed:
+                    error_code = getattr(error, "code", "INTERNAL_ERROR")
+                    fail_details = dict(recorded_details)
+                    fail_details["stage"] = "materialization"
+                    fail_details["error"] = str(error)
+                    reservation.record(
+                        principal=principal,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=recorded_resource_id,
+                        path=recorded_path,
+                        outcome="failed",
+                        error_code=error_code,
+                        revision_id=recorded_revision_id,
+                        details=fail_details,
+                    )
+                elif not audit_inserted:
+                    outcome = (
+                        "denied"
+                        if isinstance(error, AuthorizationError)
+                        else "conflict"
+                        if isinstance(error, ConflictError)
+                        else "failed"
+                    )
+                    combined_details = dict(details or {})
+                    if isinstance(error, SangamError) and error.details:
+                        combined_details.update(error.details)
+                    reservation.record(
+                        principal=principal,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        path=path,
+                        outcome=outcome,
+                        error_code=getattr(error, "code", "INTERNAL_ERROR"),
+                        details=combined_details or None,
+                    )
+                raise
 
-            if not audit_recorded and (is_mutation or principal.identity_kind != "human"):
+            if not audit_committed and (is_mutation or principal.identity_kind != "human"):
                 result_resource_id = resource_id
                 result_path = path
                 revision_id = None

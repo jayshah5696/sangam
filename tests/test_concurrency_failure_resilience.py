@@ -13,11 +13,11 @@ from fastapi.testclient import TestClient
 from test_phase_five_pdf_research import import_pdf, text_pdf
 
 from sangam.activity import ActivityService
+from sangam.api import create_app
 from sangam.chat_store import BoundedThreadRunner
 from sangam.config import Settings
 from sangam.db import Database
 from sangam.errors import ServiceUnavailableError
-from sangam.main import create_app
 from sangam.security import Principal
 
 
@@ -790,9 +790,9 @@ def test_audit_service_executed_operation_survives_worker_failure_via_direct_per
 
 
 def test_app_lifespan_reports_chat_shutdown_error_while_preserving_activity_cleanup(
-    tmp_path: object,
+    settings: Settings,
 ) -> None:
-    app = create_app(Settings(workspace_root=str(tmp_path)))
+    app = create_app(settings)
     runner = app.state.services.chat.store_adapter._runner
 
     block_task = threading.Event()
@@ -1323,3 +1323,237 @@ def test_audit_exclusive_oversized_ownership_and_atomic_capacity(client: TestCli
         assert service._queue_bytes == 0
     finally:
         service.close()
+
+
+def test_overlap_write_transaction_and_oversized_audit_event(client: TestClient) -> None:
+    """Area 1 acceptance: Overlapping write transaction and oversized audit event."""
+    db = client.app.state.services.activity.database
+    activity_service = client.app.state.services.activity
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_overlap_tx"
+    )
+
+    oversized_payload = "W" * 70_000
+    tx_started = threading.Event()
+    audit_submitted = threading.Event()
+    audit_finished = threading.Event()
+    tx_finished = threading.Event()
+
+    def write_tx():
+        with db.transaction() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO folders(path, name, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?)",
+                ("overlap_folder", "overlap_folder", "2026-01-01", "2026-01-01"),
+            )
+            tx_started.set()
+            assert audit_submitted.wait(timeout=5.0)
+            time.sleep(0.1)
+        tx_finished.set()
+
+    def audit_record():
+        assert tx_started.wait(timeout=5.0)
+        with activity_service.admit(estimated_bytes=80_000) as res:
+            audit_submitted.set()
+            res.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_overlap_audit",
+                details={"diff": oversized_payload},
+            )
+        audit_finished.set()
+
+    t_tx = threading.Thread(target=write_tx)
+    t_aud = threading.Thread(target=audit_record)
+
+    t_tx.start()
+    t_aud.start()
+
+    t_tx.join(timeout=10.0)
+    t_aud.join(timeout=10.0)
+
+    assert tx_finished.is_set(), "Write transaction deadlocked or timed out"
+    assert audit_finished.is_set(), "Audit recording deadlocked or timed out"
+
+    with db.connection() as conn:
+        fld = conn.execute("SELECT * FROM folders WHERE path = ?", ("overlap_folder",)).fetchone()
+        assert fld is not None
+        event = conn.execute(
+            "SELECT * FROM operation_events WHERE resource_id = ?", ("doc_overlap_audit",)
+        ).fetchone()
+        assert event is not None
+        assert event["outcome"] == "accepted"
+
+
+def test_recursive_payload_bound_covers_nested_structures_and_numeric_boundaries() -> None:
+    """Area 3 acceptance: Nested payloads, unicode, escaping, and numeric bounds."""
+    import json
+
+    from sangam.activity import _estimate_value_bound
+
+    test_values = [
+        None,
+        True,
+        False,
+        0,
+        -1,
+        123456789012345678901234567890,
+        3.141592653589793,
+        1e20,
+        "",
+        "hello world",
+        '{"key": "value with \\n and \\t and \\"quotes\\""}',
+        "Unicode: 日本語, العربية, 🚀, ñ, ü, ç",
+        b"raw bytes",
+        [1, 2, "three", True, None],
+        (1, 2, 3),
+        {1, 2, 3},
+        {"nested": {"list": [1, 2, {"a": "b", "c": [True, False, None]}]}},
+        {"huge_int": 10**50, "deep": {"deeper": {"deepest": {"value": "end"}}}},
+    ]
+
+    for val in test_values:
+        bound = _estimate_value_bound(val)
+        if isinstance(val, set):
+            json_str = json.dumps(list(val))
+        elif isinstance(val, (bytes, bytearray)):
+            json_str = json.dumps(val.decode("latin-1"))
+        else:
+            json_str = json.dumps(val)
+        assert bound >= len(json_str), (
+            f"Bound {bound} failed for value {val!r} (json len {len(json_str)})"
+        )
+
+
+def test_post_commit_materialization_failure_records_correlated_failure_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Area 5 acceptance: Materialization failure records correlated failure audit event."""
+    workspace = client.app.state.services.documents.workspace
+
+    def failing_write_atomic(*args: object, **kwargs: object) -> str:
+        raise OSError("Disk full during atomic materialization")
+
+    monkeypatch.setattr(workspace, "write_atomic", failing_write_atomic)
+
+    response = client.post(
+        "/api/v1/documents",
+        json={"title": "Failing Materialization", "content": "content", "path": "fail_mat.md"},
+        headers=headers("fail-mat-k1"),
+    )
+    assert response.status_code in (500, 503)
+
+    db = client.app.state.services.activity.database
+    with db.connection() as conn:
+        doc = conn.execute(
+            "SELECT document_id, current_revision_id FROM documents WHERE path = ?",
+            ("fail_mat.md",),
+        ).fetchone()
+        assert doc is not None, "Durable database revision must exist"
+        doc_id = doc["document_id"]
+        rev_id = doc["current_revision_id"]
+
+        events = conn.execute(
+            "SELECT action, outcome, revision_id, detail_json FROM operation_events "
+            "WHERE resource_id = ? ORDER BY created_at ASC",
+            (doc_id,),
+        ).fetchall()
+        assert len(events) >= 1
+        fail_event = [e for e in events if e["outcome"] == "failed"]
+        assert len(fail_event) == 1, "Must have recorded correlated failure event"
+        assert fail_event[0]["revision_id"] == rev_id
+        assert "materialization" in fail_event[0]["detail_json"]
+        assert "The revision was committed" in fail_event[0]["detail_json"]
+
+
+def test_worker_recovery_from_transient_lock_and_uncertain_reconciliation(
+    client: TestClient,
+) -> None:
+    """Area 6 acceptance: Worker recovery and event reconciliation."""
+    activity_service = client.app.state.services.activity
+
+    # Transient error
+    activity_service._worker_healthy = False
+    activity_service._worker_error = sqlite3.OperationalError("database is locked")
+    assert activity_service.is_healthy() is True, "Must recover from transient lock contention"
+
+    # Terminal / disk failure
+    activity_service._worker_healthy = False
+    activity_service._worker_error = OSError("Disk device removed")
+    assert activity_service.is_healthy() is False, "Must NOT recover from terminal OS error"
+    activity_service._worker_healthy = True
+    activity_service._worker_error = None
+
+    # Uncertain event reconciliation
+    event_id = "evt_reconcile_test_1"
+    activity_service._uncertain_events[event_id] = time.time()
+    assert activity_service.reconcile_event(event_id) == "uncertain"
+
+    # Insert into database
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_rec"
+    )
+    with activity_service.database.connection() as conn:
+        activity_service.record_with_connection(
+            connection=conn,
+            principal=principal,
+            action="create",
+            resource_type="document",
+            outcome="accepted",
+            resource_id="doc_rec_1",
+        )
+        # Check reconcile on real row
+        row = conn.execute(
+            "SELECT event_id FROM operation_events WHERE resource_id = ?", ("doc_rec_1",)
+        ).fetchone()
+        assert row is not None
+        assert activity_service.reconcile_event(row["event_id"]) == "committed"
+        assert row["event_id"] not in activity_service._uncertain_events
+
+
+def test_annotation_validation_rejects_control_characters(client: TestClient) -> None:
+    """Area 8 acceptance: Annotation color and tags reject control characters."""
+    from test_phase_five_pdf_research import import_pdf, text_pdf
+
+    from sangam.errors import ValidationError
+
+    pdf_bytes = text_pdf("Annotation Validation Test PDF")
+    imported = import_pdf(
+        client,
+        content=pdf_bytes,
+        key="ann-val-pdf-key",
+        path="research/ann_val.pdf",
+        title="Annotation Validation PDF",
+    ).json()
+    doc_id = imported["document_id"]
+
+    pdf_service = client.app.state.services.pdf_research
+    with pytest.raises(ValidationError, match="Annotation color"):
+        pdf_service.create_annotation(
+            document_id=doc_id,
+            page_number=1,
+            annotation_type="highlight",
+            selected_text="text",
+            note=None,
+            geometry=[],
+            tags=["valid"],
+            color="red\x00null",
+            actor_id="human:jay",
+            idempotency_key="ann-val-1",
+        )
+
+    with pytest.raises(ValidationError, match="Annotation tag"):
+        pdf_service.create_annotation(
+            document_id=doc_id,
+            page_number=1,
+            annotation_type="highlight",
+            selected_text="text",
+            note=None,
+            geometry=[],
+            tags=["tag\nwith\nnewline"],
+            color="#FF0000",
+            actor_id="human:jay",
+            idempotency_key="ann-val-2",
+        )

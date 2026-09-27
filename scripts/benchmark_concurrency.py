@@ -121,6 +121,8 @@ def run_read_benchmark(
 
     total_time = time.perf_counter() - start
     print_stats(f"Agent Read-Heavy ({workers} workers)", latencies, errors, total_time)
+    if errors > 0:
+        raise RuntimeError(f"Read benchmark encountered {errors} errors")
     return len(latencies)
 
 
@@ -164,6 +166,8 @@ def run_write_benchmark(
 
     total_time = time.perf_counter() - start
     print_stats(f"Agent Write-Heavy ({workers} workers)", latencies, errors, total_time)
+    if errors > 0:
+        raise RuntimeError(f"Write benchmark encountered {errors} errors")
     return len(latencies)
 
 
@@ -219,6 +223,8 @@ def run_mixed_benchmark(
 
     total_time = time.perf_counter() - start
     print_stats(f"Agent Mixed 80/20 ({workers} workers)", latencies, errors, total_time)
+    if errors > 0:
+        raise RuntimeError(f"Mixed benchmark encountered {errors} errors")
     return len(latencies)
 
 
@@ -267,21 +273,59 @@ def main() -> None:
             )
             expected_audits += mixed_ops
 
-            # Query database directly to verify 100% audit persistence
-            client.app.state.services.activity.list_events(limit=1)
-            db = client.app.state.services.activity.database
+            # Deep audit validation & database integrity verification
+            activity_svc = client.app.state.services.activity
+            activity_svc.list_events(limit=1)
+            db = activity_svc.database
+
             with db.connection() as conn:
                 row = conn.execute("SELECT count(*) as cnt FROM operation_events").fetchone()
                 persisted_events = row["cnt"]
 
+                # Deep validation on document create events
+                rows = conn.execute(
+                    "SELECT event_id, resource_id, revision_id, path, action, outcome, detail_json "
+                    "FROM operation_events WHERE action = 'create'"
+                ).fetchall()
+                for r in rows:
+                    assert r["resource_id"] is not None, (
+                        f"Event {r['event_id']} missing resource_id"
+                    )
+                    assert r["revision_id"] is not None, (
+                        f"Event {r['event_id']} missing revision_id"
+                    )
+                    assert r["outcome"] == "accepted", f"Event {r['event_id']} outcome not accepted"
+                    # Correlate with documents table
+                    doc = conn.execute(
+                        "SELECT document_id, current_revision_id, path FROM documents "
+                        "WHERE document_id = ?",
+                        (r["resource_id"],),
+                    ).fetchone()
+                    assert doc is not None, f"Document {r['resource_id']} not found in DB"
+                    assert doc["current_revision_id"] == r["revision_id"]
+
             print(
                 f"\nAudit Log Durability Check: {persisted_events} persisted / "
                 f"{expected_audits} expected "
-                f"({persisted_events / expected_audits * 100:.1f}% durability, 0 dropped events)"
+                f"({persisted_events / expected_audits * 100:.1f}% durability, "
+                f"0 dropped events, 100% verified)"
             )
             assert persisted_events == expected_audits, (
                 f"Audit row count mismatch! Persisted: {persisted_events}, "
                 f"Expected: {expected_audits}"
+            )
+
+            # Memory and WAL storage statistics
+            assert activity_svc._admitted_bytes == 0, "Leaked admitted bytes in ActivityService"
+            assert activity_svc._queue_bytes == 0, "Drained queue bytes not zero"
+            assert activity_svc._reserved_producer_bytes == 0, "Leaked reserved producer bytes"
+
+            db_size = Path(settings.database_path).stat().st_size
+            wal_path = Path(str(settings.database_path) + "-wal")
+            wal_size = wal_path.stat().st_size if wal_path.exists() else 0
+            print(
+                f"Storage Metrics: SQLite DB = {db_size / 1024:.1f} KB, "
+                f"WAL = {wal_size / 1024:.1f} KB | Active Memory Queue: 0 B"
             )
 
     print(

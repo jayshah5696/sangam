@@ -96,6 +96,19 @@ class Database:
                 hooks.remove(callback)
 
     @contextmanager
+    def post_commit_hook(self, callback: Callable[[], None]) -> Iterator[None]:
+        hooks = getattr(self._local, "post_commit_hooks", None)
+        if hooks is None:
+            hooks = []
+            self._local.post_commit_hooks = hooks
+        hooks.append(callback)
+        try:
+            yield
+        finally:
+            if callback in hooks:
+                hooks.remove(callback)
+
+    @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         active = getattr(self._local, "active_connection", None)
         if active is not None:
@@ -124,6 +137,9 @@ class Database:
             for hook in hooks:
                 hook(connection)
             connection.commit()
+            post_hooks = list(getattr(self._local, "post_commit_hooks", []))
+            for post_hook in post_hooks:
+                post_hook()
         except Exception:
             connection.rollback()
             raise

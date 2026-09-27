@@ -66,37 +66,44 @@ class BoundedThreadRunner:
                     if self._shutting_down:
                         raise ServiceUnavailableError("Chat persistence is shutting down")
                     await cond.wait()
+                if self._shutting_down:
+                    raise ServiceUnavailableError("Chat persistence is shutting down")
                 self._active_workers += 1
             finally:
                 self._waiting_count -= 1
 
         loop = asyncio.get_running_loop()
 
-        def release_permit(fut: concurrent.futures.Future[Any]) -> None:
-            def _decr() -> None:
+        def on_done(f: concurrent.futures.Future[Any]) -> None:
+            def _cleanup() -> None:
                 async def _coro() -> None:
                     c = self._get_cond()
                     async with c:
+                        self._active_futures.discard(f)
                         self._active_workers = max(0, self._active_workers - 1)
-                        c.notify()
+                        c.notify_all()
 
                 if not loop.is_closed():
                     asyncio.create_task(_coro())
 
             with contextlib.suppress(RuntimeError):
-                loop.call_soon_threadsafe(_decr)
+                loop.call_soon_threadsafe(_cleanup)
 
-        try:
-            fut = self._executor.submit(func, *args)
-        except Exception:
-            async with cond:
+        async with cond:
+            if self._shutting_down:
                 self._active_workers = max(0, self._active_workers - 1)
-                cond.notify()
-            raise
+                cond.notify_all()
+                raise ServiceUnavailableError("Chat persistence is shutting down")
 
-        self._active_futures.add(fut)
-        fut.add_done_callback(lambda f: self._active_futures.discard(f))
-        fut.add_done_callback(release_permit)
+            try:
+                fut = self._executor.submit(func, *args)
+            except Exception:
+                self._active_workers = max(0, self._active_workers - 1)
+                cond.notify_all()
+                raise
+
+            self._active_futures.add(fut)
+            fut.add_done_callback(on_done)
 
         return await asyncio.wrap_future(fut)
 
@@ -108,17 +115,21 @@ class BoundedThreadRunner:
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        while self._active_futures and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        try:
+            async with cond:
+                while (self._active_futures or self._active_workers > 0) and loop.time() < deadline:
+                    remaining = deadline - loop.time()
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(cond.wait(), timeout=min(remaining, 0.05))
 
-        async with cond:
-            if self._active_futures or self._active_workers > 0:
-                remaining = len(self._active_futures)
-                raise RuntimeError(
-                    f"ChatKitStore shutdown timed out with {remaining} operations "
-                    f"and {self._active_workers} active workers still committing"
-                )
-        self._executor.shutdown(wait=False)
+                if self._active_futures or self._active_workers > 0:
+                    remaining = len(self._active_futures)
+                    raise RuntimeError(
+                        f"ChatKitStore shutdown timed out with {remaining} operations "
+                        f"and {self._active_workers} active workers still committing"
+                    )
+        finally:
+            self._executor.shutdown(wait=False)
 
 
 class SQLiteChatKitStore(Store[TContext]):

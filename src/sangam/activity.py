@@ -49,6 +49,19 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "lines_added",
     "lines_removed",
     "diff",
+    "stage",
+    "error",
+    "annotation_type",
+    "page_number",
+    "color",
+    "tags",
+    "note",
+    "geometry",
+    "supersedes_document_id",
+    "slug",
+    "access_policy",
+    "additions",
+    "deletions",
 }
 
 
@@ -59,6 +72,33 @@ def _estimate_string_bound(s: str) -> int:
             return len(s) + s.count('"') + s.count("\\") + 2
         return len(s) * 6 + 2
     return len(s) * 12 + 2
+
+
+def _estimate_value_bound(val: object, depth: int = 0) -> int:
+    """Computes a conservative, allocation-free, recursive upper bound on JSON size."""
+    if depth > 10:
+        return 128
+    if val is None:
+        return 4
+    if isinstance(val, bool):
+        return 5
+    if isinstance(val, (int, float)):
+        return max(32, len(str(val)) + 2)
+    if isinstance(val, str):
+        return _estimate_string_bound(val)
+    if isinstance(val, (bytes, bytearray)):
+        return len(val) * 12 + 2
+    if isinstance(val, (list, tuple, set)):
+        total = 2
+        for item in val:
+            total += _estimate_value_bound(item, depth + 1) + 2
+        return total
+    if isinstance(val, dict):
+        total = 2
+        for k, v in val.items():
+            total += _estimate_string_bound(str(k)) + 2 + _estimate_value_bound(v, depth + 1) + 2
+        return total
+    return 64
 
 
 @dataclass
@@ -209,7 +249,7 @@ class ActivityService:
         self._queue_condition = threading.Condition(self._queue_lock)
         self._producers_done = threading.Condition(self._queue_lock)
         self._shutting_down = False
-        self._uncertain_events: set[str] = set()
+        self._uncertain_events: dict[str, float] = {}
         self._worker_healthy = True
         self._worker_error: Exception | None = None
         self._worker_thread = threading.Thread(
@@ -232,7 +272,47 @@ class ActivityService:
         with self._queue_lock:
             return self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
 
+    def total_in_flight_items(self) -> int:
+        """Returns total in-flight audit items across all stages."""
+        with self._queue_lock:
+            return self._admitted_items + len(self._queue) + self._committing_items
+
+    def _check_worker_recovery(self) -> bool:
+        """Write-based probe to recover worker ONLY from transient lock exhaustion."""
+        if self._worker_healthy:
+            return True
+        if self._worker_thread is None or not self._worker_thread.is_alive():
+            return False
+        if self._worker_error is None or not self._is_recoverable_error(self._worker_error):
+            return False
+        try:
+            with self.database.transaction() as probe_conn:
+                probe_conn.execute("SELECT 1")
+            self._worker_healthy = True
+            self._worker_error = None
+            return True
+        except Exception:
+            return False
+
+    def reconcile_event(self, event_id: str) -> str:
+        """Reconciles the durable outcome of an uncertain audit event."""
+        with self.database.connection() as conn:
+            row = conn.execute(
+                "SELECT outcome FROM operation_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if row is not None:
+                with self._queue_lock:
+                    self._uncertain_events.pop(event_id, None)
+                return "committed"
+        with self._queue_lock:
+            if event_id in self._uncertain_events:
+                return "uncertain"
+        return "not_found"
+
     def is_healthy(self) -> bool:
+        if not self._worker_healthy:
+            self._check_worker_recovery()
         return self._worker_healthy and (
             self._worker_thread is not None and self._worker_thread.is_alive()
         )
@@ -243,24 +323,27 @@ class ActivityService:
             while True:
                 if self._shutting_down:
                     raise ServiceUnavailableError("Activity audit logging is shutting down")
-                if not self._worker_healthy:
+                if not self._worker_healthy and not self._check_worker_recovery():
                     raise ServiceUnavailableError(
                         f"Audit persistence is unavailable: {self._worker_error}"
                     )
 
                 is_oversized = estimated_bytes > self.max_total_bytes
+                total_in_flight_items = (
+                    self._admitted_items + len(self._queue) + self._committing_items
+                )
                 total_in_flight = (
                     self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
                 )
                 if is_oversized:
                     has_capacity = (
-                        self._admitted_items < self.max_queue_items
+                        total_in_flight_items < self.max_queue_items
                         and self._oversized_owner_id is None
                         and total_in_flight == 0
                     )
                 else:
                     has_capacity = (
-                        self._admitted_items < self.max_queue_items
+                        total_in_flight_items < self.max_queue_items
                         and self._oversized_owner_id is None
                         and (total_in_flight + estimated_bytes) <= self.max_total_bytes
                     )
@@ -418,6 +501,9 @@ class ActivityService:
                 connection.commit()
                 self._worker_healthy = True
                 self._worker_error = None
+                with self._queue_lock:
+                    for item in batch:
+                        self._uncertain_events.pop(item.row[0], None)
                 for item in batch:
                     if not item.future.done():
                         item.future.set_result(None)
@@ -469,27 +555,7 @@ class ActivityService:
         safe_details = {
             key: sanitize_sensitive_data(value)
             for key, value in (details or {}).items()
-            if key
-            in {
-                "current_revision_id",
-                "expected_revision_id",
-                "current_metadata_version",
-                "expected_metadata_version",
-                "capability",
-                "summary",
-                "title",
-                "source_path",
-                "destination_path",
-                "content_type",
-                "category",
-                "tag_ids",
-                "patch",
-                "patch_mode",
-                "mode",
-                "lines_added",
-                "lines_removed",
-                "diff",
-            }
+            if key in ALLOWED_AUDIT_DETAIL_KEYS
         }
 
         detail_json = json.dumps(safe_details, sort_keys=True)
@@ -555,35 +621,7 @@ class ActivityService:
         for k, v in details.items():
             if k not in ALLOWED_AUDIT_DETAIL_KEYS:
                 continue
-            k_str = str(k)
-            total += len(k_str) * 2 + 4
-            if v is None:
-                total += 4
-            elif isinstance(v, bool):
-                total += 5
-            elif isinstance(v, (int, float)):
-                total += 32
-            elif isinstance(v, str):
-                total += _estimate_string_bound(v)
-            elif isinstance(v, (bytes, bytearray)):
-                total += len(v) * 12 + 2
-            elif isinstance(v, (list, tuple)):
-                total += 2
-                for item in v:
-                    if isinstance(item, str):
-                        total += _estimate_string_bound(item) + 2
-                    else:
-                        total += 36
-            elif isinstance(v, dict):
-                total += 2
-                for dk, dv in v.items():
-                    total += _estimate_string_bound(str(dk)) + 2
-                    if isinstance(dv, str):
-                        total += _estimate_string_bound(dv) + 2
-                    else:
-                        total += 36
-            else:
-                total += 64
+            total += _estimate_string_bound(str(k)) + 1 + _estimate_value_bound(v, depth=0) + 1
         return total
 
     _estimate_payload_bytes = estimate_payload_bytes
@@ -608,8 +646,15 @@ class ActivityService:
 
         with self._queue_lock:
             while True:
-                if not self._worker_healthy:
-                    break
+                if not self._worker_healthy and not self._check_worker_recovery():
+                    can_direct_persist = (
+                        not self._shutting_down
+                        and (self._reserved_producer_bytes + expansion) <= self.max_total_bytes
+                    )
+                    if not can_direct_persist and self._is_terminal_error(self._worker_error):
+                        raise ServiceUnavailableError(
+                            f"Audit persistence is unavailable: {self._worker_error}"
+                        )
 
                 is_oversized = (
                     needed_bytes > self.max_queue_bytes or needed_bytes > self.max_total_bytes
@@ -652,7 +697,9 @@ class ActivityService:
 
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    break
+                    raise ServiceUnavailableError(
+                        "Audit queue capacity exceeded: expansion timed out"
+                    )
                 self._queue_condition.wait(min(remaining, 0.1))
 
         row, actual_size_bytes = self._prepare_event_row(
@@ -668,7 +715,11 @@ class ActivityService:
         )
 
         with self._queue_lock:
-            if actual_size_bytes < reservation._reserved_bytes:
+            if actual_size_bytes > reservation._reserved_bytes:
+                extra = actual_size_bytes - reservation._reserved_bytes
+                self._reserved_producer_bytes += extra
+                reservation._reserved_bytes = actual_size_bytes
+            elif actual_size_bytes < reservation._reserved_bytes:
                 excess = reservation._reserved_bytes - actual_size_bytes
                 self._reserved_producer_bytes = max(0, self._reserved_producer_bytes - excess)
                 reservation._reserved_bytes = actual_size_bytes
@@ -718,7 +769,10 @@ class ActivityService:
             item.future.result(timeout=60.0)
         except concurrent.futures.TimeoutError as err:
             with self._queue_lock:
-                self._uncertain_events.add(row[0])
+                self._uncertain_events[row[0]] = time.time()
+                if len(self._uncertain_events) > 1000:
+                    oldest = next(iter(self._uncertain_events))
+                    del self._uncertain_events[oldest]
             raise ServiceUnavailableError(
                 f"Audit event commit timed out; write outcome is uncertain (event_id={row[0]})"
             ) from err
@@ -740,44 +794,10 @@ class ActivityService:
     ) -> None:
         needed_bytes = max(reservation._reserved_bytes, self.estimate_payload_bytes(details))
         expansion = max(0, needed_bytes - reservation._reserved_bytes)
-        deadline = time.monotonic() + 60.0
 
         with self._queue_lock:
-            while True:
-                is_oversized = (
-                    needed_bytes > self.max_queue_bytes or needed_bytes > self.max_total_bytes
-                )
-                if is_oversized:
-                    can_expand = (
-                        (
-                            self._oversized_owner_id is None
-                            or self._oversized_owner_id == id(reservation)
-                        )
-                        and len(self._queue) == 0
-                        and self._committing_items == 0
-                    )
-                else:
-                    total_in_flight = (
-                        self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
-                    )
-                    total_ok = (
-                        self._oversized_owner_id is None
-                        and (total_in_flight + expansion) <= self.max_total_bytes
-                    )
-                    can_expand = total_ok
-
-                if can_expand:
-                    self._reserved_producer_bytes += expansion
-                    reservation._reserved_bytes = needed_bytes
-                    if is_oversized:
-                        self._oversized_owner_id = id(reservation)
-                        reservation._is_oversized_owner = True
-                    break
-
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                self._queue_condition.wait(min(remaining, 0.1))
+            self._reserved_producer_bytes += expansion
+            reservation._reserved_bytes = needed_bytes
 
         self.record_with_connection(
             connection=connection,
