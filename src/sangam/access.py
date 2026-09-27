@@ -652,12 +652,9 @@ class WorkspaceAccessService:
                     current.content.splitlines(), content.splitlines(), lineterm=""
                 )
             )
-            lines_added = sum(
-                1 for line in diff_lines if line.startswith("+") and not line.startswith("+++")
-            )
-            lines_removed = sum(
-                1 for line in diff_lines if line.startswith("-") and not line.startswith("---")
-            )
+            content_diff_lines = diff_lines[2:]
+            lines_added = sum(1 for line in content_diff_lines if line.startswith("+"))
+            lines_removed = sum(1 for line in content_diff_lines if line.startswith("-"))
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "lines_added": lines_added,
