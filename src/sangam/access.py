@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable, Iterator
+from contextlib import suppress
 from pathlib import PurePosixPath
 from typing import TypeVar
 
@@ -1633,7 +1634,14 @@ class WorkspaceAccessService:
         path: str | None = None,
         details: dict[str, object] | None = None,
     ) -> T:
-        with self.activity.admit() as reservation:
+        estimated_bytes = 2048
+        if details:
+            with suppress(Exception):
+                estimated_bytes = max(
+                    estimated_bytes,
+                    len(json.dumps(details, default=str).encode("utf-8")) + 512,
+                )
+        with self.activity.admit(estimated_bytes=estimated_bytes) as reservation:
             try:
                 result = operation()
             except SangamError as error:

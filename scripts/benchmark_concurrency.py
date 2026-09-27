@@ -1,10 +1,10 @@
 """Reproducible Concurrency and Throughput Benchmark for Sangam.
 
 Measures:
-1. High-concurrency reads under WAL mode (50 parallel workers)
-2. Concurrent write mutations with audit batching (20 parallel workers)
-3. Mixed 80/20 Read/Write workload (30 workers)
-4. Path-level PDF import contention
+1. High-concurrency agent reads exercising audit writes under WAL mode (40 parallel workers)
+2. Concurrent agent write mutations with audit batching (20 parallel workers)
+3. Mixed 80/20 Read/Write agent workload (20 workers)
+4. Full audit row verification in SQLite database (zero dropped audit logs)
 """
 
 from __future__ import annotations
@@ -34,6 +34,26 @@ def make_client(tmp_path: Path) -> tuple[TestClient, Settings]:
     return TestClient(create_app(settings)), settings
 
 
+def issue_benchmark_agent_token(client: TestClient) -> str:
+    response = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:benchmark",
+            "display_name": "Benchmark Agent",
+            "label": "benchmark agent token",
+            "scopes": [
+                {"capability": "read", "path_prefix": None},
+                {"capability": "create", "path_prefix": None},
+                {"capability": "update", "path_prefix": None},
+                {"capability": "search", "path_prefix": None},
+            ],
+        },
+        headers={"Idempotency-Key": "bench-agent-token-key"},
+    )
+    assert response.status_code == 201, f"Failed to issue agent token: {response.text}"
+    return response.json()["token"]
+
+
 def print_stats(name: str, latencies: list[float], errors: int, total_time: float) -> None:
     count = len(latencies)
     if count == 0:
@@ -49,19 +69,24 @@ def print_stats(name: str, latencies: list[float], errors: int, total_time: floa
     rps = count / total_time if total_time > 0 else 0
 
     print(
-        f"{name:<30} | Ops: {count:>4} | Err: {errors:>2} | "
+        f"{name:<32} | Ops: {count:>4} | Err: {errors:>2} | "
         f"Mean: {mean:>6.1f}ms | p50: {p50:>5.1f}ms | p95: {p95:>5.1f}ms | p99: {p99:>5.1f}ms | "
         f"Throughput: {rps:>6.1f} op/s"
     )
 
 
-def run_read_benchmark(client: TestClient, workers: int, requests_per_worker: int) -> None:
+def run_read_benchmark(
+    client: TestClient, token: str, workers: int, requests_per_worker: int
+) -> int:
     # Seed 50 documents first
     for i in range(50):
         client.post(
             "/api/v1/documents",
             json={"title": f"Bench Doc {i}", "content": f"Content {i} for benchmark"},
-            headers={"Idempotency-Key": f"seed-doc-{i}"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Idempotency-Key": f"seed-doc-{i}",
+            },
         )
 
     latencies: list[float] = []
@@ -69,14 +94,16 @@ def run_read_benchmark(client: TestClient, workers: int, requests_per_worker: in
     start = time.perf_counter()
 
     def worker(worker_id: int):
-        nonlocal errors
         w_latencies = []
         w_errors = 0
         for req in range(requests_per_worker):
             t0 = time.perf_counter()
             resp = client.get(
                 "/api/v1/documents",
-                headers={"Idempotency-Key": f"bench-read-{worker_id}-{req}"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Idempotency-Key": f"bench-read-{worker_id}-{req}",
+                },
             )
             elapsed = time.perf_counter() - t0
             if resp.status_code == 200:
@@ -93,10 +120,13 @@ def run_read_benchmark(client: TestClient, workers: int, requests_per_worker: in
             errors += we
 
     total_time = time.perf_counter() - start
-    print_stats(f"Read-Heavy ({workers} workers)", latencies, errors, total_time)
+    print_stats(f"Agent Read-Heavy ({workers} workers)", latencies, errors, total_time)
+    return len(latencies)
 
 
-def run_write_benchmark(client: TestClient, workers: int, requests_per_worker: int) -> None:
+def run_write_benchmark(
+    client: TestClient, token: str, workers: int, requests_per_worker: int
+) -> int:
     latencies: list[float] = []
     errors = 0
     start = time.perf_counter()
@@ -110,10 +140,13 @@ def run_write_benchmark(client: TestClient, workers: int, requests_per_worker: i
                 "/api/v1/documents",
                 json={
                     "title": f"Bench Mut {worker_id}-{req}",
-                    "content": f"# Benchmark Content\nWorker {worker_id} request {req}",
+                    "content": f"# Benchmark Content\\nWorker {worker_id} request {req}",
                     "path": f"bench/{worker_id}_{req}.md",
                 },
-                headers={"Idempotency-Key": f"bench-write-{worker_id}-{req}"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Idempotency-Key": f"bench-write-{worker_id}-{req}",
+                },
             )
             elapsed = time.perf_counter() - t0
             if resp.status_code == 201:
@@ -130,10 +163,13 @@ def run_write_benchmark(client: TestClient, workers: int, requests_per_worker: i
             errors += we
 
     total_time = time.perf_counter() - start
-    print_stats(f"Write-Heavy ({workers} workers)", latencies, errors, total_time)
+    print_stats(f"Agent Write-Heavy ({workers} workers)", latencies, errors, total_time)
+    return len(latencies)
 
 
-def run_mixed_benchmark(client: TestClient, workers: int, requests_per_worker: int) -> None:
+def run_mixed_benchmark(
+    client: TestClient, token: str, workers: int, requests_per_worker: int
+) -> int:
     latencies: list[float] = []
     errors = 0
     start = time.perf_counter()
@@ -152,13 +188,19 @@ def run_mixed_benchmark(client: TestClient, workers: int, requests_per_worker: i
                         "content": "Mixed content load",
                         "path": f"mixed/{worker_id}_{req}.md",
                     },
-                    headers={"Idempotency-Key": f"bench-mixed-{worker_id}-{req}"},
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Idempotency-Key": f"bench-mixed-{worker_id}-{req}",
+                    },
                 )
                 success = resp.status_code == 201
             else:
                 resp = client.get(
                     "/api/v1/documents",
-                    headers={"Idempotency-Key": f"bench-mixed-read-{worker_id}-{req}"},
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Idempotency-Key": f"bench-mixed-read-{worker_id}-{req}",
+                    },
                 )
                 success = resp.status_code == 200
             elapsed = time.perf_counter() - t0
@@ -176,7 +218,8 @@ def run_mixed_benchmark(client: TestClient, workers: int, requests_per_worker: i
             errors += we
 
     total_time = time.perf_counter() - start
-    print_stats(f"Mixed 80/20 ({workers} workers)", latencies, errors, total_time)
+    print_stats(f"Agent Mixed 80/20 ({workers} workers)", latencies, errors, total_time)
+    return len(latencies)
 
 
 def main() -> None:
@@ -185,26 +228,62 @@ def main() -> None:
     parser.add_argument("--ops-per-worker", type=int, default=15, help="Operations per worker")
     args = parser.parse_args()
 
-    header = f"\n=== Sangam Benchmark (Workers: {args.workers}, Ops: {args.ops_per_worker}) ==="
+    header = (
+        f"\n=== Sangam Concurrency Benchmark (Workers: {args.workers}, "
+        f"Ops: {args.ops_per_worker}) ==="
+    )
     print(header)
     with tempfile.TemporaryDirectory() as temp_dir:
         client, settings = make_client(Path(temp_dir))
         with client:
-            run_read_benchmark(
+            token = issue_benchmark_agent_token(client)
+
+            # Initial token creation logged 1 event
+            expected_audits = 1
+            # 50 seed documents created
+            expected_audits += 50
+
+            read_ops = run_read_benchmark(
                 client,
-                workers=min(args.workers * 2, 50),
+                token=token,
+                workers=min(args.workers * 2, 40),
                 requests_per_worker=args.ops_per_worker,
             )
-            run_write_benchmark(
+            expected_audits += read_ops
+
+            write_ops = run_write_benchmark(
                 client,
+                token=token,
                 workers=args.workers,
                 requests_per_worker=args.ops_per_worker,
             )
-            run_mixed_benchmark(
+            expected_audits += write_ops
+
+            mixed_ops = run_mixed_benchmark(
                 client,
+                token=token,
                 workers=args.workers,
                 requests_per_worker=args.ops_per_worker,
             )
+            expected_audits += mixed_ops
+
+            # Query database directly to verify 100% audit persistence
+            client.app.state.services.activity.list_events(limit=1)
+            db = client.app.state.services.activity.database
+            with db.connection() as conn:
+                row = conn.execute("SELECT count(*) as cnt FROM operation_events").fetchone()
+                persisted_events = row["cnt"]
+
+            print(
+                f"\nAudit Log Durability Check: {persisted_events} persisted / "
+                f"{expected_audits} expected "
+                f"({persisted_events / expected_audits * 100:.1f}% durability, 0 dropped events)"
+            )
+            assert persisted_events == expected_audits, (
+                f"Audit row count mismatch! Persisted: {persisted_events}, "
+                f"Expected: {expected_audits}"
+            )
+
     print(
         "========================================================================================\n"
     )

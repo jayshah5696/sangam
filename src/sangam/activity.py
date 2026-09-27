@@ -123,6 +123,7 @@ class ActivityService:
         self._queue_condition = threading.Condition(self._queue_lock)
         self._producers_done = threading.Condition(self._queue_lock)
         self._shutting_down = False
+        self._uncertain_events: set[str] = set()
         self._worker_healthy = True
         self._worker_error: Exception | None = None
         self._worker_thread = threading.Thread(
@@ -292,17 +293,8 @@ class ActivityService:
                 break
 
         if last_error is not None:
-            if self._is_terminal_error(last_error):
-                self._worker_healthy = False
-                self._worker_error = last_error
-            else:
-                try:
-                    connection.execute("SELECT 1")
-                    self._worker_healthy = True
-                    self._worker_error = None
-                except Exception as conn_err:
-                    self._worker_healthy = False
-                    self._worker_error = conn_err
+            self._worker_healthy = False
+            self._worker_error = last_error
 
             for item in batch:
                 if not item.future.done():
@@ -354,12 +346,6 @@ class ActivityService:
                 "diff",
             }
         }
-        if "diff" in safe_details and isinstance(safe_details["diff"], str):
-            diff_text = safe_details["diff"]
-            if len(diff_text) > 32_768:
-                safe_details["diff"] = (
-                    diff_text[:2000] + f"\n... [diff truncated from {len(diff_text)} bytes]"
-                )
 
         detail_json = json.dumps(safe_details, sort_keys=True)
         size_bytes = len(detail_json.encode("utf-8")) + 256
@@ -385,7 +371,10 @@ class ActivityService:
             future=concurrent.futures.Future(),
         )
 
+        expansion = max(0, size_bytes - reservation._estimated_bytes)
         with self._queue_lock:
+            while self._queue_bytes + expansion > self.max_queue_bytes and self._queue:
+                self._queue_condition.wait(timeout=0.1)
             self._admitted_bytes = max(
                 0, self._admitted_bytes - reservation._estimated_bytes + size_bytes
             )
@@ -396,7 +385,14 @@ class ActivityService:
                 self._producers_done.notify_all()
             self._queue_condition.notify_all()
 
-        item.future.result(timeout=15.0)
+        try:
+            item.future.result(timeout=60.0)
+        except concurrent.futures.TimeoutError as err:
+            with self._queue_lock:
+                self._uncertain_events.add(row[0])
+            raise ServiceUnavailableError(
+                f"Audit event commit timed out; write outcome is uncertain (event_id={row[0]})"
+            ) from err
 
     def record(
         self,
