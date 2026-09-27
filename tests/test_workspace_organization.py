@@ -531,3 +531,43 @@ def test_folder_move_excludes_backup_generation(
             "SELECT path FROM documents WHERE document_id = ?", (document["document_id"],)
         ).fetchone()[0]
     assert path == "moved/note.md"
+
+
+def test_folder_descendant_count_handles_wildcard_characters_strictly(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/api/v1/folders",
+        json={"path": "notes_1"},
+        headers=headers("folder-notes-1"),
+    )
+    client.post(
+        "/api/v1/folders",
+        json={"path": "notes11"},
+        headers=headers("folder-notes-11"),
+    )
+
+    client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Doc in notes11",
+            "content": "Content in notes11",
+            "path": "notes11/doc1.md",
+        },
+        headers=headers("create-doc-notes11"),
+    )
+    client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Doc in notes_1",
+            "content": "Content in notes_1",
+            "path": "notes_1/doc2.md",
+        },
+        headers=headers("create-doc-notes-1"),
+    )
+
+    folders = client.get("/api/v1/folders").json()
+    folder_counts = {f["path"]: f["document_count"] for f in folders}
+
+    assert folder_counts["notes_1"] == 1
+    assert folder_counts["notes11"] == 1

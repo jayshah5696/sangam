@@ -631,12 +631,13 @@ class WorkspaceOrganizationService:
             """,
             (row["folder_id"],),
         ).fetchall()
+        start, end = WorkspaceOrganizationService._path_range(row["path"])
         count = connection.execute(
             """
             SELECT count(*) FROM documents
-            WHERE deleted = 0 AND path LIKE ?
+            WHERE deleted = 0 AND path >= ? AND path < ?
             """,
-            (f"{row['path']}/%",),
+            (start, end),
         ).fetchone()[0]
         return Folder(
             folder_id=row["folder_id"],
