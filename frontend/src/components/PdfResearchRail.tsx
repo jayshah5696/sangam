@@ -1,18 +1,58 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { Bookmark, Copy, Highlighter, MessageSquare, Quote, Search, StickyNote } from 'lucide-react'
 import { api, type Annotation, type Document } from '../api'
 import { usePdfResearch } from '../pdfResearchState'
+import { useWorkbench } from '../workbench'
 import { annotationTypeLabel, type AnnotationDraft } from './pdfResearchTypes'
+
+export function citationMarkdown(
+  annotation: Pick<Annotation, 'document_id' | 'annotation_id' | 'page_number' | 'selected_text' | 'note'>,
+): string {
+  const selectedText = annotation.selected_text?.trim()
+  const noteText = annotation.note?.trim()
+  const evidence = selectedText || noteText || 'Evidence from source.'
+  const quote = evidence
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n')
+  const note = selectedText && noteText ? `\n> \n> ${noteText}` : ''
+  const link = `sangam://document/${annotation.document_id}?page=${annotation.page_number}&annotation=${annotation.annotation_id}`
+  return `\n\n${quote}${note}\n\n[Source: PDF p. ${annotation.page_number}](${link})\n`
+}
 
 export function PdfResearchRail({ document }: { document: Document }) {
   const research = usePdfResearch()
+  const navigate = useNavigate()
+  const workbench = useWorkbench()
+  const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
+  const [draftId, setDraftId] = useState('')
   const search = useMutation({ mutationFn: (value: string) => api.searchPdf(document.document_id, value) })
+  const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  const selectedAnnotation = research
+    ? research.annotations.find((annotation) => annotation.annotation_id === research.selectedAnnotationId)
+    : undefined
+  const draftQuery = useQuery({
+    queryKey: ['document', draftId, 'research-handoff'],
+    queryFn: () => api.getDocument(draftId),
+    enabled: Boolean(draftId),
+  })
+  const insertCitation = useMutation({
+    mutationFn: async () => {
+      if (!draftQuery.data || !selectedAnnotation) throw new Error('Choose a draft and an annotation first')
+      return api.updateDocument(
+        draftQuery.data,
+        `${draftQuery.data.content.trimEnd()}${citationMarkdown(selectedAnnotation)}`,
+      )
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['document', draftId] })
+      await queryClient.invalidateQueries({ queryKey: ['history', draftId] })
+    },
+  })
   if (!research) return null
-  const selectedAnnotation = research.annotations.find(
-    (annotation) => annotation.annotation_id === research.selectedAnnotationId,
-  )
   const actions: Array<{
     type: Annotation['annotation_type']
     label: string
@@ -33,6 +73,58 @@ export function PdfResearchRail({ document }: { document: Document }) {
         </div>
         <span className="scope-badge">{research.annotations.length} notes</span>
       </div>
+      <section className="research-handoff" aria-labelledby="research-handoff-title">
+        <p className="eyebrow" id="research-handoff-title">
+          Source and draft
+        </p>
+        <p className="small-muted">Keep this source beside a writing document while you work.</p>
+        <label>
+          <span>Writing document</span>
+          <select value={draftId} onChange={(event) => setDraftId(event.target.value)}>
+            <option value="">Choose a draft…</option>
+            {(documentsQuery.data ?? [])
+              .filter(
+                (candidate) =>
+                  candidate.document_id !== document.document_id &&
+                  candidate.content_type !== 'application/pdf',
+              )
+              .map((candidate) => (
+                <option key={candidate.document_id} value={candidate.document_id}>
+                  {candidate.path ?? candidate.title}
+                </option>
+              ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="panel-button"
+          disabled={!draftId}
+          onClick={() => {
+            const draft = documentsQuery.data?.find((candidate) => candidate.document_id === draftId)
+            if (!draft) return
+            const newGroupId = workbench.splitGroup(
+              workbench.activeGroupId,
+              'horizontal',
+              document.document_id,
+            )
+            workbench.ensureDocumentOpen(draft.document_id, draft.title, newGroupId)
+            void navigate({ to: '/documents/$documentId', params: { documentId: draft.document_id } })
+          }}
+        >
+          Open draft beside source
+        </button>
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={!draftId || !selectedAnnotation || draftQuery.isLoading || insertCitation.isPending}
+          onClick={() => insertCitation.mutate()}
+        >
+          {insertCitation.isPending ? 'Adding citation…' : 'Insert selected evidence'}
+        </button>
+        {insertCitation.isError && (
+          <p className="error-text">The evidence could not be added to the draft.</p>
+        )}
+      </section>
       <form
         className="pdf-search"
         onSubmit={(event) => {

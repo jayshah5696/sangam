@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -734,6 +735,11 @@ class WorkspaceOrganizationService:
                     output.write(content_bytes)
                     output.flush()
                     os.fsync(output.fileno())
+                if (
+                    hashlib.sha256(temporary.read_bytes()).digest()
+                    != hashlib.sha256(content_bytes).digest()
+                ):
+                    raise OSError("Folder manifest hash does not match expected metadata")
                 os.replace(temporary, destination)
                 descriptor_dir = os.open(folder_dir, os.O_RDONLY)
                 try:

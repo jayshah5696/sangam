@@ -300,3 +300,37 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
         assert "action" in event
         assert "outcome" in event
         assert "created_at" in event
+
+
+def test_audit_line_counts_include_content_starting_with_diff_markers(client: TestClient) -> None:
+    create_response = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Diff Marker Audit Doc",
+            "content": "keep\n--remove-me",
+            "path": "docs/diff_marker_audit.md",
+        },
+        headers=headers("idemp_diff_marker_create"),
+    )
+    assert create_response.status_code == 201
+    created_document = create_response.json()
+
+    update_response = client.patch(
+        f"/api/v1/documents/{created_document['document_id']}",
+        json={
+            "expected_revision_id": created_document["current_revision_id"],
+            "content": "keep\n+++add-me",
+        },
+        headers=headers("idemp_diff_marker_update"),
+    )
+    assert update_response.status_code == 200
+
+    activity_response = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_response.status_code == 200
+    update_event = next(
+        event
+        for event in activity_response.json()
+        if event["resource_id"] == created_document["document_id"] and event["action"] == "update"
+    )
+    assert update_event["details"]["lines_added"] == 1
+    assert update_event["details"]["lines_removed"] == 1

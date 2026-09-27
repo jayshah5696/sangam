@@ -331,8 +331,15 @@ class ChatToolset:
         )
 
         def operation() -> dict[str, Any]:
+            request_context = ctx.context.request_context
+            context_id = (
+                request_context.context_snapshot_id
+                if request_context.document_id is not None
+                and request_context.pinned_revision_id is not None
+                else None
+            )
             proposal = self.proposals.create(
-                ctx.context.request_context.principal,
+                request_context.principal,
                 thread_id=ctx.context.thread.id,
                 document_id=validated.document_id,
                 expected_revision_id=validated.expected_revision_id,
@@ -341,6 +348,7 @@ class ChatToolset:
                 mode=validated.mode,
                 anchor=validated.anchor,
                 replace_all=validated.replace_all,
+                context_id=context_id,
             )
             return {
                 "proposal_id": proposal.proposal_id,

@@ -274,7 +274,7 @@ export function PdfViewer({
         className="pdf-page-scroll"
         ref={scrollRef}
         onScroll={(event) => {
-          setTextSelection(null)
+          dismissSelection()
           const host = event.currentTarget
           const position = host.scrollTop + host.offsetTop + host.clientHeight * 0.35
           const visible = Array.from(host.querySelectorAll<HTMLElement>('[data-pdf-page]'))

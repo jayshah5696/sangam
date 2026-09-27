@@ -65,6 +65,12 @@ Path boundaries are enforced per request: an operation outside the token's allow
 
 Agents driving the workspace chat produce **proposals**, not direct writes: a suggested revision pinned to the revision it was generated from. The human reviews the diff in the UI and applies or discards it. Proposals survive restarts and remain recoverable. See [docs/chat-capabilities.md](../chat-capabilities.md) for full capability definitions and durable effect contracts.
 
+Open **Review changes** in the workspace to inspect pending or stale proposals.
+When a proposal has recorded turn context, the inbox shows its source document,
+revision, selected passage, PDF page, or annotation. The inbox labels older
+proposals without recorded context and sources that are no longer readable
+separately.
+
 ## Incident response
 
 If a token is compromised:

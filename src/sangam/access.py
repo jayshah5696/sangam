@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import uuid
 from collections.abc import Callable, Iterator
@@ -122,7 +123,10 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "import", "pdf_document", operation, path=path)
+        details: dict[str, object] = {"title": title, "content_type": "application/pdf"}
+        if supersedes_document_id:
+            details["supersedes_document_id"] = supersedes_document_id
+        return self._run(principal, "import", "pdf_document", operation, path=path, details=details)
 
     def pdf_bytes(self, principal: Principal, document_id: str) -> tuple[Document, bytes]:
         current = self.documents.get_document(document_id)
@@ -223,6 +227,14 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Annotation:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "annotation_type": str(annotation_type),
+            "page_number": page_number,
+            "color": color,
+            "tags": tags,
+        }
+        if note:
+            details["note"] = note
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -240,6 +252,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def update_annotation(
@@ -257,6 +270,14 @@ class WorkspaceAccessService:
     ) -> Annotation:
         annotation = self.pdf_research.get_annotation(annotation_id)
         current = self.documents.get_document(annotation.document_id)
+        details: dict[str, object] = {
+            "annotation_type": str(annotation.annotation_type),
+            "page_number": annotation.page_number,
+            "color": color,
+            "tags": tags,
+        }
+        if note:
+            details["note"] = note
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -273,6 +294,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def delete_annotation(
@@ -285,6 +307,10 @@ class WorkspaceAccessService:
     ) -> Annotation:
         annotation = self.pdf_research.get_annotation(annotation_id)
         current = self.documents.get_document(annotation.document_id)
+        details: dict[str, object] = {
+            "annotation_type": str(annotation.annotation_type),
+            "page_number": annotation.page_number,
+        }
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
@@ -296,6 +322,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def annotation_history(self, principal: Principal, annotation_id: str) -> list[AnnotationEvent]:
@@ -414,6 +441,7 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {"slug": slug, "access_policy": access_policy}
         return self._run(
             principal,
             "publish",
@@ -421,6 +449,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=current.path,
+            details=details,
         )
 
     def preflight_create_document(
@@ -499,6 +528,11 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "expected_metadata_version": expected_version,
+            "slug": slug,
+            "access_policy": access_policy,
+        }
         return self._run(
             principal,
             "publish",
@@ -506,6 +540,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=publication_id,
             path=current.path,
+            details=details,
         )
 
     def unpublish(
@@ -528,6 +563,7 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {"expected_metadata_version": expected_version}
         return self._run(
             principal,
             "unpublish",
@@ -535,6 +571,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=publication_id,
             path=current.path,
+            details=details,
         )
 
     def expose_publication_revision(
@@ -557,6 +594,7 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {"revision_id": revision_id}
         return self._run(
             principal,
             "expose_revision",
@@ -564,6 +602,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=publication_id,
             path=current.path,
+            details=details,
         )
 
     def rotate_publication_token(
@@ -605,7 +644,22 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        details: dict[str, object] = {"expected_revision_id": expected_revision_id}
+        lines_added = 0
+        lines_removed = 0
+        if current.content_type != "application/pdf":
+            diff_lines = list(
+                difflib.unified_diff(
+                    current.content.splitlines(), content.splitlines(), lineterm=""
+                )
+            )
+            content_diff_lines = diff_lines[2:]
+            lines_added = sum(1 for line in content_diff_lines if line.startswith("+"))
+            lines_removed = sum(1 for line in content_diff_lines if line.startswith("-"))
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+        }
         if title is not None:
             details["title"] = title
         if summary is not None:
@@ -666,6 +720,14 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "source_path": current.path,
+        }
+        if path:
+            details["destination_path"] = path
+        if title:
+            details["title"] = title
         return self._run(
             principal,
             "duplicate",
@@ -673,6 +735,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details=details,
         )
 
     def update_document_metadata(
@@ -686,6 +749,12 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "expected_metadata_version": expected_metadata_version,
+            "tag_ids": tag_ids,
+        }
+        if category is not None:
+            details["category"] = category
         return self._document_operation(
             principal,
             capability=Capability.TAG,
@@ -699,6 +768,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
             ),
+            details=details,
         )
 
     def materialize_document(
@@ -727,6 +797,13 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "expected_revision_id": expected_revision_id,
+            "source_path": current.path,
+            "destination_path": path,
+        }
+        if summary:
+            details["summary"] = summary
         return self._run(
             principal,
             "materialize",
@@ -734,6 +811,7 @@ class WorkspaceAccessService:
             operation,
             resource_id=document_id,
             path=path,
+            details=details,
         )
 
     def move_document(
@@ -1207,7 +1285,10 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "folder", operation, path=path)
+        details: dict[str, object] = {"tag_ids": tag_ids}
+        if category:
+            details["category"] = category
+        return self._run(principal, "create", "folder", operation, path=path, details=details)
 
     def update_folder_metadata(
         self,
@@ -1236,7 +1317,15 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "tag", "folder", operation, resource_id=folder_id)
+        details: dict[str, object] = {
+            "expected_metadata_version": expected_metadata_version,
+            "tag_ids": tag_ids,
+        }
+        if category:
+            details["category"] = category
+        return self._run(
+            principal, "tag", "folder", operation, resource_id=folder_id, details=details
+        )
 
     def move_folder(
         self,

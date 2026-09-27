@@ -1,9 +1,10 @@
 import { useDeferredValue, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { FilePlus2, FileText, FileUp, MessageSquareText, Search } from 'lucide-react'
+import { FilePlus2, FileText, FileUp, MessageSquareText, Pin, Search, ShieldCheck } from 'lucide-react'
 import { api, DOCUMENT_PAGE_SIZE } from '../api'
-import { useWorkbench } from '../workbench'
+import { collectGroups, useWorkbench } from '../workbench'
+import { selectHomeDocuments } from '../workspaceHome'
 
 export const Route = createFileRoute('/')({ component: Welcome })
 
@@ -49,18 +50,30 @@ function Welcome() {
     },
   })
   const isEmpty = Boolean(documents.data && documents.data.items.length === 0 && !documents.data.hasMore)
-  const recentDocuments = documents.data?.items.slice(0, 3) ?? []
+  const openTabs = collectGroups(workbench.root).flatMap((group) => group.tabs)
+  const homeDocuments = selectHomeDocuments(documents.data?.items ?? [], openTabs)
+  const recentDocuments = homeDocuments.recent.slice(0, 4)
+  const pinnedDocuments = homeDocuments.pinned.slice(0, 4)
+  const fallbackDocuments = recentDocuments.length === 0 ? (documents.data?.items ?? []).slice(0, 4) : []
   const trimmedSearch = deferredSearch.trim()
   const matchingDocuments = trimmedSearch
     ? (searchResults.data?.pages.flatMap((page) => page.items) ?? [])
     : []
   return (
     <section className="welcome">
-      <h1>{isEmpty ? 'Your workspace is empty' : 'Files with memory.'}</h1>
+      <div className="welcome-heading-row">
+        <div>
+          <p className="eyebrow">Workspace</p>
+          <h1>{isEmpty ? 'Your workspace is empty' : 'Pick up where you left off.'}</h1>
+        </div>
+        <Link className="review-home-link" to="/review">
+          <ShieldCheck size="var(--icon-inline)" /> Review
+        </Link>
+      </div>
       <p>
         {isEmpty
           ? 'Create a Markdown document or import a PDF to begin.'
-          : 'Create Markdown documents, group them into folders, organize them with categories and tags, and find them again through full-text search.'}
+          : 'Open a document, continue a pinned thread, or check the changes waiting for your review.'}
       </p>
       <label className="welcome-search">
         <Search size="var(--icon-control)" />
@@ -175,14 +188,32 @@ function Welcome() {
           <kbd>/</kbd> focus search
         </span>
       </div>
-      {recentDocuments.length > 0 && (
+      {(recentDocuments.length > 0 || fallbackDocuments.length > 0) && (
         <div className="welcome-recent">
-          <strong>Continue writing</strong>
-          {recentDocuments.map((document) => (
+          <strong>{recentDocuments.length > 0 ? 'Recently open' : 'Recently active'}</strong>
+          {[...recentDocuments, ...fallbackDocuments].map((document) => (
             <Link
               key={document.document_id}
               to="/documents/$documentId"
               params={{ documentId: document.document_id }}
+            >
+              <span>{document.title}</span>
+              <small>{document.path ?? 'Draft'}</small>
+            </Link>
+          ))}
+        </div>
+      )}
+      {pinnedDocuments.length > 0 && (
+        <div className="welcome-recent welcome-pinned">
+          <strong>
+            <Pin size="var(--icon-inline)" /> Pinned
+          </strong>
+          {pinnedDocuments.map((document) => (
+            <Link
+              key={document.document_id}
+              to="/documents/$documentId"
+              params={{ documentId: document.document_id }}
+              onClick={() => workbench.ensureDocumentOpen(document.document_id, document.title)}
             >
               <span>{document.title}</span>
               <small>{document.path ?? 'Draft'}</small>

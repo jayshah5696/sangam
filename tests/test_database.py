@@ -48,6 +48,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "020",
         "021",
         "022",
+        "023",
     ]
     assert {
         "operation_events_revision_outcome_created_idx",
@@ -66,6 +67,100 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "chat_effects_thread_attention_idx",
         "activity_problem_acknowledgements_actor_created_idx",
     } <= indexes
+
+
+def test_migration_023_preserves_existing_proposals(tmp_path: Path) -> None:
+    database = Database(tmp_path / "pre-023.sqlite3")
+    migrations = [
+        migration for migration in database._migration_inventory() if migration.version < "023"
+    ]
+    with database.connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+                version TEXT PRIMARY KEY,
+                name TEXT,
+                checksum TEXT,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        for migration in migrations:
+            rebuilds_referenced_tables = migration.sql.startswith("-- sangam:foreign-keys-off")
+            if rebuilds_referenced_tables:
+                connection.execute("PRAGMA foreign_keys = OFF")
+            connection.executescript("BEGIN IMMEDIATE;\n" + migration.sql)
+            connection.execute(
+                """
+                INSERT INTO schema_migrations(version, name, checksum, applied_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    migration.version,
+                    migration.name,
+                    migration.checksum,
+                    "2026-09-01T00:00:00+00:00",
+                ),
+            )
+            connection.commit()
+            if rebuilds_referenced_tables:
+                connection.execute("PRAGMA foreign_keys = ON")
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO actors(actor_id, display_name, actor_type, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("human:legacy", "Legacy", "human", "2026-09-01T00:00:00+00:00"),
+        )
+        connection.execute(
+            """
+            INSERT INTO documents(
+                document_id, title, content_type, path, current_revision_id,
+                content_hash, size_bytes, materialization_state, created_by, created_at, updated_at
+            ) VALUES ('doc-legacy', 'Legacy', 'text/markdown', 'legacy.md', NULL,
+                'hash', 7, 'none', 'human:legacy', '2026-09-01T00:00:00+00:00',
+                '2026-09-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO revisions(
+                revision_id, document_id, content, content_hash, size_bytes, actor_id,
+                operation, created_at
+            ) VALUES ('rev-legacy', 'doc-legacy', 'Legacy', 'hash', 7, 'human:legacy',
+                'create', '2026-09-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            "UPDATE documents SET current_revision_id = 'rev-legacy' "
+            "WHERE document_id = 'doc-legacy'"
+        )
+        connection.execute(
+            """
+            INSERT INTO chat_threads(
+                thread_id, created_by, document_id, data_json, created_at, updated_at
+            )
+            VALUES ('thread-legacy', 'human:legacy', 'doc-legacy', '{}',
+                '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO chat_proposals(
+                proposal_id, thread_id, document_id, expected_revision_id, content,
+                summary, status, created_at
+            ) VALUES ('proposal-legacy', 'thread-legacy', 'doc-legacy', 'rev-legacy',
+                'Updated', 'Legacy proposal', 'pending', '2026-09-01T00:00:00+00:00')
+            """
+        )
+
+    database.initialize()
+
+    with database.connection() as connection:
+        proposal = connection.execute(
+            "SELECT content, context_id FROM chat_proposals WHERE proposal_id = 'proposal-legacy'"
+        ).fetchone()
+        assert proposal["content"] == "Updated"
+        assert proposal["context_id"] is None
 
 
 def test_activity_filter_query_plans_use_investigation_indexes(tmp_path: Path) -> None:

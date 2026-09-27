@@ -152,7 +152,15 @@ class DiskWorkspaceFilesystem:
             expected_hash = hashlib.sha256(content).hexdigest()
             if actual_hash != expected_hash:
                 raise OSError("Materialized file hash does not match the committed revision")
-            os.replace(temporary, destination)
+            if overwrite:
+                os.replace(temporary, destination)
+            else:
+                try:
+                    os.link(temporary, destination)
+                except FileExistsError as error:
+                    raise InvalidPathError(
+                        "A workspace file already exists at that path"
+                    ) from error
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
