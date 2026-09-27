@@ -182,7 +182,11 @@ class DiskWorkspaceFilesystem:
         if destination.exists():
             raise InvalidPathError("Destination document path already exists on disk")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, destination)
+        try:
+            os.link(source, destination)
+        except FileExistsError as error:
+            raise InvalidPathError("Destination document path already exists on disk") from error
+        source.unlink()
         self._fsync_directory(destination.parent)
         if source.parent != destination.parent and source.parent.exists():
             self._fsync_directory(source.parent)
@@ -278,7 +282,10 @@ class DiskWorkspaceFilesystem:
             restored_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
             if restored_hash != content_hash:
                 raise OSError("Restored document hash does not match expected content hash")
-            os.replace(temporary, destination)
+            try:
+                os.link(temporary, destination)
+            except FileExistsError as error:
+                raise ConflictError(f"Destination path is already occupied: {path}") from error
             self._fsync_directory(destination.parent)
         finally:
             temporary.unlink(missing_ok=True)
