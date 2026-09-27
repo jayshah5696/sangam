@@ -61,6 +61,8 @@ class Database:
         path: str | None = None,
         details: dict[str, object] | None = None,
     ) -> None:
+        if getattr(self._local, "active_connection", None) is None:
+            raise RuntimeError("set_audit_target called outside an active transaction")
         target = getattr(self._local, "audit_target", None)
         if target is None:
             target = {}
@@ -112,6 +114,7 @@ class Database:
         self._local.active_connection = connection
         self._local.transaction_depth = 1
         self._local.rollback_required = False
+        self._local.audit_target = None
         try:
             connection.execute("BEGIN IMMEDIATE")
             yield connection

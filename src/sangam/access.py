@@ -1649,7 +1649,7 @@ class WorkspaceAccessService:
             with suppress(Exception):
                 estimated_bytes = max(
                     estimated_bytes,
-                    len(json.dumps(details, default=str).encode("utf-8")) + 512,
+                    self.activity.estimate_payload_bytes(details),
                 )
         with self.activity.admit(estimated_bytes=estimated_bytes) as reservation:
             audit_recorded = False
@@ -1706,21 +1706,21 @@ class WorkspaceAccessService:
                     raise
 
             if not audit_recorded and (is_mutation or principal.identity_kind != "human"):
-                    result_resource_id = resource_id
-                    result_path = path
-                    revision_id = None
-                    if isinstance(result, Document):
-                        result_resource_id = result.document_id
-                        result_path = result.path if result.path is not None else path
-                        revision_id = result.current_revision_id
-                    reservation.record(
-                        principal=principal,
-                        action=action,
-                        resource_type=resource_type,
-                        resource_id=result_resource_id,
-                        path=result_path,
-                        outcome="accepted",
-                        revision_id=revision_id,
-                        details=details,
-                    )
+                result_resource_id = resource_id
+                result_path = path
+                revision_id = None
+                if isinstance(result, Document):
+                    result_resource_id = result.document_id
+                    result_path = result.path if result.path is not None else path
+                    revision_id = result.current_revision_id
+                reservation.record(
+                    principal=principal,
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=result_resource_id,
+                    path=result_path,
+                    outcome="accepted",
+                    revision_id=revision_id,
+                    details=details,
+                )
             return result

@@ -1057,12 +1057,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, revision_id)
-                if result is not None:
-                    self.database.set_audit_target(
-                        resource_id=result[0],
-                        revision_id=result[1],
-                        path=path,
-                    )
+                    if result is not None:
+                        self.database.set_audit_target(
+                            resource_id=result[0],
+                            revision_id=result[1],
+                            path=path,
+                        )
             except Exception:
                 try:
                     if (
@@ -1221,12 +1221,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, revision_id)
-                if result is not None:
-                    self.database.set_audit_target(
-                        resource_id=result[0],
-                        revision_id=result[1],
-                        path=old_path,
-                    )
+                    if result is not None:
+                        self.database.set_audit_target(
+                            resource_id=result[0],
+                            revision_id=result[1],
+                            path=old_path,
+                        )
             except Exception:
                 try:
                     if self.workspace.has_trashed_document(
@@ -1488,12 +1488,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, new_revision_id)
-                if result is not None:
-                    self.database.set_audit_target(
-                        resource_id=result[0],
-                        revision_id=result[1],
-                        path=target_path,
-                    )
+                    if result is not None:
+                        self.database.set_audit_target(
+                            resource_id=result[0],
+                            revision_id=result[1],
+                            path=target_path,
+                        )
             except Exception:
                 try:
                     if self.workspace.is_document_file(

@@ -1027,8 +1027,7 @@ def test_audit_records_correct_document_and_revision_on_pathless_create_and_dupl
 
         # Ensure source document ID was NOT recorded as the duplicate target
         source_dup_event = conn.execute(
-            "SELECT event_id FROM operation_events "
-            "WHERE resource_id = ? AND action = 'duplicate'",
+            "SELECT event_id FROM operation_events WHERE resource_id = ? AND action = 'duplicate'",
             (created_id,),
         ).fetchone()
         assert source_dup_event is None, "Source doc ID must not be recorded as target"
@@ -1076,6 +1075,251 @@ def test_audit_service_enforces_total_memory_bound_before_serialization(
         )
 
         assert service._admitted_bytes == 0
+        assert service._queue_bytes == 0
+    finally:
+        service.close()
+
+
+def test_set_audit_target_outside_transaction_raises_and_cleans_up_on_exit(
+    client: TestClient,
+) -> None:
+    db = client.app.state.services.activity.database
+
+    # 1. Calling set_audit_target outside an active transaction raises RuntimeError
+    with pytest.raises(RuntimeError, match="set_audit_target called outside an active transaction"):
+        db.set_audit_target(resource_id="doc_outside", revision_id="rev_outside")
+
+    # 2. Inside a transaction, setting audit target works
+    with db.transaction():
+        db.set_audit_target(resource_id="doc_inside", revision_id="rev_inside")
+        target = db.get_audit_target()
+        assert target.get("resource_id") == "doc_inside"
+        assert target.get("revision_id") == "rev_inside"
+
+    # 3. After transaction exits, target is cleaned up
+    assert db.get_audit_target() == {}
+
+    # 4. Next transaction on the same thread starts with empty target
+    with db.transaction():
+        assert db.get_audit_target() == {}
+
+
+def test_pdf_move_delete_restore_audit_records_correct_revisions_and_isolates_same_thread(
+    client: TestClient, settings
+) -> None:
+    from test_phase_five_pdf_research import import_pdf, text_pdf
+
+    db = Database(settings.database_path)
+    source = text_pdf("Audit Revision Tracking PDF")
+    imported = import_pdf(
+        client,
+        content=source,
+        key="pdf-audit-rev",
+        path="notes/audit_track.pdf",
+        title="Audit Track PDF",
+    ).json()
+    document_id = imported["document_id"]
+    rev_1 = imported["current_revision_id"]
+
+    # 1. Move PDF -> revision becomes rev_2
+    move_resp = client.post(
+        f"/api/v1/documents/{document_id}/move",
+        json={"path": "archive/audit_track.pdf", "expected_revision_id": rev_1},
+        headers=headers("pdf-move-k1"),
+    )
+    assert move_resp.status_code == 200, move_resp.text
+    moved = move_resp.json()
+    rev_2 = moved["current_revision_id"]
+    assert rev_2 != rev_1
+
+    with db.connection() as conn:
+        move_event = conn.execute(
+            "SELECT resource_id, revision_id, action, outcome FROM operation_events "
+            "WHERE resource_id = ? AND action = 'move'",
+            (document_id,),
+        ).fetchone()
+        assert move_event is not None
+        assert move_event["resource_id"] == document_id
+        assert move_event["revision_id"] == rev_2
+        assert move_event["outcome"] == "accepted"
+
+    # 2. Delete (trash) PDF -> revision becomes rev_3
+    del_resp = client.request(
+        "DELETE",
+        f"/api/v1/documents/{document_id}",
+        json={"expected_revision_id": rev_2},
+        headers=headers("pdf-trash-k1"),
+    )
+    assert del_resp.status_code == 200, del_resp.text
+    deleted = del_resp.json()
+    rev_3 = deleted["current_revision_id"]
+    assert rev_3 != rev_2
+
+    with db.connection() as conn:
+        del_event = conn.execute(
+            "SELECT resource_id, revision_id, action, outcome FROM operation_events "
+            "WHERE resource_id = ? AND action = 'delete'",
+            (document_id,),
+        ).fetchone()
+        assert del_event is not None
+        assert del_event["resource_id"] == document_id
+        assert del_event["revision_id"] == rev_3
+        assert del_event["outcome"] == "accepted"
+
+    # 3. Restore PDF -> revision becomes rev_4
+    restore_resp = client.post(
+        f"/api/v1/documents/{document_id}/restore",
+        headers=headers("pdf-restore-k1"),
+        json={"expected_revision_id": rev_3, "revision_id": rev_3},
+    )
+    assert restore_resp.status_code == 200, restore_resp.text
+    restored = restore_resp.json()
+    rev_4 = restored["current_revision_id"]
+    assert rev_4 != rev_3
+
+    with db.connection() as conn:
+        restore_event = conn.execute(
+            "SELECT resource_id, revision_id, action, outcome FROM operation_events "
+            "WHERE resource_id = ? AND action = 'restore'",
+            (document_id,),
+        ).fetchone()
+        assert restore_event is not None
+        assert restore_event["resource_id"] == document_id
+        assert restore_event["revision_id"] == rev_4
+        assert restore_event["outcome"] == "accepted"
+
+    # 4. Immediate subsequent transaction on same thread has no stale audit target
+    subsequent_resp = client.post(
+        "/api/v1/documents",
+        json={"title": "Subsequent Doc", "content": "hello world", "path": "subsequent.md"},
+        headers=headers("subsequent-k1"),
+    )
+    assert subsequent_resp.status_code == 201, subsequent_resp.text
+    subsequent = subsequent_resp.json()
+    sub_id = subsequent["document_id"]
+    sub_rev = subsequent["current_revision_id"]
+
+    with db.connection() as conn:
+        sub_event = conn.execute(
+            "SELECT resource_id, revision_id, action, outcome FROM operation_events "
+            "WHERE resource_id = ? AND action = 'create'",
+            (sub_id,),
+        ).fetchone()
+        assert sub_event is not None
+        assert sub_event["resource_id"] == sub_id
+        assert sub_event["revision_id"] == sub_rev
+        assert sub_event["outcome"] == "accepted"
+
+
+def test_audit_conservative_json_bound_handles_escapes_and_unicode(client: TestClient) -> None:
+    service = client.app.state.services.activity
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_unicode"
+    )
+
+    test_payloads = [
+        {"diff": "Plain ASCII text with no special characters"},
+        {"diff": 'Text with "quotes" and \\backslashes\\ and \t\n control characters'},
+        {"diff": "Accented French: café, déjà vu, crème brûlée"},
+        {"diff": "Cyrillic: Привет мир, Тестирование кодировок"},
+        {"diff": "CJK characters: 測試 中文 ログ 日本語"},
+        {"diff": "Astral emoji: 🚀 🔍 🛡️ 💎 🧠"},
+        {
+            "diff": 'Mixed " \n \r ' + "é" * 1000 + "😀" * 500,
+            "title": 'Document with "special" characters: 測試',
+            "category": "research",
+        },
+    ]
+
+    for i, payload in enumerate(test_payloads):
+        # 1. Conservative bound estimate must be >= actual serialized JSON size
+        est = service.estimate_payload_bytes(payload)
+        row, actual_size = service._prepare_event_row(
+            principal=principal,
+            action="create",
+            resource_type="document",
+            outcome="accepted",
+            resource_id=f"doc_unicode_{i}",
+            details=payload,
+        )
+        assert est >= actual_size, (
+            f"Estimate {est} was less than actual {actual_size} for payload {i}"
+        )
+
+        # 2. Record with reservation preserves payload verbatim without truncation or corruption
+        with service.admit(estimated_bytes=est) as res:
+            res.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id=f"doc_unicode_{i}",
+                details=payload,
+            )
+
+        events = service.list_events(operation_id="op_unicode")
+        matched = [e for e in events if e.resource_id == f"doc_unicode_{i}"]
+        assert len(matched) == 1
+        assert matched[0].details == payload
+
+
+def test_audit_exclusive_oversized_ownership_and_atomic_capacity(client: TestClient) -> None:
+    real_db = client.app.state.services.activity.database
+    service = ActivityService(real_db, max_queue_bytes=8 * 1024, max_total_bytes=8 * 1024)
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_exclusive_oversized"
+    )
+
+    try:
+        # Two producers admit small 512B reservations
+        res1 = service.admit(estimated_bytes=512)
+        res2 = service.admit(estimated_bytes=512)
+
+        oversized_payload = "X" * 10_000  # 10 KB > 8 KB limit
+        p1_started = threading.Event()
+        p1_done = threading.Event()
+        p2_done = threading.Event()
+
+        def producer_1():
+            p1_started.set()
+            res1.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_over_1",
+                details={"diff": oversized_payload},
+            )
+            p1_done.set()
+
+        def producer_2():
+            res2.record(
+                principal=principal,
+                action="create",
+                resource_type="document",
+                outcome="accepted",
+                resource_id="doc_over_2",
+                details={"diff": oversized_payload},
+            )
+            p2_done.set()
+
+        t1 = threading.Thread(target=producer_1)
+        t2 = threading.Thread(target=producer_2)
+
+        t1.start()
+        assert p1_started.wait(timeout=2.0)
+        t2.start()
+
+        t1.join(timeout=10.0)
+        t2.join(timeout=10.0)
+
+        assert p1_done.is_set(), "Producer 1 failed to complete"
+        assert p2_done.is_set(), "Producer 2 failed to complete"
+
+        events = service.list_events(operation_id="op_exclusive_oversized")
+        assert len(events) == 2
+        assert service._oversized_owner_id is None
+        assert service._reserved_producer_bytes == 0
         assert service._queue_bytes == 0
     finally:
         service.close()
