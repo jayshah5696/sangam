@@ -92,7 +92,7 @@ def build_application_services(
         mutations=mutations,
         max_document_bytes=settings.max_document_bytes,
     )
-    search_index.rebuild(documents.list_documents(include_deleted=True))
+    search_index.rebuild(documents.iter_documents(include_deleted=True))
     backup_manager = BackupManager(
         database=database,
         workspace_root=settings.workspace_root,
@@ -140,6 +140,7 @@ def build_application_services(
         access_identity_verifier=access_verifier,
     )
     activity = ActivityService(database)
+    readiness.activity = activity
     authorization = AuthorizationPolicy()
     html_javascript = HtmlJavascriptSettingsService(database)
     publications = PublicationService(

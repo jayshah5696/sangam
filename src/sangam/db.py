@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,37 +27,129 @@ def utc_now() -> str:
 
 
 class Database:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, timeout: float = 10.0) -> None:
         self.path = path
+        self.timeout = timeout
+        self._local = threading.local()
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+        timeout = getattr(self, "timeout", 10.0)
+        connection = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = FULL")
-        connection.execute("PRAGMA busy_timeout = 10000")
+        connection.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
         return connection
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._local, "active_connection", None)
+        if active is not None:
+            yield active
+            return
+
         connection = self.connect()
         try:
             yield connection
         finally:
             connection.close()
 
+    def set_audit_target(
+        self,
+        *,
+        resource_id: str | None = None,
+        revision_id: str | None = None,
+        path: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        if getattr(self._local, "active_connection", None) is None:
+            raise RuntimeError("set_audit_target called outside an active transaction")
+        target = getattr(self._local, "audit_target", None)
+        if target is None:
+            target = {}
+            self._local.audit_target = target
+        if resource_id is not None:
+            target["resource_id"] = resource_id
+        if revision_id is not None:
+            target["revision_id"] = revision_id
+        if path is not None:
+            target["path"] = path
+        if details is not None:
+            target.setdefault("details", {}).update(details)
+
+    def get_audit_target(self) -> dict[str, object]:
+        return getattr(self._local, "audit_target", None) or {}
+
+    def clear_audit_target(self) -> None:
+        self._local.audit_target = None
+
+    @contextmanager
+    def commit_hook(self, callback: Callable[[sqlite3.Connection], None]) -> Iterator[None]:
+        hooks = getattr(self._local, "commit_hooks", None)
+        if hooks is None:
+            hooks = []
+            self._local.commit_hooks = hooks
+        hooks.append(callback)
+        try:
+            yield
+        finally:
+            if callback in hooks:
+                hooks.remove(callback)
+
+    @contextmanager
+    def post_commit_hook(self, callback: Callable[[], None]) -> Iterator[None]:
+        hooks = getattr(self._local, "post_commit_hooks", None)
+        if hooks is None:
+            hooks = []
+            self._local.post_commit_hooks = hooks
+        hooks.append(callback)
+        try:
+            yield
+        finally:
+            if callback in hooks:
+                hooks.remove(callback)
+
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._local, "active_connection", None)
+        if active is not None:
+            depth = getattr(self._local, "transaction_depth", 1)
+            self._local.transaction_depth = depth + 1
+            try:
+                yield active
+            except Exception:
+                self._local.rollback_required = True
+                raise
+            finally:
+                self._local.transaction_depth = depth
+            return
+
         connection = self.connect()
+        self._local.active_connection = connection
+        self._local.transaction_depth = 1
+        self._local.rollback_required = False
+        self._local.audit_target = None
         try:
             connection.execute("BEGIN IMMEDIATE")
             yield connection
+            if getattr(self._local, "rollback_required", False):
+                raise RuntimeError("Transaction aborted due to error in nested transaction block")
+            hooks = list(getattr(self._local, "commit_hooks", []))
+            for hook in hooks:
+                hook(connection)
             connection.commit()
+            post_hooks = list(getattr(self._local, "post_commit_hooks", []))
+            for post_hook in post_hooks:
+                post_hook()
         except Exception:
             connection.rollback()
             raise
         finally:
+            self._local.active_connection = None
+            self._local.transaction_depth = 0
+            self._local.rollback_required = False
+            self._local.audit_target = None
             connection.close()
 
     def initialize(self) -> None:

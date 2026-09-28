@@ -70,10 +70,15 @@ class PdfResearchService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.creation():
+        normalized_path = self.workspace.normalize_document_path(path)
+        with (
+            self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key),
+            self.mutations.path(normalized_path),
+        ):
             return self._import_pdf_locked(
                 title=title,
                 path=path,
+                normalized_path=normalized_path,
                 content=content,
                 supersedes_document_id=supersedes_document_id,
                 actor_id=actor_id,
@@ -85,6 +90,7 @@ class PdfResearchService:
         *,
         title: str,
         path: str,
+        normalized_path: str,
         content: bytes,
         supersedes_document_id: str | None,
         actor_id: str,
@@ -101,7 +107,6 @@ class PdfResearchService:
                 "PDF exceeds the configured size limit",
                 details={"size_bytes": len(content), "max_pdf_bytes": self.max_pdf_bytes},
             )
-        normalized_path = self.workspace.normalize_document_path(path)
         if not normalized_path.lower().endswith(".pdf"):
             raise ValidationError("PDF document paths must end in .pdf")
         content_hash = hashlib.sha256(content).hexdigest()
@@ -123,6 +128,14 @@ class PdfResearchService:
             )
         if duplicate is not None:
             return self.documents.get_document(duplicate.resource_id)
+
+        with self.database.connection() as connection:
+            existing = connection.execute(
+                "SELECT document_id FROM documents WHERE path = ? AND deleted = 0",
+                (normalized_path,),
+            ).fetchone()
+            if existing is not None:
+                raise ValidationError("A document already uses that path")
 
         document_id = str(uuid.uuid4())
         revision_id = str(uuid.uuid4())
@@ -214,24 +227,29 @@ class PdfResearchService:
                         resource_type="pdf_document",
                         resource_id=document_id,
                     )
+                    self.database.set_audit_target(
+                        resource_id=document_id,
+                        revision_id=revision_id,
+                        path=normalized_path,
+                    )
             except sqlite3.IntegrityError as error:
                 if file_written_by_this_call:
                     with self.database.connection() as connection:
-                        doc_exists = connection.execute(
+                        has_owner = connection.execute(
                             "SELECT 1 FROM documents WHERE path = ? AND deleted = 0",
                             (normalized_path,),
                         ).fetchone()
-                    if not doc_exists:
+                    if not has_owner:
                         self.workspace.delete_document(normalized_path)
                 raise ValidationError("A document already uses that path") from error
             except Exception:
                 if file_written_by_this_call:
                     with self.database.connection() as connection:
-                        doc_exists = connection.execute(
+                        has_owner = connection.execute(
                             "SELECT 1 FROM documents WHERE path = ? AND deleted = 0",
                             (normalized_path,),
                         ).fetchone()
-                    if not doc_exists:
+                    if not has_owner:
                         self.workspace.delete_document(normalized_path)
                 raise
             document = self.documents.get_document(document_id)

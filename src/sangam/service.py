@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 import uuid
+from collections.abc import Iterator
 from pathlib import PurePosixPath
 
 from sangam.actors import ActorService
@@ -273,6 +274,24 @@ class DocumentService:
             ).fetchall()
         return [self._document_from_row(row) for row in rows]
 
+    def iter_documents(
+        self, *, include_deleted: bool = False, batch_size: int = 500
+    ) -> Iterator[Document]:
+        offset = 0
+        while True:
+            with self.database.connection() as connection:
+                rows = connection.execute(
+                    self._document_query()
+                    + ("" if include_deleted else " WHERE d.deleted = 0")
+                    + " ORDER BY d.updated_at DESC, d.document_id LIMIT ? OFFSET ?",
+                    (batch_size, offset),
+                ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                yield self._document_from_row(row)
+            offset += len(rows)
+
     def list_document_summaries(
         self,
         *,
@@ -381,7 +400,7 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.creation():
+        with self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key):
             fingerprint = request_hash(
                 {
                     "title": title,
@@ -506,6 +525,12 @@ class DocumentService:
                         revision_id=revision_id,
                     )
                     duplicate = (document_id, revision_id)
+                if duplicate is not None:
+                    self.database.set_audit_target(
+                        resource_id=duplicate[0],
+                        revision_id=duplicate[1],
+                        path=normalized_path,
+                    )
         except sqlite3.IntegrityError as error:
             raise ValidationError("A document already uses that path") from error
         if duplicate is None:
@@ -671,6 +696,17 @@ class DocumentService:
                         revision_id=revision_id,
                     )
                     result = (document_id, revision_id)
+                    self.database.set_audit_target(
+                        resource_id=result[0],
+                        revision_id=result[1],
+                        path=next_path,
+                    )
+                else:
+                    self.database.set_audit_target(
+                        resource_id=result[0],
+                        revision_id=result[1],
+                        path=path,
+                    )
         except sqlite3.IntegrityError as error:
             raise ValidationError("A document already uses that path") from error
         if result is None:
@@ -1021,6 +1057,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, revision_id)
+                    if result is not None:
+                        self.database.set_audit_target(
+                            resource_id=result[0],
+                            revision_id=result[1],
+                            path=path,
+                        )
             except Exception:
                 try:
                     if (
@@ -1179,6 +1221,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, revision_id)
+                    if result is not None:
+                        self.database.set_audit_target(
+                            resource_id=result[0],
+                            revision_id=result[1],
+                            path=old_path,
+                        )
             except Exception:
                 try:
                     if self.workspace.has_trashed_document(
@@ -1440,6 +1488,12 @@ class DocumentService:
                         )
                         self.organization._replace_document_search_row(connection, document_id)
                         result = (document_id, new_revision_id)
+                    if result is not None:
+                        self.database.set_audit_target(
+                            resource_id=result[0],
+                            revision_id=result[1],
+                            path=target_path,
+                        )
             except Exception:
                 try:
                     if self.workspace.is_document_file(
@@ -1615,6 +1669,11 @@ class DocumentService:
                     document_id=document_id,
                     revision_id=current.current_revision_id,
                 )
+                self.database.set_audit_target(
+                    resource_id=document_id,
+                    revision_id=current.current_revision_id,
+                    path=current.path,
+                )
         updated = self.get_document(document_id)
         self.search_index.sync(updated)
         return updated
@@ -1681,6 +1740,14 @@ class DocumentService:
         return [self._document_summary_from_row(row) for row in rows]
 
     def rebuild_search_index(self) -> int:
-        documents = self.list_documents(include_deleted=True)
-        self.search_index.rebuild(documents)
-        return sum(not document.deleted for document in documents)
+        count = 0
+
+        def count_and_yield():
+            nonlocal count
+            for doc in self.iter_documents(include_deleted=True):
+                if not doc.deleted:
+                    count += 1
+                yield doc
+
+        self.search_index.rebuild(count_and_yield())
+        return count

@@ -50,6 +50,10 @@ class AuthorizationError(SangamError):
     code = "forbidden"
 
 
+class ServiceUnavailableError(SangamError):
+    code = "service_unavailable"
+
+
 def validate_metadata_text(value: str | None, field_name: str) -> str | None:
     """Ensure metadata text fields reject null bytes and ASCII control characters."""
     if value is None:
