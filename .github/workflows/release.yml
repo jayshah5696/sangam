@@ -50,7 +50,7 @@ jobs:
           pnpm --dir frontend run test
       - name: Desktop and narrow browser gates
         run: |
-          pnpm --dir frontend exec playwright install --with-deps chromium
+          pnpm --dir frontend exec playwright install --with-deps chromium webkit
           pnpm --dir frontend run test:e2e
       - name: Documentation gates
         run: |
