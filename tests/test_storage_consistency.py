@@ -600,3 +600,136 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
             database_path=restore_db_target,
             workspace_root=restore_ws_target,
         )
+
+
+def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
+    # 1. Create document and check ETag on 201 Created
+    res_create = client.post(
+        "/api/v1/documents",
+        json={"title": "ETag Doc", "content": "Initial ETag content", "path": "etag_test.md"},
+        headers=headers("create-etag-doc"),
+    )
+    assert res_create.status_code == 201
+    doc = res_create.json()
+    doc_id = doc["document_id"]
+    rev_1 = doc["current_revision_id"]
+    expected_etag = f'"{rev_1}"'
+    assert res_create.headers.get("ETag") == expected_etag
+
+    # 2. GET document and check ETag header
+    res_get = client.get(f"/api/v1/documents/{doc_id}", headers=headers("get-etag-doc"))
+    assert res_get.status_code == 200
+    assert res_get.headers.get("ETag") == expected_etag
+
+    # 3. GET document with If-None-Match returning 304 Not Modified
+    res_304 = client.get(
+        f"/api/v1/documents/{doc_id}",
+        headers={**headers("get-if-none-match"), "If-None-Match": expected_etag},
+    )
+    assert res_304.status_code == 304
+    assert res_304.headers.get("ETag") == expected_etag
+
+    # 4. GET raw with If-None-Match
+    res_raw_304 = client.get(
+        f"/api/v1/documents/{doc_id}/raw",
+        headers={**headers("raw-if-none-match"), "If-None-Match": expected_etag},
+    )
+    assert res_raw_304.status_code == 304
+
+    # 5. GET download with If-None-Match
+    res_dl_304 = client.get(
+        f"/api/v1/documents/{doc_id}/download",
+        headers={**headers("dl-if-none-match"), "If-None-Match": expected_etag},
+    )
+    assert res_dl_304.status_code == 304
+
+    # 6. GET document with mismatched If-None-Match returns 200 OK
+    res_200 = client.get(
+        f"/api/v1/documents/{doc_id}",
+        headers={**headers("get-if-none-match-diff"), "If-None-Match": '"other_rev"'},
+    )
+    assert res_200.status_code == 200
+
+
+def test_document_if_match_conditional_update_and_conflict(client: TestClient) -> None:
+    created = _create_text(client, path="if_match.md")
+    doc_id = created["document_id"]
+    rev_1 = created["current_revision_id"]
+
+    # 1. Update using If-Match header without expected_revision_id in body
+    update_1 = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"content": "Updated via If-Match header"},
+        headers={**headers("update-if-match-1"), "If-Match": f'"{rev_1}"'},
+    )
+    assert update_1.status_code == 200
+    rev_2 = update_1.json()["current_revision_id"]
+    assert rev_2 != rev_1
+    assert update_1.headers.get("ETag") == f'"{rev_2}"'
+
+    # 2. Attempt update using stale If-Match header -> 409 Conflict
+    stale_update = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"content": "Stale edit attempt"},
+        headers={**headers("update-if-match-stale"), "If-Match": f'"{rev_1}"'},
+    )
+    assert stale_update.status_code == 409
+    assert stale_update.json()["error"]["code"] == "revision_conflict"
+
+    # 3. Attempt update with mismatched If-Match and body expected_revision_id -> 409 Conflict
+    mismatched_update = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"expected_revision_id": rev_2, "content": "Mismatched edit attempt"},
+        headers={**headers("update-if-match-mismatch"), "If-Match": f'"{rev_1}"'},
+    )
+    assert mismatched_update.status_code == 409
+
+    # 4. Update using wildcard If-Match: "*"
+    wildcard_update = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"content": "Wildcard edit"},
+        headers={**headers("update-if-match-wildcard"), "If-Match": "*"},
+    )
+    assert wildcard_update.status_code == 200
+    assert wildcard_update.json()["content"] == "Wildcard edit"
+
+
+def test_concurrent_race_conditional_updates_with_if_match(client: TestClient) -> None:
+    created = _create_text(client, path="race_if_match.md")
+    doc_id = created["document_id"]
+    initial_rev = created["current_revision_id"]
+
+    agent1_status = None
+    agent2_status = None
+
+    def agent1_update():
+        nonlocal agent1_status
+        res = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={"content": "Content from Agent 1"},
+            headers={**headers("agent-1-update"), "If-Match": f'"{initial_rev}"'},
+        )
+        agent1_status = res.status_code
+
+    def agent2_update():
+        nonlocal agent2_status
+        res = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={"content": "Content from Agent 2"},
+            headers={**headers("agent-2-update"), "If-Match": f'"{initial_rev}"'},
+        )
+        agent2_status = res.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(agent1_update)
+        f2 = executor.submit(agent2_update)
+        f1.result(timeout=5)
+        f2.result(timeout=5)
+
+    status_codes = sorted([agent1_status, agent2_status])
+    # Exactly one agent must succeed (200) and the other must be rejected with conflict (409)
+    assert status_codes == [200, 409], f"Unexpected status codes: {status_codes}"
+
+    # Verify final document is consistent
+    final_doc = client.get(f"/api/v1/documents/{doc_id}", headers=headers("get-final-race")).json()
+    assert final_doc["content"] in ("Content from Agent 1", "Content from Agent 2")
