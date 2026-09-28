@@ -7,6 +7,45 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.0] - 2026-09-27
+
+### Added
+
+- Scaled SQLite concurrency with audit group commit and keyed locks: batched durable mutation ledger writes via dedicated commit worker and Future barriers (#295, #300).
+- Enabled granular mutation concurrency by narrowing document creation locks to `(actor_id, idempotency_key)`, unlocking parallel document creation across distinct actors (#295, #300).
+- Thread-offloaded synchronous SQLite ChatKit queries via `asyncio.to_thread` for non-blocking read and query execution (#295, #300).
+- Added dedicated concurrency benchmark suite (`scripts/benchmark_concurrency.py`, `just benchmark-concurrency`) verifying saturation, 1:1 event payload checks, zero errors, and streaming under contention (#296, #300).
+- Made workspace flows reviewable and included diff marker content in mutation audit line totals (#285, #294).
+
+### Security
+
+- Hardened activity audit provenance recording, header redaction, and sensitive data sanitization across mutations, bearer tokens, headers, and payloads (#299, #300).
+- Hardened folder descendant document count query against SQL wildcard pattern matching characters (`%`, `_`) (#296, #297, #300).
+- Hardened metadata text input sanitization against null bytes and control characters across connections, proposals, and effects (#288, #291, #294).
+- Prevented silent overwrites in concurrent document moves and restores by replacing non-atomic `os.replace` with atomic `os.link` and failure cleanup (#298, #300).
+- Guaranteed atomic backup manifest replacement and content hash validation under concurrent writes (#286, #289, #294).
+- Enforced path coordination for PDF imports: locked per-path via `MutationCoordinator` and verified database document existence before creation and on cleanup (#296, #300).
+
+### Fixed
+
+- Decoupled mutation transaction locks from audit queue draining, enforcing dynamic byte reservations with strict memory bounds without silent error swallowing (#296, #300).
+- Implemented `BoundedThreadRunner` to retain concurrency permits during coroutine cancellation and cleanly drain during shutdown (#296, #300).
+- Guaranteed progress on audit capacity expansion with provisional FIFO credits, preventing circular waits, and added direct persistence fallback (#296, #300).
+- Preserved complete untruncated unified diffs computed via `difflib` for document creates, updates, and restores, preserving line endings and trailing newline annotations (#296, #300).
+- Recovered mobile toolbar layout into a clean single line and fixed materialize bar flex wrapping overflow (#285, #294).
+- Restored mobile inspector trigger focus and stabilized mobile touch tree interactions (#285, #294).
+- Resolved WCAG AA color contrast violations on activity links and summaries (#285, #294).
+- Kept PDF text selection state coherent on scroll and stabilized mobile PDF text selection (#285, #294).
+- Fixed compact chat width containment and synchronized compact chat resize assertions (#294).
+- Bounded document loading and isolated large search fixtures for workspace-scale paged search (#265).
+
+### Changed
+
+- Upgraded frontend dependencies: `@openai/chatkit-react` to 1.6.1, `lucide-react` to 1.48.0, `vite` to 8.3.0, `@testing-library/react` to 16.3.3, `@playwright/test` to 1.63.0 (#294).
+- Upgraded backend dependencies: `uvicorn[standard]` to >=0.53.0, `pyjwt[crypto]` to >=2.14.0, `pypdf` to 6.19.0, `openai-agents` to 0.22.3, `ruff` to 0.16.8 (#294).
+- Upgraded CI and build tooling: `docker/setup-buildx-action` to 4.4.1, `docker/setup-qemu-action` to 4.4.0, `docker/build-push-action` to 7.4.0, `astral-sh/setup-uv` to 10.2.0, `extractions/setup-just` to 4.0.0 (#294).
+
+
 ## [0.12.3] - 2026-09-21
 
 ### Security
@@ -390,7 +429,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.12.3...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/jayshah5696/sangam/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/jayshah5696/sangam/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.2
 [0.12.1]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.1
