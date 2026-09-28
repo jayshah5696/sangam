@@ -411,11 +411,17 @@ def test_extended_sensitive_header_and_data_sanitization() -> None:
         "Sangam-Preview": "sgm_prv_123.preview_token_value",
         "Proxy-Authenticate": "Basic realm=secret_realm",
         "Passphrase": "my_secret_passphrase",
+        "X-Client-Cert": "MIIE...client_cert_data",
+        "Ssl-Client-Cert": "MIIE...ssl_cert_data",
+        "X-Custom-Signature": "sig_9988776655443322",
     }
     sanitized_headers = sanitize_headers(request_headers)
     assert sanitized_headers["Sangam-Preview"] == "[REDACTED]"
     assert sanitized_headers["Proxy-Authenticate"] == "[REDACTED]"
     assert sanitized_headers["Passphrase"] == "[REDACTED]"
+    assert sanitized_headers["X-Client-Cert"] == "[REDACTED]"
+    assert sanitized_headers["Ssl-Client-Cert"] == "[REDACTED]"
+    assert sanitized_headers["X-Custom-Signature"] == "[REDACTED]"
 
     sensitive_payload = {
         "private_payload": "sensitive_data_blob",
@@ -430,6 +436,14 @@ def test_extended_sensitive_header_and_data_sanitization() -> None:
         "api_token": "sgm_agt_44444.secret_api",
         "tls_key": "my_tls_key_data",
         "priv_key": "my_priv_key_data",
+        "access_token_secret": "my_oauth_secret",
+        "pem": "-----BEGIN PRIVATE KEY-----\nMIIE...",
+        "client_certificate": "-----BEGIN CERTIFICATE-----\nMIIE...",
+        "digital_signature": "signature_hash_bytes",
+        "oauth_token": "glpat-1234567890abcdef1234",
+        "slack_token": "xoxb-123456789012-345678901234",
+        "env_var": "SECRET_ENV_VALUE",
+        "env_val": "ANOTHER_SECRET_VAL",
     }
     sanitized_data = sanitize_sensitive_data(sensitive_payload)
     assert isinstance(sanitized_data, dict)
