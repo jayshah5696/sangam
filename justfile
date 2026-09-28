@@ -97,7 +97,7 @@ verify-behavior port="8765" count="25" eval_limit="3":
     ./scripts/control-sangam.sh benchmark "{{ count }}"
     ./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" "{{ eval_limit }}"
 
-# Prove the verification harness rejects an invalid benchmark count and cleans up.
+# Prove the verification harness rejects an invalid benchmark count, mismatched document, and streaming error events.
 verify-negative port="8995":
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -107,12 +107,16 @@ verify-negative port="8995":
     source "${TMPDIR:-/tmp}/.sangam-active-verification"
     invalid_report="$SANGAM_ARTIFACTS_DIR/negative-count.log"
     mismatch_report="$SANGAM_ARTIFACTS_DIR/negative-document-match.log"
+    stream_error_report="$SANGAM_ARTIFACTS_DIR/negative-stream-error.log"
     set +e
     ./scripts/control-sangam.sh benchmark 0 >"$invalid_report" 2>&1
     invalid_result=$?
     SANGAM_VERIFY_BENCHMARK_NEGATIVE=wrong-document \
       ./scripts/control-sangam.sh benchmark 3 >"$mismatch_report" 2>&1
     mismatch_result=$?
+    SANGAM_VERIFY_BENCHMARK_NEGATIVE=stream-error \
+      ./scripts/control-sangam.sh benchmark 3 >"$stream_error_report" 2>&1
+    stream_error_result=$?
     set -e
     if [[ $invalid_result -eq 0 ]] || ! rg -q "positive integer" "$invalid_report"; then
       echo "Negative verification proof failed; expected the positive-count guard." >&2
@@ -124,8 +128,13 @@ verify-negative port="8995":
       cat "$mismatch_report" >&2
       exit 1
     fi
-    echo "Negative verification proof passed: invalid count and wrong document identity rejected."
-    echo "  Evidence saved to: $invalid_report and $mismatch_report"
+    if [[ $stream_error_result -eq 0 ]] || ! rg -q "streaming encountered error event|streaming stream ended without a completed assistant response" "$stream_error_report"; then
+      echo "Negative verification proof failed; expected rejection of SSE error event and missing assistant response." >&2
+      cat "$stream_error_report" >&2
+      exit 1
+    fi
+    echo "Negative verification proof passed: invalid count, wrong document identity, and SSE stream errors rejected."
+    echo "  Evidence saved to: $invalid_report, $mismatch_report, and $stream_error_report"
 
 # Run a read-only doctor health and integrity check on the active verification instance.
 verify-doctor:

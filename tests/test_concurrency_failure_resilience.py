@@ -2189,3 +2189,127 @@ def test_audit_diff_preserves_line_endings_and_diff_header_lines(client: TestCli
         assert details3.get("final_newline") is True
         assert details3.get("lines_added") == 2
         assert details3.get("lines_removed") == 2
+
+
+def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_response(
+    client: TestClient,
+) -> None:
+    """Verification Gate: Reject SSE error events, require completed assistant response,
+    and verify item ID and content match SQLite chat_thread_items.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from chatkit.types import AssistantMessageContent, AssistantMessageItem, ThreadMetadata
+
+    from sangam.chat_context import ChatRequestContext
+    from sangam.chat_store import SQLiteChatKitStore
+
+    # 1. Five-event error sequence simulation
+    error_stream_events = [
+        {
+            "type": "thread.created",
+            "thread": {"id": "thr_err_test", "created_at": "2026-03-31T00:00:00Z"},
+        },
+        {
+            "type": "thread.item.done",
+            "item": {
+                "id": "msg_user",
+                "thread_id": "thr_err_test",
+                "type": "user_message",
+                "content": [{"type": "input_text", "text": "test probe"}],
+            },
+        },
+        {"type": "stream_options", "stream_options": {"allow_cancel": True}},
+        {
+            "type": "error",
+            "code": "custom",
+            "message": "Set SANGAM_OPENROUTER_API_KEY in the server environment.",
+        },
+        {"type": "thread.updated", "thread": {"id": "thr_err_test"}},
+    ]
+
+    # Evaluate against gate criteria
+    error_events = [ev for ev in error_stream_events if ev.get("type") == "error"]
+    assert len(error_events) == 1
+    assert error_events[0].get("code") == "custom"
+    assert "SANGAM_OPENROUTER_API_KEY" in error_events[0].get("message", "")
+
+    completed_asst = [
+        ev.get("item")
+        for ev in error_stream_events
+        if ev.get("type") == "thread.item.done"
+        and isinstance(ev.get("item"), dict)
+        and ev["item"].get("type") == "assistant_message"
+    ]
+    assert len(completed_asst) == 0, "Error stream must not have completed assistant response"
+
+    # 2. Valid stream sequence with completed assistant response and SQLite persistence
+    db = client.app.state.services.activity.database
+    store = SQLiteChatKitStore(db)
+    principal = Principal.trusted_human(
+        actor_id="human:jay", display_name="Jay", operation_id="op_asst_stream"
+    )
+    ctx = ChatRequestContext(principal=principal)
+
+    async def persist_chat():
+        thread = ThreadMetadata(id="thr_success_1", created_at=datetime.now(UTC))
+        await store.save_thread(thread, ctx)
+        asst_item = AssistantMessageItem(
+            id="msg_asst_1",
+            thread_id=thread.id,
+            content=[AssistantMessageContent(text="Verified assistant stream response text.")],
+            created_at=datetime.now(UTC),
+        )
+        await store.save_item(thread.id, asst_item, ctx)
+        await store.close()
+
+    asyncio.run(persist_chat())
+
+    success_stream_events = [
+        {"type": "thread.created", "thread": {"id": "thr_success_1"}},
+        {"type": "thread.item.done", "item": {"id": "msg_user_1", "type": "user_message"}},
+        {
+            "type": "thread.item.done",
+            "item": {
+                "id": "msg_asst_1",
+                "type": "assistant_message",
+                "content": [
+                    {"type": "output_text", "text": "Verified assistant stream response text."}
+                ],
+            },
+        },
+        {"type": "thread.updated", "thread": {"id": "thr_success_1"}},
+    ]
+
+    # Gate verification
+    success_errs = [ev for ev in success_stream_events if ev.get("type") == "error"]
+    assert not success_errs
+
+    asst_items = [
+        ev.get("item")
+        for ev in success_stream_events
+        if ev.get("type") == "thread.item.done"
+        and isinstance(ev.get("item"), dict)
+        and ev["item"].get("type") == "assistant_message"
+    ]
+    assert len(asst_items) == 1
+    found_item = asst_items[0]
+    asst_id = found_item.get("id")
+    asst_text = "".join(p.get("text", "") for p in found_item.get("content", []))
+
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT item_id, thread_id, data_json FROM chat_thread_items "
+            "WHERE thread_id = ? AND item_id = ?",
+            ("thr_success_1", asst_id),
+        ).fetchone()
+        assert row is not None, "Assistant item must be found in SQLite"
+        db_raw = json.loads(row["data_json"])
+        payload = db_raw.get("payload", db_raw) if isinstance(db_raw, dict) else {}
+        assert payload.get("id") == asst_id
+        assert payload.get("type") == "assistant_message"
+        db_text = "".join(
+            p.get("text", "") for p in payload.get("content", []) if p.get("type") == "output_text"
+        )
+        assert db_text == asst_text

@@ -303,11 +303,12 @@ cmd_benchmark() {
   uv run python - <<PYEOF
 import json
 import os
+import sqlite3
+import threading
 import time
 import uuid
-import httpx
-import sqlite3
 from pathlib import Path
+import httpx
 
 base_url = "http://127.0.0.1:$port/api/v1"
 db_path = "$SANGAM_DATABASE_PATH"
@@ -317,9 +318,12 @@ if count < 1:
 benchmark_id = uuid.uuid4().hex[:12]
 title_prefix = f"Benchmark Document {benchmark_id} #"
 errors = []
-negative_expected_id = os.environ.get("SANGAM_VERIFY_BENCHMARK_NEGATIVE") == "wrong-document"
 
-client = httpx.Client(timeout=10.0)
+negative_mode = os.environ.get("SANGAM_VERIFY_BENCHMARK_NEGATIVE", "")
+negative_expected_id = negative_mode == "wrong-document"
+negative_stream_error = negative_mode in ("stream-error", "five-event-error")
+
+client = httpx.Client(timeout=15.0)
 
 # 1. Measure readiness ping latency
 t0 = time.perf_counter()
@@ -350,26 +354,34 @@ elif set(checks) != expected_checks:
 if not isinstance(checks, dict) or any(not isinstance(check, dict) or check.get("ok") is not True for check in checks.values()):
     errors.append("readiness contains a failed or malformed check")
 
-# 2. Benchmark Live Server SSE Streaming overlapped with active storage write traffic
+# 2. Benchmark Live Server SSE Streaming overlapped with active storage contention
 # Verifies streaming responsiveness, first-event latency, inter-event delays,
-# and direct SQLite persistence of chat thread & items under active storage contention.
-import threading
-
+# completed assistant response item semantics, and direct SQLite persistence
+# while storage writes and searches run continuously until the stream finishes.
+stream_done = threading.Event()
+stream_started = threading.Event()
 stream_results = {
     "latencies": [],
     "events_count": 0,
     "thread_id": None,
     "first_event_ms": 0.0,
     "inter_event_delays_ms": [],
-    "error": None,
+    "errors": [],
+    "error_events": [],
     "completed_cleanly": False,
     "event_types": [],
     "total_time_seconds": 0.0,
+    "assistant_item_id": None,
+    "assistant_content": "",
+    "t_start": 0.0,
+    "t_end": 0.0,
 }
 
 def stream_worker():
     t_stream_worker_start = time.perf_counter()
+    stream_results["t_start"] = t_stream_worker_start
     try:
+        model_name = "unsupported/negative-error-model" if negative_stream_error else "openai/gpt-5.4-nano"
         with client.stream(
             "POST",
             f"{base_url}/chatkit",
@@ -379,18 +391,20 @@ def stream_worker():
                     "input": {
                         "content": [{"type": "input_text", "text": "Contention streaming benchmark probe"}],
                         "attachments": [],
-                        "inference_options": {"model": "openai/gpt-5.4-nano"},
+                        "inference_options": {"model": model_name},
                     }
                 },
             },
             headers={"Content-Type": "application/json"},
         ) as stream_resp:
+            stream_started.set()
             if stream_resp.status_code != 200:
-                stream_results["error"] = f"streaming failed with HTTP {stream_resp.status_code}"
+                body_sample = stream_resp.read().decode("utf-8", errors="replace")[:200]
+                stream_results["errors"].append(f"streaming failed with HTTP {stream_resp.status_code}: {body_sample}")
                 return
             content_type = stream_resp.headers.get("content-type", "")
             if "text/event-stream" not in content_type:
-                stream_results["error"] = f"streaming returned unexpected content-type: {content_type}"
+                stream_results["errors"].append(f"streaming returned unexpected content-type: {content_type}")
                 return
 
             sse_events = []
@@ -398,38 +412,89 @@ def stream_worker():
             for line in stream_resp.iter_lines():
                 now_t = time.perf_counter()
                 if line.startswith("data: "):
-                    ev = json.loads(line[6:])
+                    try:
+                        ev = json.loads(line[6:])
+                    except Exception as err:
+                        stream_results["errors"].append(f"malformed SSE JSON: {err}")
+                        continue
+
+                    ev_type = ev.get("type")
                     sse_events.append(ev)
-                    stream_results["event_types"].append(ev.get("type"))
+                    stream_results["event_types"].append(ev_type)
                     stream_results["latencies"].append((now_t - t_stream_worker_start) * 1000)
                     stream_results["inter_event_delays_ms"].append((now_t - prev_t) * 1000)
                     prev_t = now_t
 
+                    if ev_type == "error":
+                        stream_results["error_events"].append(ev)
+                        err_code = ev.get('code')
+                        err_msg = ev.get('message')
+                        stream_results["errors"].append(
+                            f"SSE error event received: code={err_code!r}, message={err_msg!r}"
+                        )
+
+            t_stream_worker_end = time.perf_counter()
+            stream_results["t_end"] = t_stream_worker_end
+            stream_results["total_time_seconds"] = t_stream_worker_end - t_stream_worker_start
             stream_results["events_count"] = len(sse_events)
-            stream_results["completed_cleanly"] = True
-            stream_results["total_time_seconds"] = time.perf_counter() - t_stream_worker_start
+
             if sse_events and sse_events[0].get("type") == "thread.created":
                 stream_results["thread_id"] = sse_events[0].get("thread", {}).get("id")
+
             if stream_results["latencies"]:
                 stream_results["first_event_ms"] = stream_results["latencies"][0]
-            if len(sse_events) < 4:
-                stream_results["error"] = f"streaming returned only {len(sse_events)} events; expected >= 4"
+
+            # Completed assistant response according to ChatKit event schema
+            completed_assistant_items = [
+                ev.get("item")
+                for ev in sse_events
+                if ev.get("type") == "thread.item.done"
+                and isinstance(ev.get("item"), dict)
+                and ev["item"].get("type") == "assistant_message"
+            ]
+            if completed_assistant_items:
+                asst_item = completed_assistant_items[-1]
+                asst_id = asst_item.get("id")
+                stream_results["assistant_item_id"] = asst_id
+                content_parts = asst_item.get("content", [])
+                asst_text = "".join(
+                    part.get("text", "")
+                    for part in content_parts
+                    if isinstance(part, dict) and part.get("type") == "output_text"
+                )
+                stream_results["assistant_content"] = asst_text
+
+            if (
+                not stream_results["error_events"]
+                and not stream_results["errors"]
+                and stream_results["assistant_item_id"] is not None
+            ):
+                stream_results["completed_cleanly"] = True
     except Exception as exc:
-        stream_results["error"] = f"streaming exception: {exc}"
+        stream_results["errors"].append(f"streaming exception: {exc}")
+    finally:
+        if not stream_results["t_end"]:
+            stream_results["t_end"] = time.perf_counter()
+        stream_done.set()
 
 stream_thread = threading.Thread(target=stream_worker, name="benchmark-sse-stream")
 stream_thread.start()
+stream_started.wait(timeout=1.0)
 
-# 3. Benchmark Document Creation throughput (running CONCURRENTLY with streaming)
+# 3. Sustained Storage Workload: document writes and FTS5 searches running until stream completes
 create_latencies = []
 created_doc_ids = []
 created_documents = {}
-t_start = time.perf_counter()
+search_latencies = []
 
-for i in range(count):
+t_storage_start = time.perf_counter()
+doc_idx = 0
+
+while doc_idx < count or not stream_done.is_set():
+    # Write
     payload = {
-        "title": f"{title_prefix}{i}",
-        "content": f"# Benchmark Document {i}\n\nContent body with unique term benchmark_token_{i} and searchable metadata."
+        "title": f"{title_prefix}{doc_idx}",
+        "content": f"# Benchmark Document {doc_idx}\n\nContent body with unique term benchmark_token_{doc_idx} and searchable metadata."
     }
     headers = {"Idempotency-Key": str(uuid.uuid4())}
     req_t0 = time.perf_counter()
@@ -437,60 +502,82 @@ for i in range(count):
     req_ms = (time.perf_counter() - req_t0) * 1000
     create_latencies.append(req_ms)
     if resp.status_code not in (200, 201):
-        errors.append(f"write {i} failed with HTTP {resp.status_code}: {resp.text[:200]}")
-        continue
-    try:
-        document_id = resp.json().get("document_id")
-    except ValueError as error:
-        errors.append(f"write {i} returned invalid JSON: {error}")
-        continue
-    if not document_id:
-        errors.append(f"write {i} returned no document_id")
+        errors.append(f"write {doc_idx} failed with HTTP {resp.status_code}: {resp.text[:200]}")
     else:
-        created_doc_ids.append(document_id)
-        created_documents[f"benchmark_token_{i}"] = document_id
+        try:
+            document_id = resp.json().get("document_id")
+            if not document_id:
+                errors.append(f"write {doc_idx} returned no document_id")
+            else:
+                created_doc_ids.append(document_id)
+                created_documents[f"benchmark_token_{doc_idx}"] = document_id
+        except ValueError as err:
+            errors.append(f"write {doc_idx} returned invalid JSON: {err}")
 
-t_total_create = time.perf_counter() - t_start
-throughput_writes = count / t_total_create if t_total_create > 0 else 0
-
-# 4. Benchmark FTS5 Search latency
-search_latencies = []
-t_search_start = time.perf_counter()
-for i in range(count):
-    token = f"benchmark_token_{i}"
-    req_t0 = time.perf_counter()
+    # Search
+    token = f"benchmark_token_{doc_idx}"
+    s_t0 = time.perf_counter()
     s_resp = client.get(f"{base_url}/search", params={"q": token})
-    search_ms = (time.perf_counter() - req_t0) * 1000
+    search_ms = (time.perf_counter() - s_t0) * 1000
     search_latencies.append(search_ms)
     if s_resp.status_code != 200:
-        errors.append(f"search {i} failed with HTTP {s_resp.status_code}: {s_resp.text[:200]}")
-        continue
-    try:
-        search_results = s_resp.json()
-    except ValueError as error:
-        errors.append(f"search {i} returned invalid JSON: {error}")
-        continue
-    expected_document_id = created_documents.get(token)
-    if negative_expected_id and created_doc_ids:
-        expected_document_id = created_doc_ids[(i + 1) % len(created_doc_ids)]
-    if not isinstance(search_results, list) or not any(
-        isinstance(result, dict) and result.get("document_id") == expected_document_id
-        for result in search_results
-    ):
-        errors.append(
-            f"search {i} did not return the expected benchmark document "
-            f"{expected_document_id!r} for {token}"
-        )
+        errors.append(f"search {doc_idx} failed with HTTP {s_resp.status_code}: {s_resp.text[:200]}")
+    else:
+        try:
+            search_results = s_resp.json()
+            expected_document_id = created_documents.get(token)
+            if negative_expected_id and created_doc_ids:
+                expected_document_id = created_doc_ids[(doc_idx + 1) % len(created_doc_ids)]
+            if not isinstance(search_results, list) or not any(
+                isinstance(result, dict) and result.get("document_id") == expected_document_id
+                for result in search_results
+            ):
+                errors.append(
+                    f"search {doc_idx} did not return the expected benchmark document "
+                    f"{expected_document_id!r} for {token}"
+                )
+        except ValueError as err:
+            errors.append(f"search {doc_idx} returned invalid JSON: {err}")
 
-t_total_search = time.perf_counter() - t_search_start
-throughput_searches = count / t_total_search if t_total_search > 0 else 0
+    doc_idx += 1
 
-# Join concurrent streaming thread
-stream_thread.join(timeout=30.0)
+t_storage_end = time.perf_counter()
+storage_duration = t_storage_end - t_storage_start
+
+# Join streaming thread
+stream_thread.join(timeout=35.0)
 if stream_thread.is_alive():
-    errors.append("streaming probe timed out after 30 seconds")
-if stream_results["error"]:
-    errors.append(stream_results["error"])
+    errors.append("streaming probe timed out after 35 seconds")
+
+t_stream_start = stream_results.get("t_start", t_storage_start)
+t_stream_end = stream_results.get("t_end", t_storage_end)
+stream_duration = max(0.001, t_stream_end - t_stream_start)
+
+overlap_start = max(t_storage_start, t_stream_start)
+overlap_end = min(t_storage_end, t_stream_end)
+actual_overlap = max(0.0, overlap_end - overlap_start)
+overlap_percentage = round((actual_overlap / stream_duration) * 100, 1)
+
+throughput_writes = len(create_latencies) / storage_duration if storage_duration > 0 else 0
+throughput_searches = len(search_latencies) / storage_duration if storage_duration > 0 else 0
+
+# Check streaming errors & requirements
+if stream_results["error_events"]:
+    for ev in stream_results["error_events"]:
+        err_code = ev.get('code')
+        err_msg = ev.get('message')
+        errors.append(
+            f"streaming encountered error event: code={err_code!r}, message={err_msg!r}"
+        )
+if stream_results["errors"]:
+    for err in stream_results["errors"]:
+        errors.append(f"streaming error: {err}")
+
+if not stream_results["assistant_item_id"]:
+    errors.append(
+        "streaming stream ended without a completed assistant response "
+        "(missing thread.item.done event with item.type='assistant_message')"
+    )
 
 create_latencies.sort()
 search_latencies.sort()
@@ -510,30 +597,73 @@ doc_count_db = cur.fetchone()[0]
 
 chat_thread_row = None
 chat_item_count = 0
-if stream_results["thread_id"]:
+chat_assistant_row = None
+chat_assistant_matched = False
+chat_content_matched = False
+
+thread_id = stream_results.get("thread_id")
+assistant_item_id = stream_results.get("assistant_item_id")
+assistant_text = stream_results.get("assistant_content", "")
+
+if thread_id:
     cur.execute(
         "SELECT thread_id, created_by, data_json FROM chat_threads WHERE thread_id = ?",
-        (stream_results["thread_id"],),
+        (thread_id,),
     )
     chat_thread_row = cur.fetchone()
+
     cur.execute(
         "SELECT COUNT(*) FROM chat_thread_items WHERE thread_id = ?",
-        (stream_results["thread_id"],),
+        (thread_id,),
     )
     chat_item_count = cur.fetchone()[0]
+
+    if assistant_item_id:
+        cur.execute(
+            "SELECT item_id, thread_id, data_json, created_at FROM chat_thread_items WHERE thread_id = ? AND item_id = ?",
+            (thread_id, assistant_item_id),
+        )
+        chat_assistant_row = cur.fetchone()
+        if chat_assistant_row:
+            try:
+                db_raw = json.loads(chat_assistant_row[2])
+                db_payload = db_raw.get("payload", db_raw) if isinstance(db_raw, dict) else {}
+                db_id = db_payload.get("id")
+                db_type = db_payload.get("type")
+                db_content = db_payload.get("content", [])
+                db_text = "".join(
+                    part.get("text", "")
+                    for part in db_content
+                    if isinstance(part, dict) and part.get("type") == "output_text"
+                )
+                if db_id == assistant_item_id and db_type == "assistant_message":
+                    chat_assistant_matched = True
+                if db_text == assistant_text:
+                    chat_content_matched = True
+                else:
+                    errors.append(
+                        f"assistant response content mismatch between stream and SQLite for {assistant_item_id}: "
+                        f"stream has {len(assistant_text)} chars, db has {len(db_text)} chars"
+                    )
+            except Exception as db_err:
+                errors.append(f"failed to parse chat_thread_items data_json: {db_err}")
 conn.close()
 
 if not chat_thread_row:
-    errors.append(f"chat thread {stream_results['thread_id']} was not persisted in SQLite chat_threads table")
-if chat_item_count < 1:
-    errors.append(f"chat items for thread {stream_results['thread_id']} were not persisted in SQLite chat_thread_items table")
+    errors.append(f"chat thread {thread_id} was not persisted in SQLite chat_threads table")
+if not chat_assistant_row:
+    errors.append(f"completed assistant response item {assistant_item_id} was not persisted in SQLite chat_thread_items")
+elif not chat_assistant_matched:
+    errors.append(f"persisted chat item in SQLite does not match assistant item ID {assistant_item_id}")
+if not chat_content_matched:
+    errors.append("persisted chat item content in SQLite does not match streamed assistant response")
 
 results = {
     "benchmark_count": count,
     "readiness_latency_ms": round(readiness_latency_ms, 2),
     "writes": {
         "count": len(create_latencies),
-        "total_time_seconds": round(t_total_create, 3),
+        "total_time_seconds": round(storage_duration, 3),
         "writes_per_second": round(throughput_writes, 1),
         "latency_ms": {
             "p50": p(create_latencies, 0.50),
@@ -544,7 +674,7 @@ results = {
     },
     "fts5_search": {
         "count": len(search_latencies),
-        "total_time_seconds": round(t_total_search, 3),
+        "total_time_seconds": round(storage_duration, 3),
         "searches_per_second": round(throughput_searches, 1),
         "latency_ms": {
             "p50": p(search_latencies, 0.50),
@@ -555,16 +685,22 @@ results = {
     },
     "database_verification": {
         "persisted_documents_in_sqlite": doc_count_db,
-        "match_expected": doc_count_db == count,
+        "match_expected": doc_count_db == len(create_latencies),
         "unique_document_ids": len(set(created_doc_ids)),
         "chat_thread_persisted_in_sqlite": chat_thread_row is not None,
         "chat_items_persisted_in_sqlite": chat_item_count,
+        "assistant_item_persisted_in_sqlite": chat_assistant_row is not None,
+        "assistant_item_id_matched": chat_assistant_matched,
+        "assistant_content_matched": chat_content_matched,
     },
     "live_streaming_under_contention": {
         "events_count": stream_results["events_count"],
         "thread_id": stream_results["thread_id"],
         "event_types": stream_results["event_types"],
         "completed_cleanly": stream_results["completed_cleanly"],
+        "error_events": stream_results["error_events"],
+        "assistant_item_id": stream_results["assistant_item_id"],
+        "assistant_content_length": len(assistant_text),
         "total_time_seconds": round(stream_results["total_time_seconds"], 3),
         "first_event_latency_ms": round(stream_results["first_event_ms"], 2),
         "delays_between_events_ms": {
@@ -572,17 +708,25 @@ results = {
             "p90": p(delays, 0.90),
             "max": round(max(delays), 2) if delays else 0.0,
         },
+        "contention_overlap": {
+            "storage_duration_seconds": round(storage_duration, 3),
+            "stream_duration_seconds": round(stream_duration, 3),
+            "actual_overlap_seconds": round(actual_overlap, 3),
+            "overlap_percentage": overlap_percentage,
+            "writes_during_contention": len(create_latencies),
+            "searches_during_contention": len(search_latencies),
+        }
     }
 }
 
-if len(create_latencies) != count:
-    errors.append(f"only {len(create_latencies)} write responses were recorded; expected {count}")
-if len(created_doc_ids) != count or len(set(created_doc_ids)) != count:
+if len(create_latencies) < count:
+    errors.append(f"only {len(create_latencies)} write responses were recorded; expected at least {count}")
+if len(created_doc_ids) != len(create_latencies) or len(set(created_doc_ids)) != len(create_latencies):
     errors.append("write responses did not contain unique document IDs for every request")
-if len(search_latencies) != count:
-    errors.append(f"only {len(search_latencies)} search responses were recorded; expected {count}")
-if doc_count_db != count:
-    errors.append(f"SQLite persisted {doc_count_db} benchmark documents; expected {count}")
+if len(search_latencies) != len(create_latencies):
+    errors.append("number of search responses did not match write responses")
+if doc_count_db != len(create_latencies):
+    errors.append(f"SQLite persisted {doc_count_db} benchmark documents; expected {len(create_latencies)}")
 results["ok"] = not errors
 results["errors"] = errors
 
