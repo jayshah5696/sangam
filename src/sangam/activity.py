@@ -62,6 +62,8 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "access_policy",
     "additions",
     "deletions",
+    "line_ending",
+    "final_newline",
 }
 
 
@@ -263,6 +265,7 @@ class ActivityService:
         self._committing_bytes = 0
         self._oversized_owner_id: int | None = None
         self._expansion_owner_id: int | None = None
+        self._expansion_waiters: list[int] = []
         self._peak_reserved_bytes = 0
         self._peak_queue_bytes = 0
         self._peak_total_bytes = 0
@@ -473,6 +476,8 @@ class ActivityService:
             self._admitted_items = max(0, self._admitted_items - 1)
             self._reserved_producer_bytes = max(0, self._reserved_producer_bytes - reserved_bytes)
             self._active_producers = max(0, self._active_producers - 1)
+            if reservation_id is not None and reservation_id in self._expansion_waiters:
+                self._expansion_waiters.remove(reservation_id)
             if is_oversized_owner and self._oversized_owner_id == reservation_id:
                 self._oversized_owner_id = None
             if is_expansion_owner or self._expansion_owner_id == reservation_id:
@@ -736,98 +741,182 @@ class ActivityService:
         needed_bytes = max(reservation._reserved_bytes, self.estimate_payload_bytes(details))
         expansion = max(0, needed_bytes - reservation._reserved_bytes)
         deadline = time.monotonic() + 60.0
+        waiter_id = id(reservation)
+        is_waiter = False
 
-        while True:
-            if not self._worker_healthy:
-                can_probe = False
-                err = None
-                with self._queue_lock:
-                    err = self._worker_error
-                    can_direct_persist = (
-                        not self._shutting_down
-                        and (self._reserved_producer_bytes + expansion) <= self.max_total_bytes
-                    )
-                    if not can_direct_persist and self._is_terminal_error(err):
-                        raise ServiceUnavailableError(f"Audit persistence is unavailable: {err}")
-                    if (
-                        self._worker_thread is not None
-                        and self._worker_thread.is_alive()
-                        and err is not None
-                        and self._is_recoverable_error(err)
-                    ):
-                        can_probe = True
-                if can_probe and self._probe_write_lock_availability():
+        try:
+            while True:
+                if not self._worker_healthy:
+                    can_probe = False
+                    err = None
                     with self._queue_lock:
-                        if self._worker_error is not None and self._is_recoverable_error(
-                            self._worker_error
+                        err = self._worker_error
+                        can_direct_persist = (
+                            not self._shutting_down
+                            and (self._reserved_producer_bytes + expansion) <= self.max_total_bytes
+                        )
+                        if not can_direct_persist and self._is_terminal_error(err):
+                            raise ServiceUnavailableError(
+                                f"Audit persistence is unavailable: {err}"
+                            )
+                        if (
+                            self._worker_thread is not None
+                            and self._worker_thread.is_alive()
+                            and err is not None
+                            and self._is_recoverable_error(err)
                         ):
-                            self._worker_healthy = True
-                            self._worker_error = None
+                            can_probe = True
+                    if can_probe and self._probe_write_lock_availability():
+                        with self._queue_lock:
+                            if self._worker_error is not None and self._is_recoverable_error(
+                                self._worker_error
+                            ):
+                                self._worker_healthy = True
+                                self._worker_error = None
+                                self._queue_condition.notify_all()
+
+                with self._queue_lock:
+                    if not self._worker_healthy:
+                        can_direct_persist = (
+                            not self._shutting_down
+                            and (self._reserved_producer_bytes + expansion) <= self.max_total_bytes
+                        )
+                        if not can_direct_persist:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                raise ServiceUnavailableError(
+                                    f"Audit persistence is unavailable: {self._worker_error}"
+                                )
+                            self._queue_condition.wait(min(remaining, 0.1))
+                            continue
+
+                    is_oversized = (
+                        needed_bytes > self.max_queue_bytes or needed_bytes > self.max_total_bytes
+                    )
+
+                    # Case 1: No expansion needed and no prior waiters
+                    if not is_waiter and expansion == 0 and len(self._expansion_waiters) == 0:
+                        break
+
+                    # Case 2: Can we expand immediately without waiting?
+                    if not is_waiter and len(self._expansion_waiters) == 0:
+                        total_in_flight = (
+                            self._reserved_producer_bytes
+                            + self._queue_bytes
+                            + self._committing_bytes
+                        )
+                        if is_oversized:
+                            can_expand = (
+                                (
+                                    self._oversized_owner_id is None
+                                    or self._oversized_owner_id == waiter_id
+                                )
+                                and len(self._queue) == 0
+                                and self._committing_items == 0
+                            )
+                        else:
+                            queue_ok = (
+                                self._queue_bytes + self._committing_bytes + needed_bytes
+                                <= self.max_queue_bytes
+                                or (
+                                    len(self._queue) == 0
+                                    and self._committing_items == 0
+                                    and self._oversized_owner_id is None
+                                )
+                            )
+                            total_ok = (
+                                self._oversized_owner_id is None
+                                and (total_in_flight + expansion) <= self.max_total_bytes
+                            )
+                            can_expand = queue_ok and total_ok
+
+                        if can_expand:
+                            self._reserved_producer_bytes += expansion
+                            reservation._reserved_bytes = needed_bytes
+                            if is_oversized:
+                                self._oversized_owner_id = waiter_id
+                                reservation._is_oversized_owner = True
+                            self._peak_reserved_bytes = max(
+                                self._peak_reserved_bytes, self._reserved_producer_bytes
+                            )
+                            self._peak_total_bytes = max(
+                                self._peak_total_bytes, total_in_flight + expansion
+                            )
+                            break
+
+                    # Cannot expand immediately.
+                    # Release provisional byte credits to break circular wait,
+                    # and wait fairly in FIFO order.
+                    if not is_waiter:
+                        self._expansion_waiters.append(waiter_id)
+                        is_waiter = True
+                        if reservation._reserved_bytes > 0:
+                            self._reserved_producer_bytes = max(
+                                0, self._reserved_producer_bytes - reservation._reserved_bytes
+                            )
+                            reservation._reserved_bytes = 0
                             self._queue_condition.notify_all()
 
-            with self._queue_lock:
-                if not self._worker_healthy:
-                    can_direct_persist = (
-                        not self._shutting_down
-                        and (self._reserved_producer_bytes + expansion) <= self.max_total_bytes
-                    )
-                    if not can_direct_persist:
-                        remaining = deadline - time.monotonic()
-                        if remaining <= 0:
-                            raise ServiceUnavailableError(
-                                f"Audit persistence is unavailable: {self._worker_error}"
+                    # Check if this waiter is at the head of the fair queue
+                    if self._expansion_waiters and self._expansion_waiters[0] == waiter_id:
+                        total_in_flight = (
+                            self._reserved_producer_bytes
+                            + self._queue_bytes
+                            + self._committing_bytes
+                        )
+                        if is_oversized:
+                            can_acquire = (
+                                (
+                                    self._oversized_owner_id is None
+                                    or self._oversized_owner_id == waiter_id
+                                )
+                                and len(self._queue) == 0
+                                and self._committing_items == 0
                             )
-                        self._queue_condition.wait(min(remaining, 0.1))
-                        continue
+                        else:
+                            queue_ok = (
+                                self._queue_bytes + self._committing_bytes + needed_bytes
+                                <= self.max_queue_bytes
+                                or (
+                                    len(self._queue) == 0
+                                    and self._committing_items == 0
+                                    and self._oversized_owner_id is None
+                                )
+                            )
+                            total_ok = (
+                                self._oversized_owner_id is None
+                                and (total_in_flight + needed_bytes) <= self.max_total_bytes
+                            )
+                            can_acquire = queue_ok and total_ok
 
-                is_oversized = (
-                    needed_bytes > self.max_queue_bytes or needed_bytes > self.max_total_bytes
-                )
-                if is_oversized:
-                    can_expand = (
-                        (
-                            self._oversized_owner_id is None
-                            or self._oversized_owner_id == id(reservation)
+                        if can_acquire:
+                            self._expansion_waiters.pop(0)
+                            is_waiter = False
+                            self._reserved_producer_bytes += needed_bytes
+                            reservation._reserved_bytes = needed_bytes
+                            if is_oversized:
+                                self._oversized_owner_id = waiter_id
+                                reservation._is_oversized_owner = True
+                            self._peak_reserved_bytes = max(
+                                self._peak_reserved_bytes, self._reserved_producer_bytes
+                            )
+                            self._peak_total_bytes = max(
+                                self._peak_total_bytes, total_in_flight + needed_bytes
+                            )
+                            break
+
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ServiceUnavailableError(
+                            "Audit queue capacity exceeded: expansion timed out"
                         )
-                        and len(self._queue) == 0
-                        and self._committing_items == 0
-                    )
-                else:
-                    queue_ok = (
-                        self._queue_bytes + self._committing_bytes + needed_bytes
-                        <= self.max_queue_bytes
-                        or (
-                            len(self._queue) == 0
-                            and self._committing_items == 0
-                            and self._oversized_owner_id is None
-                        )
-                    )
-                    total_in_flight = (
-                        self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
-                    )
-                    total_ok = (
-                        self._oversized_owner_id is None
-                        and (total_in_flight + expansion) <= self.max_total_bytes
-                    )
-                    can_expand = queue_ok and total_ok
-
-                if can_expand:
-                    self._reserved_producer_bytes += expansion
-                    reservation._reserved_bytes = needed_bytes
-                    if is_oversized:
-                        self._oversized_owner_id = id(reservation)
-                        reservation._is_oversized_owner = True
-                    self._peak_reserved_bytes = max(
-                        self._peak_reserved_bytes, self._reserved_producer_bytes
-                    )
-                    break
-
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise ServiceUnavailableError(
-                        "Audit queue capacity exceeded: expansion timed out"
-                    )
-                self._queue_condition.wait(min(remaining, 0.1))
+                    self._queue_condition.wait(min(remaining, 0.1))
+        finally:
+            if is_waiter:
+                with self._queue_lock:
+                    if waiter_id in self._expansion_waiters:
+                        self._expansion_waiters.remove(waiter_id)
+                        self._queue_condition.notify_all()
 
         row, actual_size_bytes = self._prepare_event_row(
             principal=principal,

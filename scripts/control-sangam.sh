@@ -350,7 +350,77 @@ elif set(checks) != expected_checks:
 if not isinstance(checks, dict) or any(not isinstance(check, dict) or check.get("ok") is not True for check in checks.values()):
     errors.append("readiness contains a failed or malformed check")
 
-# 2. Benchmark Document Creation throughput
+# 2. Benchmark Live Server SSE Streaming overlapped with active storage write traffic
+# Verifies streaming responsiveness, first-event latency, inter-event delays,
+# and direct SQLite persistence of chat thread & items under active storage contention.
+import threading
+
+stream_results = {
+    "latencies": [],
+    "events_count": 0,
+    "thread_id": None,
+    "first_event_ms": 0.0,
+    "inter_event_delays_ms": [],
+    "error": None,
+    "completed_cleanly": False,
+    "event_types": [],
+    "total_time_seconds": 0.0,
+}
+
+def stream_worker():
+    t_stream_worker_start = time.perf_counter()
+    try:
+        with client.stream(
+            "POST",
+            f"{base_url}/chatkit",
+            json={
+                "type": "threads.create",
+                "params": {
+                    "input": {
+                        "content": [{"type": "input_text", "text": "Contention streaming benchmark probe"}],
+                        "attachments": [],
+                        "inference_options": {"model": "openai/gpt-5.4-nano"},
+                    }
+                },
+            },
+            headers={"Content-Type": "application/json"},
+        ) as stream_resp:
+            if stream_resp.status_code != 200:
+                stream_results["error"] = f"streaming failed with HTTP {stream_resp.status_code}"
+                return
+            content_type = stream_resp.headers.get("content-type", "")
+            if "text/event-stream" not in content_type:
+                stream_results["error"] = f"streaming returned unexpected content-type: {content_type}"
+                return
+
+            sse_events = []
+            prev_t = t_stream_worker_start
+            for line in stream_resp.iter_lines():
+                now_t = time.perf_counter()
+                if line.startswith("data: "):
+                    ev = json.loads(line[6:])
+                    sse_events.append(ev)
+                    stream_results["event_types"].append(ev.get("type"))
+                    stream_results["latencies"].append((now_t - t_stream_worker_start) * 1000)
+                    stream_results["inter_event_delays_ms"].append((now_t - prev_t) * 1000)
+                    prev_t = now_t
+
+            stream_results["events_count"] = len(sse_events)
+            stream_results["completed_cleanly"] = True
+            stream_results["total_time_seconds"] = time.perf_counter() - t_stream_worker_start
+            if sse_events and sse_events[0].get("type") == "thread.created":
+                stream_results["thread_id"] = sse_events[0].get("thread", {}).get("id")
+            if stream_results["latencies"]:
+                stream_results["first_event_ms"] = stream_results["latencies"][0]
+            if len(sse_events) < 4:
+                stream_results["error"] = f"streaming returned only {len(sse_events)} events; expected >= 4"
+    except Exception as exc:
+        stream_results["error"] = f"streaming exception: {exc}"
+
+stream_thread = threading.Thread(target=stream_worker, name="benchmark-sse-stream")
+stream_thread.start()
+
+# 3. Benchmark Document Creation throughput (running CONCURRENTLY with streaming)
 create_latencies = []
 created_doc_ids = []
 created_documents = {}
@@ -383,7 +453,7 @@ for i in range(count):
 t_total_create = time.perf_counter() - t_start
 throughput_writes = count / t_total_create if t_total_create > 0 else 0
 
-# 3. Benchmark FTS5 Search latency
+# 4. Benchmark FTS5 Search latency
 search_latencies = []
 t_search_start = time.perf_counter()
 for i in range(count):
@@ -415,47 +485,16 @@ for i in range(count):
 t_total_search = time.perf_counter() - t_search_start
 throughput_searches = count / t_total_search if t_total_search > 0 else 0
 
-# 4. Benchmark Live Server SSE Streaming (ChatKit protocol & Async SQLite ChatStore)
-streaming_latencies = []
-streaming_events_count = 0
-chatkit_thread_id = None
-t_stream_start = time.perf_counter()
-try:
-    with client.stream(
-        "POST",
-        f"{base_url}/chatkit",
-        json={
-            "type": "threads.create",
-            "params": {
-                "input": {
-                    "content": [{"type": "input_text", "text": "Live benchmark streaming probe"}],
-                    "attachments": [],
-                    "inference_options": {"model": "openai/gpt-5.4-nano"},
-                }
-            },
-        },
-        headers={"Content-Type": "application/json"},
-    ) as stream_resp:
-        if stream_resp.status_code != 200:
-            errors.append(f"streaming failed with HTTP {stream_resp.status_code}")
-        else:
-            sse_events = []
-            for line in stream_resp.iter_lines():
-                if line.startswith("data: "):
-                    ev = json.loads(line[6:])
-                    sse_events.append(ev)
-                    streaming_latencies.append((time.perf_counter() - t_stream_start) * 1000)
-            streaming_events_count = len(sse_events)
-            if sse_events and sse_events[0].get("type") == "thread.created":
-                chatkit_thread_id = sse_events[0].get("thread", {}).get("id")
-            if streaming_events_count < 4:
-                errors.append(f"streaming returned only {streaming_events_count} events; expected >= 4")
-except Exception as error:
-    errors.append(f"streaming error: {error}")
-t_total_stream = time.perf_counter() - t_stream_start
+# Join concurrent streaming thread
+stream_thread.join(timeout=30.0)
+if stream_thread.is_alive():
+    errors.append("streaming probe timed out after 30 seconds")
+if stream_results["error"]:
+    errors.append(stream_results["error"])
 
 create_latencies.sort()
 search_latencies.sort()
+delays = sorted(stream_results["inter_event_delays_ms"])
 
 def p(arr, percentile):
     if not arr:
@@ -463,12 +502,31 @@ def p(arr, percentile):
     idx = int(len(arr) * percentile)
     return round(arr[min(idx, len(arr) - 1)], 2)
 
-# Verify DB state directly
+# Verify DB state directly for both documents and chat persistence
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 cur.execute("SELECT COUNT(*) FROM documents WHERE title LIKE ?", (f"{title_prefix}%",))
 doc_count_db = cur.fetchone()[0]
+
+chat_thread_row = None
+chat_item_count = 0
+if stream_results["thread_id"]:
+    cur.execute(
+        "SELECT thread_id, created_by, data_json FROM chat_threads WHERE thread_id = ?",
+        (stream_results["thread_id"],),
+    )
+    chat_thread_row = cur.fetchone()
+    cur.execute(
+        "SELECT COUNT(*) FROM chat_thread_items WHERE thread_id = ?",
+        (stream_results["thread_id"],),
+    )
+    chat_item_count = cur.fetchone()[0]
 conn.close()
+
+if not chat_thread_row:
+    errors.append(f"chat thread {stream_results['thread_id']} was not persisted in SQLite chat_threads table")
+if chat_item_count < 1:
+    errors.append(f"chat items for thread {stream_results['thread_id']} were not persisted in SQLite chat_thread_items table")
 
 results = {
     "benchmark_count": count,
@@ -499,13 +557,21 @@ results = {
         "persisted_documents_in_sqlite": doc_count_db,
         "match_expected": doc_count_db == count,
         "unique_document_ids": len(set(created_doc_ids)),
+        "chat_thread_persisted_in_sqlite": chat_thread_row is not None,
+        "chat_items_persisted_in_sqlite": chat_item_count,
     },
-    "live_streaming": {
-        "events_count": streaming_events_count,
-        "thread_id": chatkit_thread_id,
-        "total_time_seconds": round(t_total_stream, 3),
-        "first_event_latency_ms": round(streaming_latencies[0], 2) if streaming_latencies else 0.0,
-        "stream_duration_ms": round(streaming_latencies[-1], 2) if streaming_latencies else 0.0,
+    "live_streaming_under_contention": {
+        "events_count": stream_results["events_count"],
+        "thread_id": stream_results["thread_id"],
+        "event_types": stream_results["event_types"],
+        "completed_cleanly": stream_results["completed_cleanly"],
+        "total_time_seconds": round(stream_results["total_time_seconds"], 3),
+        "first_event_latency_ms": round(stream_results["first_event_ms"], 2),
+        "delays_between_events_ms": {
+            "p50": p(delays, 0.50),
+            "p90": p(delays, 0.90),
+            "max": round(max(delays), 2) if delays else 0.0,
+        },
     }
 }
 

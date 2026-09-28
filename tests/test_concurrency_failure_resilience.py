@@ -2023,3 +2023,169 @@ def test_failure_audit_persistence_failure_is_not_swallowed(
     assert body["error"]["code"] == "revision_conflict"
     assert body["error"]["details"].get("audit_persisted") is False
     assert "Simulated audit queue failure" in str(body["error"]["details"].get("audit_error"))
+
+
+def test_two_expanding_producers_break_circular_wait_under_strict_capacity(
+    client: TestClient,
+) -> None:
+    """Reviewer Finding 1: Two expanding reservations must not deadlock each other until timeout.
+    Under a strict 16 KB budget with two 8 KB reservations expanding to 12 KB each,
+    producers yield provisional byte credits in FIFO order to acquire complete event capacity,
+    finishing without timeout while peak total memory stays strictly <= 16,384 bytes.
+    """
+    activity_svc = client.app.state.services.activity
+    orig_total = activity_svc.max_total_bytes
+    orig_queue = activity_svc.max_queue_bytes
+    activity_svc.max_total_bytes = 16_384
+    activity_svc.max_queue_bytes = 16_384
+
+    try:
+        res1 = activity_svc.admit(estimated_bytes=8192)
+        res2 = activity_svc.admit(estimated_bytes=8192)
+
+        principal = Principal.trusted_human(
+            actor_id="human:jay", display_name="Jay", operation_id="op_circ_wait"
+        )
+        large_diff = "X" * 11_500
+        results = {}
+        errors = []
+
+        def worker(res, name, doc_id):
+            try:
+                res.record(
+                    principal=principal,
+                    action="update",
+                    resource_type="document",
+                    outcome="accepted",
+                    resource_id=doc_id,
+                    details={"diff": large_diff},
+                )
+                results[name] = "success"
+            except Exception as e:
+                results[name] = f"error: {e}"
+                errors.append(e)
+
+        t1 = threading.Thread(target=worker, args=(res1, "p1", "doc_circ_1"))
+        t2 = threading.Thread(target=worker, args=(res2, "p2", "doc_circ_2"))
+
+        t0 = time.time()
+        t1.start()
+        t2.start()
+
+        t1.join(timeout=10.0)
+        t2.join(timeout=10.0)
+        elapsed = time.time() - t0
+
+        assert not t1.is_alive(), "Producer 1 deadlocked during expansion wait"
+        assert not t2.is_alive(), "Producer 2 deadlocked during expansion wait"
+        assert elapsed < 10.0, f"Producers took {elapsed}s; expected completion well under timeout"
+        assert not errors, f"Expansion workers encountered errors: {errors}"
+        assert results.get("p1") == "success"
+        assert results.get("p2") == "success"
+
+        # Strictly enforce peak memory bound <= 16,384 bytes
+        assert activity_svc.peak_total_bytes <= 16_384, (
+            f"Peak total bytes {activity_svc.peak_total_bytes} exceeded configured budget 16,384!"
+        )
+    finally:
+        activity_svc.max_total_bytes = orig_total
+        activity_svc.max_queue_bytes = orig_queue
+
+
+def test_audit_diff_preserves_line_endings_and_diff_header_lines(client: TestClient) -> None:
+    """Reviewer Finding 2: Audit diffs must distinguish line-ending additions/removals,
+    missing-final-newline, and CRLF vs LF changes, while retaining correct counts for content
+    resembling diff headers.
+    """
+    db = client.app.state.services.activity.database
+
+    # Case 1: Missing final newline addition: "line" -> "line\n"
+    c1 = client.post(
+        "/api/v1/documents",
+        json={"title": "Newline Doc", "content": "line", "path": "newline.md"},
+        headers=headers("nl-create-k1"),
+    )
+    assert c1.status_code == 201
+    doc1_id = c1.json()["document_id"]
+    rev1_id = c1.json()["current_revision_id"]
+
+    u1 = client.patch(
+        f"/api/v1/documents/{doc1_id}",
+        json={"content": "line\n", "expected_revision_id": rev1_id},
+        headers=headers("nl-update-k1"),
+    )
+    assert u1.status_code == 200
+
+    with db.connection() as conn:
+        ev = conn.execute(
+            "SELECT detail_json FROM operation_events WHERE resource_id = ? AND action = 'update'",
+            (doc1_id,),
+        ).fetchone()
+        assert ev is not None
+        details = json.loads(ev["detail_json"])
+        diff_text = details.get("diff", "")
+        assert r"\ No newline at end of file" in diff_text
+        assert details.get("lines_added") == 1
+        assert details.get("lines_removed") == 1
+        assert details.get("final_newline") is True
+        assert details.get("line_ending") == "lf"
+
+    # Case 2: Content lines starting with ++ and --
+    c2 = client.post(
+        "/api/v1/documents",
+        json={"title": "Symbols Doc", "content": "++var\n--flag\n", "path": "symbols.md"},
+        headers=headers("sym-create-k1"),
+    )
+    assert c2.status_code == 201
+    doc2_id = c2.json()["document_id"]
+    rev2_id = c2.json()["current_revision_id"]
+
+    u2 = client.patch(
+        f"/api/v1/documents/{doc2_id}",
+        json={"content": "+++var\n---flag\n", "expected_revision_id": rev2_id},
+        headers=headers("sym-update-k1"),
+    )
+    assert u2.status_code == 200
+
+    with db.connection() as conn:
+        ev2 = conn.execute(
+            "SELECT detail_json FROM operation_events WHERE resource_id = ? AND action = 'update'",
+            (doc2_id,),
+        ).fetchone()
+        assert ev2 is not None
+        details2 = json.loads(ev2["detail_json"])
+        diff2 = details2.get("diff", "")
+        # Both additions and removals must be present and counted
+        assert "++++var" in diff2
+        assert "+---flag" in diff2
+        assert details2.get("lines_added") == 2
+        assert details2.get("lines_removed") == 2
+
+    # Case 3: CRLF to LF change
+    c3 = client.post(
+        "/api/v1/documents",
+        json={"title": "CRLF Doc", "content": "header\r\nbody\r\n", "path": "crlf.md"},
+        headers=headers("crlf-create-k1"),
+    )
+    assert c3.status_code == 201
+    doc3_id = c3.json()["document_id"]
+    rev3_id = c3.json()["current_revision_id"]
+
+    u3 = client.patch(
+        f"/api/v1/documents/{doc3_id}",
+        json={"content": "header\nbody\n", "expected_revision_id": rev3_id},
+        headers=headers("crlf-update-k1"),
+    )
+    assert u3.status_code == 200
+
+    with db.connection() as conn:
+        ev3 = conn.execute(
+            "SELECT detail_json FROM operation_events WHERE resource_id = ? AND action = 'update'",
+            (doc3_id,),
+        ).fetchone()
+        assert ev3 is not None
+        details3 = json.loads(ev3["detail_json"])
+        assert details3.get("line_ending") == "lf"
+        assert details3.get("final_newline") is True
+        assert details3.get("lines_added") == 2
+        assert details3.get("lines_removed") == 2

@@ -56,6 +56,106 @@ from sangam.workspace import canonicalize_document_path
 T = TypeVar("T")
 
 
+def detect_line_ending(text: str) -> str:
+    if "\r\n" in text:
+        return "crlf"
+    if "\n" in text:
+        return "lf"
+    if "\r" in text:
+        return "cr"
+    return "none"
+
+
+def compute_document_diff(
+    old_content: str,
+    new_content: str,
+    fromfile: str = "before",
+    tofile: str = "current",
+) -> tuple[str, int, int, dict[str, object]]:
+    if old_content == new_content:
+        return (
+            "",
+            0,
+            0,
+            {
+                "line_ending": detect_line_ending(new_content),
+                "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+            },
+        )
+
+    a_lines = old_content.splitlines(keepends=True)
+    b_lines = new_content.splitlines(keepends=True)
+
+    raw_diff = list(
+        difflib.unified_diff(
+            a_lines,
+            b_lines,
+            fromfile=fromfile,
+            tofile=tofile,
+            lineterm="",
+        )
+    )
+    if not raw_diff:
+        return (
+            "",
+            0,
+            0,
+            {
+                "line_ending": detect_line_ending(new_content),
+                "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+            },
+        )
+
+    formatted_lines: list[str] = []
+    lines_added = 0
+    lines_removed = 0
+    in_hunks = False
+
+    for idx, line in enumerate(raw_diff):
+        if idx < 2 and (line.startswith("---") or line.startswith("+++")):
+            formatted_lines.append(line + "\n")
+            continue
+
+        if line.startswith("@@") and "@@" in line[2:]:
+            in_hunks = True
+            formatted_lines.append(line + "\n")
+            continue
+
+        if not in_hunks:
+            formatted_lines.append(line + "\n")
+            continue
+
+        has_newline = line.endswith("\n") or line.endswith("\r")
+        clean_line = (
+            line[:-1]
+            if line.endswith("\n")
+            else (line[:-2] + "\r" if line.endswith("\r\n") else line)
+        )
+
+        if line.startswith("+"):
+            lines_added += 1
+            formatted_lines.append(clean_line + "\n")
+            if not has_newline:
+                formatted_lines.append("\\ No newline at end of file\n")
+        elif line.startswith("-"):
+            lines_removed += 1
+            formatted_lines.append(clean_line + "\n")
+            if not has_newline:
+                formatted_lines.append("\\ No newline at end of file\n")
+        elif line.startswith(" "):
+            formatted_lines.append(clean_line + "\n")
+            if not has_newline:
+                formatted_lines.append("\\ No newline at end of file\n")
+        else:
+            formatted_lines.append(line + "\n")
+
+    metadata: dict[str, object] = {
+        "line_ending": detect_line_ending(new_content),
+        "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+    }
+    return "".join(formatted_lines), lines_added, lines_removed, metadata
+
+
 class WorkspaceAccessService:
     """Public workspace boundary that authenticates policy before domain services run."""
 
@@ -419,20 +519,19 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        lines = list(
-            difflib.unified_diff(
-                [],
-                content.splitlines(),
-                lineterm="",
-            )
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            "",
+            content,
+            fromfile="empty",
+            tofile="current",
         )
-        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "title": title,
             "content_type": content_type,
             "diff": diff_text,
-            "lines_added": len(content.splitlines()),
-            "lines_removed": 0,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            **meta,
         }
         return self._run(principal, "create", "document", operation, path=path, details=details)
 
@@ -650,25 +749,18 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        lines = list(
-            difflib.unified_diff(
-                current.content.splitlines(),
-                content.splitlines(),
-                fromfile=current.current_revision_id or "before",
-                tofile="current",
-                lineterm="",
-            )
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            current.content,
+            content,
+            fromfile=current.current_revision_id or "before",
+            tofile="current",
         )
-        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "diff": diff_text,
-            "lines_added": sum(
-                line.startswith("+") and not line.startswith("+++") for line in lines
-            ),
-            "lines_removed": sum(
-                line.startswith("-") and not line.startswith("---") for line in lines
-            ),
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            **meta,
         }
         if title is not None:
             details["title"] = title
@@ -730,19 +822,18 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        lines = list(
-            difflib.unified_diff(
-                [],
-                current.content.splitlines(),
-                lineterm="",
-            )
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            "",
+            current.content,
+            fromfile="empty",
+            tofile="current",
         )
-        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "diff": diff_text,
-            "lines_added": len(current.content.splitlines()),
-            "lines_removed": 0,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            **meta,
         }
         if title is not None:
             details["title"] = title
@@ -940,26 +1031,19 @@ class WorkspaceAccessService:
             ).fetchone()
             if row:
                 target_content = row["content"]
-        lines = list(
-            difflib.unified_diff(
-                current.content.splitlines(),
-                target_content.splitlines(),
-                fromfile=current.current_revision_id or "before",
-                tofile=revision_id,
-                lineterm="",
-            )
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            current.content,
+            target_content,
+            fromfile=current.current_revision_id or "before",
+            tofile=revision_id,
         )
-        diff_text = "\n".join(lines)
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "current_revision_id": revision_id,
             "diff": diff_text,
-            "lines_added": sum(
-                line.startswith("+") and not line.startswith("+++") for line in lines
-            ),
-            "lines_removed": sum(
-                line.startswith("-") and not line.startswith("---") for line in lines
-            ),
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            **meta,
         }
         if summary:
             details["summary"] = summary
