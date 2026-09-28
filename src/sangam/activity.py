@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import sqlite3
+import threading
+import time
 import uuid
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sangam.db import Database, utc_now
-from sangam.errors import NotFoundError, ValidationError
+from sangam.errors import NotFoundError, ServiceUnavailableError, ValidationError
 from sangam.schemas import (
     ActivityActorSummary,
     ActivityBucket,
@@ -24,11 +30,134 @@ EXPIRY_WARNING_DAYS = 7
 RECENT_DENIED_DAYS = 1
 
 
-class ActivityService:
-    """Stores safe, reviewable request outcomes without request bodies or credentials."""
+ALLOWED_AUDIT_DETAIL_KEYS = {
+    "current_revision_id",
+    "expected_revision_id",
+    "revision_id",
+    "current_metadata_version",
+    "expected_metadata_version",
+    "capability",
+    "summary",
+    "title",
+    "source_path",
+    "destination_path",
+    "expected_source_path",
+    "content_type",
+    "category",
+    "tag_ids",
+    "tags",
+    "patch",
+    "patch_mode",
+    "mode",
+    "lines_added",
+    "lines_removed",
+    "diff",
+    "stage",
+    "error",
+    "annotation_type",
+    "page_number",
+    "color",
+    "note",
+    "geometry",
+    "supersedes_document_id",
+    "slug",
+    "access_policy",
+    "additions",
+    "deletions",
+    "line_ending",
+    "final_newline",
+    "action_type",
+    "target_file",
+    "operation_key",
+    "reason",
+    "proposal_id",
+    "trust_level",
+    "expected_trust_version",
+}
 
-    def __init__(self, database: Database) -> None:
-        self.database = database
+
+MAX_AUDIT_DETAIL_DEPTH = 32
+
+
+def _estimate_string_bound(s: str) -> int:
+    """Computes an allocation-free, escaping-aware upper bound on json.dumps() size."""
+    if s.isascii():
+        if s.isprintable():
+            return max(16, len(s) + s.count('"') + s.count("\\") + 2)
+        return max(16, len(s) * 6 + 2)
+    return max(16, len(s) * 12 + 2)
+
+
+def _estimate_value_bound(val: object, depth: int = 0) -> int:
+    """Computes a conservative, allocation-free, recursive upper bound on JSON size."""
+    if depth > MAX_AUDIT_DETAIL_DEPTH:
+        raise ValueError(f"Audit details exceed maximum nesting depth of {MAX_AUDIT_DETAIL_DEPTH}")
+    if val is None:
+        return 4
+    if isinstance(val, bool):
+        return 5
+    if isinstance(val, (int, float)):
+        return max(32, len(str(val)) + 2)
+    if isinstance(val, str):
+        return _estimate_string_bound(val)
+    if isinstance(val, (bytes, bytearray)):
+        return max(16, len(val) * 12 + 2)
+    if isinstance(val, (list, tuple, set)):
+        total = 2
+        for item in val:
+            total += _estimate_value_bound(item, depth + 1) + 2
+        return total
+    if isinstance(val, dict):
+        total = 2
+        for k, v in val.items():
+            total += _estimate_string_bound(str(k)) + 2 + _estimate_value_bound(v, depth + 1) + 2
+        return total
+    return 64
+
+
+@dataclass
+class _AuditEventItem:
+    row: tuple[
+        str,
+        str,
+        str,
+        str | None,
+        str,
+        str,
+        str | None,
+        str | None,
+        str,
+        str | None,
+        str | None,
+        str,
+        str,
+    ]
+    size_bytes: int
+    future: concurrent.futures.Future[None]
+    is_oversized: bool = False
+    is_expansion_owner: bool = False
+    reservation_id: int | None = None
+
+
+class AuditReservation:
+    """Pre-admission ticket guaranteeing capacity in the audit commit ledger."""
+
+    def __init__(self, service: ActivityService, estimated_bytes: int) -> None:
+        self._service = service
+        self._reserved_bytes = estimated_bytes
+        self._transferred = False
+        self._released = False
+        self._used = False
+        self._is_oversized_owner = False
+        self._is_expansion_owner = False
+
+    @property
+    def _estimated_bytes(self) -> int:
+        return self._reserved_bytes
+
+    @_estimated_bytes.setter
+    def _estimated_bytes(self, value: int) -> None:
+        self._reserved_bytes = value
 
     def record(
         self,
@@ -43,49 +172,295 @@ class ActivityService:
         revision_id: str | None = None,
         details: dict[str, object] | None = None,
     ) -> None:
-        safe_details = {
-            key: sanitize_sensitive_data(value)
-            for key, value in (details or {}).items()
-            if key
-            in {
-                "current_revision_id",
-                "expected_revision_id",
-                "revision_id",
-                "current_metadata_version",
-                "expected_metadata_version",
-                "capability",
-                "summary",
-                "title",
-                "source_path",
-                "destination_path",
-                "expected_source_path",
-                "content_type",
-                "category",
-                "tag_ids",
-                "tags",
-                "patch",
-                "patch_mode",
-                "mode",
-                "lines_added",
-                "lines_removed",
-                "diff",
-                "additions",
-                "deletions",
-                "slug",
-                "access_policy",
-                "page_number",
-                "annotation_type",
-                "note",
-                "color",
-                "geometry",
-                "supersedes_document_id",
-                "action_type",
-                "target_file",
-                "operation_key",
-                "reason",
-                "proposal_id",
-            }
-        }
+        if self._used or self._released:
+            raise RuntimeError(
+                "AuditReservation is single-use and has already been recorded or released"
+            )
+        self._used = True
+        try:
+            self._service._record_with_reservation(
+                reservation=self,
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                outcome=outcome,
+                resource_id=resource_id,
+                path=path,
+                error_code=error_code,
+                revision_id=revision_id,
+                details=details,
+            )
+        finally:
+            self.release()
+
+    def record_with_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        if self._used or self._released:
+            raise RuntimeError(
+                "AuditReservation is single-use and has already been recorded or released"
+            )
+        self._used = True
+        try:
+            self._service._record_with_connection_and_reservation(
+                reservation=self,
+                connection=connection,
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                outcome=outcome,
+                resource_id=resource_id,
+                path=path,
+                error_code=error_code,
+                revision_id=revision_id,
+                details=details,
+            )
+        finally:
+            self.release()
+
+    def release(self) -> None:
+        if not self._released:
+            self._released = True
+            if not self._transferred:
+                self._service._release_reservation(
+                    self._reserved_bytes,
+                    reservation_id=id(self),
+                    is_oversized_owner=self._is_oversized_owner,
+                    is_expansion_owner=self._is_expansion_owner,
+                )
+
+    def __enter__(self) -> AuditReservation:
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.release()
+
+
+class ActivityService:
+    """Stores safe, reviewable request outcomes without request bodies or credentials."""
+
+    def __init__(
+        self,
+        database: Database,
+        *,
+        max_queue_items: int = 5000,
+        max_queue_bytes: int = 16 * 1024 * 1024,
+        max_total_bytes: int | None = None,
+        max_batch_size: int = 250,
+    ) -> None:
+        self.database = database
+        self.max_queue_items = max_queue_items
+        self.max_queue_bytes = max_queue_bytes
+        self.max_total_bytes = (
+            max_total_bytes if max_total_bytes is not None else max_queue_bytes * 2
+        )
+        self.max_batch_size = max_batch_size
+        self._queue: list[_AuditEventItem] = []
+        self._queue_bytes = 0
+        self._admitted_items = 0
+        self._reserved_producer_bytes = 0
+        self._committing_items = 0
+        self._committing_bytes = 0
+        self._oversized_owner_id: int | None = None
+        self._expansion_owner_id: int | None = None
+        self._expansion_waiters: list[int] = []
+        self._peak_reserved_bytes = 0
+        self._peak_queue_bytes = 0
+        self._peak_total_bytes = 0
+        self._active_producers = 0
+        self._queue_lock = threading.Lock()
+        self._queue_condition = threading.Condition(self._queue_lock)
+        self._producers_done = threading.Condition(self._queue_lock)
+        self._shutting_down = False
+        self._uncertain_events: dict[str, float] = {}
+        self._worker_healthy = True
+        self._worker_error: Exception | None = None
+        self._worker_thread = threading.Thread(
+            target=self._commit_worker_loop,
+            name="sangam-audit-commit-worker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+
+    @property
+    def _admitted_bytes(self) -> int:
+        return self._reserved_producer_bytes
+
+    @_admitted_bytes.setter
+    def _admitted_bytes(self, val: int) -> None:
+        self._reserved_producer_bytes = val
+
+    @property
+    def peak_reserved_bytes(self) -> int:
+        with self._queue_lock:
+            return self._peak_reserved_bytes
+
+    @property
+    def peak_queue_bytes(self) -> int:
+        with self._queue_lock:
+            return self._peak_queue_bytes
+
+    @property
+    def peak_total_bytes(self) -> int:
+        with self._queue_lock:
+            return self._peak_total_bytes
+
+    def total_in_flight_bytes(self) -> int:
+        """Returns total in-flight audit payload bytes across all stages."""
+        with self._queue_lock:
+            return self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
+
+    def total_in_flight_items(self) -> int:
+        """Returns total in-flight audit items across all stages."""
+        with self._queue_lock:
+            return self._admitted_items + len(self._queue) + self._committing_items
+
+    def _probe_write_lock_availability(self) -> bool:
+        """Probes SQLite write-lock availability outside _queue_lock using BEGIN IMMEDIATE.
+
+        A successful probe with BEGIN IMMEDIATE and SELECT 1 establishes write-lock
+        availability, not successful audit-row persistence or schema integrity.
+        """
+        try:
+            with self.database.transaction() as probe_conn:
+                probe_conn.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+
+    def reconcile_event(self, event_id: str) -> str:
+        """Reconciles the durable outcome of an uncertain audit event."""
+        with self.database.connection() as conn:
+            row = conn.execute(
+                "SELECT outcome FROM operation_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if row is not None:
+                with self._queue_lock:
+                    self._uncertain_events.pop(event_id, None)
+                return "committed"
+        with self._queue_lock:
+            if event_id in self._uncertain_events:
+                return "uncertain"
+        return "not_found"
+
+    def is_healthy(self) -> bool:
+        if not self._worker_healthy:
+            can_probe = False
+            with self._queue_lock:
+                if (
+                    self._worker_thread is not None
+                    and self._worker_thread.is_alive()
+                    and self._worker_error is not None
+                    and self._is_recoverable_error(self._worker_error)
+                ):
+                    can_probe = True
+            if can_probe and self._probe_write_lock_availability():
+                with self._queue_lock:
+                    if self._worker_error is not None and self._is_recoverable_error(
+                        self._worker_error
+                    ):
+                        self._worker_healthy = True
+                        self._worker_error = None
+                        self._queue_condition.notify_all()
+        return self._worker_healthy and (
+            self._worker_thread is not None and self._worker_thread.is_alive()
+        )
+
+    def admit(self, estimated_bytes: int = 1024, timeout: float = 10.0) -> AuditReservation:
+        start_time = time.monotonic()
+        while True:
+            if not self._worker_healthy:
+                can_probe = False
+                err = None
+                with self._queue_lock:
+                    if self._shutting_down:
+                        raise ServiceUnavailableError("Activity audit logging is shutting down")
+                    err = self._worker_error
+                    if (
+                        self._worker_thread is not None
+                        and self._worker_thread.is_alive()
+                        and err is not None
+                        and self._is_recoverable_error(err)
+                    ):
+                        can_probe = True
+                if can_probe:
+                    if self._probe_write_lock_availability():
+                        with self._queue_lock:
+                            if self._worker_error is not None and self._is_recoverable_error(
+                                self._worker_error
+                            ):
+                                self._worker_healthy = True
+                                self._worker_error = None
+                                self._queue_condition.notify_all()
+                    else:
+                        raise ServiceUnavailableError(f"Audit persistence is unavailable: {err}")
+                else:
+                    raise ServiceUnavailableError(f"Audit persistence is unavailable: {err}")
+
+            with self._queue_lock:
+                if self._shutting_down:
+                    raise ServiceUnavailableError("Activity audit logging is shutting down")
+                if not self._worker_healthy:
+                    continue
+
+                is_oversized = estimated_bytes > self.max_total_bytes
+                total_in_flight_items = (
+                    self._admitted_items + len(self._queue) + self._committing_items
+                )
+                total_in_flight = (
+                    self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
+                )
+                if is_oversized:
+                    has_capacity = (
+                        total_in_flight_items < self.max_queue_items
+                        and self._oversized_owner_id is None
+                        and total_in_flight == 0
+                    )
+                else:
+                    has_capacity = (
+                        total_in_flight_items < self.max_queue_items
+                        and self._oversized_owner_id is None
+                        and (total_in_flight + estimated_bytes) <= self.max_total_bytes
+                    )
+
+                if has_capacity:
+                    reservation = AuditReservation(self, estimated_bytes=estimated_bytes)
+                    self._admitted_items += 1
+                    self._reserved_producer_bytes += estimated_bytes
+                    self._active_producers += 1
+                    if is_oversized:
+                        self._oversized_owner_id = id(reservation)
+                        reservation._is_oversized_owner = True
+                    self._peak_reserved_bytes = max(
+                        self._peak_reserved_bytes, self._reserved_producer_bytes
+                    )
+                    self._peak_total_bytes = max(
+                        self._peak_total_bytes, total_in_flight + estimated_bytes
+                    )
+                    return reservation
+
+                elapsed = time.monotonic() - start_time
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    raise ServiceUnavailableError(
+                        "Audit queue capacity exceeded: service overloaded"
+                    )
+
+                self._queue_condition.wait(min(remaining, 0.1))
+
+    def _persist_row_direct(self, row: tuple[object, ...]) -> None:
         with self.database.transaction() as connection:
             connection.execute(
                 """
@@ -95,21 +470,619 @@ class ActivityService:
                     detail_json, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    str(uuid.uuid4()),
-                    principal.operation_id,
-                    principal.actor_id,
-                    principal.token_id,
-                    action,
-                    resource_type,
-                    resource_id,
-                    path,
-                    outcome,
-                    error_code,
-                    revision_id,
-                    json.dumps(safe_details, sort_keys=True),
-                    utc_now(),
-                ),
+                row,
+            )
+
+    def _release_reservation(
+        self,
+        reserved_bytes: int,
+        *,
+        reservation_id: int | None = None,
+        is_oversized_owner: bool = False,
+        is_expansion_owner: bool = False,
+    ) -> None:
+        with self._queue_lock:
+            self._admitted_items = max(0, self._admitted_items - 1)
+            self._reserved_producer_bytes = max(0, self._reserved_producer_bytes - reserved_bytes)
+            self._active_producers = max(0, self._active_producers - 1)
+            if reservation_id is not None and reservation_id in self._expansion_waiters:
+                self._expansion_waiters.remove(reservation_id)
+            if is_oversized_owner and self._oversized_owner_id == reservation_id:
+                self._oversized_owner_id = None
+            if is_expansion_owner or self._expansion_owner_id == reservation_id:
+                self._expansion_owner_id = None
+            if self._active_producers == 0:
+                self._producers_done.notify_all()
+            self._queue_condition.notify_all()
+
+    def close(self, timeout: float = 35.0) -> None:
+        deadline = time.monotonic() + timeout
+        with self._queue_lock:
+            self._shutting_down = True
+            self._queue_condition.notify_all()
+
+            while self._active_producers > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._producers_done.wait(remaining)
+
+        if self._worker_thread is not None and self._worker_thread.is_alive():
+            with self._queue_lock:
+                self._queue_condition.notify_all()
+            remaining = max(1.0, deadline - time.monotonic())
+            self._worker_thread.join(timeout=remaining)
+            if self._worker_thread.is_alive():
+                msg = (
+                    "ActivityService shutdown timed out while worker was still "
+                    "committing pending audit records"
+                )
+                raise RuntimeError(msg)
+
+    def _commit_worker_loop(self) -> None:
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self.database.connect()
+        except Exception as error:
+            self._worker_healthy = False
+            self._worker_error = error
+            return
+
+        try:
+            while True:
+                batch: list[_AuditEventItem] = []
+                with self._queue_lock:
+                    while not self._queue:
+                        if self._shutting_down and self._active_producers == 0:
+                            return
+                        self._queue_condition.wait(timeout=0.1)
+
+                    drain_count = min(len(self._queue), self.max_batch_size)
+                    batch = self._queue[:drain_count]
+                    del self._queue[:drain_count]
+                    batch_bytes = sum(item.size_bytes for item in batch)
+                    self._queue_bytes = max(0, self._queue_bytes - batch_bytes)
+                    self._committing_items = len(batch)
+                    self._committing_bytes = batch_bytes
+
+                if batch:
+                    self._process_batch(connection, batch)
+        finally:
+            remaining: list[_AuditEventItem] = []
+            with self._queue_lock:
+                remaining = list(self._queue)
+                self._queue.clear()
+
+            if remaining and connection is not None:
+                for i in range(0, len(remaining), self.max_batch_size):
+                    chunk = remaining[i : i + self.max_batch_size]
+                    self._process_batch(connection, chunk)
+
+            if connection is not None:
+                with suppress(Exception):
+                    connection.close()
+
+    @staticmethod
+    def _is_recoverable_error(error: Exception) -> bool:
+        if isinstance(error, sqlite3.OperationalError):
+            msg = str(error).lower()
+            if "busy" in msg or "locked" in msg:
+                return True
+        return False
+
+    @staticmethod
+    def _is_terminal_error(error: Exception) -> bool:
+        if isinstance(error, sqlite3.DatabaseError):
+            msg = str(error).lower()
+            if "malformed" in msg or "corrupt" in msg or "not a database" in msg:
+                return True
+        return isinstance(error, (OSError, MemoryError))
+
+    def _process_batch(self, connection: sqlite3.Connection, batch: list[_AuditEventItem]) -> None:
+        max_retries = 5
+        base_delay = 0.05
+        last_error: Exception | None = None
+
+        busy_ms = int(getattr(self.database, "timeout", 10.0) * 1000)
+        with suppress(Exception):
+            connection.execute(f"PRAGMA busy_timeout = {busy_ms}")
+
+        for attempt in range(max_retries):
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.executemany(
+                    """
+                    INSERT INTO operation_events(
+                        event_id, operation_id, actor_id, token_id, action, resource_type,
+                        resource_id, path, outcome, error_code, revision_id,
+                        detail_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [item.row for item in batch],
+                )
+                connection.commit()
+                self._worker_healthy = True
+                self._worker_error = None
+                with self._queue_lock:
+                    for item in batch:
+                        self._uncertain_events.pop(item.row[0], None)
+                for item in batch:
+                    if not item.future.done():
+                        item.future.set_result(None)
+                last_error = None
+                break
+            except Exception as error:
+                with suppress(Exception):
+                    connection.rollback()
+                last_error = error
+
+                if self._is_recoverable_error(error) and attempt < max_retries - 1:
+                    time.sleep(base_delay * (2**attempt))
+                    continue
+                break
+
+        if last_error is not None:
+            self._worker_healthy = False
+            self._worker_error = last_error
+
+            for item in batch:
+                if not item.future.done():
+                    item.future.set_exception(last_error)
+
+        batch_bytes = sum(item.size_bytes for item in batch)
+        with self._queue_lock:
+            self._committing_items = max(0, self._committing_items - len(batch))
+            self._committing_bytes = max(0, self._committing_bytes - batch_bytes)
+            for item in batch:
+                if (
+                    getattr(item, "is_oversized", False)
+                    and getattr(item, "reservation_id", None) == self._oversized_owner_id
+                ):
+                    self._oversized_owner_id = None
+                if (
+                    getattr(item, "is_expansion_owner", False)
+                    and getattr(item, "reservation_id", None) == self._expansion_owner_id
+                ):
+                    self._expansion_owner_id = None
+            self._queue_condition.notify_all()
+
+    def _prepare_event_row(
+        self,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> tuple[tuple[object, ...], int]:
+        safe_details = {
+            key: sanitize_sensitive_data(value)
+            for key, value in (details or {}).items()
+            if key in ALLOWED_AUDIT_DETAIL_KEYS
+        }
+
+        detail_json = json.dumps(safe_details, sort_keys=True)
+        size_bytes = len(detail_json.encode("utf-8")) + 256
+        row = (
+            str(uuid.uuid4()),
+            principal.operation_id,
+            principal.actor_id,
+            principal.token_id,
+            action,
+            resource_type,
+            resource_id,
+            path,
+            outcome,
+            error_code,
+            revision_id,
+            detail_json,
+            utc_now(),
+        )
+        return row, size_bytes
+
+    def record_with_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        row, _ = self._prepare_event_row(
+            principal=principal,
+            action=action,
+            resource_type=resource_type,
+            outcome=outcome,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            revision_id=revision_id,
+            details=details,
+        )
+        connection.execute(
+            """
+            INSERT INTO operation_events(
+                event_id, operation_id, actor_id, token_id, action, resource_type,
+                resource_id, path, outcome, error_code, revision_id,
+                detail_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+
+    def estimate_payload_bytes(self, details: dict[str, object] | None) -> int:
+        """Computes a conservative, allocation-free upper bound on json.dumps() size."""
+        if not details:
+            return 512
+        total = 512
+        for k, v in details.items():
+            if k not in ALLOWED_AUDIT_DETAIL_KEYS:
+                continue
+            total += _estimate_string_bound(str(k)) + 1 + _estimate_value_bound(v, depth=0) + 1
+        return total
+
+    _estimate_payload_bytes = estimate_payload_bytes
+
+    def _record_with_reservation(
+        self,
+        *,
+        reservation: AuditReservation,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        needed_bytes = max(reservation._reserved_bytes, self.estimate_payload_bytes(details))
+        expansion = max(0, needed_bytes - reservation._reserved_bytes)
+        deadline = time.monotonic() + 60.0
+        waiter_id = id(reservation)
+        is_waiter = False
+
+        try:
+            while True:
+                if not self._worker_healthy:
+                    can_probe = False
+                    err = None
+                    with self._queue_lock:
+                        err = self._worker_error
+                        can_direct_persist = (
+                            not self._shutting_down
+                            and (self._reserved_producer_bytes + expansion) <= self.max_total_bytes
+                        )
+                        if not can_direct_persist and self._is_terminal_error(err):
+                            raise ServiceUnavailableError(
+                                f"Audit persistence is unavailable: {err}"
+                            )
+                        if (
+                            self._worker_thread is not None
+                            and self._worker_thread.is_alive()
+                            and err is not None
+                            and self._is_recoverable_error(err)
+                        ):
+                            can_probe = True
+                    if can_probe and self._probe_write_lock_availability():
+                        with self._queue_lock:
+                            if self._worker_error is not None and self._is_recoverable_error(
+                                self._worker_error
+                            ):
+                                self._worker_healthy = True
+                                self._worker_error = None
+                                self._queue_condition.notify_all()
+
+                with self._queue_lock:
+                    if not self._worker_healthy:
+                        can_direct_persist = (
+                            not self._shutting_down
+                            and (self._reserved_producer_bytes + expansion) <= self.max_total_bytes
+                        )
+                        if not can_direct_persist:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                raise ServiceUnavailableError(
+                                    f"Audit persistence is unavailable: {self._worker_error}"
+                                )
+                            self._queue_condition.wait(min(remaining, 0.1))
+                            continue
+
+                    is_oversized = (
+                        needed_bytes > self.max_queue_bytes or needed_bytes > self.max_total_bytes
+                    )
+
+                    # Case 1: No expansion needed and no prior waiters
+                    if not is_waiter and expansion == 0 and len(self._expansion_waiters) == 0:
+                        break
+
+                    # Case 2: Can we expand immediately without waiting?
+                    if not is_waiter and len(self._expansion_waiters) == 0:
+                        total_in_flight = (
+                            self._reserved_producer_bytes
+                            + self._queue_bytes
+                            + self._committing_bytes
+                        )
+                        if is_oversized:
+                            can_expand = (
+                                (
+                                    self._oversized_owner_id is None
+                                    or self._oversized_owner_id == waiter_id
+                                )
+                                and len(self._queue) == 0
+                                and self._committing_items == 0
+                            )
+                        else:
+                            queue_ok = (
+                                self._queue_bytes + self._committing_bytes + needed_bytes
+                                <= self.max_queue_bytes
+                                or (
+                                    len(self._queue) == 0
+                                    and self._committing_items == 0
+                                    and self._oversized_owner_id is None
+                                )
+                            )
+                            total_ok = (
+                                self._oversized_owner_id is None
+                                and (total_in_flight + expansion) <= self.max_total_bytes
+                            )
+                            can_expand = queue_ok and total_ok
+
+                        if can_expand:
+                            self._reserved_producer_bytes += expansion
+                            reservation._reserved_bytes = needed_bytes
+                            if is_oversized:
+                                self._oversized_owner_id = waiter_id
+                                reservation._is_oversized_owner = True
+                            self._peak_reserved_bytes = max(
+                                self._peak_reserved_bytes, self._reserved_producer_bytes
+                            )
+                            self._peak_total_bytes = max(
+                                self._peak_total_bytes, total_in_flight + expansion
+                            )
+                            break
+
+                    # Cannot expand immediately.
+                    # Release provisional byte credits to break circular wait,
+                    # and wait fairly in FIFO order.
+                    if not is_waiter:
+                        self._expansion_waiters.append(waiter_id)
+                        is_waiter = True
+                        if reservation._reserved_bytes > 0:
+                            self._reserved_producer_bytes = max(
+                                0, self._reserved_producer_bytes - reservation._reserved_bytes
+                            )
+                            reservation._reserved_bytes = 0
+                            self._queue_condition.notify_all()
+
+                    # Check if this waiter is at the head of the fair queue
+                    if self._expansion_waiters and self._expansion_waiters[0] == waiter_id:
+                        total_in_flight = (
+                            self._reserved_producer_bytes
+                            + self._queue_bytes
+                            + self._committing_bytes
+                        )
+                        if is_oversized:
+                            can_acquire = (
+                                (
+                                    self._oversized_owner_id is None
+                                    or self._oversized_owner_id == waiter_id
+                                )
+                                and len(self._queue) == 0
+                                and self._committing_items == 0
+                            )
+                        else:
+                            queue_ok = (
+                                self._queue_bytes + self._committing_bytes + needed_bytes
+                                <= self.max_queue_bytes
+                                or (
+                                    len(self._queue) == 0
+                                    and self._committing_items == 0
+                                    and self._oversized_owner_id is None
+                                )
+                            )
+                            total_ok = (
+                                self._oversized_owner_id is None
+                                and (total_in_flight + needed_bytes) <= self.max_total_bytes
+                            )
+                            can_acquire = queue_ok and total_ok
+
+                        if can_acquire:
+                            self._expansion_waiters.pop(0)
+                            is_waiter = False
+                            self._reserved_producer_bytes += needed_bytes
+                            reservation._reserved_bytes = needed_bytes
+                            if is_oversized:
+                                self._oversized_owner_id = waiter_id
+                                reservation._is_oversized_owner = True
+                            self._peak_reserved_bytes = max(
+                                self._peak_reserved_bytes, self._reserved_producer_bytes
+                            )
+                            self._peak_total_bytes = max(
+                                self._peak_total_bytes, total_in_flight + needed_bytes
+                            )
+                            break
+
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ServiceUnavailableError(
+                            "Audit queue capacity exceeded: expansion timed out"
+                        )
+                    self._queue_condition.wait(min(remaining, 0.1))
+        finally:
+            if is_waiter:
+                with self._queue_lock:
+                    if waiter_id in self._expansion_waiters:
+                        self._expansion_waiters.remove(waiter_id)
+                        self._queue_condition.notify_all()
+
+        row, actual_size_bytes = self._prepare_event_row(
+            principal=principal,
+            action=action,
+            resource_type=resource_type,
+            outcome=outcome,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            revision_id=revision_id,
+            details=details,
+        )
+
+        with self._queue_lock:
+            if actual_size_bytes > reservation._reserved_bytes:
+                extra = actual_size_bytes - reservation._reserved_bytes
+                self._reserved_producer_bytes += extra
+                reservation._reserved_bytes = actual_size_bytes
+            elif actual_size_bytes < reservation._reserved_bytes:
+                excess = reservation._reserved_bytes - actual_size_bytes
+                self._reserved_producer_bytes = max(0, self._reserved_producer_bytes - excess)
+                reservation._reserved_bytes = actual_size_bytes
+
+            can_queue = (
+                self._worker_healthy
+                and not self._shutting_down
+                and (
+                    self._queue_bytes + self._committing_bytes + actual_size_bytes
+                    <= self.max_queue_bytes
+                    or (
+                        len(self._queue) == 0
+                        and self._committing_items == 0
+                        and (
+                            self._oversized_owner_id is None
+                            or self._oversized_owner_id == id(reservation)
+                        )
+                    )
+                )
+            )
+
+            if can_queue:
+                item = _AuditEventItem(
+                    row=row,
+                    size_bytes=actual_size_bytes,
+                    future=concurrent.futures.Future(),
+                    is_oversized=reservation._is_oversized_owner,
+                    is_expansion_owner=reservation._is_expansion_owner,
+                    reservation_id=id(reservation)
+                    if (reservation._is_oversized_owner or reservation._is_expansion_owner)
+                    else None,
+                )
+                self._reserved_producer_bytes = max(
+                    0, self._reserved_producer_bytes - actual_size_bytes
+                )
+                self._admitted_items = max(0, self._admitted_items - 1)
+                self._queue.append(item)
+                self._queue_bytes += actual_size_bytes
+                self._peak_queue_bytes = max(self._peak_queue_bytes, self._queue_bytes)
+                total_in_flight = (
+                    self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
+                )
+                self._peak_total_bytes = max(self._peak_total_bytes, total_in_flight)
+                self._active_producers = max(0, self._active_producers - 1)
+                reservation._transferred = True
+                if self._active_producers == 0:
+                    self._producers_done.notify_all()
+                self._queue_condition.notify_all()
+
+        if not can_queue:
+            self._persist_row_direct(row)
+            return
+
+        try:
+            item.future.result(timeout=60.0)
+        except concurrent.futures.TimeoutError as err:
+            with self._queue_lock:
+                self._uncertain_events[row[0]] = time.time()
+                if len(self._uncertain_events) > 1000:
+                    oldest = next(iter(self._uncertain_events))
+                    del self._uncertain_events[oldest]
+            raise ServiceUnavailableError(
+                f"Audit event commit timed out; write outcome is uncertain (event_id={row[0]})"
+            ) from err
+
+    def _record_with_connection_and_reservation(
+        self,
+        *,
+        reservation: AuditReservation,
+        connection: sqlite3.Connection,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        needed_bytes = max(reservation._reserved_bytes, self.estimate_payload_bytes(details))
+        expansion = max(0, needed_bytes - reservation._reserved_bytes)
+
+        with self._queue_lock:
+            total_in_flight = (
+                self._reserved_producer_bytes + self._queue_bytes + self._committing_bytes
+            )
+            if (
+                not reservation._is_oversized_owner
+                and (total_in_flight + expansion) > self.max_total_bytes
+            ):
+                raise ServiceUnavailableError(
+                    "Audit total memory limit exceeded during transaction"
+                )
+            self._reserved_producer_bytes += expansion
+            reservation._reserved_bytes = needed_bytes
+            self._peak_reserved_bytes = max(
+                self._peak_reserved_bytes, self._reserved_producer_bytes
+            )
+            self._peak_total_bytes = max(self._peak_total_bytes, total_in_flight + expansion)
+
+        self.record_with_connection(
+            connection=connection,
+            principal=principal,
+            action=action,
+            resource_type=resource_type,
+            outcome=outcome,
+            resource_id=resource_id,
+            path=path,
+            error_code=error_code,
+            revision_id=revision_id,
+            details=details,
+        )
+
+    def record(
+        self,
+        *,
+        principal: Principal,
+        action: str,
+        resource_type: str,
+        outcome: str,
+        resource_id: str | None = None,
+        path: str | None = None,
+        error_code: str | None = None,
+        revision_id: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        with self.admit() as reservation:
+            reservation.record(
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                outcome=outcome,
+                resource_id=resource_id,
+                path=path,
+                error_code=error_code,
+                revision_id=revision_id,
+                details=details,
             )
 
     def acknowledge_problem(

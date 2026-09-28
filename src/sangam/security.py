@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 SENSITIVE_HEADER_NAMES: set[str] = {
     "authorization",
     "sangam-publication",
+    "sangam-preview",
     "cf-access-jwt-assertion",
     "cookie",
     "set-cookie",
@@ -49,6 +50,8 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-xsrf-token",
     "sec-websocket-protocol",
     "proxy-authorization",
+    "proxy-authenticate",
+    "passphrase",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -65,7 +68,10 @@ _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
     "bearer",
     "trusted-identity",
     "sangam-publication",
+    "sangam-preview",
     "cf-access-jwt-assertion",
+    "passphrase",
+    "proxy-authenticate",
 )
 
 _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
@@ -85,6 +91,18 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "jwt",
     "bearer",
     "env",
+    "private_payload",
+    "passphrase",
+    "dsn",
+    "connection_string",
+    "database_url",
+    "priv_key",
+    "tls_key",
+    "client_secret",
+    "auth_token",
+    "refresh_token",
+    "access_token",
+    "api_token",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {

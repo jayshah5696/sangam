@@ -32,6 +32,7 @@ from sangam.errors import (
     MaterializationError,
     NotFoundError,
     SangamError,
+    ServiceUnavailableError,
     ValidationError,
 )
 from sangam.schemas import (
@@ -152,6 +153,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
+        shutdown_error: Exception | None = None
+        if hasattr(services, "chat") and hasattr(services.chat, "store_adapter"):
+            try:
+                await services.chat.store_adapter.close()
+            except Exception as error:
+                shutdown_error = error
+        try:
+            services.activity.close()
+        except Exception as error:
+            if shutdown_error is None:
+                shutdown_error = error
+        if shutdown_error is not None:
+            raise shutdown_error
 
     app = FastAPI(
         title="Sangam API",
@@ -466,7 +480,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status = 409
         elif isinstance(error, (InvalidPathError, ValidationError)):
             status = 422
-        elif isinstance(error, MaterializationError):
+        elif isinstance(error, (MaterializationError, ServiceUnavailableError)):
             status = 503
         elif isinstance(error, IntegrationError):
             status = 502
@@ -556,21 +570,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: CreateAgentToken,
         principal: Principal = admin_dependency,
     ) -> IssuedAgentToken:
-        issued = identity.issue_agent_token(
-            actor_id=body.actor_id,
-            display_name=body.display_name,
-            label=body.label,
-            scopes=body.scopes,
-            expires_at=body.expires_at,
-        )
-        activity.record(
-            principal=principal,
-            action="issue",
-            resource_type="agent_token",
-            resource_id=issued.token_id,
-            outcome="accepted",
-        )
-        return issued
+        with identity.database.transaction() as connection:
+            issued = identity.issue_agent_token(
+                actor_id=body.actor_id,
+                display_name=body.display_name,
+                label=body.label,
+                scopes=body.scopes,
+                expires_at=body.expires_at,
+            )
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="issue",
+                resource_type="agent_token",
+                resource_id=issued.token_id,
+                outcome="accepted",
+            )
+            return issued
 
     @app.patch("/api/v1/agent-tokens/{token_id}", response_model=AgentToken)
     def update_agent_token(
@@ -578,53 +594,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: UpdateAgentToken,
         principal: Principal = admin_dependency,
     ) -> AgentToken:
-        updated = identity.update_token(
-            token_id,
-            expected_version=body.expected_version,
-            label=body.label,
-            scopes=body.scopes,
-            expires_at=body.expires_at,
-            actor_id=principal.actor_id,
-        )
-        activity.record(
-            principal=principal,
-            action="update",
-            resource_type="agent_token",
-            resource_id=token_id,
-            outcome="accepted",
-            details={"current_metadata_version": updated.version},
-        )
-        return updated
+        with identity.database.transaction() as connection:
+            updated = identity.update_token(
+                token_id,
+                expected_version=body.expected_version,
+                label=body.label,
+                scopes=body.scopes,
+                expires_at=body.expires_at,
+                actor_id=principal.actor_id,
+            )
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="update",
+                resource_type="agent_token",
+                resource_id=token_id,
+                outcome="accepted",
+                details={"current_metadata_version": updated.version},
+            )
+            return updated
 
     @app.post("/api/v1/agent-tokens/{token_id}/rotate", response_model=IssuedAgentToken)
     def rotate_agent_token(
         token_id: str,
         principal: Principal = admin_dependency,
     ) -> IssuedAgentToken:
-        issued = identity.rotate_token(token_id)
-        activity.record(
-            principal=principal,
-            action="rotate",
-            resource_type="agent_token",
-            resource_id=issued.token_id,
-            outcome="accepted",
-        )
-        return issued
+        with identity.database.transaction() as connection:
+            issued = identity.rotate_token(token_id)
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="rotate",
+                resource_type="agent_token",
+                resource_id=issued.token_id,
+                outcome="accepted",
+            )
+            return issued
 
     @app.delete("/api/v1/agent-tokens/{token_id}", response_model=AgentToken)
     def revoke_agent_token(
         token_id: str,
         principal: Principal = admin_dependency,
     ) -> AgentToken:
-        revoked = identity.revoke_token(token_id)
-        activity.record(
-            principal=principal,
-            action="revoke",
-            resource_type="agent_token",
-            resource_id=token_id,
-            outcome="accepted",
-        )
-        return revoked
+        with identity.database.transaction() as connection:
+            revoked = identity.revoke_token(token_id)
+            activity.record_with_connection(
+                connection,
+                principal=principal,
+                action="revoke",
+                resource_type="agent_token",
+                resource_id=token_id,
+                outcome="accepted",
+            )
+            return revoked
 
     @app.get("/api/v1/activity/export.jsonl", response_class=PlainTextResponse)
     def export_activity_jsonl(
@@ -967,13 +989,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = admin_dependency,
     ) -> Document:
-        return documents.update_trust(
+        result = documents.update_trust(
             document_id=document_id,
             expected_trust_version=body.expected_trust_version,
             trust_level=body.trust_level,
             actor_id=principal.actor_id,
             idempotency_key=idempotency_key,
         )
+        activity.record(
+            principal=principal,
+            action="trust",
+            resource_type="document",
+            resource_id=document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+            details={
+                "trust_level": body.trust_level,
+                "expected_trust_version": body.expected_trust_version,
+            },
+        )
+        return result
 
     @app.post(
         "/api/v1/documents/{document_id}/trusted-preview",
@@ -1449,30 +1485,70 @@ else fetch('/api/v1/trusted-previews/content', {
     @app.post("/api/v1/reconciliation/reindex", response_model=Document, status_code=201)
     def reconciliation_reindex(
         body: ReindexPath,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.reindex_path(body.path)
+        result = reconciliation.reindex_path(body.path)
+        activity.record(
+            principal=principal,
+            action="reconcile_reindex",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/accept-disk", response_model=Document)
     def reconciliation_accept_disk(
         conflict_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.accept_disk_content(conflict_id)
+        result = reconciliation.accept_disk_content(conflict_id)
+        activity.record(
+            principal=principal,
+            action="reconcile_accept_disk",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/restore-database", response_model=Document)
     def reconciliation_restore_database(
         conflict_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.restore_database_content(conflict_id)
+        result = reconciliation.restore_database_content(conflict_id)
+        activity.record(
+            principal=principal,
+            action="reconcile_restore_database",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/recognize-move", response_model=Document)
     def reconciliation_recognize_move(
         conflict_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Document:
-        return reconciliation.recognize_move(conflict_id)
+        result = reconciliation.recognize_move(conflict_id)
+        activity.record(
+            principal=principal,
+            action="reconcile_recognize_move",
+            resource_type="document",
+            resource_id=result.document_id,
+            path=result.path,
+            outcome="accepted",
+            revision_id=result.current_revision_id,
+        )
+        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/ignore", response_model=ReconciliationReport)
     def reconciliation_ignore(

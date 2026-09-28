@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import difflib
 import json
+import sqlite3
 import uuid
 from collections.abc import Callable, Iterator
+from contextlib import suppress
 from pathlib import PurePosixPath
 from typing import TypeVar
 
@@ -52,6 +54,106 @@ from sangam.service import DocumentService
 from sangam.workspace import canonicalize_document_path
 
 T = TypeVar("T")
+
+
+def detect_line_ending(text: str) -> str:
+    if "\r\n" in text:
+        return "crlf"
+    if "\n" in text:
+        return "lf"
+    if "\r" in text:
+        return "cr"
+    return "none"
+
+
+def compute_document_diff(
+    old_content: str,
+    new_content: str,
+    fromfile: str = "before",
+    tofile: str = "current",
+) -> tuple[str, int, int, dict[str, object]]:
+    if old_content == new_content:
+        return (
+            "",
+            0,
+            0,
+            {
+                "line_ending": detect_line_ending(new_content),
+                "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+            },
+        )
+
+    a_lines = old_content.splitlines(keepends=True)
+    b_lines = new_content.splitlines(keepends=True)
+
+    raw_diff = list(
+        difflib.unified_diff(
+            a_lines,
+            b_lines,
+            fromfile=fromfile,
+            tofile=tofile,
+            lineterm="",
+        )
+    )
+    if not raw_diff:
+        return (
+            "",
+            0,
+            0,
+            {
+                "line_ending": detect_line_ending(new_content),
+                "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+            },
+        )
+
+    formatted_lines: list[str] = []
+    lines_added = 0
+    lines_removed = 0
+    in_hunks = False
+
+    for idx, line in enumerate(raw_diff):
+        if idx < 2 and (line.startswith("---") or line.startswith("+++")):
+            formatted_lines.append(line + "\n")
+            continue
+
+        if line.startswith("@@") and "@@" in line[2:]:
+            in_hunks = True
+            formatted_lines.append(line + "\n")
+            continue
+
+        if not in_hunks:
+            formatted_lines.append(line + "\n")
+            continue
+
+        has_newline = line.endswith("\n") or line.endswith("\r")
+        clean_line = (
+            line[:-1]
+            if line.endswith("\n")
+            else (line[:-2] + "\r" if line.endswith("\r\n") else line)
+        )
+
+        if line.startswith("+"):
+            lines_added += 1
+            formatted_lines.append(clean_line + "\n")
+            if not has_newline:
+                formatted_lines.append("\\ No newline at end of file\n")
+        elif line.startswith("-"):
+            lines_removed += 1
+            formatted_lines.append(clean_line + "\n")
+            if not has_newline:
+                formatted_lines.append("\\ No newline at end of file\n")
+        elif line.startswith(" "):
+            formatted_lines.append(clean_line + "\n")
+            if not has_newline:
+                formatted_lines.append("\\ No newline at end of file\n")
+        else:
+            formatted_lines.append(line + "\n")
+
+    metadata: dict[str, object] = {
+        "line_ending": detect_line_ending(new_content),
+        "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+    }
+    return "".join(formatted_lines), lines_added, lines_removed, metadata
 
 
 class WorkspaceAccessService:
@@ -417,7 +519,20 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        details: dict[str, object] = {"title": title, "content_type": content_type}
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            "",
+            content,
+            fromfile="empty",
+            tofile="current",
+        )
+        details: dict[str, object] = {
+            "title": title,
+            "content_type": content_type,
+            "diff": diff_text,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            **meta,
+        }
         return self._run(principal, "create", "document", operation, path=path, details=details)
 
     def create_publication(
@@ -644,21 +759,18 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id)
-        lines_added = 0
-        lines_removed = 0
-        if current.content_type != "application/pdf":
-            diff_lines = list(
-                difflib.unified_diff(
-                    current.content.splitlines(), content.splitlines(), lineterm=""
-                )
-            )
-            content_diff_lines = diff_lines[2:]
-            lines_added = sum(1 for line in content_diff_lines if line.startswith("+"))
-            lines_removed = sum(1 for line in content_diff_lines if line.startswith("-"))
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            current.content,
+            content,
+            fromfile=current.current_revision_id or "before",
+            tofile="current",
+        )
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
+            "diff": diff_text,
             "lines_added": lines_added,
             "lines_removed": lines_removed,
+            **meta,
         }
         if title is not None:
             details["title"] = title
@@ -720,13 +832,23 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            "",
+            current.content,
+            fromfile="empty",
+            tofile="current",
+        )
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "source_path": current.path,
+            "diff": diff_text,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            **meta,
         }
         if path:
             details["destination_path"] = path
-        if title:
+        if title is not None:
             details["title"] = title
         return self._run(
             principal,
@@ -929,9 +1051,27 @@ class WorkspaceAccessService:
         idempotency_key: str,
     ) -> Document:
         current = self.documents.get_document(document_id, include_deleted=True)
+        target_content = ""
+        with self.documents.database.connection() as conn:
+            row = conn.execute(
+                "SELECT content FROM revisions WHERE revision_id = ? AND document_id = ?",
+                (revision_id, document_id),
+            ).fetchone()
+            if row:
+                target_content = row["content"]
+        diff_text, lines_added, lines_removed, meta = compute_document_diff(
+            current.content,
+            target_content,
+            fromfile=current.current_revision_id or "before",
+            tofile=revision_id,
+        )
         details: dict[str, object] = {
             "expected_revision_id": expected_revision_id,
             "current_revision_id": revision_id,
+            "diff": diff_text,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            **meta,
         }
         if summary:
             details["summary"] = summary
@@ -1682,6 +1822,7 @@ class WorkspaceAccessService:
         current: Document,
         operation: Callable[[], T],
         details: dict[str, object] | None = None,
+        estimated_bytes: int | None = None,
     ) -> T:
         def authorized() -> T:
             self.policy.require(principal, capability, current.path)
@@ -1695,6 +1836,7 @@ class WorkspaceAccessService:
             resource_id=current.document_id,
             path=current.path,
             details=details,
+            estimated_bytes=estimated_bytes,
         )
 
     def _require_global_read(self, principal: Principal) -> None:
@@ -1721,39 +1863,9 @@ class WorkspaceAccessService:
         resource_id: str | None = None,
         path: str | None = None,
         details: dict[str, object] | None = None,
+        estimated_bytes: int | None = None,
     ) -> T:
-        try:
-            result = operation()
-        except SangamError as error:
-            outcome = (
-                "denied"
-                if isinstance(error, AuthorizationError)
-                else "conflict"
-                if isinstance(error, ConflictError)
-                else "failed"
-            )
-            combined_details = dict(details or {})
-            if error.details:
-                combined_details.update(error.details)
-            self.activity.record(
-                principal=principal,
-                action=action,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                path=path,
-                outcome=outcome,
-                error_code=error.code,
-                details=combined_details or None,
-            )
-            raise
-        result_resource_id = resource_id
-        result_path = path
-        revision_id: str | None = None
-        if isinstance(result, Document):
-            result_resource_id = result.document_id
-            result_path = result.path if result.path is not None else path
-            revision_id = result.current_revision_id
-        if principal.identity_kind != "human" or action not in {
+        is_mutation = action not in {
             "list",
             "search",
             "read",
@@ -1761,15 +1873,166 @@ class WorkspaceAccessService:
             "diff",
             "list_tags",
             "list_folders",
-        }:
-            self.activity.record(
-                principal=principal,
-                action=action,
-                resource_type=resource_type,
-                resource_id=result_resource_id,
-                path=result_path,
-                outcome="accepted",
-                revision_id=revision_id,
-                details=details,
-            )
-        return result
+        }
+        if estimated_bytes is None:
+            estimated_bytes = 2048
+            if details:
+                with suppress(Exception):
+                    estimated_bytes = max(
+                        estimated_bytes,
+                        self.activity.estimate_payload_bytes(details),
+                    )
+        with self.activity.admit(estimated_bytes=estimated_bytes) as reservation:
+            audit_inserted = False
+            audit_committed = False
+            recorded_resource_id = resource_id
+            recorded_path = path
+            recorded_revision_id = None
+            recorded_details = dict(details or {})
+
+            def audit_commit_hook(connection: sqlite3.Connection) -> None:
+                nonlocal \
+                    audit_inserted, \
+                    recorded_resource_id, \
+                    recorded_path, \
+                    recorded_revision_id, \
+                    recorded_details
+                if not audit_inserted and is_mutation:
+                    target = self.documents.database.get_audit_target()
+                    hook_resource_id = target.get("resource_id") or resource_id
+                    hook_revision_id = target.get("revision_id")
+                    hook_path = target.get("path") if target.get("path") is not None else path
+                    hook_details = dict(details or {})
+                    if "details" in target and isinstance(target["details"], dict):
+                        hook_details.update(target["details"])
+
+                    reservation.record_with_connection(
+                        connection,
+                        principal=principal,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=hook_resource_id,
+                        path=hook_path,
+                        outcome="accepted",
+                        revision_id=hook_revision_id,
+                        details=hook_details or None,
+                    )
+                    audit_inserted = True
+                    recorded_resource_id = hook_resource_id
+                    recorded_path = hook_path
+                    recorded_revision_id = hook_revision_id
+                    recorded_details = hook_details
+
+            def audit_post_commit_hook() -> None:
+                nonlocal audit_committed
+                if audit_inserted:
+                    audit_committed = True
+
+            try:
+                with (
+                    self.documents.database.commit_hook(audit_commit_hook),
+                    self.documents.database.post_commit_hook(audit_post_commit_hook),
+                ):
+                    result = operation()
+            except Exception as error:
+                audit_err: Exception | None = None
+                if audit_committed:
+                    error_code = getattr(error, "code", "INTERNAL_ERROR")
+                    fail_details = dict(recorded_details)
+                    fail_details["stage"] = "materialization"
+                    fail_details["error"] = str(error)
+                    try:
+                        self.activity.record(
+                            principal=principal,
+                            action=action,
+                            resource_type=resource_type,
+                            resource_id=recorded_resource_id,
+                            path=recorded_path,
+                            outcome="failed",
+                            error_code=error_code,
+                            revision_id=recorded_revision_id,
+                            details=fail_details,
+                        )
+                    except Exception as ae:
+                        audit_err = ae
+                elif (
+                    audit_inserted
+                    or getattr(reservation, "_used", False)
+                    or getattr(reservation, "_released", False)
+                ):
+                    outcome = (
+                        "denied"
+                        if isinstance(error, AuthorizationError)
+                        else "conflict"
+                        if isinstance(error, ConflictError)
+                        else "failed"
+                    )
+                    fail_details = dict(recorded_details)
+                    if isinstance(error, SangamError) and error.details:
+                        fail_details.update(error.details)
+                    fail_details["stage"] = "commit" if audit_inserted else "mutation"
+                    fail_details["error"] = str(error)
+                    try:
+                        self.activity.record(
+                            principal=principal,
+                            action=action,
+                            resource_type=resource_type,
+                            resource_id=recorded_resource_id or resource_id,
+                            path=recorded_path or path,
+                            outcome=outcome,
+                            error_code=getattr(error, "code", "INTERNAL_ERROR"),
+                            details=fail_details or None,
+                        )
+                    except Exception as ae:
+                        audit_err = ae
+                else:
+                    outcome = (
+                        "denied"
+                        if isinstance(error, AuthorizationError)
+                        else "conflict"
+                        if isinstance(error, ConflictError)
+                        else "failed"
+                    )
+                    combined_details = dict(details or {})
+                    if isinstance(error, SangamError) and error.details:
+                        combined_details.update(error.details)
+                    try:
+                        reservation.record(
+                            principal=principal,
+                            action=action,
+                            resource_type=resource_type,
+                            resource_id=resource_id,
+                            path=path,
+                            outcome=outcome,
+                            error_code=getattr(error, "code", "INTERNAL_ERROR"),
+                            details=combined_details or None,
+                        )
+                    except Exception as ae:
+                        audit_err = ae
+
+                if audit_err is not None:
+                    if isinstance(error, SangamError):
+                        error.details["audit_persisted"] = False
+                        error.details["audit_error"] = str(audit_err)
+                    raise error from audit_err
+                raise
+
+            if not audit_committed and (is_mutation or principal.identity_kind != "human"):
+                result_resource_id = resource_id
+                result_path = path
+                revision_id = None
+                if isinstance(result, Document):
+                    result_resource_id = result.document_id
+                    result_path = result.path if result.path is not None else path
+                    revision_id = result.current_revision_id
+                reservation.record(
+                    principal=principal,
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=result_resource_id,
+                    path=result_path,
+                    outcome="accepted",
+                    revision_id=revision_id,
+                    details=details,
+                )
+            return result

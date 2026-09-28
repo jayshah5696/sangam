@@ -21,10 +21,12 @@ class ReadinessService:
         database: Database,
         backups: BackupService,
         settings: Settings,
+        activity: Any = None,
     ) -> None:
         self.database = database
         self.backups = backups
         self.settings = settings
+        self.activity = activity
 
     def check(
         self,
@@ -52,6 +54,8 @@ class ReadinessService:
         return {"status": "ready" if ready else "degraded", "checks": checks}
 
     def _database_check(self) -> dict[str, Any]:
+        if self.activity is not None and not self.activity.is_healthy():
+            return {"ok": False, "detail": "audit_worker_unhealthy"}
         try:
             with self.database.connection() as connection:
                 connection.execute("SELECT 1").fetchone()
