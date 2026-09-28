@@ -161,7 +161,116 @@ def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> 
     assert final_content in ("content A " * 100, "content B " * 100)
 
     # Confirm workspace clean of temporary staging files
-    temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
+    temp_files = [f for f in workspace.root.rglob("*") if f.is_file() and ".sangam-" in f.name]
+    assert temp_files == []
+
+
+def test_concurrent_move_document_prevents_overwrite_and_prunes_staging(
+    tmp_path: Path,
+) -> None:
+    import threading
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    workspace.write_atomic("source1.md", "source 1 content")
+    workspace.write_atomic("source2.md", "source 2 content")
+
+    destination_path = "target.md"
+    barrier = threading.Barrier(2)
+    results: list[tuple[str, Exception | None]] = []
+    lock = threading.Lock()
+
+    def mover(src: str):
+        barrier.wait()
+        try:
+            workspace.move_document(src, destination_path)
+            with lock:
+                results.append((src, None))
+        except Exception as exc:
+            with lock:
+                results.append((src, exc))
+
+    t1 = threading.Thread(target=mover, args=("source1.md",))
+    t2 = threading.Thread(target=mover, args=("source2.md",))
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    successes = [r for r in results if r[1] is None]
+    failures = [r for r in results if r[1] is not None]
+
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert isinstance(failures[0][1], InvalidPathError)
+
+    winning_source = successes[0][0]
+    losing_source = failures[0][0]
+
+    # Target has content of winner, losing source file was NOT overwritten or destroyed
+    expected_content = "source 1 content" if winning_source == "source1.md" else "source 2 content"
+    assert workspace.read_document(destination_path) == expected_content
+    assert workspace.is_document_file(losing_source)
+
+    # Confirm workspace clean of temporary staging files
+    temp_files = [f for f in workspace.root.rglob("*") if f.is_file() and ".sangam-" in f.name]
+    assert temp_files == []
+
+
+def test_concurrent_restore_trash_document_prevents_overwrite_and_prunes_staging(
+    tmp_path: Path,
+) -> None:
+    import threading
+
+    from sangam.errors import ConflictError
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+
+    # Create and trash two separate documents
+    content1 = "trash 1 content"
+    content2 = "trash 2 content"
+    hash1 = hashlib.sha256(content1.encode("utf-8")).hexdigest()
+    hash2 = hashlib.sha256(content2.encode("utf-8")).hexdigest()
+    size1 = len(content1.encode("utf-8"))
+    size2 = len(content2.encode("utf-8"))
+
+    workspace.write_atomic("temp1.md", content1)
+    workspace.write_atomic("temp2.md", content2)
+    workspace.trash_document("doc1", "temp1.md", hash1, size1)
+    workspace.trash_document("doc2", "temp2.md", hash2, size2)
+
+    destination_path = "restored.md"
+    barrier = threading.Barrier(2)
+    results: list[tuple[str, Exception | None]] = []
+    lock = threading.Lock()
+
+    def restorer(doc_id: str, c_hash: str, size: int):
+        barrier.wait()
+        try:
+            workspace.restore_trash_document(doc_id, destination_path, c_hash, size)
+            with lock:
+                results.append((doc_id, None))
+        except Exception as exc:
+            with lock:
+                results.append((doc_id, exc))
+
+    t1 = threading.Thread(target=restorer, args=("doc1", hash1, size1))
+    t2 = threading.Thread(target=restorer, args=("doc2", hash2, size2))
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    successes = [r for r in results if r[1] is None]
+    failures = [r for r in results if r[1] is not None]
+
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert isinstance(failures[0][1], ConflictError)
+
+    # Confirm workspace clean of temporary staging files
+    temp_files = [f for f in workspace.root.rglob("*") if f.is_file() and ".sangam-" in f.name]
     assert temp_files == []
 
 
