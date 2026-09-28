@@ -1157,7 +1157,7 @@ class WorkspaceAccessService:
                         descendant_document_count=folder.document_count,
                     )
                 )
-        if item_type in {None, "tag"} and allowed != ():
+        if item_type in {None, "tag"} and allowed is None:
             items.extend(
                 OrganizationTagSnapshot(tag_id=tag.tag_id, name=tag.name, color=tag.color)
                 for tag in self.organization.list_tags(limit=source_limit)
