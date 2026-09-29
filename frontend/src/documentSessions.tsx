@@ -23,6 +23,7 @@ export type DocumentSession = {
   content?: string
   baseRevisionId?: string
   mode: EditorMode
+  focusOnOpen?: boolean
   saveState: SaveState
   draftPersistenceState: DraftPersistenceState
   draftPersistenceOperation?: DraftPersistenceOperation
@@ -102,6 +103,17 @@ export class DocumentSessionStore {
 
   focusEditor = (documentId: string) => {
     this.editorHandles.get(documentId)?.focus()
+  }
+
+  openForWriting = (document: Document) => {
+    this.updateSession(document.document_id, {
+      mode: 'edit',
+      focusOnOpen: true,
+      viewState:
+        document.content_type === 'text/markdown'
+          ? { anchor: document.content.length, head: document.content.length, scrollTop: 0 }
+          : undefined,
+    })
   }
 
   scrollToLine = (documentId: string, line: number) => {

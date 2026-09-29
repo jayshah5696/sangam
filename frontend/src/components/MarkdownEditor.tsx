@@ -31,10 +31,21 @@ type MarkdownEditorProps = {
   initialViewState?: EditorViewState
   onViewStateChange?: (viewState: EditorViewState) => void
   contentType?: 'text/markdown' | 'text/html'
+  focusOnOpen?: boolean
+  onFocused?: () => void
 }
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, onSelectionChange, initialViewState, onViewStateChange, contentType = 'text/markdown' },
+  {
+    value,
+    onChange,
+    onSelectionChange,
+    initialViewState,
+    onViewStateChange,
+    contentType = 'text/markdown',
+    focusOnOpen,
+    onFocused,
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -121,6 +132,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       }),
     })
     viewRef.current = view
+    const initialSelection = view.state.selection.main
+    const initialLine = view.state.doc.lineAt(initialSelection.head)
+    onSelectionChangeRef.current?.({
+      line: initialLine.number,
+      column: initialSelection.head - initialLine.from + 1,
+      selectedCharacters: initialSelection.to - initialSelection.from,
+    })
     const reportScroll = () => {
       const selection = view.state.selection.main
       onViewStateChangeRef.current?.({
@@ -142,6 +160,12 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       viewRef.current = null
     }
   }, [contentType])
+
+  useEffect(() => {
+    if (!focusOnOpen || !viewRef.current) return
+    viewRef.current.focus()
+    onFocused?.()
+  }, [focusOnOpen, onFocused])
 
   useEffect(() => {
     const view = viewRef.current

@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { FilePlus2, FileText, FileUp, MessageSquareText, Pin, Search, ShieldCheck } from 'lucide-react'
 import { api, DOCUMENT_PAGE_SIZE } from '../api'
+import { useDocumentSessions } from '../documentSessions'
 import { collectGroups, useWorkbench } from '../workbench'
 import { selectHomeDocuments } from '../workspaceHome'
 
@@ -12,6 +13,7 @@ function Welcome() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const sessions = useDocumentSessions()
   const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
@@ -31,6 +33,7 @@ function Welcome() {
         contentType,
       ),
     onSuccess: async (document) => {
+      sessions.openForWriting(document)
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
       workbench.ensureDocumentOpen(document.document_id, document.title)
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
