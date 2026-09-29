@@ -5,6 +5,7 @@
 @import './styles/ui-system.css';
 @import './styles/pdf-research.css';
 @import './styles/karakeep.css';
+@import './styles/projects.css';
 
 @media (pointer: coarse) {
   /* Icon-only controls keep their compact glyphs while exposing a full touch target. */

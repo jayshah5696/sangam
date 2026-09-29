@@ -202,39 +202,38 @@ function Welcome() {
         </span>
       </div>
       {projectsQuery.data && projectsQuery.data.length > 0 && (
-        <div className="welcome-recent">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              width: '100%',
-              marginBottom: 'var(--space-1)',
-            }}
-          >
-            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-              <FolderKanban size="var(--icon-inline)" /> Projects
-            </strong>
+        <div className="welcome-projects-shelf">
+          <div className="welcome-projects-shelf-header">
+            <span className="welcome-projects-shelf-title">
+              <FolderKanban size="var(--icon-inline)" /> Initiatives & Projects
+            </span>
             <Link
               to="/projects"
-              style={{ fontSize: 'var(--text-meta)', color: 'var(--muted)', textDecoration: 'none' }}
+              className="secondary-action"
+              style={{ fontSize: 'var(--text-meta)', textDecoration: 'none' }}
             >
               View all ({projectsQuery.data.length})
             </Link>
           </div>
-          {projectsQuery.data.slice(0, 3).map((project) => (
-            <Link
-              key={project.project_id}
-              to="/projects"
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-            >
-              <span>{project.name}</span>
-              <small>
-                {project.document_count} {project.document_count === 1 ? 'doc' : 'docs'}
-                {project.brief_document_title ? ` · ${project.brief_document_title}` : ''}
-              </small>
-            </Link>
-          ))}
+          <div className="welcome-projects-cards">
+            {projectsQuery.data.slice(0, 3).map((project) => (
+              <Link
+                key={project.project_id}
+                to="/projects"
+                className="welcome-project-tile"
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+                  <span className="welcome-project-tile-name">{project.name}</span>
+                  <span className="project-stat-pill" style={{ flex: 'none' }}>
+                    {project.document_count} {project.document_count === 1 ? 'doc' : 'docs'}
+                  </span>
+                </div>
+                <small className="welcome-project-tile-meta">
+                  {project.brief_document_title ? project.brief_document_title : (project.description ?? 'Active project workspace')}
+                </small>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
       {(recentDocuments.length > 0 || fallbackDocuments.length > 0) && (

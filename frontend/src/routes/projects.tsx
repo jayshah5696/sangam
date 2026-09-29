@@ -4,6 +4,9 @@ import {
   ArrowLeft,
   BookOpen,
   ChevronRight,
+  ExternalLink,
+  FileStack,
+  FileText,
   FolderKanban,
   Layout,
   MessageSquare,
@@ -22,14 +25,6 @@ import { parseWorkbenchLayoutState } from '../workbenchLayout'
 export const Route = createFileRoute('/projects')({
   component: ProjectsPage,
 })
-
-const roleColors = {
-  source: 'var(--accent)',
-  draft: '#3b82f6',
-  note: '#eab308',
-  output: '#10b981',
-  decision: '#8b5cf6',
-} satisfies Record<ProjectRole, string>
 
 const ROLE_OPTIONS = [
   {
@@ -85,71 +80,42 @@ function ProjectsPage() {
   }
 
   return (
-    <section className="utility-page">
-      <header
-        className="utility-header"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 'var(--space-3)',
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0 }}>Projects</h1>
-          <p
-            style={{
-              margin: 'var(--space-1) 0 0',
-              color: 'var(--muted)',
-              fontSize: 'var(--text-body)',
-            }}
-          >
-            Persistent homes for research, investigations, and writing efforts.
+    <section className="projects-page">
+      <header className="projects-header">
+        <div className="projects-header-info">
+          <div className="projects-eyebrow">
+            <FolderKanban size="var(--icon-detail)" />
+            <span>Workspace Initiatives</span>
+          </div>
+          <div className="projects-title-row">
+            <h1>Projects</h1>
+            {projectsQuery.data && (
+              <span className="projects-count-pill">{projectsQuery.data.length} active</span>
+            )}
+          </div>
+          <p className="projects-description">
+            Persistent workspaces for research initiatives, writing efforts, and investigations with linked
+            sources, automated briefs, and workbench layout recall.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+        <div>
           <button className="primary-button" type="button" onClick={() => setShowCreateModal(true)}>
             <Plus size="var(--icon-control)" /> New Project
           </button>
         </div>
       </header>
 
-      <div style={{ margin: 'var(--space-3) 0' }}>
-        <div
-          style={{
-            position: 'relative',
-            maxWidth: '24rem',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <Search
-            size="var(--icon-detail)"
-            style={{
-              position: 'absolute',
-              left: 'var(--space-3)',
-              color: 'var(--muted)',
-              pointerEvents: 'none',
-            }}
-          />
+      <div className="projects-toolbar">
+        <div className="projects-search-bar">
+          <Search size="var(--icon-detail)" className="projects-search-icon" />
           <input
+            className="projects-search-input"
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter projects…"
+            placeholder="Filter projects by title or description…"
             aria-label="Filter projects"
-            style={{
-              width: '100%',
-              paddingLeft: 'var(--space-6)',
-              paddingRight: 'var(--space-3)',
-              height: 'var(--control-height)',
-              border: '1px solid var(--line)',
-              borderRadius: 'var(--radius-control)',
-              background: 'var(--surface-soft)',
-              color: 'var(--text)',
-            }}
           />
         </div>
       </div>
@@ -189,7 +155,7 @@ function ProjectsPage() {
         />
       )}
 
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+      <div className="projects-grid">
         {filteredProjects.map((project) => (
           <ProjectCard
             key={project.project_id}
@@ -254,100 +220,87 @@ function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOpen: () 
   })
 
   return (
-    <article className="publication-card">
-      <div className="publication-card-main">
-        <div>
-          <button
-            type="button"
-            onClick={onOpen}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              color: 'var(--text)',
-              fontSize: 'var(--text-title-sm)',
-              fontWeight: 600,
-            }}
-          >
-            <FolderKanban size="var(--icon-inline)" /> {project.name}
-          </button>
+    <article className="project-card-outer">
+      <div className="project-card-inner">
+        <div className="project-card-header">
+          <div className="project-badge-icon">
+            <FolderKanban size="var(--icon-inline)" />
+          </div>
+          <div className="project-card-title-group">
+            <button
+              type="button"
+              className="project-card-title-button"
+              onClick={onOpen}
+              title={project.name}
+            >
+              {project.name}
+            </button>
+            <div className="project-card-meta">
+              <span>Updated {new Date(project.updated_at).toLocaleDateString()}</span>
+            </div>
+          </div>
         </div>
 
-        {project.description && (
-          <p
-            style={{
-              margin: 0,
-              color: 'var(--muted)',
-              fontSize: 'var(--text-body)',
-            }}
-          >
-            {project.description}
+        {project.description ? (
+          <p className="project-card-description">{project.description}</p>
+        ) : (
+          <p className="project-card-description" style={{ fontStyle: 'italic', opacity: 0.6 }}>
+            No project description provided.
           </p>
         )}
 
-        <div className="publication-badges">
+        <div className="project-card-stats-row">
           {project.brief_document_id && (
-            <span
-              className="scope-badge"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-                background: 'var(--surface-soft)',
-              }}
-            >
+            <span className="project-stat-pill has-brief" title="Brief document attached">
               <BookOpen size="var(--icon-detail)" />
-              {project.brief_document_title ?? 'Brief'}
+              <span>{project.brief_document_title ?? 'Brief'}</span>
             </span>
           )}
-          <span className="scope-badge">
-            {project.document_count} {project.document_count === 1 ? 'document' : 'documents'}
+          <span className="project-stat-pill">
+            <FileText size="var(--icon-detail)" />
+            <span>
+              {project.document_count} {project.document_count === 1 ? 'doc' : 'docs'}
+            </span>
           </span>
           {project.thread_count > 0 && (
-            <span className="scope-badge">
-              {project.thread_count} {project.thread_count === 1 ? 'thread' : 'threads'}
+            <span className="project-stat-pill">
+              <MessageSquare size="var(--icon-detail)" />
+              <span>
+                {project.thread_count} {project.thread_count === 1 ? 'thread' : 'threads'}
+              </span>
             </span>
           )}
-          {project.annotation_count > 0 && (
-            <span className="scope-badge">
-              {project.annotation_count} {project.annotation_count === 1 ? 'annotation' : 'annotations'}
-            </span>
-          )}
-          <span className="scope-badge" style={{ color: 'var(--muted)' }}>
-            Updated {new Date(project.updated_at).toLocaleDateString()}
-          </span>
-        </div>
-      </div>
 
-      <div className="publication-card-actions">
-        <button
-          className="primary-button"
-          type="button"
-          onClick={() => void resumeProject()}
-          title="Resume workbench layout and open documents"
-        >
-          <Layout size="var(--icon-control)" /> Resume
-        </button>
-        <button className="secondary-action" type="button" onClick={onOpen}>
-          Manage <ChevronRight size="var(--icon-control)" />
-        </button>
-        <button
-          className="secondary-action"
-          type="button"
-          aria-label={`Delete ${project.name}`}
-          onClick={() => {
-            if (window.confirm(`Delete project "${project.name}"? Source documents will not be deleted.`)) {
-              deleteMutation.mutate()
-            }
-          }}
-          disabled={deleteMutation.isPending}
-        >
-          <Trash2 size="var(--icon-control)" />
-        </button>
+        </div>
+
+        <div className="project-card-footer">
+          <button
+            className="primary-button project-resume-btn"
+            type="button"
+            onClick={() => void resumeProject()}
+            title="Resume workbench layout and open documents"
+          >
+            <Layout size="var(--icon-control)" /> Resume
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <button className="secondary-action" type="button" onClick={onOpen}>
+              Manage <ChevronRight size="var(--icon-control)" />
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              aria-label={`Delete ${project.name}`}
+              onClick={() => {
+                if (window.confirm(`Delete project "${project.name}"? Source documents will not be deleted.`)) {
+                  deleteMutation.mutate()
+                }
+              }}
+              disabled={deleteMutation.isPending}
+            >
+              <Trash2 size="var(--icon-control)" />
+            </button>
+          </div>
+        </div>
       </div>
     </article>
   )
@@ -389,7 +342,7 @@ function ProjectDetailView({ projectId, onBack }: { projectId: string; onBack: (
 
   if (detailQuery.isLoading) {
     return (
-      <section className="utility-page">
+      <section className="projects-page">
         <StateMessage kind="loading" title="Loading project details…" />
       </section>
     )
@@ -397,7 +350,7 @@ function ProjectDetailView({ projectId, onBack }: { projectId: string; onBack: (
 
   if (detailQuery.isError || !detailQuery.data) {
     return (
-      <section className="utility-page">
+      <section className="projects-page">
         <StateMessage
           kind="error"
           title="Could not load project"
@@ -450,423 +403,296 @@ function ProjectDetailView({ projectId, onBack }: { projectId: string; onBack: (
   }
 
   return (
-    <section className="utility-page">
-      <div style={{ marginBottom: 'var(--space-3)' }}>
-        <button
-          className="secondary-action"
-          type="button"
-          onClick={onBack}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 'var(--space-2)',
-          }}
-        >
+    <section className="projects-page">
+      <div className="project-detail-back-bar">
+        <button className="secondary-action" type="button" onClick={onBack}>
           <ArrowLeft size="var(--icon-inline)" /> Back to projects
         </button>
       </div>
 
-      <header
-        className="utility-header"
-        style={{
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: 'var(--space-3)',
-        }}
-      >
-        <div style={{ flex: 1, minWidth: '18rem' }}>
-          {isEditing ? (
-            <div
-              style={{
-                display: 'grid',
-                gap: 'var(--space-2)',
-                marginBottom: 'var(--space-2)',
-              }}
-            >
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                style={{
-                  height: 'var(--control-height)',
-                  padding: '0 var(--space-3)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 'var(--radius-control)',
-                  background: 'var(--surface-soft)',
-                  color: 'var(--text)',
-                  fontSize: 'var(--text-title-sm)',
-                  fontWeight: 600,
-                }}
-              />
-              <textarea
-                rows={2}
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-                style={{
-                  padding: 'var(--space-2) var(--space-3)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 'var(--radius-control)',
-                  background: 'var(--surface-soft)',
-                  color: 'var(--text)',
-                  fontSize: 'var(--text-body)',
-                }}
-              />
-              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={() =>
-                    updateMutation.mutate({
-                      name: editName.trim() || project.name,
-                      description: editDescription.trim() || null,
-                    })
-                  }
-                  disabled={updateMutation.isPending}
-                >
-                  <Save size="var(--icon-control)" /> Save changes
-                </button>
-                <button className="secondary-action" type="button" onClick={() => setIsEditing(false)}>
-                  Cancel
-                </button>
-              </div>
+      <header className="project-detail-hero">
+        <div className="project-detail-hero-top">
+          <div className="project-detail-title-block">
+            <div className="projects-eyebrow">
+              <FolderKanban size="var(--icon-detail)" />
+              <span>Project Initiative</span>
             </div>
-          ) : (
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-3)',
-                }}
-              >
-                <h1 style={{ margin: 0 }}>{project.name}</h1>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => {
-                    setEditName(project.name)
-                    setEditDescription(project.description ?? '')
-                    setIsEditing(true)
-                  }}
-                  style={{ fontSize: 'var(--text-meta)' }}
-                >
-                  Edit details
-                </button>
-              </div>
-              {project.description && (
-                <p
-                  style={{
-                    marginTop: 'var(--space-1)',
-                    fontSize: 'var(--text-body)',
-                  }}
-                >
-                  {project.description}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-          <button
-            className="primary-button"
-            type="button"
-            onClick={handleResumeWorkbench}
-            title="Restore saved workbench splits, tabs, and documents"
-          >
-            <Layout size="var(--icon-control)" /> Resume in Workbench
-          </button>
-          <button
-            className="secondary-action"
-            type="button"
-            onClick={handleSaveCurrentLayout}
-            title="Snapshot current open workbench tabs and layout into this project"
-            disabled={updateMutation.isPending}
-          >
-            <Save size="var(--icon-control)" /> Snapshot current layout
-          </button>
-        </div>
-      </header>
-
-      {/* Brief Card */}
-      <section
-        style={{
-          marginTop: 'var(--space-4)',
-          padding: 'var(--space-4)',
-          borderRadius: 'var(--radius-panel)',
-          border: '1px solid var(--line)',
-          background: 'var(--surface)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 'var(--space-2)',
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 'var(--text-body)',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-            }}
-          >
-            <BookOpen size="var(--icon-inline)" /> Project Brief
-          </h2>
-          {project.brief_document_id && (
-            <Link
-              to="/documents/$documentId"
-              params={{ documentId: project.brief_document_id }}
-              className="secondary-action"
-              style={{ fontSize: 'var(--text-meta)' }}
-            >
-              Open brief in editor
-            </Link>
-          )}
-        </div>
-
-        {project.brief_document_id ? (
-          <div>
-            <p
-              style={{
-                fontWeight: 600,
-                margin: 0,
-                fontSize: 'var(--text-title-sm)',
-              }}
-            >
-              {project.brief_document_title ?? 'Project Brief'}
-            </p>
-            <p
-              style={{
-                color: 'var(--muted)',
-                margin: 'var(--space-1) 0 0',
-                fontSize: 'var(--text-meta)',
-              }}
-            >
-              Ordinary Markdown brief holding scope, background, open questions, and deliverables.
-            </p>
-          </div>
-        ) : (
-          <p
-            style={{
-              color: 'var(--muted)',
-              margin: 0,
-              fontSize: 'var(--text-meta)',
-            }}
-          >
-            No brief linked yet. You can set any document as the project brief.
-          </p>
-        )}
-      </section>
-
-      {/* Documents & Sources Section */}
-      <section style={{ marginTop: 'var(--space-5)' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 'var(--space-3)',
-          }}
-        >
-          <div>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: 'var(--text-title-sm)',
-                fontWeight: 600,
-              }}
-            >
-              Documents & Research Sources
-            </h2>
-            <p
-              style={{
-                margin: 'var(--space-1) 0 0',
-                color: 'var(--muted)',
-                fontSize: 'var(--text-meta)',
-              }}
-            >
-              Documents belong to this project by reference. One document can support multiple projects.
-            </p>
-          </div>
-
-          <button className="secondary-action" type="button" onClick={() => setShowAddDocModal(true)}>
-            <Plus size="var(--icon-control)" /> Add document
-          </button>
-        </div>
-
-        {project.documents.length === 0 ? (
-          <StateMessage
-            kind="empty"
-            title="No documents attached"
-            description="Add existing documents or PDFs to this project to organize your sources, drafts, notes, and outputs."
-            action={
-              <button className="primary-button" type="button" onClick={() => setShowAddDocModal(true)}>
-                <Plus size="var(--icon-control)" /> Add first document
-              </button>
-            }
-          />
-        ) : (
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            {project.documents.map((doc) => (
-              <article
-                key={doc.document_id}
-                className="publication-card"
-                style={{ padding: 'var(--space-3)' }}
-              >
-                <div className="publication-card-main">
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 'var(--space-2)',
-                      flexWrap: 'wrap',
-                    }}
+            {isEditing ? (
+              <div style={{ display: 'grid', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="project-modal-input"
+                  style={{ fontSize: 'var(--text-title-sm)', fontWeight: 600 }}
+                />
+                <textarea
+                  rows={2}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="project-modal-textarea"
+                />
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() =>
+                      updateMutation.mutate({
+                        name: editName.trim() || project.name,
+                        description: editDescription.trim() || null,
+                      })
+                    }
+                    disabled={updateMutation.isPending}
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        workbench.ensureDocumentOpen(doc.document_id, doc.document_title)
-                        void navigate({
-                          to: '/documents/$documentId',
-                          params: { documentId: doc.document_id },
-                        })
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        padding: 0,
-                        cursor: 'pointer',
-                        color: 'var(--text)',
-                        fontWeight: 600,
-                        fontSize: 'var(--text-body)',
-                        textAlign: 'left',
-                      }}
-                    >
-                      {doc.document_title}
-                    </button>
-                    <code
-                      style={{
-                        fontSize: 'var(--text-meta)',
-                        color: 'var(--muted)',
-                      }}
-                    >
-                      {doc.document_path}
-                    </code>
-                  </div>
-
-                  {doc.notes && (
-                    <p
-                      style={{
-                        margin: 'var(--space-1) 0 0',
-                        color: 'var(--muted)',
-                        fontSize: 'var(--text-meta)',
-                      }}
-                    >
-                      {doc.notes}
-                    </p>
-                  )}
-
-                  <div className="publication-badges">
-                    <span
-                      className="scope-badge"
-                      style={{
-                        borderColor: roleColors[doc.role],
-                        color: roleColors[doc.role],
-                        fontWeight: 500,
-                      }}
-                    >
-                      {doc.role}
-                    </span>
-                    {doc.pinned_page && <span className="scope-badge">Page {doc.pinned_page}</span>}
-                  </div>
+                    <Save size="var(--icon-control)" /> Save changes
+                  </button>
+                  <button className="secondary-action" type="button" onClick={() => setIsEditing(false)}>
+                    Cancel
+                  </button>
                 </div>
-
-                <div className="publication-card-actions">
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                  <h1>{project.name}</h1>
                   <button
                     className="secondary-action"
                     type="button"
                     onClick={() => {
-                      workbench.ensureDocumentOpen(doc.document_id, doc.document_title)
-                      void navigate({
-                        to: '/documents/$documentId',
-                        params: { documentId: doc.document_id },
-                      })
+                      setEditName(project.name)
+                      setEditDescription(project.description ?? '')
+                      setIsEditing(true)
                     }}
+                    style={{ fontSize: 'var(--text-meta)' }}
                   >
-                    Open
-                  </button>
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={() => removeDocMutation.mutate(doc.document_id)}
-                    disabled={removeDocMutation.isPending}
-                    aria-label={`Remove ${doc.document_title} from project`}
-                  >
-                    <Trash2 size="var(--icon-control)" />
+                    Edit details
                   </button>
                 </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Relevant Chat Threads */}
-      <section style={{ marginTop: 'var(--space-5)' }}>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 'var(--text-title-sm)',
-            fontWeight: 600,
-          }}
-        >
-          Relevant Chat Threads
-        </h2>
-        <p
-          style={{
-            margin: 'var(--space-1) 0 var(--space-3)',
-            color: 'var(--muted)',
-            fontSize: 'var(--text-meta)',
-          }}
-        >
-          Discussions and AI investigations linked to this body of work.
-        </p>
-
-        {project.threads.length === 0 ? (
-          <p
-            style={{
-              color: 'var(--muted)',
-              fontSize: 'var(--text-meta)',
-              fontStyle: 'italic',
-            }}
-          >
-            No chat threads linked yet. Link threads from Workspace Chat to keep your conversations attached.
-          </p>
-        ) : (
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            {project.threads.map((t) => (
-              <div key={t.thread_id} className="publication-card" style={{ padding: 'var(--space-3)' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-2)',
-                  }}
-                >
-                  <MessageSquare size="var(--icon-inline)" />
-                  <span style={{ fontWeight: 500 }}>{t.title ?? 'Conversation'}</span>
-                </div>
+                {project.description && (
+                  <p className="projects-description">{project.description}</p>
+                )}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </section>
+
+          <div className="project-detail-actions">
+            <button
+              className="primary-button project-detail-hero-resume-btn"
+              type="button"
+              onClick={handleResumeWorkbench}
+              title="Restore saved workbench splits, tabs, and documents"
+            >
+              <Layout size="var(--icon-control)" /> Resume in Workbench
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={handleSaveCurrentLayout}
+              title="Snapshot current open workbench tabs and layout into this project"
+              disabled={updateMutation.isPending}
+            >
+              <Save size="var(--icon-control)" /> Snapshot current layout
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="project-detail-grid">
+        <div className="project-detail-main">
+          {/* Brief Card */}
+          <section className="project-section-panel">
+            <div className="project-section-header">
+              <h2>
+                <BookOpen size="var(--icon-inline)" /> Project Brief
+              </h2>
+              {project.brief_document_id && (
+                <Link
+                  to="/documents/$documentId"
+                  params={{ documentId: project.brief_document_id }}
+                  className="secondary-action"
+                  style={{ fontSize: 'var(--text-meta)', display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
+                >
+                  <span>Open brief in editor</span>
+                  <ExternalLink size="var(--icon-detail)" />
+                </Link>
+              )}
+            </div>
+
+            <div className="project-section-body">
+              {project.brief_document_id ? (
+                <div className="project-brief-artifact">
+                  <div className="project-brief-artifact-info">
+                    <p className="project-brief-artifact-title">
+                      {project.brief_document_title ?? 'Project Brief'}
+                    </p>
+                    <p className="project-brief-artifact-desc">
+                      Ordinary Markdown brief holding scope, background, open questions, and deliverables.
+                    </p>
+                  </div>
+                  <span className="project-role-badge role-draft">Draft Brief</span>
+                </div>
+              ) : (
+                <p style={{ color: 'var(--muted)', margin: 0, fontSize: 'var(--text-meta)' }}>
+                  No brief linked yet. You can set any document as the project brief.
+                </p>
+              )}
+            </div>
+          </section>
+
+          {/* Documents & Sources Section */}
+          <section className="project-section-panel">
+            <div className="project-section-header">
+              <div className="project-section-header-info">
+                <h2>
+                  <FileStack size="var(--icon-inline)" /> Documents & Research Sources
+                </h2>
+                <p>
+                  Documents belong to this project by reference. One document can support multiple projects.
+                </p>
+              </div>
+
+              <button className="secondary-action" type="button" onClick={() => setShowAddDocModal(true)}>
+                <Plus size="var(--icon-control)" /> Add document
+              </button>
+            </div>
+
+            <div className="project-section-body">
+              {project.documents.length === 0 ? (
+                <StateMessage
+                  kind="empty"
+                  title="No documents attached"
+                  description="Add existing documents or PDFs to this project to organize your sources, drafts, notes, and outputs."
+                  action={
+                    <button className="primary-button" type="button" onClick={() => setShowAddDocModal(true)}>
+                      <Plus size="var(--icon-control)" /> Add first document
+                    </button>
+                  }
+                />
+              ) : (
+                <div className="project-doc-table">
+                  {project.documents.map((doc) => (
+                    <article key={doc.document_id} className="project-doc-row">
+                      <div className="project-doc-main">
+                        <div className="project-doc-title-row">
+                          <button
+                            type="button"
+                            className="project-doc-title-btn"
+                            onClick={() => {
+                              workbench.ensureDocumentOpen(doc.document_id, doc.document_title)
+                              void navigate({
+                                to: '/documents/$documentId',
+                                params: { documentId: doc.document_id },
+                              })
+                            }}
+                          >
+                            {doc.document_title}
+                          </button>
+                          <code className="project-doc-path">{doc.document_path}</code>
+                        </div>
+
+                        {doc.notes && <p className="project-doc-notes">{doc.notes}</p>}
+
+                        <div className="project-doc-badges">
+                          <span className={`project-role-badge role-${doc.role}`}>{doc.role}</span>
+                          {doc.pinned_page && (
+                            <span className="project-page-badge">
+                              <BookOpen size="var(--icon-detail)" /> Page {doc.pinned_page}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="project-doc-actions">
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          onClick={() => {
+                            workbench.ensureDocumentOpen(doc.document_id, doc.document_title)
+                            void navigate({
+                              to: '/documents/$documentId',
+                              params: { documentId: doc.document_id },
+                            })
+                          }}
+                        >
+                          Open
+                        </button>
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          onClick={() => removeDocMutation.mutate(doc.document_id)}
+                          disabled={removeDocMutation.isPending}
+                          aria-label={`Remove ${doc.document_title} from project`}
+                        >
+                          <Trash2 size="var(--icon-control)" />
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+
+        <div className="project-detail-sidebar">
+          {/* Workbench Context Layout Status */}
+          <section className="project-section-panel">
+            <div className="project-section-header">
+              <h2>
+                <Layout size="var(--icon-inline)" /> Workbench Context
+              </h2>
+            </div>
+            <div className="project-section-body" style={{ display: 'grid', gap: 'var(--space-3)' }}>
+              <p style={{ margin: 0, fontSize: 'var(--text-meta)', color: 'var(--muted)', lineHeight: 'var(--leading-body)' }}>
+                {project.workbench_state_json
+                  ? 'Active workbench layout snapshot is saved. Resuming this project restores your splits, active editors, and documents.'
+                  : 'No layout snapshot saved yet. Click "Snapshot current layout" in the header to remember your current workbench arrangement.'}
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  style={{ width: '100%' }}
+                  onClick={handleSaveCurrentLayout}
+                  disabled={updateMutation.isPending}
+                >
+                  <Save size="var(--icon-control)" /> Snapshot Now
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Relevant Chat Threads */}
+          <section className="project-section-panel">
+            <div className="project-section-header">
+              <h2>
+                <MessageSquare size="var(--icon-inline)" /> Relevant Chat Threads
+              </h2>
+            </div>
+            <div className="project-section-body">
+              {project.threads.length === 0 ? (
+                <p style={{ color: 'var(--muted)', fontSize: 'var(--text-meta)', fontStyle: 'italic', margin: 0 }}>
+                  No chat threads linked yet. Link threads from Workspace Chat to keep your conversations attached.
+                </p>
+              ) : (
+                <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+                  {project.threads.map((t) => (
+                    <div key={t.thread_id} className="project-doc-row" style={{ padding: 'var(--space-2) var(--space-3)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <MessageSquare size="var(--icon-inline)" />
+                        <span style={{ fontWeight: 500, fontSize: 'var(--text-control)' }}>
+                          {t.title ?? 'Conversation'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
 
       {showAddDocModal && (
         <AddDocumentModal
@@ -926,40 +752,10 @@ function CreateProjectModal({
   })
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.65)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'var(--space-4)',
-        overflowY: 'auto',
-        zIndex: 50,
-      }}
-    >
-      <div
-        className="publication-edit-dialog"
-        style={{
-          width: 'min(36rem, calc(100vw - var(--space-5) * 2))',
-          maxHeight: 'calc(100dvh - var(--space-5) * 2)',
-          overflowY: 'auto',
-          padding: 'var(--space-4)',
-          background: 'var(--surface)',
-          borderRadius: 'var(--radius-panel)',
-          border: '1px solid var(--line)',
-        }}
-      >
-        <header
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 'var(--space-3)',
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 'var(--text-title-sm)' }}>Create Project</h2>
+    <div className="project-modal-overlay">
+      <div className="project-modal-dialog">
+        <header className="project-modal-header">
+          <h2>Create Project</h2>
           <button type="button" className="secondary-action" onClick={onClose} aria-label="Close">
             <X size="var(--icon-control)" />
           </button>
@@ -971,10 +767,10 @@ function CreateProjectModal({
             if (!name.trim()) return
             createMutation.mutate()
           }}
-          style={{ display: 'grid', gap: 'var(--space-3)' }}
+          className="project-modal-form"
         >
-          <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--text-label)', color: 'var(--muted)' }}>Project name *</span>
+          <label className="project-modal-field">
+            <span className="project-modal-label">Project name *</span>
             <input
               type="text"
               required
@@ -982,45 +778,22 @@ function CreateProjectModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Distributed Consensus Investigation"
-              style={{
-                height: 'var(--control-height)',
-                padding: '0 var(--space-3)',
-                border: '1px solid var(--line)',
-                borderRadius: 'var(--radius-control)',
-                background: 'var(--surface-soft)',
-                color: 'var(--text)',
-              }}
+              className="project-modal-input"
             />
           </label>
 
-          <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--text-label)', color: 'var(--muted)' }}>
-              Purpose & Goals (optional)
-            </span>
+          <label className="project-modal-field">
+            <span className="project-modal-label">Purpose & Goals (optional)</span>
             <textarea
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What questions is this project answering? What are the deliverables?"
-              style={{
-                padding: 'var(--space-2) var(--space-3)',
-                border: '1px solid var(--line)',
-                borderRadius: 'var(--radius-control)',
-                background: 'var(--surface-soft)',
-                color: 'var(--text)',
-                fontSize: 'var(--text-body)',
-              }}
+              className="project-modal-textarea"
             />
           </label>
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 'var(--space-2)',
-              marginTop: 'var(--space-2)',
-            }}
-          >
+          <div className="project-modal-actions">
             <button className="secondary-action" type="button" onClick={onClose}>
               Cancel
             </button>
@@ -1077,40 +850,10 @@ function AddDocumentModal({
   })
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.65)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'var(--space-4)',
-        overflowY: 'auto',
-        zIndex: 50,
-      }}
-    >
-      <div
-        className="publication-edit-dialog"
-        style={{
-          width: 'min(36rem, calc(100vw - var(--space-5) * 2))',
-          maxHeight: 'calc(100dvh - var(--space-5) * 2)',
-          overflowY: 'auto',
-          padding: 'var(--space-4)',
-          background: 'var(--surface)',
-          borderRadius: 'var(--radius-panel)',
-          border: '1px solid var(--line)',
-        }}
-      >
-        <header
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 'var(--space-3)',
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 'var(--text-title-sm)' }}>Add Document to Project</h2>
+    <div className="project-modal-overlay">
+      <div className="project-modal-dialog">
+        <header className="project-modal-header">
+          <h2>Add Document to Project</h2>
           <button type="button" className="secondary-action" onClick={onClose} aria-label="Close">
             <X size="var(--icon-control)" />
           </button>
@@ -1122,22 +865,16 @@ function AddDocumentModal({
             if (!selectedDocId) return
             addMutation.mutate()
           }}
-          style={{ display: 'grid', gap: 'var(--space-3)' }}
+          className="project-modal-form"
         >
-          <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--text-label)', color: 'var(--muted)' }}>Select document *</span>
+          <label className="project-modal-field">
+            <span className="project-modal-label">Select document *</span>
             <select
               value={selectedDocId}
               onChange={(e) => setSelectedDocId(e.target.value)}
               required
-              style={{
-                height: 'var(--control-height)',
-                padding: '0 var(--space-3)',
-                border: '1px solid var(--line)',
-                borderRadius: 'var(--radius-control)',
-                background: 'var(--surface-soft)',
-                color: 'var(--text)',
-              }}
+              className="project-modal-select"
+              aria-label="Select document"
             >
               <option value="">-- Choose a document --</option>
               {availableDocs.map((doc) => (
@@ -1148,9 +885,25 @@ function AddDocumentModal({
             </select>
           </label>
 
-          <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--text-label)', color: 'var(--muted)' }}>Project Role</span>
+          <div className="project-modal-field">
+            <label htmlFor="project-role-select" className="project-modal-label">
+              Project Role
+            </label>
+            <div className="project-role-pills-row">
+              {ROLE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`project-role-choice-pill ${role === opt.value ? 'active' : ''}`}
+                  onClick={() => setRole(opt.value)}
+                  title={opt.description}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <select
+              id="project-role-select"
               value={role}
               onChange={(e) => {
                 const parsed = projectRoleSchema.safeParse(e.target.value)
@@ -1158,14 +911,7 @@ function AddDocumentModal({
                   setRole(parsed.data)
                 }
               }}
-              style={{
-                height: 'var(--control-height)',
-                padding: '0 var(--space-3)',
-                border: '1px solid var(--line)',
-                borderRadius: 'var(--radius-control)',
-                background: 'var(--surface-soft)',
-                color: 'var(--text)',
-              }}
+              className="project-modal-select"
             >
               {ROLE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -1173,57 +919,32 @@ function AddDocumentModal({
                 </option>
               ))}
             </select>
-          </label>
+          </div>
 
-          <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--text-label)', color: 'var(--muted)' }}>
-              Pinned Page (for PDFs, optional)
-            </span>
+          <label className="project-modal-field">
+            <span className="project-modal-label">Pinned Page (for PDFs, optional)</span>
             <input
               type="number"
               min="1"
               value={pinnedPage}
               onChange={(e) => setPinnedPage(e.target.value)}
               placeholder="e.g. 14"
-              style={{
-                height: 'var(--control-height)',
-                padding: '0 var(--space-3)',
-                border: '1px solid var(--line)',
-                borderRadius: 'var(--radius-control)',
-                background: 'var(--surface-soft)',
-                color: 'var(--text)',
-              }}
+              className="project-modal-input"
             />
           </label>
 
-          <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--text-label)', color: 'var(--muted)' }}>
-              Notes / Takeaways (optional)
-            </span>
+          <label className="project-modal-field">
+            <span className="project-modal-label">Notes / Takeaways (optional)</span>
             <textarea
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="e.g. Primary literature reference for Section 3"
-              style={{
-                padding: 'var(--space-2) var(--space-3)',
-                border: '1px solid var(--line)',
-                borderRadius: 'var(--radius-control)',
-                background: 'var(--surface-soft)',
-                color: 'var(--text)',
-                fontSize: 'var(--text-body)',
-              }}
+              className="project-modal-textarea"
             />
           </label>
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 'var(--space-2)',
-              marginTop: 'var(--space-2)',
-            }}
-          >
+          <div className="project-modal-actions">
             <button className="secondary-action" type="button" onClick={onClose}>
               Cancel
             </button>
