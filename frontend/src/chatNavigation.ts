@@ -9,6 +9,7 @@ export type ChatNavigationContext = {
 declare module '@tanstack/history' {
   interface HistoryState {
     sangamChatContext?: ChatNavigationContext
+    sangamChatInitialPrompt?: string
   }
 }
 

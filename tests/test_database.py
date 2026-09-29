@@ -50,6 +50,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "022",
         "023",
         "024",
+        "025",
     ]
     assert {
         "projects_created_at_idx",
@@ -57,6 +58,8 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "project_documents_doc_idx",
         "project_threads_thread_idx",
         "project_annotations_ann_idx",
+        "chat_run_sources_run_idx",
+        "chat_proposals_run_idx",
         "operation_events_revision_outcome_created_idx",
         "documents_deleted_updated_idx",
         "documents_category_idx",

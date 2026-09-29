@@ -664,6 +664,38 @@ class IdentityService:
         except sqlite3.OperationalError:
             logger.warning("Could not update agent-token last-use telemetry", exc_info=True)
 
+    def reauthorize(self, principal: Principal) -> Principal:
+        """Refresh an authenticated in-flight actor's token lifetime and current grants."""
+        if principal.token_id is None:
+            return principal
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT t.*, a.display_name, a.identity_kind FROM actor_tokens t "
+                "JOIN actors a ON a.actor_id = t.actor_id WHERE t.token_id = ? AND t.actor_id = ?",
+                (principal.token_id, principal.actor_id),
+            ).fetchone()
+            if row is None or row["revoked_at"] is not None:
+                raise AuthenticationError("The bearer token has been revoked")
+            if row["expires_at"] is not None and self._parse_timestamp(
+                row["expires_at"]
+            ) <= datetime.now(UTC):
+                raise AuthenticationError("The bearer token has expired")
+            scopes = connection.execute(
+                "SELECT capability, path_prefix FROM token_scopes WHERE token_id = ?",
+                (principal.token_id,),
+            ).fetchall()
+        return Principal(
+            actor_id=principal.actor_id,
+            display_name=row["display_name"],
+            identity_kind=row["identity_kind"],
+            operation_id=principal.operation_id,
+            token_id=principal.token_id,
+            scopes=tuple(
+                ScopeGrant(Capability(scope["capability"]), scope["path_prefix"] or None)
+                for scope in scopes
+            ),
+        )
+
     @staticmethod
     def _parse_token_id(raw_token: str) -> str:
         if not raw_token.startswith("sgm_agt_"):

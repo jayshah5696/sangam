@@ -8,6 +8,8 @@ export type CitationTarget = {
   annotationId?: string
   title?: string
   textLocator?: TextLocator
+  quoteStart?: number
+  quoteEnd?: number
 }
 
 export const CITATION_NAVIGATION_EVENT = 'sangam:citation-navigation'
@@ -27,6 +29,8 @@ const citationDataSchema = z.object({
     .optional(),
   annotation_id: z.string().trim().min(1).max(200).optional(),
   title: z.string().trim().min(1).max(500).optional(),
+  quote_start: z.number().int().nonnegative().optional(),
+  quote_end: z.number().int().nonnegative().optional(),
 })
 
 export type CitationDataPayload = z.input<typeof citationDataSchema>
@@ -42,6 +46,8 @@ export function citationTargetFromData(data: CitationDataPayload | undefined): C
     annotationId: parsed.data.annotation_id,
     title: parsed.data.title,
     textLocator: parsed.data.text_locator,
+    quoteStart: parsed.data.quote_start,
+    quoteEnd: parsed.data.quote_end,
   }
 }
 
@@ -49,7 +55,9 @@ export function citationTargetFromLocation(documentId: string): CitationTarget |
   if (!window.location.pathname.endsWith(`/documents/${documentId}`))
     return pendingTargets.get(documentId) ?? null
   const search = new URLSearchParams(window.location.search)
+  const pending = pendingTargets.get(documentId)
   pendingTargets.delete(documentId)
+  if (pending) return pending
   const exact = search.get('text')
   const start = Number(search.get('start') ?? 0)
   const target = citationTargetFromData({
@@ -69,7 +77,21 @@ export function citationTargetFromLocation(documentId: string): CitationTarget |
           }
         : undefined,
   })
-  return target && (target.revisionId || target.pageNumber || target.annotationId || target.textLocator)
+  if (target) {
+    const offset = z.coerce.number().int().nonnegative()
+    const start = search.has('quoteStart') ? offset.safeParse(search.get('quoteStart')) : null
+    const end = search.has('quoteEnd') ? offset.safeParse(search.get('quoteEnd')) : null
+    if (start?.success && end?.success && end.data > start.data) {
+      target.quoteStart = start.data
+      target.quoteEnd = end.data
+    }
+  }
+  return target &&
+    (target.revisionId ||
+      target.pageNumber ||
+      target.annotationId ||
+      target.textLocator ||
+      target.quoteStart !== undefined)
     ? target
     : null
 }
@@ -84,6 +106,8 @@ export function citationHref(target: CitationTarget): string {
     search.set('start', String(target.textLocator.start))
     if (target.textLocator.representation) search.set('representation', target.textLocator.representation)
   }
+  if (target.quoteStart !== undefined) search.set('quoteStart', String(target.quoteStart))
+  if (target.quoteEnd !== undefined) search.set('quoteEnd', String(target.quoteEnd))
   const suffix = search.size ? `?${search.toString()}` : ''
   return `/documents/${encodeURIComponent(target.documentId)}${suffix}`
 }

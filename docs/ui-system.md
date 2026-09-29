@@ -143,7 +143,10 @@ The **Review changes** route lists pending and stale agent proposals. Each card
 shows the target revision, a contextual diff, and Apply or Dismiss actions. A
 recorded turn context can add a source document, source revision, selected
 passage, PDF page, and annotation link. The inbox shows recorded turn context
-only. Tool citation counts do not reconstruct every source read during a turn.
+separately from cited supporting passages. Each proposal run records up to 50
+retrieved source references, including reads after proposal creation, and shows
+when references were omitted. Up to 20 supporting citations are validated against
+exact authorized revisions. Retrieval alone does not establish claim support.
 Legacy proposals say that no source evidence was recorded. If a recorded
 source is deleted or no longer readable, the inbox says that the evidence is
 unavailable and hides the stored source details.

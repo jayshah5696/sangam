@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -11,7 +11,12 @@ import {
   Rows2,
 } from 'lucide-react'
 import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
-import { evidenceTextForLocator, locateEvidencePassage, locatePassage } from '../../evidenceCitation'
+import {
+  evidenceTextForLocator,
+  locateEvidencePassage,
+  locatePassage,
+  type TextLocator,
+} from '../../evidenceCitation'
 import { StateMessage } from '../ui/StateMessage'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 import { TextSelectionToolbar, type TextSelectionAnchor } from './TextSelectionToolbar'
@@ -467,7 +472,16 @@ export function DocumentWorkspace({
           error={citedHistoryQuery.isError || (citedHistoryQuery.isSuccess && !citedRevision)}
           onClose={() => {
             const url = new URL(window.location.href)
-            for (const key of ['revision', 'page', 'annotation', 'text', 'start', 'representation'])
+            for (const key of [
+              'revision',
+              'page',
+              'annotation',
+              'text',
+              'start',
+              'representation',
+              'quoteStart',
+              'quoteEnd',
+            ])
               url.searchParams.delete(key)
             clearCitationNavigation(documentId)
             window.history.replaceState(window.history.state, '', url)
@@ -628,10 +642,33 @@ function CitedRevisionEvidence({
 }) {
   const current = target.revisionId === document.current_revision_id
   const ref = useRef<HTMLElement>(null)
-  const sourceText = revision
-    ? evidenceTextForLocator(revision.content, document.content_type, target.textLocator)
-    : ''
-  const locator = target.textLocator
+  const quoteRef = useRef<HTMLElement>(null)
+  const hasQuote = !target.textLocator && target.quoteStart !== undefined && target.quoteEnd !== undefined
+  // Editorial offsets address raw UTF-16 source; evidence locators may address rendered text.
+  const quoteLocator = useMemo<TextLocator | undefined>(
+    () =>
+      !target.textLocator &&
+      revision &&
+      target.quoteStart !== undefined &&
+      target.quoteEnd !== undefined &&
+      Number.isInteger(target.quoteStart) &&
+      Number.isInteger(target.quoteEnd) &&
+      target.quoteStart >= 0 &&
+      target.quoteEnd > target.quoteStart &&
+      target.quoteEnd <= revision.content.length
+        ? {
+            exact: revision.content.slice(target.quoteStart, target.quoteEnd),
+            start: target.quoteStart,
+            end: target.quoteEnd,
+            prefix: '',
+            suffix: '',
+            representation: 'source',
+          }
+        : undefined,
+    [revision, target],
+  )
+  const locator = target.textLocator ?? quoteLocator
+  const sourceText = revision ? evidenceTextForLocator(revision.content, document.content_type, locator) : ''
   const passage =
     locator && sourceText.slice(locator.start, locator.end) === locator.exact
       ? locator
@@ -639,10 +676,15 @@ function CitedRevisionEvidence({
         ? locatePassage(sourceText, locator.exact)
         : undefined
   useEffect(() => {
-    if (!revision || !target.textLocator) return
-    ref.current?.focus()
+    if (!revision || !locator) return
+    if (hasQuote && quoteLocator) {
+      quoteRef.current?.scrollIntoView({ block: 'nearest' })
+      quoteRef.current?.focus({ preventScroll: true })
+      return
+    }
+    ref.current?.focus({ preventScroll: true })
     ref.current?.querySelector('mark')?.scrollIntoView({ block: 'center' })
-  }, [revision, target])
+  }, [revision, locator, hasQuote, quoteLocator])
   return (
     <section ref={ref} tabIndex={-1} className="citation-evidence" aria-labelledby="citation-evidence-title">
       <header>
@@ -665,6 +707,26 @@ function CitedRevisionEvidence({
           The cited revision is not available in this document’s history. The current head has not been
           substituted.
         </p>
+      )}
+      {quoteLocator && document.content_type !== 'application/pdf' && (
+        <section
+          ref={quoteRef}
+          tabIndex={-1}
+          className="citation-quote"
+          aria-label="Exact cited passage"
+          data-source-revision={revision?.revision_id}
+        >
+          <p className="eyebrow">Exact cited passage</p>
+          <blockquote>{quoteLocator.exact}</blockquote>
+        </section>
+      )}
+      {revision && hasQuote && !quoteLocator && (
+        <StateMessage
+          compact
+          kind="error"
+          title="The passage locator is outside this revision"
+          description="The current head has not been substituted."
+        />
       )}
       {revision && (
         <details open data-source-revision={revision.revision_id}>

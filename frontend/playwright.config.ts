@@ -34,7 +34,7 @@ export default defineConfig({
     {
       name: 'chromium-touch-mobile',
       testMatch:
-        /(?:projects|capture-projects-screenshots|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence)\.spec\.ts/,
+        /(?:projects|capture-projects-screenshots|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence|review-inbox)\.spec\.ts/,
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
     },
     {
@@ -50,6 +50,11 @@ export default defineConfig({
     {
       name: 'webkit-mobile-projects',
       testMatch: /projects\.spec\.ts$/,
+      use: { ...devices['iPhone 13'] },
+    },
+    {
+      name: 'webkit-mobile-editorial',
+      testMatch: /review-inbox\.spec\.ts/,
       use: { ...devices['iPhone 13'] },
     },
   ],

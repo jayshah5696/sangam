@@ -126,6 +126,12 @@ revision, selected passage, PDF page, or annotation. The inbox labels older
 proposals without recorded context and sources that are no longer readable
 separately.
 
+The inbox separates cited supporting passages from retrieved sources and recorded
+turn context. You can edit the wording before applying it. **Prepare revision
+request in chat** fills the source thread's composer with your feedback and the
+exact proposal context. Choose **Send** to deliver it. Preparing feedback leaves
+the original proposal available for review.
+
 ## Incident response
 
 If a token is compromised:

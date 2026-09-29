@@ -17,20 +17,57 @@ setup:
 test-projects:
     uv run pytest tests/test_projects.py tests/test_projects_perf.py
 
-# Print the reviewed API fingerprint after an intentional contract change.
-update-openapi:
-    uv run python scripts/verify_openapi_contract.py --print
-
 # Drive projects against an isolated live server and inspect committed audit/data state.
 verify-projects port="8872":
     #!/usr/bin/env bash
     set -Eeuo pipefail
-    export TMPDIR="$(mktemp -d /tmp/opencode/projects-proof.XXXXXX)"
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-projects-control.XXXXXX")"
     trap './scripts/control-sangam.sh cleanup; rm -rf "$TMPDIR"' EXIT
     ./scripts/control-sangam.sh launch "{{ port }}"
     ./scripts/control-sangam.sh doctor
     source "$TMPDIR/.sangam-active-verification"
     uv run python scripts/verify_projects.py
+
+# Run focused backend behavior regressions.
+test-backend-focused args="":
+    uv run pytest {{ args }}
+
+# Regenerate the API fingerprint after intentional contract changes.
+update-openapi:
+    uv run python scripts/verify_openapi_contract.py --write
+
+# Serve disposable browser fixtures for interactive investigation.
+serve-e2e port="8873":
+    SANGAM_E2E_PORT="{{ port }}" bash frontend/scripts/run-e2e-server.sh
+
+# Operate the browser against a running isolated fixture instance.
+browser args="":
+    agent-browser --session sangam-staging {{ args }}
+
+# Install missing WebKit libraries without changing the host system.
+setup-webkit-local:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    root="{{ justfile_directory() }}/.venv/webkit-libs"
+    mkdir -p "$root"
+    cd "$root"
+    for package in \
+      main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.9_amd64.deb \
+      universe/f/flite/libflite1_2.2-6build3_amd64.deb \
+      main/i/icu/libicu74_74.2-1ubuntu3.1_amd64.deb; do
+        archive="${package##*/}"
+        curl --fail --location --silent --show-error "https://archive.ubuntu.com/ubuntu/pool/$package" --output "$archive"
+        ar p "$archive" data.tar.zst | tar --zstd --extract --file - --directory "$root"
+    done
+
+# Run browser tests with the optional isolated WebKit compatibility libraries.
+test-e2e-webkit-local args="":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    root="{{ justfile_directory() }}/.venv/webkit-libs/usr/lib/x86_64-linux-gnu"
+    export LD_PRELOAD=""
+    for library in "$root"/*.so.[0-9]*; do LD_PRELOAD="$LD_PRELOAD:$library"; done
+    just test-e2e '{{ args }}'
 
 # Run the complete fast local verification suite.
 test:
@@ -141,7 +178,7 @@ verify-behavior port="8765" count="25" eval_limit="3":
 verify-security port="8893":
     #!/usr/bin/env bash
     set -Eeuo pipefail
-    export TMPDIR="$(mktemp -d /tmp/opencode/sangam-security-control.XXXXXX)"
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-security-control.XXXXXX")"
     export SANGAM_VERIFY_SECURITY=1
     trap 'rmdir "$TMPDIR" 2>/dev/null || true' EXIT
     just verify-behavior "{{ port }}" 25 3
