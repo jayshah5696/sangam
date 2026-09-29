@@ -575,3 +575,61 @@ def test_organization_document_pages_use_one_authorized_order(client):
         if offset is None:
             break
     assert paths == ["root/a.md", "root/b.md", "root/c.md", "root/d.md", "root/e.md"]
+
+
+def test_nested_cross_document_pipeline_does_not_wait_on_a_backup_blocked_owner():
+    from sangam.mutations import MutationCoordinator
+
+    coordinator = MutationCoordinator()
+    acquired = threading.Event()
+    enter_nested = threading.Event()
+    finished = threading.Event()
+    backup_finished = threading.Event()
+    other_finished = threading.Event()
+
+    def source():
+        with coordinator.document("source"):
+            acquired.set()
+            assert enter_nested.wait(timeout=10)
+            with coordinator.document("copy"):
+                finished.set()
+
+    def backup():
+        with coordinator.backup():
+            backup_finished.set()
+
+    def copy_request():
+        with coordinator.document("copy"):
+            other_finished.set()
+
+    threads = [
+        threading.Thread(target=target, daemon=True) for target in [source, backup, copy_request]
+    ]
+    threads[0].start()
+    assert acquired.wait(timeout=10)
+    threads[1].start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with coordinator._condition:
+            if coordinator._waiting_backups:
+                break
+        time.sleep(0.01)
+    else:
+        pytest.fail("Backup did not reach generation barrier")
+    threads[2].start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with coordinator._condition:
+            if coordinator._document_lock_users.get("copy", 0):
+                break
+        time.sleep(0.01)
+    else:
+        pytest.fail("Copy request did not reach document boundary")
+    enter_nested.set()
+    assert finished.wait(timeout=2), (
+        "Pipeline waited on a document lock held by a backup-blocked request"
+    )
+    assert backup_finished.wait(timeout=10)
+    assert other_finished.wait(timeout=10)
+    for thread in threads:
+        thread.join(timeout=10)

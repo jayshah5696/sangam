@@ -53,7 +53,9 @@ class MutationCoordinator:
     def document(self, document_id: str) -> Iterator[None]:
         lock = self._retain_document_lock(document_id)
         try:
-            with lock, self.mutation():
+            # Never hold a document lock while waiting for a generation. An
+            # active pipeline may need that lock to finish before the backup.
+            with self.mutation(), lock:
                 yield
         finally:
             self._release_document_lock(document_id)
