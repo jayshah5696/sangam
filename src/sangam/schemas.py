@@ -989,7 +989,78 @@ class ChatEffectsSummary(BaseModel):
     total_history: int
 
 
-ProjectRole = Literal["source", "draft", "output", "note"]
+ProjectRole = Literal["source", "draft", "output", "note", "decision"]
+
+
+class ProjectTab(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    documentId: str = Field(min_length=1)
+    title: str
+    pinned: bool
+
+
+class ProjectGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["group"]
+    id: str = Field(min_length=1)
+    tabs: list[ProjectTab] = Field(max_length=100)
+    activeTabId: str | None
+
+
+class ProjectSplit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["split"]
+    id: str = Field(min_length=1)
+    direction: Literal["horizontal", "vertical"]
+    ratio: float = Field(ge=10, le=90)
+    first: ProjectGroup | ProjectSplit
+    second: ProjectGroup | ProjectSplit
+
+
+class ProjectClosedTab(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    groupId: str = Field(min_length=1)
+    tab: ProjectTab
+
+
+class ProjectLayout(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal[1]
+    root: ProjectGroup | ProjectSplit
+    activeGroupId: str
+    recentlyClosed: list[ProjectClosedTab] = Field(default_factory=list, max_length=12)
+
+    def groups(self) -> list[ProjectGroup]:
+        def visit(node: ProjectGroup | ProjectSplit) -> list[ProjectGroup]:
+            return (
+                [node] if isinstance(node, ProjectGroup) else visit(node.first) + visit(node.second)
+            )
+
+        return visit(self.root)
+
+    @model_validator(mode="after")
+    def valid_selection(self) -> ProjectLayout:
+        def node_ids(node: ProjectGroup | ProjectSplit) -> list[str]:
+            return (
+                [node.id]
+                if isinstance(node, ProjectGroup)
+                else [node.id, *node_ids(node.first), *node_ids(node.second)]
+            )
+
+        all_ids = node_ids(self.root)
+        if len(set(all_ids)) != len(all_ids):
+            raise ValueError("Layout node IDs must be unique")
+        groups = self.groups()
+        ids = [g.id for g in groups]
+        if len(groups) > 16 or len(set(ids)) != len(ids) or self.activeGroupId not in ids:
+            raise ValueError("Layout requires unique groups and a valid active group")
+        for group in groups:
+            tabs = [t.documentId for t in group.tabs]
+            if len(set(tabs)) != len(tabs) or (
+                group.activeTabId is not None and group.activeTabId not in tabs
+            ):
+                raise ValueError("Active tab must belong to its group")
+        return self
 
 
 class ProjectDocumentItem(BaseModel):
@@ -1001,6 +1072,11 @@ class ProjectDocumentItem(BaseModel):
     role: ProjectRole
     pinned_page: int | None = None
     notes: str | None = None
+    source_revision_id: str | None = None
+    current_revision_id: str
+    source_updated: bool = False
+    excerpt: str = ""
+    updated_at: str
     created_at: str
 
 
@@ -1029,6 +1105,9 @@ class ProjectSummary(BaseModel):
     brief_document_id: str | None = None
     brief_document_title: str | None = None
     active_thread_id: str | None = None
+    active_document_id: str | None = None
+    version: int = 1
+    last_worked_at: str | None = None
     document_count: int = 0
     thread_count: int = 0
     annotation_count: int = 0
@@ -1038,7 +1117,7 @@ class ProjectSummary(BaseModel):
 
 
 class ProjectDetail(ProjectSummary):
-    workbench_state_json: str | None = None
+    workbench_state_json: str | None = Field(default=None, max_length=200_000)
     documents: list[ProjectDocumentItem] = Field(default_factory=list)
     threads: list[ProjectThreadItem] = Field(default_factory=list)
     annotations: list[ProjectAnnotationItem] = Field(default_factory=list)
@@ -1052,11 +1131,21 @@ class CreateProject(MutationRequest):
 
 
 class UpdateProject(MutationRequest):
+    expected_version: int | None = Field(default=None, ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     brief_document_id: str | None = None
-    workbench_state_json: str | None = None
+    workbench_state_json: str | None = Field(default=None, max_length=200_000)
     active_thread_id: str | None = None
+    active_document_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_layout(self) -> UpdateProject:
+        if self.workbench_state_json is not None:
+            ProjectLayout.model_validate_json(self.workbench_state_json)
+        if "name" in self.model_fields_set and (self.name is None or not self.name.strip()):
+            raise ValueError("Project name cannot be empty")
+        return self
 
 
 class AddProjectDocument(MutationRequest):
@@ -1067,6 +1156,8 @@ class AddProjectDocument(MutationRequest):
 
 
 class UpdateProjectDocument(MutationRequest):
+    expected_version: int | None = Field(default=None, ge=1)
+    source_revision_id: str | None = None
     role: ProjectRole | None = None
     pinned_page: int | None = Field(default=None, ge=1)
     notes: str | None = Field(default=None, max_length=2000)

@@ -770,6 +770,11 @@ export const projectDocumentItemSchema = z.object({
   role: projectRoleSchema,
   pinned_page: z.number().nullable().optional(),
   notes: z.string().nullable().optional(),
+  source_revision_id: z.string().nullable().optional(),
+  current_revision_id: z.string(),
+  source_updated: z.boolean().default(false),
+  excerpt: z.string().default(''),
+  updated_at: z.string(),
   created_at: z.string(),
 })
 export type ProjectDocumentItem = z.infer<typeof projectDocumentItemSchema>
@@ -801,6 +806,9 @@ export const projectSummarySchema = z.object({
   brief_document_id: z.string().nullable().optional(),
   brief_document_title: z.string().nullable().optional(),
   active_thread_id: z.string().nullable().optional(),
+  active_document_id: z.string().nullable().optional(),
+  version: z.number().int().positive(),
+  last_worked_at: z.string().nullable().optional(),
   document_count: z.number(),
   thread_count: z.number(),
   annotation_count: z.number(),
@@ -1564,15 +1572,19 @@ export const api = {
   async getProject(projectId: string): Promise<ProjectDetail> {
     return projectDetailSchema.parse(await request(`/projects/${projectId}`))
   },
-  async createProject(input: {
-    name: string
-    description?: string | null
-    brief_document_id?: string | null
-    create_brief?: boolean
-  }): Promise<ProjectDetail> {
+  async createProject(
+    input: {
+      name: string
+      description?: string | null
+      brief_document_id?: string | null
+      create_brief?: boolean
+    },
+    idempotencyKey = crypto.randomUUID(),
+  ): Promise<ProjectDetail> {
     return projectDetailSchema.parse(
       await request('/projects', {
         method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(input),
       }),
     )
@@ -1581,6 +1593,8 @@ export const api = {
     projectId: string,
     input: {
       name?: string | null
+      expected_version?: number
+      active_document_id?: string | null
       description?: string | null
       brief_document_id?: string | null
       workbench_state_json?: string | null
@@ -1618,6 +1632,8 @@ export const api = {
     documentId: string,
     input: {
       role?: ProjectRole
+      expected_version?: number
+      source_revision_id?: string | null
       pinned_page?: number | null
       notes?: string | null
     },
@@ -1639,6 +1655,9 @@ export const api = {
         body: JSON.stringify({ thread_id: threadId }),
       }),
     )
+  },
+  async listProjectThreads(): Promise<ProjectThreadItem[]> {
+    return z.array(projectThreadItemSchema).parse(await request('/projects/available-threads'))
   },
   async removeProjectThread(projectId: string, threadId: string): Promise<void> {
     await request(`/projects/${projectId}/threads/${threadId}`, { method: 'DELETE' })

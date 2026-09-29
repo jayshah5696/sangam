@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
-from conftest import headers
+import pytest
+from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.application import build_application_services
@@ -12,6 +14,168 @@ from sangam.schemas import (
     CreateProject,
 )
 from sangam.security import Principal
+
+
+def test_projects_reject_scoped_agents_without_disclosing_references(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Private"}).json()
+    token = issue_agent_token(
+        client, capabilities=("read", "create", "update"), path_prefix="public"
+    )
+    auth = {"Authorization": f"Bearer {token}"}
+    for method, path, body in [
+        ("GET", "/api/v1/projects", None),
+        ("GET", f"/api/v1/projects/{project['project_id']}", None),
+        ("POST", "/api/v1/projects", {"name": "Escape"}),
+        ("PATCH", f"/api/v1/projects/{project['project_id']}", {"name": "Escape"}),
+        ("DELETE", f"/api/v1/projects/{project['project_id']}", None),
+    ]:
+        response = client.request(method, path, json=body, headers=auth)
+        assert response.status_code == 403, response.text
+        assert project["brief_document_id"] not in response.text
+
+
+def test_project_create_and_delete_replay_do_not_duplicate_brief(client: TestClient) -> None:
+    payload = {"name": "Replay", "description": "One purpose"}
+    first = client.post("/api/v1/projects", json=payload, headers=headers("project-replay"))
+    second = client.post("/api/v1/projects", json=payload, headers=headers("project-replay"))
+    assert first.status_code == second.status_code == 201
+    assert first.json() == second.json()
+    assert len(client.get("/api/v1/projects").json()) == 1
+    assert len(client.get("/api/v1/documents").json()) == 1
+    conflict = client.post(
+        "/api/v1/projects", json={"name": "Other"}, headers=headers("project-replay")
+    )
+    assert conflict.status_code == 409
+    path = f"/api/v1/projects/{first.json()['project_id']}"
+    assert client.delete(path, headers=headers("delete-replay")).status_code == 204
+    assert client.delete(path, headers=headers("delete-replay")).status_code == 204
+
+
+def test_project_optimistic_conflict_and_explicit_null_clear(client: TestClient) -> None:
+    project = client.post(
+        "/api/v1/projects", json={"name": "Concurrent", "description": "Purpose"}
+    ).json()
+    path = f"/api/v1/projects/{project['project_id']}"
+
+    def update(name: str):
+        return client.patch(path, json={"name": name, "expected_version": project["version"]})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(update, ["First", "Second"]))
+    assert sorted(r.status_code for r in responses) == [200, 409]
+    current = client.get(path).json()
+    cleared = client.patch(
+        path,
+        json={
+            "description": None,
+            "brief_document_id": None,
+            "expected_version": current["version"],
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["description"] is None
+    assert cleared.json()["brief_document_id"] is None
+
+
+def test_project_rejects_invalid_layout_and_nonmember_draft(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Layout"}).json()
+    doc = client.post(
+        "/api/v1/documents",
+        json={"title": "Unrelated", "content": "Body"},
+        headers=headers("unrelated"),
+    ).json()
+    path = f"/api/v1/projects/{project['project_id']}"
+    assert client.patch(path, json={"workbench_state_json": "{bad"}).status_code == 422
+    assert (
+        client.patch(path, json={"workbench_state_json": json.dumps({"groups": []})}).status_code
+        == 422
+    )
+    assert client.patch(path, json={"active_document_id": doc["document_id"]}).status_code == 422
+    assert (
+        client.patch(path, json={"active_document_id": project["brief_document_id"]}).status_code
+        == 422
+    )
+
+
+def test_project_source_revision_and_membership_nulls(client: TestClient) -> None:
+    project = client.post(
+        "/api/v1/projects", json={"name": "Sources", "create_brief": False}
+    ).json()
+    doc = client.post(
+        "/api/v1/documents",
+        json={"title": "Decision", "content": "# Header\n\nUseful body."},
+        headers=headers("source"),
+    ).json()
+    path = f"/api/v1/projects/{project['project_id']}/documents"
+    added = client.post(
+        path,
+        json={
+            "document_id": doc["document_id"],
+            "role": "decision",
+            "notes": "Keep this",
+            "pinned_page": 1,
+        },
+    )
+    assert added.status_code == 201
+    assert added.json()["source_revision_id"] == doc["current_revision_id"]
+    assert added.json()["excerpt"] == "Useful body."
+    changed = client.patch(
+        f"/api/v1/documents/{doc['document_id']}",
+        json={
+            "content": "# Header\n\nNew body.",
+            "expected_revision_id": doc["current_revision_id"],
+        },
+        headers=headers("change-source"),
+    )
+    assert changed.status_code == 200, changed.text
+    detail = client.get(f"/api/v1/projects/{project['project_id']}").json()
+    assert detail["documents"][0]["source_updated"] is True
+    cleared = client.patch(
+        f"{path}/{doc['document_id']}",
+        json={
+            "notes": None,
+            "pinned_page": None,
+            "source_revision_id": changed.json()["current_revision_id"],
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["notes"] is None
+    assert cleared.json()["pinned_page"] is None
+    assert cleared.json()["source_updated"] is False
+
+
+def test_project_atomic_audit_failure_rolls_back_brief(settings: Settings) -> None:
+    services = build_application_services(settings)
+    principal = Principal.trusted_human(
+        actor_id=settings.trusted_human_actor_id,
+        display_name="Owner",
+        operation_id="atomic-project",
+    )
+    with services.projects.database.connection() as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_project_audit BEFORE INSERT ON operation_events "
+            "WHEN NEW.resource_type = 'project' BEGIN SELECT RAISE(ABORT, 'audit blocked'); END"
+        )
+    with pytest.raises(Exception, match="audit blocked"):
+        services.projects.create_project(principal, CreateProject(name="Rollback"))
+    assert services.projects.list_projects() == []
+    assert services.documents.list_document_summaries() == []
+
+
+def test_deleted_brief_is_not_a_resume_reference(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Deleted brief"}).json()
+    brief = client.get(f"/api/v1/documents/{project['brief_document_id']}").json()
+    response = client.request(
+        "DELETE",
+        f"/api/v1/documents/{project['brief_document_id']}",
+        json={"expected_revision_id": brief["current_revision_id"]},
+        headers=headers("trash-brief"),
+    )
+    assert response.status_code == 200
+    detail = client.get(f"/api/v1/projects/{project['project_id']}").json()
+    assert detail["brief_document_id"] is None
+    assert detail["active_document_id"] is None
+    assert detail["documents"] == []
 
 
 def test_project_crud_and_auto_brief(client: TestClient) -> None:
@@ -33,7 +197,7 @@ def test_project_crud_and_auto_brief(client: TestClient) -> None:
     assert project["brief_document_title"] == "Distributed Consensus Review Brief"
     assert project["document_count"] == 1
     assert len(project["documents"]) == 1
-    assert project["documents"][0]["role"] == "draft"
+    assert project["documents"][0]["role"] == "note"
 
     # Verify brief document exists as an ordinary Markdown document
     brief_id = project["brief_document_id"]
@@ -51,9 +215,15 @@ def test_project_crud_and_auto_brief(client: TestClient) -> None:
 
     # 3. Update project details and workbench state
     layout_state = {
-        "groups": [
-            {"id": "group-1", "activeId": brief_id, "tabs": [{"id": brief_id, "title": "Brief"}]}
-        ]
+        "schemaVersion": 1,
+        "activeGroupId": "group-1",
+        "recentlyClosed": [],
+        "root": {
+            "kind": "group",
+            "id": "group-1",
+            "activeTabId": brief_id,
+            "tabs": [{"documentId": brief_id, "title": "Brief", "pinned": False}],
+        },
     }
     update_res = client.patch(
         f"/api/v1/projects/{project_id}",

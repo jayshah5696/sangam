@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -201,7 +202,19 @@ def test_concurrent_project_mutations(settings: Settings) -> None:
                 principal,
                 proj.project_id,
                 UpdateProject(
-                    workbench_state_json=f'{{"activeWorker": {worker_idx}}}',
+                    workbench_state_json=json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "activeGroupId": f"worker-{worker_idx}",
+                            "recentlyClosed": [],
+                            "root": {
+                                "kind": "group",
+                                "id": f"worker-{worker_idx}",
+                                "tabs": [],
+                                "activeTabId": None,
+                            },
+                        }
+                    ),
                 ),
             )
         except Exception as e:

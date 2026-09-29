@@ -8,6 +8,30 @@ port := "8000"
 default:
     @just --list
 
+# Install the locked Python and browser-client dependencies.
+setup:
+    uv sync --locked
+    pnpm --dir frontend install --frozen-lockfile
+
+# Exercise the project API failure cases.
+test-projects:
+    uv run pytest tests/test_projects.py tests/test_projects_perf.py
+
+# Print the reviewed API fingerprint after an intentional contract change.
+update-openapi:
+    uv run python scripts/verify_openapi_contract.py --print
+
+# Drive projects against an isolated live server and inspect committed audit/data state.
+verify-projects port="8872":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d /tmp/opencode/projects-proof.XXXXXX)"
+    trap './scripts/control-sangam.sh cleanup; rm -rf "$TMPDIR"' EXIT
+    ./scripts/control-sangam.sh launch "{{ port }}"
+    ./scripts/control-sangam.sh doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/verify_projects.py
+
 # Run the complete fast local verification suite.
 test:
     uv run ruff check .
