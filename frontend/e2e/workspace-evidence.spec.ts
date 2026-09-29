@@ -12,10 +12,15 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: path.join(directory, `${name}-${testInfo.project.name}.png`) })
 }
 
-async function create(request: APIRequestContext, content: string, contentType = 'text/markdown') {
+async function create(
+  request: APIRequestContext,
+  content: string,
+  contentType = 'text/markdown',
+  title = `Evidence ${randomUUID()}`,
+) {
   const response = await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': randomUUID() },
-    data: { title: `Evidence ${randomUUID()}`, content, content_type: contentType },
+    data: { title, content, content_type: contentType },
   })
   expect(response.ok(), await response.text()).toBeTruthy()
   return documentSchema.parse(await response.json())
@@ -135,6 +140,40 @@ test('replacement remaps an existing passage to the actual new revision', async 
   )
   expect(stored.pinnedRevisionId).toBe(head.current_revision_id)
   expect(head.content.slice(stored.textLocator.start, stored.textLocator.end)).toBe(stored.selectedText)
+})
+
+test('Markdown source titles cannot change the citation destination', async ({ page, request }) => {
+  const source = await create(
+    request,
+    '# Source\n\nA passage with a literal source title.',
+    'text/markdown',
+    'Research ](https://example.com) [notes \\ <https://example.com> **draft** `literal`',
+  )
+  const draft = await create(request, '# Draft\n\nOriginal draft content.')
+  await page.goto(`/documents/${source.document_id}`)
+  await page.getByRole('radio', { name: 'preview' }).click()
+  await selectPassage(page)
+  await openDraft(page, draft.title)
+  await research(page)
+  await page.getByRole('button', { name: 'Insert at cursor', exact: true }).click()
+  await expect
+    .poll(
+      async () =>
+        documentSchema.parse(await (await request.get(`/api/v1/documents/${draft.document_id}`)).json())
+          .content,
+    )
+    .toContain(source.current_revision_id)
+  const sheet = page.getByRole('dialog', { name: 'Document inspector', exact: true })
+  if (await sheet.isVisible())
+    await sheet.getByRole('button', { name: 'Collapse document inspector' }).click()
+  await page.getByRole('radio', { name: 'preview' }).click()
+  const link = page.getByRole('link', { name: `Source: ${source.title}`, exact: true })
+  await expect(link).toHaveAttribute(
+    'href',
+    new RegExp(`/documents/${source.document_id}\\?revision=${source.current_revision_id}`),
+  )
+  await link.click()
+  await expect(page.locator('.citation-evidence mark')).toHaveText('A passage with a literal source title.')
 })
 
 test('rendered formatting and repeated passages keep the selected occurrence', async ({ page, request }) => {

@@ -186,7 +186,11 @@ export function evidenceCitationMarkdown(reference: EvidenceReference): string {
   }
 
   const { link, label } = evidenceSourceLink(reference)
-  return `\n\n${lines.join('\n')}\n\n[Source: ${label}](${link})\n`
+  const literalLabel = ['\\', '[', ']', '<', '>', '*', '_', '`', '!', '~'].reduce(
+    (text, character) => text.replaceAll(character, `\\${character}`),
+    label,
+  )
+  return `\n\n${lines.join('\n')}\n\n[Source: ${literalLabel}](${link})\n`
 }
 
 function evidenceSourceLink(reference: EvidenceReference) {
