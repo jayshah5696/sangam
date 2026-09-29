@@ -350,31 +350,31 @@ class OrganizationSnapshotPage(BaseModel):
 
 
 class UpdateDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     content: str
     title: str | None = Field(default=None, min_length=1, max_length=240)
     summary: str | None = Field(default=None, max_length=500)
 
 
 class PathMutation(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     path: str
     summary: str | None = Field(default=None, max_length=500)
 
 
 class DeleteDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     summary: str | None = Field(default=None, max_length=500)
 
 
 class RestoreDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     revision_id: str
     summary: str | None = Field(default=None, max_length=500)
 
 
 class DuplicateDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     title: str | None = Field(default=None, min_length=1, max_length=240)
     path: str | None = Field(default=None, max_length=500)
 

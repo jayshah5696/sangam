@@ -2313,3 +2313,108 @@ def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_re
             p.get("text", "") for p in payload.get("content", []) if p.get("type") == "output_text"
         )
         assert db_text == asst_text
+
+
+def test_document_conditional_headers_and_concurrency(client: TestClient) -> None:
+    """Verify ETag, If-None-Match, If-Match, and optimistic concurrency control across agents."""
+    # 1. Create document
+    create_res = client.post(
+        "/api/v1/documents",
+        json={"title": "Conditional Doc", "content": "Version 1", "path": "cond.md"},
+        headers=headers("create-cond-1"),
+    )
+    assert create_res.status_code == 201
+    doc = create_res.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+    assert f'"{rev1}"' in create_res.headers.get("ETag", "")
+
+    # 2. GET returns ETag
+    get_res = client.get(f"/api/v1/documents/{doc_id}", headers=headers("get-cond-1"))
+    assert get_res.status_code == 200
+    assert get_res.headers["ETag"] == f'"{rev1}"'
+
+    # 3. GET with matching If-None-Match returns 304 Not Modified
+    get_304 = client.get(
+        f"/api/v1/documents/{doc_id}",
+        headers={**headers("get-cond-304"), "If-None-Match": f'"{rev1}"'},
+    )
+    assert get_304.status_code == 304
+    assert get_304.headers["ETag"] == f'"{rev1}"'
+    assert get_304.content == b""
+
+    # 4. GET with non-matching If-None-Match returns 200
+    get_stale = client.get(
+        f"/api/v1/documents/{doc_id}",
+        headers={**headers("get-cond-stale"), "If-None-Match": '"stale_revision_id"'},
+    )
+    assert get_stale.status_code == 200
+
+    # 5. PATCH with If-Match header omitting body expected_revision_id succeeds
+    patch_res = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"content": "Version 2 by Agent A"},
+        headers={**headers("patch-if-match-1"), "If-Match": f'"{rev1}"'},
+    )
+    assert patch_res.status_code == 200
+    updated_doc = patch_res.json()
+    rev2 = updated_doc["current_revision_id"]
+    assert rev2 != rev1
+    assert patch_res.headers["ETag"] == f'"{rev2}"'
+
+    # 6. PATCH with stale If-Match returns 409 Conflict
+    stale_patch = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"content": "Version 3 Stale"},
+        headers={**headers("patch-stale-if-match"), "If-Match": f'"{rev1}"'},
+    )
+    assert stale_patch.status_code == 409
+    assert stale_patch.json()["error"]["code"] == "revision_conflict"
+
+    # 7. PATCH with conflicting If-Match header vs body expected_revision_id returns 422
+    mismatch_patch = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={"content": "Version 3 Mismatch", "expected_revision_id": rev2},
+        headers={**headers("patch-mismatch"), "If-Match": f'"{rev1}"'},
+    )
+    assert mismatch_patch.status_code == 422
+    assert "If-Match header does not match" in mismatch_patch.json()["error"]["message"]
+
+    # 8. Concurrent update race between separate agent identities using If-Match
+    current_rev = rev2
+    agent_a_results = []
+    agent_b_results = []
+
+    def run_agent_a():
+        res = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={"content": "Agent A Content"},
+            headers={**headers("race-agent-a"), "If-Match": f'"{current_rev}"'},
+        )
+        agent_a_results.append(res)
+
+    def run_agent_b():
+        res = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={"content": "Agent B Content"},
+            headers={**headers("race-agent-b"), "If-Match": f'"{current_rev}"'},
+        )
+        agent_b_results.append(res)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        fa = executor.submit(run_agent_a)
+        fb = executor.submit(run_agent_b)
+        fa.result(timeout=5)
+        fb.result(timeout=5)
+
+    status_codes = sorted([agent_a_results[0].status_code, agent_b_results[0].status_code])
+    assert status_codes == [200, 409], f"Expected exactly one 200 and one 409, got {status_codes}"
+
+    # Verify document content matches the winner
+    final_get = client.get(f"/api/v1/documents/{doc_id}", headers=headers("final-get"))
+    assert final_get.status_code == 200
+    final_data = final_get.json()
+    if agent_a_results[0].status_code == 200:
+        assert final_data["content"] == "Agent A Content"
+    else:
+        assert final_data["content"] == "Agent B Content"
