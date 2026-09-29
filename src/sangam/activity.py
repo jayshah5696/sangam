@@ -24,7 +24,7 @@ from sangam.schemas import (
     AgentAccessHealth,
     OperationEvent,
 )
-from sangam.security import Principal, sanitize_sensitive_data
+from sangam.security import Principal, sanitize_sensitive_data, sanitize_sensitive_text
 
 EXPIRY_WARNING_DAYS = 7
 RECENT_DENIED_DAYS = 1
@@ -675,7 +675,7 @@ class ActivityService:
             action,
             resource_type,
             resource_id,
-            path,
+            sanitize_sensitive_text(path) if path is not None else None,
             outcome,
             error_code,
             revision_id,

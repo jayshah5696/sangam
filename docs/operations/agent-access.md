@@ -1,5 +1,60 @@
 # Agent access
 
+## Path scopes and conditional HTTP requests
+
+Path grants are recursive prefixes. `docs`, `docs/*`, and `docs/**` grant the
+same subtree, including deeper descendants. Root aliases are `/`, `*`, `**`,
+`/*`, and `/**`. Empty or absent prefixes also grant the root. Malformed
+prefixes such as `//`, `*/*`, and embedded wildcards are rejected. Stored
+literal wildcard prefixes are not rewritten on upgrade. Administrators must
+review and reissue those grants through token settings or the issuance API.
+
+Scoped organization reads filter before pagination. Ancestors outside the
+grant have structural paths and authorized document counts. Their category
+and tags are empty, their metadata version is zero, and their timestamps are
+empty. Global tag enumeration requires a
+global read grant. Organization reads use the normal activity boundary.
+
+Document JSON responses have a strong `ETag` over all represented fields,
+including tags, trust, extraction status, and materialization state. The raw
+and download validators cover the bytes and media type. These validators are
+different contracts. Use the JSON validator for document mutations. The
+`current_revision_id` body field and `X-Sangam-Revision-ID` GET response header
+identify content revisions, not HTTP representations.
+
+GET, raw, and download support `If-Match` and `If-None-Match`. Update, move,
+materialize, delete, restore, duplicate, metadata, and trust support both
+conditions. `If-Match` compares strong tags. `If-None-Match` compares weakly.
+Lists use OR comparison and may contain commas inside quoted tags. Only the
+unquoted `*` is a wildcard. `"*"` is an ordinary tag. Malformed fields return
+422. Empty tags are valid, but empty fields are rejected. An `If-Match`
+failure takes precedence over an `If-None-Match` match. A matching GET cache
+condition returns an empty 304 response with its validator. False mutation
+conditions return 412 with `precondition_failed`.
+
+HTTP conditions do not replace supplied body revision, metadata, or trust
+version guards. Those independent guards still return 409. A revision body
+guard may be omitted when a revision mutation supplies an HTTP condition.
+Metadata and trust still require their body versions. Restore evaluates the
+retained deleted document. Missing resources retain the normal 404 policy.
+
+Authorization precedes condition parsing and replay. Storage rechecks the
+condition after replay lookup inside the committing transaction while the
+document pipeline is coordinated. Identical successful retries keep the
+same request identity, including wildcard requests. Changed bodies or
+headers with the same key return 409. Replay returns the current result and
+repairs pending text materialization. It does not restore an old snapshot.
+
+Audit redaction covers supported token strings in free text and paths, and
+complete private PEM blocks before diff generation. Edit counts still
+describe the original edit. Document content is preserved. Request headers
+are sanitized for request context, but are not newly persisted in the
+activity ledger. Mutation and audit atomicity already existed before this
+repair.
+
+Run `just verify-security 8893` for isolated live HTTP, token, storage, and
+audit-export proof through the canonical behavior harness.
+
 Agents interact with Sangam through the same API as humans, using scoped bearer tokens instead of shared credentials. Agent edits are attributed, revision-checked, idempotent, and reviewable.
 
 ## Discovery endpoints

@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from pathlib import PurePosixPath
 
 from sangam.actors import ActorService
+from sangam.conditions import validate_storage_condition
 from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
@@ -263,6 +264,12 @@ class DocumentService:
                     resource_type="document",
                     resource_id=document_id,
                 )
+                current = self._get_document_in_connection(connection, document_id)
+                self.database.set_audit_target(
+                    resource_id=document_id,
+                    revision_id=current.current_revision_id,
+                    path=current.path,
+                )
         return self.get_document(document_id)
 
     def list_documents(self, *, include_deleted: bool = False) -> list[Document]:
@@ -351,6 +358,7 @@ class DocumentService:
             (actor_id, key),
         ).fetchone()
         if not row:
+            validate_storage_condition(connection)
             return None
         if row["operation"] != operation or row["request_hash"] != request_hash:
             raise IdempotencyError(
@@ -1537,6 +1545,11 @@ class DocumentService:
                 WHERE document_id = ? AND current_revision_id = ?
                 """,
                 (file_hash, document.document_id, document.current_revision_id),
+            )
+            self.database.set_audit_target(
+                resource_id=document.document_id,
+                revision_id=document.current_revision_id,
+                path=document.path,
             )
 
     def rematerialize_document(self, document_id: str) -> Document:

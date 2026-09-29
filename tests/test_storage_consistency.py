@@ -8,6 +8,7 @@ import sqlite3
 import tarfile
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -38,6 +39,16 @@ def _create_text(client: TestClient, *, path: str = "race.md") -> dict:
     return response.json()
 
 
+def _wait_for_pipeline_attempt(service: DocumentService, document_id: str, users: int = 2) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        with service.mutations._condition:
+            if service.mutations._document_lock_users.get(document_id, 0) >= users:
+                return
+        time.sleep(0.01)
+    pytest.fail("Request did not reach the coordinated document boundary")
+
+
 def _start_paused_backup(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     manager = client.app.state.services.backups.manager
     original_archive = manager._archive_workspace
@@ -64,7 +75,6 @@ def test_document_pipeline_serializes_revision_materialization_and_search(
     original_write = service.workspace.write_atomic
     first_write_started = threading.Event()
     release_first_write = threading.Event()
-    second_attempted = threading.Event()
 
     def delayed_write(path: str, content: str) -> str:
         if content == "first":
@@ -72,15 +82,7 @@ def test_document_pipeline_serializes_revision_materialization_and_search(
             assert release_first_write.wait(timeout=5)
         return original_write(path, content)
 
-    original_append = service._append_revision
-
-    def observed_append(**kwargs):
-        if kwargs["idempotency_key"] == "second-update":
-            second_attempted.set()
-        return original_append(**kwargs)
-
     monkeypatch.setattr(service.workspace, "write_atomic", delayed_write)
-    monkeypatch.setattr(service, "_append_revision", observed_append)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         first_future = executor.submit(
@@ -101,7 +103,7 @@ def test_document_pipeline_serializes_revision_materialization_and_search(
             json={"expected_revision_id": first_revision, "content": "second"},
             headers=headers("second-update"),
         )
-        assert second_attempted.wait(timeout=5)
+        _wait_for_pipeline_attempt(service, created["document_id"])
 
         # The second mutation has reached the document boundary, but cannot commit
         # while the first revision still owns materialization and FTS synchronization.
@@ -128,7 +130,6 @@ def test_create_pipeline_blocks_an_update_until_materialization_finishes(
     original_write = service.workspace.write_atomic
     create_write_started = threading.Event()
     release_create_write = threading.Event()
-    update_attempted = threading.Event()
 
     def delayed_write(path: str, content: str) -> str:
         if content == "created":
@@ -136,14 +137,7 @@ def test_create_pipeline_blocks_an_update_until_materialization_finishes(
             assert release_create_write.wait(timeout=5)
         return original_write(path, content)
 
-    original_append = service._append_revision
-
-    def observed_append(**kwargs):
-        update_attempted.set()
-        return original_append(**kwargs)
-
     monkeypatch.setattr(service.workspace, "write_atomic", delayed_write)
-    monkeypatch.setattr(service, "_append_revision", observed_append)
     with ThreadPoolExecutor(max_workers=2) as executor:
         create_future = executor.submit(
             client.post,
@@ -159,7 +153,7 @@ def test_create_pipeline_blocks_an_update_until_materialization_finishes(
             json={"expected_revision_id": pending.current_revision_id, "content": "updated"},
             headers=headers("update-after-create"),
         )
-        assert update_attempted.wait(timeout=5)
+        _wait_for_pipeline_attempt(service, pending.document_id)
         assert service.get_document(pending.document_id).current_revision_id == (
             pending.current_revision_id
         )
@@ -188,7 +182,6 @@ def test_restore_and_move_pipelines_block_followup_updates(
     original_write = service.workspace.write_atomic
     pipeline_write_started = threading.Event()
     release_pipeline_write = threading.Event()
-    followup_attempted = threading.Event()
 
     def delayed_write(path: str, content: str) -> str:
         if (operation == "restore" and content == "base") or (
@@ -198,15 +191,7 @@ def test_restore_and_move_pipelines_block_followup_updates(
             assert release_pipeline_write.wait(timeout=5)
         return original_write(path, content)
 
-    original_append = service._append_revision
-
-    def observed_append(**kwargs):
-        if kwargs["idempotency_key"] == f"followup-{operation}":
-            followup_attempted.set()
-        return original_append(**kwargs)
-
     monkeypatch.setattr(service.workspace, "write_atomic", delayed_write)
-    monkeypatch.setattr(service, "_append_revision", observed_append)
     with ThreadPoolExecutor(max_workers=2) as executor:
         if operation == "restore":
             pipeline_future = executor.submit(
@@ -239,7 +224,7 @@ def test_restore_and_move_pipelines_block_followup_updates(
             },
             headers=headers(f"followup-{operation}"),
         )
-        assert followup_attempted.wait(timeout=5)
+        _wait_for_pipeline_attempt(service, created["document_id"])
         assert service.get_document(created["document_id"]).current_revision_id == (
             pipeline_head.current_revision_id
         )
@@ -258,14 +243,6 @@ def test_backup_excludes_in_flight_text_mutations(
     created = _create_text(client, path=f"{operation}/before.md")
     service: DocumentService = client.app.state.services.documents
     manager, executor, backup_future, release_archive = _start_paused_backup(client, monkeypatch)
-    mutation_attempted = threading.Event()
-    original_append = service._append_revision
-
-    def observed_append(**kwargs):
-        mutation_attempted.set()
-        return original_append(**kwargs)
-
-    monkeypatch.setattr(service, "_append_revision", observed_append)
     if operation == "update":
         mutation_future = executor.submit(
             client.patch,
@@ -292,7 +269,7 @@ def test_backup_excludes_in_flight_text_mutations(
             headers=headers("backup-race-delete"),
         )
 
-    assert mutation_attempted.wait(timeout=5)
+    _wait_for_pipeline_attempt(service, created["document_id"], users=1)
     assert (
         service.get_document(created["document_id"]).current_revision_id
         == created["current_revision_id"]
@@ -612,8 +589,7 @@ def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
     assert res_create.status_code == 201
     doc = res_create.json()
     doc_id = doc["document_id"]
-    rev_1 = doc["current_revision_id"]
-    expected_etag = f'"{rev_1}"'
+    expected_etag = res_create.headers["ETag"]
     assert res_create.headers.get("ETag") == expected_etag
 
     # 2. GET document and check ETag header
@@ -632,14 +608,20 @@ def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
     # 4. GET raw with If-None-Match
     res_raw_304 = client.get(
         f"/api/v1/documents/{doc_id}/raw",
-        headers={**headers("raw-if-none-match"), "If-None-Match": expected_etag},
+        headers={
+            **headers("raw-if-none-match"),
+            "If-None-Match": client.get(f"/api/v1/documents/{doc_id}/raw").headers["ETag"],
+        },
     )
     assert res_raw_304.status_code == 304
 
     # 5. GET download with If-None-Match
     res_dl_304 = client.get(
         f"/api/v1/documents/{doc_id}/download",
-        headers={**headers("dl-if-none-match"), "If-None-Match": expected_etag},
+        headers={
+            **headers("dl-if-none-match"),
+            "If-None-Match": client.get(f"/api/v1/documents/{doc_id}/download").headers["ETag"],
+        },
     )
     assert res_dl_304.status_code == 304
 
@@ -655,34 +637,35 @@ def test_document_if_match_conditional_update_and_conflict(client: TestClient) -
     created = _create_text(client, path="if_match.md")
     doc_id = created["document_id"]
     rev_1 = created["current_revision_id"]
+    etag_1 = client.get(f"/api/v1/documents/{doc_id}").headers["ETag"]
 
     # 1. Update using If-Match header without expected_revision_id in body
     update_1 = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={"content": "Updated via If-Match header"},
-        headers={**headers("update-if-match-1"), "If-Match": f'"{rev_1}"'},
+        headers={**headers("update-if-match-1"), "If-Match": etag_1},
     )
     assert update_1.status_code == 200
     rev_2 = update_1.json()["current_revision_id"]
     assert rev_2 != rev_1
-    assert update_1.headers.get("ETag") == f'"{rev_2}"'
+    assert update_1.headers.get("ETag") == client.get(f"/api/v1/documents/{doc_id}").headers["ETag"]
 
-    # 2. Attempt update using stale If-Match header -> 409 Conflict
+    # HTTP precondition failures use 412 independently of body revision conflicts.
     stale_update = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={"content": "Stale edit attempt"},
-        headers={**headers("update-if-match-stale"), "If-Match": f'"{rev_1}"'},
+        headers={**headers("update-if-match-stale"), "If-Match": etag_1},
     )
-    assert stale_update.status_code == 409
-    assert stale_update.json()["error"]["code"] == "revision_conflict"
+    assert stale_update.status_code == 412
+    assert stale_update.json()["error"]["code"] == "precondition_failed"
 
-    # 3. Attempt update with mismatched If-Match and body expected_revision_id -> 409 Conflict
+    # A false supplied header is evaluated before the independent body guard.
     mismatched_update = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={"expected_revision_id": rev_2, "content": "Mismatched edit attempt"},
-        headers={**headers("update-if-match-mismatch"), "If-Match": f'"{rev_1}"'},
+        headers={**headers("update-if-match-mismatch"), "If-Match": etag_1},
     )
-    assert mismatched_update.status_code == 409
+    assert mismatched_update.status_code == 412
 
     # 4. Update using wildcard If-Match: "*"
     wildcard_update = client.patch(
@@ -697,7 +680,7 @@ def test_document_if_match_conditional_update_and_conflict(client: TestClient) -
 def test_concurrent_race_conditional_updates_with_if_match(client: TestClient) -> None:
     created = _create_text(client, path="race_if_match.md")
     doc_id = created["document_id"]
-    initial_rev = created["current_revision_id"]
+    initial_etag = client.get(f"/api/v1/documents/{doc_id}").headers["ETag"]
 
     agent1_status = None
     agent2_status = None
@@ -707,7 +690,7 @@ def test_concurrent_race_conditional_updates_with_if_match(client: TestClient) -
         res = client.patch(
             f"/api/v1/documents/{doc_id}",
             json={"content": "Content from Agent 1"},
-            headers={**headers("agent-1-update"), "If-Match": f'"{initial_rev}"'},
+            headers={**headers("agent-1-update"), "If-Match": initial_etag},
         )
         agent1_status = res.status_code
 
@@ -716,7 +699,7 @@ def test_concurrent_race_conditional_updates_with_if_match(client: TestClient) -
         res = client.patch(
             f"/api/v1/documents/{doc_id}",
             json={"content": "Content from Agent 2"},
-            headers={**headers("agent-2-update"), "If-Match": f'"{initial_rev}"'},
+            headers={**headers("agent-2-update"), "If-Match": initial_etag},
         )
         agent2_status = res.status_code
 
@@ -727,8 +710,8 @@ def test_concurrent_race_conditional_updates_with_if_match(client: TestClient) -
         f2.result(timeout=5)
 
     status_codes = sorted([agent1_status, agent2_status])
-    # Exactly one agent must succeed (200) and the other must be rejected with conflict (409)
-    assert status_codes == [200, 409], f"Unexpected status codes: {status_codes}"
+    # Exactly one succeeds; the stale HTTP precondition fails.
+    assert status_codes == [200, 412], f"Unexpected status codes: {status_codes}"
 
     # Verify final document is consistent
     final_doc = client.get(f"/api/v1/documents/{doc_id}", headers=headers("get-final-race")).json()

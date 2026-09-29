@@ -31,6 +31,19 @@ check: test test-docs validate-compose
 test-backend:
     uv run pytest
 
+# Install the locked dependencies in an isolated checkout.
+setup:
+    uv sync --locked
+    pnpm --dir frontend install --frozen-lockfile
+
+# Run the security consolidation failure cases against real temporary storage.
+test-security:
+    uv run pytest tests/test_security_contracts.py
+
+# Print the API contract digest for a reviewed fingerprint update.
+generate-api:
+    uv run python scripts/verify_openapi_contract.py --print
+
 # Run reproducible concurrency, backpressure saturation, and audit integrity benchmark.
 benchmark-concurrency workers="20" ops="15":
     uv run python scripts/benchmark_concurrency.py --workers "{{ workers }}" --ops-per-worker "{{ ops }}" 
@@ -98,8 +111,21 @@ verify-behavior port="8765" count="25" eval_limit="3":
     ./scripts/control-sangam.sh launch "{{ port }}"
     ./scripts/control-sangam.sh doctor
     ./scripts/control-sangam.sh seed
+    if [[ "${SANGAM_VERIFY_SECURITY:-}" == "1" ]]; then
+        source "${TMPDIR:-/tmp}/.sangam-active-verification"
+        uv run python scripts/verify_security_api.py
+    fi
     ./scripts/control-sangam.sh benchmark "{{ count }}"
     ./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" "{{ eval_limit }}"
+
+# Run the canonical behavior harness with private control state and live security proof.
+verify-security port="8893":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d /tmp/opencode/sangam-security-control.XXXXXX)"
+    export SANGAM_VERIFY_SECURITY=1
+    trap 'rmdir "$TMPDIR" 2>/dev/null || true' EXIT
+    just verify-behavior "{{ port }}" 25 3
 
 # Prove the verification harness rejects an invalid benchmark count, mismatched document, and streaming error events.
 verify-negative port="8995":
