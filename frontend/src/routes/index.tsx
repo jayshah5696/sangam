@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { api, DOCUMENT_PAGE_SIZE } from '../api'
+import { useDocumentSessions } from '../documentSessions'
 import { collectGroups, useWorkbench } from '../workbench'
 import { selectHomeDocuments } from '../workspaceHome'
 import { StateMessage } from '../components/ui/StateMessage'
@@ -34,6 +35,7 @@ function Welcome() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const sessions = useDocumentSessions()
   const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
   const [searchQuery, setSearchQuery] = useState('')
   const [selection, setSelection] = useState(readHomeSelection)
@@ -75,6 +77,7 @@ function Welcome() {
         contentType,
       ),
     onSuccess: async (document) => {
+      sessions.openForWriting(document)
       if (selected)
         await api.addProjectDocument(selected.project_id, {
           document_id: document.document_id,

@@ -23,6 +23,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { api } from '../api'
+import { useDocumentSessions } from '../documentSessions'
 import { canSplitActiveGroup } from '../splitPolicy'
 import { findGroup, useWorkbench } from '../workbench'
 
@@ -40,6 +41,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const sessions = useDocumentSessions()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -56,6 +58,7 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
   const { mutate: createNewDocument } = useMutation({
     mutationFn: () => api.createDocument('Untitled document'),
     onSuccess: async (document) => {
+      sessions.openForWriting(document)
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
       workbench.ensureDocumentOpen(document.document_id, document.title, workbench.activeGroupId)
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })

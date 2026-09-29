@@ -252,11 +252,21 @@ function GroupInspector({ documentId }: { documentId: string }) {
       return
     }
     if (preferences.rightVisible) {
+      if (sessions.getSession(documentId).focusOnOpen) {
+        updatePreferences({ rightVisible: false })
+        sheetWasOpenRef.current = false
+        return
+      }
       if (sheetWasOpenRef.current) return
       sheetWasOpenRef.current = true
       sheetTriggerRef.current =
         globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : null
       requestAnimationFrame(() => {
+        if (
+          sessions.getSession(documentId).focusOnOpen ||
+          globalThis.document.activeElement?.closest('.cm-editor')
+        )
+          return
         globalThis.document
           .querySelector<HTMLElement>('.document-inspector [role="tab"][aria-selected="true"]')
           ?.focus()
@@ -272,7 +282,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
         : globalThis.document.querySelector<HTMLElement>('.mobile-inspector-toggle')
     restoreTarget?.focus()
     sheetTriggerRef.current = null
-  }, [isNarrow, preferences.rightVisible])
+  }, [documentId, isNarrow, preferences.rightVisible, sessions, updatePreferences])
   const pdfAnnotationsQuery = useQuery({
     queryKey: ['annotations', documentId, session.pdfAnnotationQuery ?? ''],
     queryFn: () => api.listAnnotations(documentId, session.pdfAnnotationQuery ?? ''),
@@ -350,16 +360,14 @@ function GroupInspector({ documentId }: { documentId: string }) {
         >
           <SlidersHorizontal size="var(--icon-control)" />
         </button>
-        {document.content_type === 'application/pdf' && (
-          <button
-            className="icon-button"
-            aria-label="PDF research"
-            data-tooltip="PDF research"
-            onClick={() => openToTab('research')}
-          >
-            <NotebookTabs size="var(--icon-control)" />
-          </button>
-        )}
+        <button
+          className="icon-button"
+          aria-label={document.content_type === 'application/pdf' ? 'PDF research' : 'Workspace evidence'}
+          data-tooltip={document.content_type === 'application/pdf' ? 'PDF research' : 'Workspace evidence'}
+          onClick={() => openToTab('research')}
+        >
+          <NotebookTabs size="var(--icon-control)" />
+        </button>
         <button
           className="icon-button"
           aria-label="Document outline"
@@ -437,6 +445,7 @@ function GroupInspector({ documentId }: { documentId: string }) {
         }}
       >
         <DocumentInspector
+          loadingDocument={documentQuery.isPlaceholderData}
           width={preferences.rightWidth}
           document={document}
           content={content}

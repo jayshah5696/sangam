@@ -67,6 +67,9 @@ export function PdfViewer({
   const pageNumber = pdfState.pageNumber
   const scrollRef = useRef<HTMLDivElement>(null)
   const initialStateRef = useRef(pdfState)
+  useEffect(() => {
+    initialStateRef.current = pdfState
+  }, [pdfState])
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageSize, setPageSize] = useState<PageSize>({ width: 612, height: 792 })
   const [availableWidth, setAvailableWidth] = useState(0)
@@ -104,10 +107,11 @@ export function PdfViewer({
       const viewport = firstPage.getViewport({ scale: 1 })
       setPageSize({ width: viewport.width, height: viewport.height })
       setPdf(loaded)
-      const initialState = initialStateRef.current
-      const boundedPage = Math.min(Math.max(initialState.pageNumber, 1), loaded.numPages)
-      if (boundedPage !== initialState.pageNumber) setPageNumber(boundedPage)
       requestAnimationFrame(() => {
+        // A citation received while the worker was loading wins over restoration.
+        const initialState = initialStateRef.current
+        const boundedPage = Math.min(Math.max(initialState.pageNumber, 1), loaded.numPages)
+        if (boundedPage !== initialState.pageNumber) setPageNumber(boundedPage)
         const host = scrollRef.current
         if (!host) return
         if (initialState.scrollTop > 0) host.scrollTop = initialState.scrollTop
@@ -308,6 +312,8 @@ export function PdfViewer({
       </div>
       {textSelection && (
         <PdfSelectionToolbar
+          key={`${textSelection.pageNumber}:${textSelection.selectedText}:${JSON.stringify(textSelection.geometry)}`}
+          pinnedRevisionId={document.current_revision_id}
           documentId={document.document_id}
           documentTitle={document.title}
           selection={textSelection}

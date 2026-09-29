@@ -55,11 +55,6 @@ check: test test-docs validate-compose
 test-backend:
     uv run pytest
 
-# Install the locked dependencies in an isolated checkout.
-setup:
-    uv sync --locked
-    pnpm --dir frontend install --frozen-lockfile
-
 # Run the security consolidation failure cases against real temporary storage.
 test-security:
     uv run pytest tests/test_security_contracts.py

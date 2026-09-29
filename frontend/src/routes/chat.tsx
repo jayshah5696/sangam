@@ -39,7 +39,24 @@ function WorkspaceChat() {
     enabled: Boolean(search.document),
   })
   const document = documentQuery.data ?? null
-  const contextIsCurrent = !document || !search.revision || document.current_revision_id === search.revision
+  const historyQuery = useQuery({
+    queryKey: ['history', search.document],
+    queryFn: () => api.history(search.document!),
+    enabled: Boolean(document && search.revision && document.current_revision_id !== search.revision),
+  })
+  const historical = historyQuery.data?.find((revision) => revision.revision_id === search.revision)
+  const contextDocument =
+    document && historical
+      ? {
+          ...document,
+          content: historical.content,
+          current_revision_id: historical.revision_id,
+          content_hash: historical.content_hash,
+          size_bytes: historical.size_bytes,
+        }
+      : document
+  const contextIsCurrent =
+    !document || !search.revision || document.current_revision_id === search.revision || Boolean(historical)
   const clearContext = () =>
     navigate({
       search: search.returnTo ? { returnTo: search.returnTo } : {},
@@ -78,7 +95,7 @@ function WorkspaceChat() {
         <MessageSquareText size="var(--icon-page)" />
       </header>
       <div className="workspace-chat-surface">
-        {documentQuery.isLoading ? (
+        {documentQuery.isLoading || historyQuery.isLoading ? (
           <StateMessage kind="loading" title="Attaching document context" />
         ) : documentQuery.isError || (search.document && !document) ? (
           <StateMessage
@@ -109,7 +126,7 @@ function WorkspaceChat() {
         ) : (
           <Suspense fallback={<StateMessage kind="loading" title="Preparing workspace chat" />}>
             <ChatPanel
-              document={document}
+              document={contextDocument}
               selectedText={selectedText}
               pdfPageNumber={document?.content_type === 'application/pdf' ? pdfPageNumber : null}
               annotationId={document?.content_type === 'application/pdf' ? annotationId : null}

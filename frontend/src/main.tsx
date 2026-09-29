@@ -33,10 +33,16 @@ if (!root) throw new Error('Sangam root element is missing')
 const reactRoot = createRoot(root)
 
 function WorkspaceSessions({ storage }: { storage: IndexedDbDraftStorage }) {
-  const { preferences } = useTheme()
+  const { preferences, updatePreferences } = useTheme()
   return (
     <WorkbenchProvider>
-      <DocumentSessionsProvider storage={storage} defaultMode={() => preferences.editorMode}>
+      <DocumentSessionsProvider
+        storage={storage}
+        defaultMode={() => preferences.editorMode}
+        onWritingIntent={() => {
+          if (matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
+        }}
+      >
         <RouterProvider router={router} />
       </DocumentSessionsProvider>
     </WorkbenchProvider>
