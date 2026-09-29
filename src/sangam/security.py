@@ -52,6 +52,9 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "proxy-authorization",
     "proxy-authenticate",
     "passphrase",
+    "x-client-cert",
+    "ssl-client-cert",
+    "x-tls-client-cert",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -72,6 +75,8 @@ _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
     "cf-access-jwt-assertion",
     "passphrase",
     "proxy-authenticate",
+    "cert",
+    "signature",
 )
 
 _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
@@ -103,6 +108,14 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "refresh_token",
     "access_token",
     "api_token",
+    "access_token_secret",
+    "pem",
+    "cert",
+    "certificate",
+    "signature",
+    "oauth_token",
+    "env_var",
+    "env_val",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -128,7 +141,7 @@ _SAFE_HEADER_EXCEPTIONS: set[str] = {
 }
 
 _TOKEN_PATTERN = re.compile(
-    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9_-]{16,})\b"
+    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9_-]{16,}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,})\b"
 )
 
 
