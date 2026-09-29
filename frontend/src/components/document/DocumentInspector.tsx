@@ -20,6 +20,7 @@ import { ActionMenu } from '../ActionMenu'
 import { workspaceLayoutPatch, workspaceLayoutPresets } from '../../workspaceLayout'
 
 import { WorkspaceEvidenceRail } from '../evidence/WorkspaceEvidenceRail'
+import { SelectableHtmlText } from '../SelectableHtmlText'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'research', 'outline', 'history', 'chat'] as const
@@ -36,6 +37,7 @@ export function DocumentInspector({
   onFocusEditor,
   onScrollToLine,
   modal = false,
+  loadingDocument = false,
 }: {
   width: number
   document: Document
@@ -46,6 +48,7 @@ export function DocumentInspector({
   onFocusEditor: () => void
   onScrollToLine?: (line: number) => void
   modal?: boolean
+  loadingDocument?: boolean
 }) {
   const documentId = document.document_id
   const session = useDocumentSession(documentId)
@@ -151,6 +154,7 @@ export function DocumentInspector({
   }
   return (
     <aside
+      inert={loadingDocument || undefined}
       className={`history-panel document-inspector ui-rail ui-rail--surface ${tab === 'chat' ? 'mode-chat' : ''}`}
       style={{ width }}
       role={modal ? 'dialog' : undefined}
@@ -233,12 +237,12 @@ export function DocumentInspector({
             )}
           </>
         )}
-        {tab === 'research' &&
-          (pdf ? (
-            <PdfResearchRail document={document} />
-          ) : (
+        {tab === 'research' && (
+          <>
+            {pdf && <PdfResearchRail document={document} />}
             <WorkspaceEvidenceRail document={document} />
-          ))}
+          </>
+        )}
         {tab === 'outline' && (
           <section className="outline-panel">
             {document.content_type === 'application/pdf' && (
@@ -320,8 +324,12 @@ export function DocumentInspector({
               fromRevision.revision_id !== toRevision.revision_id && (
                 <RevisionMergeView original={fromRevision.content} modified={toRevision.content} />
               )}
-            {document.content_type !== 'application/pdf' && previewRevision && (
-              <section className="revision-render-preview">
+            {document.content_type !== 'application/pdf' && previewRevision?.document_id === documentId && (
+              <section
+                className="revision-render-preview"
+                data-evidence-source={documentId}
+                data-source-revision={previewRevision.revision_id}
+              >
                 <header>
                   <strong>Rendered revision</strong>
                   <button className="secondary-action" onClick={() => setPreviewRevision(null)}>
@@ -331,7 +339,10 @@ export function DocumentInspector({
                 {document.content_type === 'text/markdown' ? (
                   <MarkdownPreview content={previewRevision.content} />
                 ) : (
-                  <HtmlPreview content={previewRevision.content} />
+                  <>
+                    <HtmlPreview content={previewRevision.content} />
+                    <SelectableHtmlText content={previewRevision.content} />
+                  </>
                 )}
               </section>
             )}

@@ -4,6 +4,7 @@ import { ApiError, api, type Document } from './api'
 import { IndexedDbDraftStorage, type DraftRecord, type DraftStorage } from './browserState/draftStorage'
 import type { EditorSelection, EditorViewState } from './components/MarkdownEditor'
 import type { AnnotationDraft } from './components/pdfResearchTypes'
+import { evidenceCitationForType, type EvidenceReference } from './evidenceCitation'
 
 export type { DraftStorage } from './browserState/draftStorage'
 
@@ -56,6 +57,7 @@ type StoreOptions = {
   saveDelay?: number
   persistDelay?: number
   getDefaultMode?: () => EditorMode
+  onWritingIntent?: () => void
 }
 
 const initialSelection: EditorSelection = { line: 1, column: 1, selectedCharacters: 0 }
@@ -77,8 +79,17 @@ export class DocumentSessionStore {
   private readonly listeners = new Map<string, Set<() => void>>()
   private readonly editorHandles = new Map<
     string,
-    { focus: () => void; scrollToLine?: (line: number) => void; insertText?: (text: string) => void }
+    {
+      focus: () => void
+      scrollToLine?: (line: number) => void
+      insertText?: (text: string, expectedContent?: string) => boolean
+    }
   >()
+  private readonly pendingInsertions = new Map<
+    string,
+    { text: string; resolve: (inserted: boolean) => void }
+  >()
+  private readonly initializing = new Map<string, Promise<void>>()
   private online = true
 
   constructor(private readonly options: StoreOptions) {
@@ -93,9 +104,14 @@ export class DocumentSessionStore {
     documentId: string,
     focus: () => void,
     scrollToLine?: (line: number) => void,
-    insertText?: (text: string) => void,
+    insertText?: (text: string, expectedContent?: string) => boolean,
   ) => {
     this.editorHandles.set(documentId, { focus, scrollToLine, insertText })
+    const pending = this.pendingInsertions.get(documentId)
+    if (pending) {
+      this.pendingInsertions.delete(documentId)
+      pending.resolve(this.insertText(documentId, pending.text))
+    }
     return () => {
       if (this.editorHandles.get(documentId)?.focus === focus) this.editorHandles.delete(documentId)
     }
@@ -106,6 +122,7 @@ export class DocumentSessionStore {
   }
 
   openForWriting = (document: Document) => {
+    this.options.onWritingIntent?.()
     this.updateSession(document.document_id, {
       mode: 'edit',
       focusOnOpen: true,
@@ -124,20 +141,58 @@ export class DocumentSessionStore {
 
   insertText = (documentId: string, text: string): boolean => {
     const handle = this.editorHandles.get(documentId)
-    if (handle?.insertText) {
-      handle.insertText(text)
+    if (this.runtimes.has(documentId) && handle?.insertText?.(text, this.getSession(documentId).content)) {
       handle.focus()
       return true
     }
+    return false
+  }
+
+  insertIntoDocument = async (documentId: string, text: string): Promise<boolean> =>
+    this.insertIntoLoadedDocument(await api.getDocument(documentId), text)
+
+  insertEvidence = async (documentId: string, reference: EvidenceReference): Promise<boolean> => {
+    const document = await api.getDocument(documentId)
+    return this.insertIntoLoadedDocument(document, evidenceCitationForType(reference, document.content_type))
+  }
+
+  private async insertIntoLoadedDocument(document: Document, text: string): Promise<boolean> {
+    const documentId = document.document_id
+    if (document.content_type === 'application/pdf') throw new Error('Choose a writable destination draft.')
+    await this.initializeDocument(document)
     const session = this.getSession(documentId)
-    const runtime = this.runtimes.get(documentId)
-    const currentContent = session.content ?? runtime?.document.content ?? ''
-    const newContent = `${currentContent.trimEnd()}${text}`
-    this.updateSession(documentId, {
-      content: newContent,
-      baseRevisionId: session.baseRevisionId ?? runtime?.document.current_revision_id,
+    if (session.draftPersistenceState === 'failed')
+      throw new Error('Recover the destination draft before inserting evidence.')
+    if (session.saveState === 'conflict')
+      throw new Error('Resolve the destination conflict before inserting evidence.')
+    this.updateSession(documentId, { mode: 'edit', focusOnOpen: true })
+    this.options.onWritingIntent?.()
+    if (this.insertText(documentId, text)) return true
+    return new Promise((resolve) => {
+      this.pendingInsertions.get(documentId)?.resolve(false)
+      this.pendingInsertions.set(documentId, { text, resolve })
     })
-    return true
+  }
+
+  flushSnapshot = async (documentId: string, snapshot: string): Promise<Document> => {
+    const runtime = this.runtimes.get(documentId)
+    if (!runtime) throw new Error('Source is not loaded.')
+    if (runtime.inFlight)
+      await new Promise<void>((resolve) => {
+        const stop = this.subscribe(documentId, () => {
+          if (!runtime.inFlight) {
+            stop()
+            resolve()
+          }
+        })
+      })
+    if (runtime.savedContent === snapshot) return runtime.document
+    if (this.getSession(documentId).content !== snapshot)
+      throw new Error('The source changed after selection. Select the passage again.')
+    await this.save(documentId)
+    if (runtime.savedContent !== snapshot)
+      throw new Error('Save the source successfully before keeping evidence.')
+    return runtime.document
   }
 
   getSession = (documentId: string): DocumentSession => {
@@ -160,7 +215,15 @@ export class DocumentSessionStore {
     return () => listeners.delete(listener)
   }
 
-  async initializeDocument(document: Document) {
+  initializeDocument(document: Document): Promise<void> {
+    const pending = this.initializing.get(document.document_id)
+    if (pending) return pending
+    const task = this.initialize(document).finally(() => this.initializing.delete(document.document_id))
+    this.initializing.set(document.document_id, task)
+    return task
+  }
+
+  private async initialize(document: Document) {
     const existingRuntime = this.runtimes.get(document.document_id)
     const session = this.getSession(document.document_id)
     if (existingRuntime) {
@@ -328,6 +391,8 @@ export class DocumentSessionStore {
   }
 
   dispose() {
+    for (const pending of this.pendingInsertions.values()) pending.resolve(false)
+    this.pendingInsertions.clear()
     for (const runtime of this.runtimes.values()) {
       if (runtime.saveTimer !== undefined) window.clearTimeout(runtime.saveTimer)
       if (runtime.persistTimer !== undefined) window.clearTimeout(runtime.persistTimer)
@@ -395,6 +460,7 @@ export class DocumentSessionStore {
       })
     } finally {
       runtime.inFlight = false
+      this.listeners.get(documentId)?.forEach((listener) => listener())
       const current = this.getSession(documentId)
       if (
         (runtime.queued || current.content !== runtime.savedContent) &&
@@ -516,16 +582,19 @@ export function DocumentSessionsProvider({
   children,
   storage,
   defaultMode,
+  onWritingIntent,
 }: {
   children: ReactNode
   storage?: DraftStorage
   defaultMode?: () => EditorMode
+  onWritingIntent?: () => void
 }) {
   const queryClient = useQueryClient()
   const [store] = useState(
     () =>
       new DocumentSessionStore({
         storage: storage ?? new IndexedDbDraftStorage(),
+        onWritingIntent,
         saveDocument: api.updateDocument,
         isOnline: () => navigator.onLine,
         onSaved: (document) => {

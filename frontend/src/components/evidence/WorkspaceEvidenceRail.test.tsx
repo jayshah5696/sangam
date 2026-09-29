@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Document } from '../../api'
+import { evidenceCitationForType, type EvidenceReference } from '../../evidenceCitation'
 import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
 import { WorkspaceEvidenceRail } from './WorkspaceEvidenceRail'
 
@@ -71,7 +72,9 @@ vi.mock('@tanstack/react-query', () => ({
 
 vi.mock('../../documentSessions', () => ({
   useDocumentSessions: () => ({
-    insertText: (documentId: string, text: string) => {
+    getSession: () => ({ baseRevisionId: 'rev-draft-1', content: activeDraftDoc.content }),
+    insertEvidence: async (documentId: string, reference: EvidenceReference) => {
+      const text = evidenceCitationForType(reference, activeDraftDoc.content_type)
       state.inserted.push({ documentId, text })
       return true
     },
@@ -130,9 +133,23 @@ class MemoryStorage {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   Object.defineProperty(window, 'localStorage', { value: new MemoryStorage(), configurable: true })
-  workspaceEvidenceStore.clearEvidence()
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_name: string, callback: () => void) => callback() },
+  })
+  window.matchMedia = () => ({
+    matches: false,
+    media: '',
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  })
+  await workspaceEvidenceStore.clearEvidence()
   state.inserted = []
   state.navigate.mockReset()
 })
@@ -145,8 +162,8 @@ describe('WorkspaceEvidenceRail', () => {
     expect(screen.getByText(/No evidence kept yet/i)).toBeTruthy()
   })
 
-  it('renders kept evidence and inserts it into the draft at cursor', () => {
-    workspaceEvidenceStore.keepEvidence({
+  it('renders kept evidence and inserts it into the draft at cursor', async () => {
+    await workspaceEvidenceStore.keepEvidence({
       sourceDocumentId: 'source-doc-1',
       sourceTitle: 'Consensus Algorithms',
       sourceContentType: 'text/markdown',
@@ -165,11 +182,13 @@ describe('WorkspaceEvidenceRail', () => {
     expect(state.inserted).toHaveLength(1)
     expect(state.inserted[0]?.documentId).toBe('draft-1')
     expect(state.inserted[0]?.text).toContain('> Raft divides time into terms of arbitrary length.')
-    expect(state.inserted[0]?.text).toContain('[Source: Consensus Algorithms](sangam://document/source-doc-1?revision=rev-pinned-1)')
+    expect(state.inserted[0]?.text).toContain(
+      '[Source: Consensus Algorithms](sangam://document/source-doc-1?revision=rev-pinned-1)',
+    )
   })
 
-  it('attaches and saves a claim statement to the evidence card', () => {
-    workspaceEvidenceStore.keepEvidence({
+  it('attaches and saves a claim statement to the evidence card', async () => {
+    await workspaceEvidenceStore.keepEvidence({
       sourceDocumentId: 'source-doc-2',
       sourceTitle: 'Scaling Laws',
       sourceContentType: 'text/markdown',
@@ -190,13 +209,13 @@ describe('WorkspaceEvidenceRail', () => {
     const saveBtn = screen.getByRole('button', { name: 'Save' })
     fireEvent.click(saveBtn)
 
-    expect(
-      screen.getByText('Compute budget is the primary driver of performance'),
-    ).toBeTruthy()
+    await waitFor(() =>
+      expect(screen.getByText('Compute budget is the primary driver of performance')).toBeTruthy(),
+    )
   })
 
-  it('detects when source has changed and provides a version comparison dialog', () => {
-    workspaceEvidenceStore.keepEvidence({
+  it('detects when source has changed and provides a version comparison dialog', async () => {
+    await workspaceEvidenceStore.keepEvidence({
       sourceDocumentId: 'doc-src-changed',
       sourceTitle: 'Protocol V2',
       sourceContentType: 'text/markdown',
@@ -214,17 +233,19 @@ describe('WorkspaceEvidenceRail', () => {
     expect(screen.getByText(/Pinned revision \(rev-pinn\)/i)).toBeTruthy()
   })
 
-  it('compares two kept evidence excerpts side by side', () => {
-    workspaceEvidenceStore.keepEvidence({
+  it('compares two kept evidence excerpts side by side', async () => {
+    await workspaceEvidenceStore.keepEvidence({
       sourceDocumentId: 'source-a',
       sourceTitle: 'Paper A',
       sourceContentType: 'text/markdown',
+      pinnedRevisionId: 'rev-original',
       selectedText: 'Passage from paper A.',
     })
-    workspaceEvidenceStore.keepEvidence({
+    await workspaceEvidenceStore.keepEvidence({
       sourceDocumentId: 'source-b',
       sourceTitle: 'Paper B',
       sourceContentType: 'text/markdown',
+      pinnedRevisionId: 'rev-original',
       selectedText: 'Passage from paper B.',
     })
 

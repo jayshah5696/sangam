@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type Document } from '../api'
-import { CITATION_NAVIGATION_EVENT, type CitationTarget } from '../citationNavigation'
+import {
+  CITATION_NAVIGATION_EVENT,
+  citationTargetFromLocation,
+  type CitationTarget,
+} from '../citationNavigation'
 import { useDocumentSession, useDocumentSessions, type PdfViewState } from '../documentSessions'
 import { useTheme } from '../theme'
 import { PdfViewer } from './PdfViewer'
@@ -17,17 +21,15 @@ export function PdfResearchWorkspace({ document }: { document: Document }) {
   const sessions = useDocumentSessions()
   const session = useDocumentSession(document.document_id)
   const { updatePreferences } = useTheme()
-  const initialSearch = useMemo(() => new URLSearchParams(window.location.search), [])
-  const requestedPage = Number(initialSearch.get('page'))
-  const pdfState = useMemo(
-    () =>
-      session.pdfState ?? {
-        ...defaultPdfState,
-        pageNumber:
-          Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : defaultPdfState.pageNumber,
-      },
-    [requestedPage, session.pdfState],
-  )
+  const [initialTarget] = useState(() => citationTargetFromLocation(document.document_id))
+  const requestedPage = initialTarget?.pageNumber
+  const [initialState] = useState(() => ({
+    ...(session.pdfState ?? defaultPdfState),
+    pageNumber: requestedPage ?? session.pdfState?.pageNumber ?? 1,
+    scrollTop: requestedPage ? 0 : (session.pdfState?.scrollTop ?? 0),
+  }))
+  const [citationApplied, setCitationApplied] = useState(!initialTarget)
+  const pdfState = useMemo(() => session.pdfState ?? initialState, [initialState, session.pdfState])
   const annotationQuery = session.pdfAnnotationQuery ?? ''
   const annotationsQuery = useQuery({
     queryKey: ['annotations', document.document_id, annotationQuery],
@@ -52,38 +54,57 @@ export function PdfResearchWorkspace({ document }: { document: Document }) {
   )
 
   useEffect(() => {
+    if (initialTarget) {
+      sessions.updateSession(document.document_id, {
+        pdfState: initialState,
+        pdfSelectedAnnotationId: initialTarget.annotationId ?? null,
+        pdfAnnotationQuery: '',
+      })
+    }
+    const frame = requestAnimationFrame(() => setCitationApplied(true))
     const receiveCitation = (event: Event) => {
       // SAFETY: CITATION_NAVIGATION_EVENT dispatches CustomEvent with detail: CitationTarget
       const target = (event as CustomEvent<CitationTarget>).detail
       if (target.documentId !== document.document_id) return
-      if (target.pageNumber) scrollToPage(target.pageNumber)
+      if (target.pageNumber) {
+        updatePdfState({ pageNumber: target.pageNumber, scrollTop: 0 })
+        scrollToPage(target.pageNumber)
+      }
       if (target.annotationId) {
-        sessions.updateSession(document.document_id, { pdfSelectedAnnotationId: target.annotationId })
+        sessions.updateSession(document.document_id, {
+          pdfSelectedAnnotationId: target.annotationId,
+          pdfAnnotationQuery: '',
+        })
       }
     }
     window.addEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
-    return () => window.removeEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
-  }, [document.document_id, scrollToPage, sessions])
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
+    }
+  }, [document.document_id, initialState, initialTarget, scrollToPage, sessions, updatePdfState])
 
   return (
     <div className="pdf-research-workspace">
-      <PdfViewer
-        document={document}
-        pdfState={pdfState}
-        setPageNumber={setPageNumber}
-        updatePdfState={updatePdfState}
-        annotations={annotations}
-        onSelectAnnotation={(id) => {
-          sessions.updateSession(document.document_id, { pdfSelectedAnnotationId: id })
-          updatePreferences({ rightVisible: true, rightTab: 'research' })
-        }}
-        onOpenResearch={() => updatePreferences({ rightVisible: true, rightTab: 'research' })}
-        setDraft={(updater) => {
-          const currentDraft = sessions.getSession(document.document_id).pdfDraft ?? null
-          const nextDraft = updater instanceof Function ? updater(currentDraft) : updater
-          sessions.updateSession(document.document_id, { pdfDraft: nextDraft })
-        }}
-      />
+      {citationApplied && (
+        <PdfViewer
+          document={document}
+          pdfState={pdfState}
+          setPageNumber={setPageNumber}
+          updatePdfState={updatePdfState}
+          annotations={annotations}
+          onSelectAnnotation={(id) => {
+            sessions.updateSession(document.document_id, { pdfSelectedAnnotationId: id })
+            updatePreferences({ rightVisible: true, rightTab: 'research' })
+          }}
+          onOpenResearch={() => updatePreferences({ rightVisible: true, rightTab: 'research' })}
+          setDraft={(updater) => {
+            const currentDraft = sessions.getSession(document.document_id).pdfDraft ?? null
+            const nextDraft = updater instanceof Function ? updater(currentDraft) : updater
+            sessions.updateSession(document.document_id, { pdfDraft: nextDraft })
+          }}
+        />
+      )}
     </div>
   )
 }

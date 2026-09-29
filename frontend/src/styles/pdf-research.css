@@ -699,7 +699,7 @@
 .workspace-evidence-rail {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
@@ -743,7 +743,7 @@
   border-bottom: 1px solid var(--line);
   background: var(--accent-soft);
   color: var(--text);
-  font-size: var(--text-label);
+  font-size: var(--text-control);
 }
 
 .empty-evidence-message {
@@ -802,7 +802,8 @@
   color: var(--text);
   cursor: pointer;
   text-align: left;
-  font-size: var(--text-label);
+  font-size: var(--text-control);
+  overflow-wrap: anywhere;
 }
 
 .evidence-source-link:hover {
@@ -897,7 +898,7 @@
   border-radius: var(--radius-control);
   background: var(--surface-soft);
   color: var(--text);
-  font-size: var(--text-label);
+  font-size: var(--text-control);
 }
 
 .evidence-inline-add {
@@ -908,7 +909,7 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: var(--text-meta);
+  font-size: var(--text-control);
 }
 
 .evidence-inline-add:hover {
@@ -942,7 +943,7 @@
 .button-sm {
   min-height: var(--control-compact);
   padding: 0 var(--space-2);
-  font-size: var(--text-meta);
+  font-size: var(--text-control);
 }
 
 .icon-button-sm {
@@ -990,6 +991,7 @@
 
 .evidence-modal-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
@@ -1000,7 +1002,7 @@
 
 .evidence-comparison-columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
   padding: var(--space-3);
   overflow-y: auto;
@@ -1008,6 +1010,8 @@
 
 .evidence-comparison-pane {
   display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
   gap: var(--space-2);
   padding: var(--space-3);
   border: 1px solid var(--line);
@@ -1017,7 +1021,7 @@
 
 .evidence-version-comparison-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
   padding: var(--space-3);
   overflow-y: auto;
@@ -1045,3 +1049,24 @@
   background: var(--surface);
 }
 
+.html-source-text {
+  padding: var(--space-3);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.text-selection-toolbar { z-index: 50; }
+.html-source-text summary { cursor: pointer; font: inherit; }
+.html-source-text p { white-space: pre-wrap; }
+.cited-source-text { margin: 0; padding: var(--space-3); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-editor); line-height: var(--leading-ui); }
+.evidence-modal-header > div { min-width: 0; overflow-wrap: anywhere; }
+.evidence-card-secondary-row { flex-wrap: wrap; }
+.workspace-evidence-rail :is(button, input, select), .evidence-modal-backdrop button { font-size: var(--text-control); }
+.evidence-meta-text { text-align: left; background: transparent; border: 0; }
+@media (max-width: 650px) {
+  .evidence-comparison-columns, .evidence-version-comparison-body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (pointer: coarse) {
+  .workspace-evidence-rail :is(button, input, select), .evidence-modal-backdrop button { min-height: var(--control-touch); }
+  .workspace-evidence-rail .icon-button-sm, .evidence-modal-backdrop .icon-button-sm { min-width: var(--control-touch); }
+}

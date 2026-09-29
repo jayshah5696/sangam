@@ -8,6 +8,11 @@ port := "8000"
 default:
     @just --list
 
+# Install locked service and frontend dependencies.
+setup:
+    uv sync --locked
+    pnpm --dir frontend install --frozen-lockfile
+
 # Run the complete fast local verification suite.
 test:
     uv run ruff check .

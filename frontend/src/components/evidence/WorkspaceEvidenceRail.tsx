@@ -1,10 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
   AlertTriangle,
   ArrowRight,
-  BookmarkCheck,
   Check,
   ExternalLink,
   GitCompare,
@@ -14,31 +13,31 @@ import {
 } from 'lucide-react'
 import { api, type Document, type DocumentSummary } from '../../api'
 import { announceCitationNavigation } from '../../citationNavigation'
+import { citationHref } from '../../citationNavigation'
+import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSessions } from '../../documentSessions'
-import {
-  evidenceCitationMarkdown,
-  itemToEvidenceReference,
-  type EvidenceItem,
-} from '../../evidenceCitation'
+import { itemToEvidenceReference, type EvidenceItem, remapEvidencePassage } from '../../evidenceCitation'
 import { shortRevision } from '../../evidenceCitation'
 import { useTheme } from '../../theme'
 import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
 import { MarkdownPreview } from '../MarkdownPreview'
+import { SelectableHtmlText } from '../SelectableHtmlText'
+import { StateMessage } from '../ui/StateMessage'
 
 export function WorkspaceEvidenceRail({ document }: { document?: Document | null }) {
   const navigate = useNavigate()
   const sessions = useDocumentSessions()
   const { updatePreferences } = useTheme()
-  const { evidence, removeEvidence, updateEvidence, replaceEvidenceRevision, clearEvidence } =
+  const { evidence, error, retry, removeEvidence, updateEvidence, replaceEvidenceRevision, clearEvidence } =
     useWorkspaceEvidence()
-  const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  const documentsQuery = useQuery({ queryKey: ['documents', 'all'], queryFn: api.listDocuments })
 
   const [filterQuery, setFilterQuery] = useState('')
   const [comparingPair, setComparingPair] = useState<[EvidenceItem, EvidenceItem] | null>(null)
   const [comparingWithId, setComparingWithId] = useState<string | null>(null)
   const [inspectingChangeItem, setInspectingChangeItem] = useState<EvidenceItem | null>(null)
 
-  const activeDraftId = document?.document_id ?? ''
+  const activeDraftId = document?.content_type !== 'application/pdf' ? (document?.document_id ?? '') : ''
   const availableDrafts = (documentsQuery.data ?? []).filter(
     (candidate) => candidate.content_type !== 'application/pdf',
   )
@@ -55,21 +54,17 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
   })
 
   const openSource = (item: EvidenceItem) => {
-    const params = new URLSearchParams()
-    if (item.pinnedRevisionId) params.set('revision', item.pinnedRevisionId)
-    if (item.pageNumber) params.set('page', String(item.pageNumber))
-    if (item.annotationId) params.set('annotation', item.annotationId)
-
-    const query = params.size ? `?${params.toString()}` : ''
-    announceCitationNavigation({
+    const target = {
       documentId: item.sourceDocumentId,
       revisionId: item.pinnedRevisionId,
       pageNumber: item.pageNumber ?? undefined,
       annotationId: item.annotationId ?? undefined,
       title: item.sourceTitle,
-    })
+      textLocator: item.textLocator,
+    }
+    announceCitationNavigation(target)
     void navigate({
-      to: `/documents/${item.sourceDocumentId}${query}`,
+      href: citationHref(target),
     })
   }
 
@@ -82,6 +77,10 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
         revision: item.pinnedRevisionId,
         returnTo: `/documents/${item.sourceDocumentId}`,
       },
+      state: chatNavigationState(item.selectedText, {
+        pageNumber: item.pageNumber,
+        annotationId: item.annotationId,
+      }),
     })
   }
 
@@ -114,13 +113,30 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
               className="ghost-button icon-button-sm"
               title="Clear all kept evidence"
               aria-label="Clear all kept evidence"
-              onClick={clearEvidence}
+              onClick={() =>
+                void clearEvidence().catch(() => {
+                  /* Store displays persistence failure. */
+                })
+              }
             >
               <Trash2 size="var(--icon-detail)" />
             </button>
           )}
         </div>
       </header>
+      {error && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Evidence storage failed"
+          description={error}
+          action={
+            <button type="button" className="secondary-action" onClick={retry}>
+              Retry evidence storage
+            </button>
+          }
+        />
+      )}
 
       {evidence.length > 3 && (
         <div className="evidence-filter-bar">
@@ -151,22 +167,26 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
         <SourceVersionComparisonModal
           item={inspectingChangeItem}
           onClose={() => setInspectingChangeItem(null)}
-          onUpdateRevision={(newRevisionId) => {
-            replaceEvidenceRevision(inspectingChangeItem.id, newRevisionId)
+          onUpdateRevision={async (newRevisionId, content) => {
+            await replaceEvidenceRevision(inspectingChangeItem.id, newRevisionId, content)
             setInspectingChangeItem(null)
           }}
         />
       )}
 
       {filteredEvidence.length === 0 ? (
-        <div className="empty-evidence-message">
-          <BookmarkCheck size="var(--icon-section)" />
-          <p>
-            {evidence.length === 0
-              ? 'No evidence kept yet. Select any text passage in a PDF, imported article, or document and choose Keep as evidence.'
-              : 'No evidence matches your search.'}
-          </p>
-        </div>
+        error ? null : (
+          <StateMessage
+            compact
+            kind="empty"
+            title={evidence.length === 0 ? 'No evidence kept yet' : 'No evidence matches your search'}
+            description={
+              evidence.length === 0
+                ? 'Select a passage in a PDF, imported article, or document and choose Keep as evidence.'
+                : undefined
+            }
+          />
+        )
       ) : (
         <div className="evidence-items-list" role="feed" aria-label="Kept evidence list">
           {filteredEvidence.map((item) => (
@@ -176,15 +196,37 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
               activeDraftId={activeDraftId}
               availableDrafts={availableDrafts}
               isComparingTarget={comparingWithId === item.id}
-              onInsert={(targetDraftId) => {
-                const markdown = evidenceCitationMarkdown(itemToEvidenceReference(item))
-                sessions.insertText(targetDraftId, markdown)
+              onInsert={async (targetDraftId) => {
+                const [inserted] = await Promise.all([
+                  sessions.insertEvidence(targetDraftId, itemToEvidenceReference(item)),
+                  navigate({ to: '/documents/$documentId', params: { documentId: targetDraftId } }),
+                ])
+                updatePreferences({ rightVisible: !matchMedia('(max-width: 900px)').matches })
+                if (!inserted)
+                  throw new Error('The destination editor did not insert the passage. Try again.')
               }}
               onOpenSource={() => openSource(item)}
               onAskInChat={() => askInChat(item)}
               onCompare={() => handleStartCompare(item)}
               onInspectSourceChange={() => setInspectingChangeItem(item)}
-              onUpdateClaim={(claim) => updateEvidence(item.id, { claim })}
+              onUpdateClaim={async (claim, targetDraftId) => {
+                if (!targetDraftId) throw new Error('Choose a destination draft before attaching a claim.')
+                const existing = sessions.getSession(targetDraftId)
+                if (existing.content === undefined || existing.draftPersistenceOperation === 'read')
+                  await sessions.initializeDocument(await api.getDocument(targetDraftId))
+                const target = sessions.getSession(targetDraftId)
+                if (target.draftPersistenceState === 'failed')
+                  throw new Error('Recover the destination draft before attaching a claim.')
+                return updateEvidence(item.id, {
+                  claim,
+                  claimTarget: {
+                    documentId: targetDraftId,
+                    anchor: target.viewState?.anchor ?? 0,
+                    head: target.viewState?.head ?? 0,
+                    revisionId: target.baseRevisionId,
+                  },
+                })
+              }}
               onUpdateNote={(note) => updateEvidence(item.id, { note })}
               onRemove={() => removeEvidence(item.id)}
             />
@@ -213,23 +255,34 @@ function EvidenceCard({
   activeDraftId: string
   availableDrafts: DocumentSummary[]
   isComparingTarget: boolean
-  onInsert: (targetDraftId: string) => void
+  onInsert: (targetDraftId: string) => Promise<void>
   onOpenSource: () => void
   onAskInChat: () => void
   onCompare: () => void
   onInspectSourceChange: () => void
-  onUpdateClaim: (claim: string) => void
-  onUpdateNote: (note: string) => void
-  onRemove: () => void
+  onUpdateClaim: (claim: string, targetDraftId: string) => Promise<void>
+  onUpdateNote: (note: string) => Promise<void>
+  onRemove: () => Promise<void>
 }) {
-  const [inserted, setInserted] = useState(false)
+  const [insertedTarget, setInsertedTarget] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [inserting, setInserting] = useState(false)
   const [editingClaim, setEditingClaim] = useState(false)
   const [claimText, setClaimText] = useState(item.claim ?? '')
   const [editingNote, setEditingNote] = useState(false)
   const [noteText, setNoteText] = useState(item.note ?? '')
-  const [targetDraft, setTargetDraft] = useState(
-    activeDraftId || (availableDrafts[0]?.document_id ?? ''),
-  )
+  const [targetDraft, setTargetDraft] = useState('')
+  const destination = activeDraftId || targetDraft
+  const inserted = insertedTarget === destination
+  const commitMetadata = async (action: () => Promise<void>, done?: () => void) => {
+    try {
+      await action()
+      setActionError(null)
+      done?.()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   // Query source document to see if head revision has changed
   const sourceDocQuery = useQuery({
@@ -240,15 +293,17 @@ function EvidenceCard({
 
   const sourceDoc = sourceDocQuery.data
   const sourceChanged =
-    Boolean(sourceDoc && item.pinnedRevisionId) &&
-    sourceDoc?.current_revision_id !== item.pinnedRevisionId
+    Boolean(sourceDoc && item.pinnedRevisionId) && sourceDoc?.current_revision_id !== item.pinnedRevisionId
 
-  const handleInsert = () => {
-    const draftId = targetDraft || activeDraftId
+  const handleInsert = async () => {
+    const draftId = destination
     if (!draftId) return
-    onInsert(draftId)
-    setInserted(true)
-    setTimeout(() => setInserted(false), 2000)
+    setInserting(true)
+    await commitMetadata(
+      () => onInsert(draftId),
+      () => setInsertedTarget(draftId),
+    )
+    setInserting(false)
   }
 
   return (
@@ -281,11 +336,14 @@ function EvidenceCard({
           className="ghost-button icon-button-sm"
           title="Remove evidence"
           aria-label="Remove evidence"
-          onClick={onRemove}
+          onClick={() => void commitMetadata(onRemove)}
         >
           <X size="var(--icon-detail)" />
         </button>
       </header>
+      {actionError && (
+        <StateMessage compact kind="error" title="Evidence action failed" description={actionError} />
+      )}
 
       {sourceChanged && (
         <div className="evidence-source-changed-alert" role="alert">
@@ -324,8 +382,10 @@ function EvidenceCard({
                 onChange={(e) => setClaimText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    onUpdateClaim(claimText)
-                    setEditingClaim(false)
+                    void commitMetadata(
+                      () => onUpdateClaim(claimText, destination),
+                      () => setEditingClaim(false),
+                    )
                   }
                 }}
               />
@@ -333,29 +393,28 @@ function EvidenceCard({
                 type="button"
                 className="secondary-action button-sm"
                 onClick={() => {
-                  onUpdateClaim(claimText)
-                  setEditingClaim(false)
+                  void commitMetadata(
+                    () => onUpdateClaim(claimText, destination),
+                    () => setEditingClaim(false),
+                  )
                 }}
               >
                 Save
               </button>
             </div>
           ) : (
-            <p
+            <button
+              type="button"
               className="evidence-meta-text"
               onClick={() => setEditingClaim(true)}
               title="Click to edit claim"
             >
               {item.claim}
-            </p>
+            </button>
           )}
         </div>
       ) : (
-        <button
-          type="button"
-          className="evidence-inline-add"
-          onClick={() => setEditingClaim(true)}
-        >
+        <button type="button" className="evidence-inline-add" onClick={() => setEditingClaim(true)}>
           + Attach to a claim
         </button>
       )}
@@ -372,8 +431,10 @@ function EvidenceCard({
                 onChange={(e) => setNoteText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    onUpdateNote(noteText)
-                    setEditingNote(false)
+                    void commitMetadata(
+                      () => onUpdateNote(noteText),
+                      () => setEditingNote(false),
+                    )
                   }
                 }}
               />
@@ -381,41 +442,41 @@ function EvidenceCard({
                 type="button"
                 className="secondary-action button-sm"
                 onClick={() => {
-                  onUpdateNote(noteText)
-                  setEditingNote(false)
+                  void commitMetadata(
+                    () => onUpdateNote(noteText),
+                    () => setEditingNote(false),
+                  )
                 }}
               >
                 Save
               </button>
             </div>
           ) : (
-            <p
+            <button
+              type="button"
               className="evidence-meta-text"
               onClick={() => setEditingNote(true)}
               title="Click to edit note"
             >
               {item.note}
-            </p>
+            </button>
           )}
         </div>
       ) : (
-        <button
-          type="button"
-          className="evidence-inline-add"
-          onClick={() => setEditingNote(true)}
-        >
+        <button type="button" className="evidence-inline-add" onClick={() => setEditingNote(true)}>
           + Add note
         </button>
       )}
 
       <div className="evidence-card-actions">
-        {availableDrafts.length > 1 && !activeDraftId && (
+        {!activeDraftId && (
           <select
             className="evidence-draft-select"
             aria-label="Destination draft"
             value={targetDraft}
             onChange={(e) => setTargetDraft(e.target.value)}
           >
+            <option value="">Choose a destination draft…</option>
             {availableDrafts.map((d) => (
               <option key={d.document_id} value={d.document_id}>
                 {d.path ?? d.title}
@@ -426,11 +487,11 @@ function EvidenceCard({
         <button
           type="button"
           className="panel-button"
-          disabled={!targetDraft && !activeDraftId}
-          onClick={handleInsert}
+          disabled={!destination || inserting}
+          onClick={() => void handleInsert()}
         >
           {inserted ? <Check size="var(--icon-inline)" /> : <ArrowRight size="var(--icon-inline)" />}
-          {inserted ? 'Inserted at cursor' : 'Insert at cursor'}
+          {inserted ? 'Inserted at cursor' : inserting ? 'Opening destination…' : 'Insert at cursor'}
         </button>
 
         <div className="evidence-card-secondary-row">
@@ -475,12 +536,27 @@ function ExcerptComparisonModal({
   onClose: () => void
 }) {
   const [a, b] = pair
+  const dialogRef = useComparisonDialog(onClose)
   return (
-    <div className="evidence-modal-backdrop" role="dialog" aria-modal="true" aria-label="Compare evidence excerpts">
+    <div
+      ref={dialogRef}
+      className="evidence-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Compare evidence excerpts"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
       <div className="evidence-modal-content">
         <header className="evidence-modal-header">
           <strong>Compare excerpts</strong>
-          <button type="button" className="ghost-button icon-button-sm" onClick={onClose} aria-label="Close comparison">
+          <button
+            type="button"
+            className="ghost-button icon-button-sm"
+            onClick={onClose}
+            aria-label="Close comparison"
+          >
             <X size="var(--icon-control)" />
           </button>
         </header>
@@ -527,8 +603,10 @@ function SourceVersionComparisonModal({
 }: {
   item: EvidenceItem
   onClose: () => void
-  onUpdateRevision: (newRevisionId: string) => void
+  onUpdateRevision: (newRevisionId: string, content: string) => Promise<void>
 }) {
+  const dialogRef = useComparisonDialog(onClose)
+  const [error, setError] = useState<string | null>(null)
   const historyQuery = useQuery({
     queryKey: ['history', item.sourceDocumentId],
     queryFn: () => api.history(item.sourceDocumentId),
@@ -544,13 +622,18 @@ function SourceVersionComparisonModal({
   const pinnedRev = history.find((r) => r.revision_id === item.pinnedRevisionId)
   const currentDoc = docQuery.data
   const currentRevId = currentDoc?.current_revision_id
+  const remapped = currentDoc && remapEvidencePassage(currentDoc.content, item)
 
   return (
     <div
+      ref={dialogRef}
       className="evidence-modal-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label="Compare source versions"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
     >
       <div className="evidence-modal-content wide">
         <header className="evidence-modal-header">
@@ -576,9 +659,21 @@ function SourceVersionComparisonModal({
             <h4>Pinned revision ({shortRevision(item.pinnedRevisionId)})</h4>
             <div className="comparison-preview-container">
               {pinnedRev ? (
-                <MarkdownPreview content={pinnedRev.content} />
+                item.sourceContentType === 'text/html' ? (
+                  <SelectableHtmlText content={pinnedRev.content} initiallyOpen />
+                ) : (
+                  <MarkdownPreview content={pinnedRev.content} />
+                )
               ) : (
-                <p className="small-muted">Pinned revision snapshot loading…</p>
+                <StateMessage
+                  compact
+                  kind={historyQuery.isError || historyQuery.isSuccess ? 'error' : 'loading'}
+                  title={
+                    historyQuery.isError || historyQuery.isSuccess
+                      ? 'Pinned revision snapshot is unavailable'
+                      : 'Loading pinned revision snapshot'
+                  }
+                />
               )}
             </div>
           </div>
@@ -586,15 +681,39 @@ function SourceVersionComparisonModal({
             <h4>Current head revision ({shortRevision(currentRevId)})</h4>
             <div className="comparison-preview-container">
               {currentDoc ? (
-                <MarkdownPreview content={currentDoc.content} />
+                item.sourceContentType === 'text/html' ? (
+                  <SelectableHtmlText content={currentDoc.content} initiallyOpen />
+                ) : (
+                  <MarkdownPreview content={currentDoc.content} />
+                )
               ) : (
-                <p className="small-muted">Current document content loading…</p>
+                <StateMessage
+                  compact
+                  kind={docQuery.isError ? 'error' : 'loading'}
+                  title={docQuery.isError ? 'Current source could not be loaded' : 'Loading current source'}
+                />
               )}
             </div>
           </div>
         </div>
 
         <footer className="evidence-modal-footer">
+          {error && (
+            <StateMessage
+              compact
+              kind="error"
+              title="Evidence revision could not be replaced"
+              description={error}
+            />
+          )}
+          {currentDoc && !remapped && (
+            <StateMessage
+              compact
+              kind="empty"
+              title="The original passage cannot be located in the current revision"
+              description="Keep the original pin or capture a new passage from the updated source."
+            />
+          )}
           <button type="button" className="secondary-action" onClick={onClose}>
             Keep original pinned reference
           </button>
@@ -602,7 +721,13 @@ function SourceVersionComparisonModal({
             <button
               type="button"
               className="panel-button"
-              onClick={() => onUpdateRevision(currentRevId)}
+              disabled={!remapped || !pinnedRev || item.sourceContentType === 'application/pdf'}
+              onClick={() => {
+                if (currentDoc)
+                  void onUpdateRevision(currentRevId, currentDoc.content).catch((error) =>
+                    setError(error instanceof Error ? error.message : String(error)),
+                  )
+              }}
             >
               Update to current head revision
             </button>
@@ -611,4 +736,47 @@ function SourceVersionComparisonModal({
       </div>
     </div>
   )
+}
+
+function useComparisonDialog(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
+  useEffect(() => {
+    closeRef.current = onClose
+  }, [onClose])
+  useEffect(() => {
+    const trigger = globalThis.document.activeElement
+    const dialog = ref.current
+    if (!dialog) return
+    const controls = () =>
+      Array.from(
+        dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, [href], [tabindex="0"]'),
+      )
+    controls()[0]?.focus()
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = controls()
+      const first = items[0],
+        last = items.at(-1)
+      if (event.shiftKey && globalThis.document.activeElement === first) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && globalThis.document.activeElement === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }
+    dialog.addEventListener('keydown', keyboard)
+    return () => {
+      dialog.removeEventListener('keydown', keyboard)
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus()
+    }
+  }, [])
+  return ref
 }

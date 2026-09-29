@@ -344,9 +344,11 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .draft-recovery-copy { min-width: 0; display: grid; gap: var(--space-1); line-height: var(--leading-body); }
 .draft-recovery-copy small { overflow-wrap: anywhere; }
 .draft-recovery-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
-.citation-evidence { margin-bottom: var(--space-3); overflow: hidden; border: 1px solid var(--accent); border-radius: var(--radius-panel); background: var(--surface); }
+.citation-evidence { flex: none; display: flex; flex-direction: column; max-height: 50%; min-height: 0; margin-bottom: var(--space-3); overflow: hidden; border: 1px solid var(--accent); border-radius: var(--radius-panel); background: var(--surface); }
 .citation-evidence > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); background: var(--accent-soft); }
 .citation-evidence > header > div { min-width: 0; display: grid; gap: var(--space-1); }
+.citation-evidence > header { flex: none; }
+.citation-evidence > details { min-height: 0; overflow: auto; }
 .citation-evidence > header .eyebrow { margin: 0; }
 .citation-evidence > header small { overflow-wrap: anywhere; font-family: var(--font-mono); }
 .citation-evidence > p { margin: 0; padding: var(--space-3); }

@@ -4,6 +4,7 @@ import { BookmarkCheck, Check, Copy, FileText } from 'lucide-react'
 import { evidenceCitationMarkdown } from '../../evidenceCitation'
 import { floatingPosition } from '../../pdfAnnotationUi'
 import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
+import { StateMessage } from '../ui/StateMessage'
 
 export type TextSelectionAnchor = {
   left: number
@@ -22,20 +23,23 @@ export function TextSelectionToolbar({
   selectedText,
   anchor,
   onDismiss,
+  onKeep,
 }: {
   documentId: string
   documentTitle: string
   documentPath?: string | null
-  contentType: string
+  contentType: 'text/markdown' | 'text/html' | 'application/pdf'
   pinnedRevisionId?: string
   selectedText: string
   anchor: TextSelectionAnchor
   onDismiss: () => void
+  onKeep?: () => Promise<void>
 }) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: anchor.left, top: anchor.top })
   const [copied, setCopied] = useState<'text' | 'citation' | null>(null)
   const [kept, setKept] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current
@@ -82,17 +86,23 @@ export function TextSelectionToolbar({
     setTimeout(() => setCopied(null), 2000)
   }
 
-  const handleKeep = () => {
-    workspaceEvidenceStore.keepEvidence({
-      sourceDocumentId: documentId,
-      sourceTitle: documentTitle,
-      sourcePath: documentPath,
-      sourceContentType: contentType,
-      pinnedRevisionId,
-      selectedText,
-    })
-    setKept(true)
-    setTimeout(() => setKept(false), 2000)
+  const handleKeep = async () => {
+    try {
+      if (onKeep) await onKeep()
+      else
+        await workspaceEvidenceStore.keepEvidence({
+          sourceDocumentId: documentId,
+          sourceTitle: documentTitle,
+          sourcePath: documentPath,
+          sourceContentType: contentType,
+          pinnedRevisionId,
+          selectedText,
+        })
+      setKept(true)
+      setError(null)
+    } catch (error) {
+      setError(`Evidence storage: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   return createPortal(
@@ -107,11 +117,12 @@ export function TextSelectionToolbar({
         type="button"
         aria-label="Keep as evidence"
         title="Keep as evidence"
-        onClick={handleKeep}
+        onClick={() => void handleKeep()}
       >
         {kept ? <Check size="var(--icon-inline)" /> : <BookmarkCheck size="var(--icon-inline)" />}
         {kept ? 'Kept' : 'Keep as evidence'}
       </button>
+      {error && <StateMessage compact kind="error" title="Evidence storage failed" description={error} />}
       <span className="pdf-selection-divider" />
       <button
         type="button"

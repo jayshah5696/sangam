@@ -1,7 +1,17 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Bookmark, BookmarkCheck, Check, Copy, Highlighter, MessageSquare, Quote, Search, StickyNote } from 'lucide-react'
+import {
+  Bookmark,
+  BookmarkCheck,
+  Check,
+  Copy,
+  Highlighter,
+  MessageSquare,
+  Quote,
+  Search,
+  StickyNote,
+} from 'lucide-react'
 import { evidenceCitationMarkdown } from '../evidenceCitation'
 import { useDocumentSessions } from '../documentSessions'
 import { workspaceEvidenceStore } from '../workspaceEvidenceState'
@@ -9,6 +19,8 @@ import { api, type Annotation, type Document } from '../api'
 import { usePdfResearch } from '../pdfResearchState'
 import { useWorkbench } from '../workbench'
 import { annotationTypeLabel, type AnnotationDraft } from './pdfResearchTypes'
+import { StateMessage } from './ui/StateMessage'
+import { useTheme } from '../theme'
 
 export function citationMarkdown(
   annotation: Pick<Annotation, 'document_id' | 'annotation_id' | 'page_number' | 'selected_text' | 'note'>,
@@ -29,35 +41,63 @@ export function PdfResearchRail({ document }: { document: Document }) {
   const [query, setQuery] = useState('')
   const [draftId, setDraftId] = useState('')
   const search = useMutation({ mutationFn: (value: string) => api.searchPdf(document.document_id, value) })
-  const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: api.listDocuments })
+  const documentsQuery = useQuery({ queryKey: ['documents', 'all'], queryFn: api.listDocuments })
   const selectedAnnotation = research
     ? research.annotations.find((annotation) => annotation.annotation_id === research.selectedAnnotationId)
     : undefined
   const sessions = useDocumentSessions()
+  const { updatePreferences } = useTheme()
+  const [error, setError] = useState<string | null>(null)
   const [inserted, setInserted] = useState(false)
-  const [kept, setKept] = useState(false)
+  const [keptAnnotation, setKeptAnnotation] = useState<string | null>(null)
+  const selectedAnnotationKey = selectedAnnotation
+    ? `${selectedAnnotation.annotation_id}:${selectedAnnotation.version}`
+    : null
+  const kept = keptAnnotation !== null && keptAnnotation === selectedAnnotationKey
 
-  const handleInsertCitation = () => {
+  const handleInsertCitation = async () => {
     if (!draftId || !selectedAnnotation) return
-    const citation = citationMarkdown(selectedAnnotation)
-    sessions.insertText(draftId, citation)
-    setInserted(true)
-    setTimeout(() => setInserted(false), 2000)
-  }
-
-  const handleKeepEvidence = () => {
-    if (!selectedAnnotation) return
-    workspaceEvidenceStore.keepEvidence({
-      sourceDocumentId: document.document_id,
-      sourceTitle: document.title,
-      sourceContentType: 'application/pdf',
+    const reference = {
+      documentId: document.document_id,
+      title: document.title,
+      revisionId: document.current_revision_id,
       pageNumber: selectedAnnotation.page_number,
       annotationId: selectedAnnotation.annotation_id,
-      selectedText: selectedAnnotation.selected_text ?? selectedAnnotation.note ?? '',
+      selectedText: selectedAnnotation.selected_text ?? '',
       note: selectedAnnotation.note ?? undefined,
-    })
-    setKept(true)
-    setTimeout(() => setKept(false), 2000)
+    }
+    try {
+      const [inserted] = await Promise.all([
+        sessions.insertEvidence(draftId, reference),
+        navigate({ to: '/documents/$documentId', params: { documentId: draftId } }),
+      ])
+      updatePreferences({ rightVisible: !matchMedia('(max-width: 900px)').matches })
+      if (!inserted) throw new Error('The destination editor could not insert the passage.')
+      setInserted(true)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const handleKeepEvidence = async () => {
+    if (!selectedAnnotation) return
+    try {
+      await workspaceEvidenceStore.keepEvidence({
+        sourceDocumentId: document.document_id,
+        sourceTitle: document.title,
+        sourceContentType: 'application/pdf',
+        pinnedRevisionId: document.current_revision_id,
+        geometry: selectedAnnotation.geometry,
+        pageNumber: selectedAnnotation.page_number,
+        annotationId: selectedAnnotation.annotation_id,
+        selectedText: selectedAnnotation.selected_text ?? selectedAnnotation.note ?? '',
+        note: selectedAnnotation.note ?? undefined,
+      })
+      setKeptAnnotation(`${selectedAnnotation.annotation_id}:${selectedAnnotation.version}`)
+      setError(null)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    }
   }
   if (!research) return null
   const actions: Array<{
@@ -73,6 +113,7 @@ export function PdfResearchRail({ document }: { document: Document }) {
 
   return (
     <section className="pdf-research-rail" aria-label="PDF research">
+      {error && <StateMessage compact kind="error" title="Evidence action failed" description={error} />}
       <div className="pdf-research-summary">
         <div>
           <p className="eyebrow">Research</p>
@@ -124,7 +165,7 @@ export function PdfResearchRail({ document }: { document: Document }) {
           type="button"
           className="secondary-action"
           disabled={!draftId || !selectedAnnotation}
-          onClick={handleInsertCitation}
+          onClick={() => void handleInsertCitation()}
         >
           {inserted ? (
             <>
@@ -138,7 +179,7 @@ export function PdfResearchRail({ document }: { document: Document }) {
           type="button"
           className="secondary-action"
           disabled={!selectedAnnotation}
-          onClick={handleKeepEvidence}
+          onClick={() => void handleKeepEvidence()}
         >
           {kept ? (
             <>
