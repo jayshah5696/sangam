@@ -4,11 +4,11 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any
 
 from sangam.access import WorkspaceAccessService
 from sangam.db import Database, utc_now
 from sangam.errors import NotFoundError, ValidationError
+from sangam.schemas import ChatProposalSource
 from sangam.security import Principal
 
 
@@ -301,6 +301,15 @@ class ChatEvidenceRepository:
                 (run_id,),
             ).fetchone()
             if count_row and count_row["count"] >= 50:
+                existing = connection.execute(
+                    "SELECT 1 FROM chat_run_sources WHERE run_id = ? AND document_id = ? "
+                    "AND revision_id = ? AND page_number = ?",
+                    (run_id, document_id, rev, page),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        "UPDATE chat_runs SET sources_truncated = 1 WHERE run_id = ?", (run_id,)
+                    )
                 return
             connection.execute(
                 """
@@ -322,7 +331,26 @@ class ChatEvidenceRepository:
                 ),
             )
 
-    def list_run_sources(self, run_id: str) -> list[dict[str, Any]]:
+    def require_run_owner(self, principal: Principal, run_id: str, thread_id: str) -> None:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT actor_id, thread_id FROM chat_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        if (
+            row is None
+            or row["thread_id"] != thread_id
+            or (row["actor_id"] != principal.actor_id and not principal.administrator)
+        ):
+            raise NotFoundError(f"Chat run not found: {run_id}")
+
+    def run_sources_truncated(self, run_id: str) -> bool:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT sources_truncated FROM chat_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        return bool(row and row["sources_truncated"])
+
+    def list_run_sources(self, run_id: str) -> list[ChatProposalSource]:
         """List bounded retrieved sources for a run."""
         with self.database.transaction() as connection:
             rows = connection.execute(
@@ -336,13 +364,13 @@ class ChatEvidenceRepository:
                 (run_id,),
             ).fetchall()
             return [
-                {
-                    "document_id": row["document_id"],
-                    "revision_id": row["revision_id"] if row["revision_id"] else None,
-                    "page_number": row["page_number"] if row["page_number"] > 0 else None,
-                    "title": row["title"],
-                    "path": row["path"],
-                }
+                ChatProposalSource(
+                    document_id=row["document_id"],
+                    revision_id=row["revision_id"] or None,
+                    page_number=row["page_number"] or None,
+                    title=row["title"],
+                    path=row["path"],
+                )
                 for row in rows
             ]
 

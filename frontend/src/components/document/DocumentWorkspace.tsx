@@ -21,6 +21,7 @@ import { canSplitActiveGroup } from '../../splitPolicy'
 import { initialDocumentMode, materializePath, saveLabel } from '../../documentWorkspaceState'
 import { ActionDialog } from '../ActionMenu'
 import type { MarkdownEditorHandle } from '../MarkdownEditor'
+import { StateMessage } from '../ui/StateMessage'
 import { ConflictRecoveryNotice } from './ConflictRecoveryNotice'
 import { DraftRecoveryNotice, offlineRecoveryMessage } from './DraftRecoveryNotice'
 
@@ -426,6 +427,19 @@ function CitedRevisionEvidence({
   onClose: () => void
 }) {
   const current = target.revisionId === document.current_revision_id
+  const quoteRef = useRef<HTMLElement>(null)
+  const hasQuote = target.quoteStart !== undefined && target.quoteEnd !== undefined
+  const validQuote =
+    revision !== undefined &&
+    target.quoteStart !== undefined &&
+    target.quoteEnd !== undefined &&
+    target.quoteEnd > target.quoteStart &&
+    target.quoteEnd <= revision.content.length
+  useEffect(() => {
+    if (!validQuote) return
+    quoteRef.current?.scrollIntoView({ block: 'nearest' })
+    quoteRef.current?.focus({ preventScroll: true })
+  }, [validQuote, target.revisionId, target.quoteStart, target.quoteEnd])
   return (
     <section className="citation-evidence" aria-labelledby="citation-evidence-title">
       <header>
@@ -449,8 +463,22 @@ function CitedRevisionEvidence({
           substituted.
         </p>
       )}
+      {validQuote && document.content_type !== 'application/pdf' && (
+        <section ref={quoteRef} tabIndex={-1} className="citation-quote" aria-label="Exact cited passage">
+          <p className="eyebrow">Exact cited passage</p>
+          <blockquote>{revision.content.slice(target.quoteStart, target.quoteEnd)}</blockquote>
+        </section>
+      )}
+      {revision && hasQuote && !validQuote && (
+        <StateMessage
+          compact
+          kind="error"
+          title="The passage locator is outside this revision"
+          description="The current head has not been substituted."
+        />
+      )}
       {!current && revision && (
-        <details open>
+        <details open={!hasQuote}>
           <summary>Exact cited content</summary>
           {document.content_type === 'text/markdown' ? (
             <Suspense fallback={<div className="markdown-preview muted">Preparing cited Markdown…</div>}>

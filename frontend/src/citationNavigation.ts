@@ -6,6 +6,8 @@ export type CitationTarget = {
   pageNumber?: number
   annotationId?: string
   title?: string
+  quoteStart?: number
+  quoteEnd?: number
 }
 
 export const CITATION_NAVIGATION_EVENT = 'sangam:citation-navigation'
@@ -49,6 +51,15 @@ export function citationTargetFromLocation(documentId: string): CitationTarget |
     page_number: search.get('page') ?? undefined,
     annotation_id: search.get('annotation') ?? undefined,
   })
+  if (target) {
+    const offset = z.coerce.number().int().nonnegative()
+    const start = search.has('quoteStart') ? offset.safeParse(search.get('quoteStart')) : null
+    const end = search.has('quoteEnd') ? offset.safeParse(search.get('quoteEnd')) : null
+    if (start?.success && end?.success && end.data > start.data) {
+      target.quoteStart = start.data
+      target.quoteEnd = end.data
+    }
+  }
   return target && (target.revisionId || target.pageNumber || target.annotationId) ? target : null
 }
 
@@ -57,6 +68,8 @@ export function citationHref(target: CitationTarget): string {
   if (target.revisionId) search.set('revision', target.revisionId)
   if (target.pageNumber) search.set('page', String(target.pageNumber))
   if (target.annotationId) search.set('annotation', target.annotationId)
+  if (target.quoteStart !== undefined) search.set('quoteStart', String(target.quoteStart))
+  if (target.quoteEnd !== undefined) search.set('quoteEnd', String(target.quoteEnd))
   const suffix = search.size ? `?${search.toString()}` : ''
   return `/documents/${encodeURIComponent(target.documentId)}${suffix}`
 }

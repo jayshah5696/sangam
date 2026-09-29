@@ -70,6 +70,44 @@ The chat panel shows the active mode. Pending organization plans use a dedicated
 
 The **Review changes** inbox lists pending and stale document proposals as an editorial review workspace. A proposal includes the proposed wording, an editable wording mode with a live diff, editorial rationale, and any explicit judgment needed. It presents supporting cited passages with direct source links, alongside bounded source documents retrieved during the turn. Reviewers can apply the proposal as drafted or with manual wording adjustments, request a revision, or dismiss it. Older proposals without recorded evidence indicate that no evidence was recorded. A deleted or unauthorized source document is redacted to prevent leaking passages or titles to reviewers who lack permission.
 
+### Exact editorial review
+
+The original agent wording stays in `content`. Sangam stores the exact reviewed wording
+separately in `applied_content`, with its immutable `applied_revision_id`. Apply reserves
+the wording's SHA-256 digest, the reviewing actor, and the first document operation key.
+Only one apply for a proposal can execute at a time. An identical retry by the same actor
+uses the reserved operation key, including after a lost response or interrupted completion.
+A different payload or actor cannot replace an interrupted reservation.
+
+Validation and current authorization checks run inside the reservation lifecycle.
+An uncommitted validation, permission, deletion, or revision failure releases the
+reservation. A revision conflict marks the proposal stale and leaves Dismiss available.
+A committed operation keeps its reservation for recovery, even if the actor's token is
+later revoked. A newly issued token for that actor can resume the exact operation when
+the actor has access again. Recovery reads the committed revision from the operation
+record, rather than using a newer human edit as the applied revision.
+
+Supporting citations are limited to 20. Each citation must quote a passage from an
+authorized document revision. Missing revision IDs resolve to the authorized current
+revision at proposal creation. Sangam checks document, revision, PDF page, and annotation
+relationships and calculates the passage location. `quote_start` and `quote_end` use
+UTF-16 offsets so browser selection and Unicode passages agree.
+Repeated passages require an explicit `quote_start` or a longer unique quote.
+Model interpretations and external claims belong in `model_opinion`. Recorded turn context is displayed
+separately and does not count as cited support.
+
+Retrieved sources come from the proposal's run record, including reads after the
+proposal was created. Each run stores at most 50 distinct document, revision, and page
+references. The review shows when additional references were omitted. Identical wording
+in different runs keeps separate proposal identities and evidence. Review responses
+recheck current access before returning source titles and passages.
+
+**Prepare revision request in chat** opens the proposal's thread and fills ChatPanel's
+composer with feedback, the exact reviewed wording, and the proposal, document, thread,
+and reviewed revision IDs. The reviewer chooses **Send** to deliver it. The original
+proposal remains available. A stale proposal can request a revision against the current
+document while its old reviewed revision remains explicit in the feedback.
+
 ## Add a capability
 
 Complete these steps in order:

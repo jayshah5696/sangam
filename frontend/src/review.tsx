@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { Check, ExternalLink, FileCode, MessageSquareQuote, Pencil, RotateCcw, X } from 'lucide-react'
@@ -101,6 +101,8 @@ function ProposalCard({
   const [editMode, setEditMode] = useState(false)
   const [showRevisionPrompt, setShowRevisionPrompt] = useState(false)
   const [revisionInstruction, setRevisionInstruction] = useState('')
+  const [handoffError, setHandoffError] = useState(false)
+  const revisionTrigger = useRef<HTMLButtonElement>(null)
 
   const documentQuery = useQuery({
     queryKey: ['document', proposal.document_id, 'review'],
@@ -128,7 +130,7 @@ function ProposalCard({
   const expectedRevision = historyQuery.data?.find(
     (revision) => revision.revision_id === proposal.expected_revision_id,
   )
-  const original = expectedRevision?.content ?? document?.content ?? ''
+  const original = expectedRevision?.content
   const current = document?.current_revision_id === proposal.expected_revision_id
   const busy = apply.isPending || dismiss.isPending
   const isEdited = editedContent !== proposal.content
@@ -145,26 +147,30 @@ function ProposalCard({
   const handleRequestRevision = async () => {
     const instruction = revisionInstruction.trim()
     if (!instruction) return
+    setHandoffError(false)
+    const context = `Request a revision of proposal ${proposal.proposal_id} in thread ${proposal.thread_id}.\nDocument: ${proposal.document_id}\nReviewed revision: ${proposal.expected_revision_id}\nFeedback: ${instruction}`
     try {
-      await dismiss.mutateAsync(`Revision requested: ${instruction}`)
-      try {
-        window.localStorage.setItem('sangam.chat-thread.workspace', proposal.thread_id)
-        window.localStorage.setItem('sangam.chat.draft-prompt', instruction)
-      } catch {
-        // Ignore storage errors in restricted or test environments
-      }
-      void navigate({
+      await navigate({
         to: '/chat',
         search: {
           document: proposal.document_id,
-          revision: proposal.expected_revision_id,
-          prompt: instruction,
+          thread: proposal.thread_id,
+          proposal: proposal.proposal_id,
+          prompt: context,
           returnTo: `/documents/${proposal.document_id}`,
+        },
+        state: {
+          sangamChatInitialPrompt: `${context}\n\nExact reviewed wording:\n${editedContent}\n\nRead the current document and return a fresh proposal. Keep the original proposal available for review.`,
         },
       })
     } catch {
-      // Dismiss error will be reflected in UI
+      setHandoffError(true)
     }
+  }
+
+  const closeRevisionPrompt = () => {
+    setShowRevisionPrompt(false)
+    revisionTrigger.current?.focus()
   }
 
   const citations: ChatProposalCitation[] = proposal.citations ?? []
@@ -198,10 +204,19 @@ function ProposalCard({
                 {proposal.rationale || proposal.summary || 'No rationale recorded for this edit.'}
               </p>
             </div>
+            {proposal.model_opinion && (
+              <div className="review-editorial-section">
+                <span className="eyebrow">Model opinion</span>
+                <p className="review-editorial-text">{proposal.model_opinion}</p>
+                <p className="small-muted">
+                  This is the model's interpretation, not a verified source passage.
+                </p>
+              </div>
+            )}
             <div className="review-editorial-section">
               <span className="eyebrow">Judgment needed</span>
               <p className="review-editorial-text">
-                {proposal.judgment_needed || 'Standard editorial review of proposed text.'}
+                {proposal.judgment_needed || 'No specific judgment recorded.'}
               </p>
             </div>
           </div>
@@ -253,6 +268,13 @@ function ProposalCard({
             </div>
           ) : historyQuery.isLoading || documentQuery.isLoading ? (
             <StateMessage compact kind="loading" title="Preparing revision evidence" />
+          ) : historyQuery.isError || documentQuery.isError || original === undefined ? (
+            <StateMessage
+              compact
+              kind="error"
+              title="The reviewed revision could not be loaded"
+              description="The current document has not been substituted for the reviewed revision."
+            />
           ) : (
             <RevisionMergeView original={original} modified={editedContent} />
           )}
@@ -272,16 +294,20 @@ function ProposalCard({
                             ? citation.path.split('/').pop()
                             : `Document ${citation.document_id.slice(0, 8)}`)}
                       </span>
-                      <a
-                        href={citationHref({
-                          documentId: citation.document_id,
-                          revisionId: citation.revision_id ?? undefined,
-                          pageNumber: citation.page_number ?? undefined,
-                          annotationId: citation.annotation_id ?? undefined,
-                        })}
-                      >
-                        Open source
-                      </a>
+                      {citation.available !== false && (
+                        <a
+                          href={citationHref({
+                            documentId: citation.document_id,
+                            revisionId: citation.revision_id ?? undefined,
+                            pageNumber: citation.page_number ?? undefined,
+                            annotationId: citation.annotation_id ?? undefined,
+                            quoteStart: citation.quote_start ?? undefined,
+                            quoteEnd: citation.quote_end ?? undefined,
+                          })}
+                        >
+                          Open source
+                        </a>
+                      )}
                     </div>
                     <p className="review-source-meta">
                       {citation.location ? `Location: ${citation.location}` : ''}
@@ -293,12 +319,32 @@ function ProposalCard({
                     {citation.snippet ? (
                       <blockquote>{citation.snippet}</blockquote>
                     ) : (
-                      <p className="review-source-empty">No excerpt provided.</p>
+                      <StateMessage
+                        compact
+                        kind="empty"
+                        title={
+                          citation.available === false
+                            ? 'Source passage deleted, changed, or inaccessible.'
+                            : 'No excerpt provided.'
+                        }
+                      />
                     )}
                   </div>
                 ))}
               </div>
-            ) : proposal.evidence ? (
+            ) : proposal.evidence_status === 'unavailable' ? (
+              <StateMessage compact kind="empty" title="Source document deleted or inaccessible." />
+            ) : (
+              <StateMessage compact kind="empty" title="No supporting passages recorded for this proposal." />
+            )}
+          </div>
+
+          {proposal.evidence && (
+            <div className="review-supporting-passages" aria-label="Recorded turn context">
+              <span className="eyebrow">Recorded turn context</span>
+              <p className="small-muted">
+                This context was attached to the request. It is not cited support for a claim.
+              </p>
               <div className="review-citation-item">
                 <div className="review-source-header">
                   <span className="review-citation-title">Source context</span>
@@ -310,7 +356,7 @@ function ProposalCard({
                       annotationId: proposal.evidence.annotation_id ?? undefined,
                     })}
                   >
-                    Open source
+                    Open turn context
                   </a>
                 </div>
                 <p className="review-source-meta">
@@ -325,15 +371,23 @@ function ProposalCard({
                   <p className="review-source-empty">No passage was selected for this source.</p>
                 )}
               </div>
-            ) : proposal.evidence_status === 'unavailable' ? (
-              <p className="review-source-empty">Source document deleted or inaccessible.</p>
-            ) : (
-              <p className="review-source-empty">No supporting passages recorded for this proposal.</p>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="review-retrieved-sources">
             <span className="eyebrow">Sources retrieved during turn</span>
+            <p className="small-muted">
+              Retrieval alone does not establish support for a claim. Up to 50 source references are recorded;
+              supporting citations are limited to 20.
+            </p>
+            {proposal.sources_retrieved_truncated && (
+              <StateMessage
+                compact
+                kind="empty"
+                title="Source list truncated at 50 references"
+                description="Additional sources were retrieved during this run."
+              />
+            )}
             {sourcesRetrieved.length > 0 ? (
               <ul className="review-sources-list">
                 {sourcesRetrieved.map((source, index) => (
@@ -360,24 +414,26 @@ function ProposalCard({
                 ))}
               </ul>
             ) : (
-              <p className="review-source-empty">No background sources recorded for this turn.</p>
+              <StateMessage compact kind="empty" title="No retrieved sources available for this turn." />
             )}
           </div>
         </div>
       </div>
 
       {!current && (
-        <p className="review-stale" role="alert">
-          This proposal was based on an older revision. Open the document and ask for a fresh proposal before
-          applying it.
-        </p>
+        <StateMessage
+          compact
+          kind="error"
+          title="This proposal was based on an older revision"
+          description="Request a fresh proposal before applying it. Your reviewed wording is preserved."
+        />
       )}
 
       <div className="review-card-actions">
         <button
           type="button"
           className="primary-button"
-          disabled={!current || busy}
+          disabled={!current || busy || !expectedRevision || documentQuery.isError || historyQuery.isError}
           onClick={() => apply.mutate(isEdited ? editedContent : undefined)}
         >
           <Check size="var(--icon-inline)" />{' '}
@@ -389,6 +445,7 @@ function ProposalCard({
           disabled={busy}
           onClick={() => setShowRevisionPrompt((prev) => !prev)}
           aria-expanded={showRevisionPrompt}
+          ref={revisionTrigger}
         >
           <MessageSquareQuote size="var(--icon-inline)" /> Request a revision
         </button>
@@ -406,7 +463,24 @@ function ProposalCard({
       </div>
 
       {showRevisionPrompt && (
-        <div className="review-revision-prompt" role="region" aria-label="Request a revision">
+        <div
+          className="review-revision-prompt"
+          role="region"
+          aria-label="Request a revision"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              event.stopPropagation()
+              closeRevisionPrompt()
+            }
+          }}
+        >
+          <StateMessage
+            compact
+            kind="empty"
+            title="Prepare feedback in the source conversation"
+            description="Chat will open with this proposal, its exact reviewed wording, and your feedback in the composer. Review it and choose Send. This proposal stays available."
+          />
           <label className="review-reason">
             <span>What should be revised?</span>
             <input
@@ -424,14 +498,9 @@ function ProposalCard({
               disabled={!revisionInstruction.trim() || busy}
               onClick={handleRequestRevision}
             >
-              Send revision request
+              Prepare revision request in chat
             </button>
-            <button
-              type="button"
-              className="secondary-action"
-              disabled={busy}
-              onClick={() => setShowRevisionPrompt(false)}
-            >
+            <button type="button" className="secondary-action" disabled={busy} onClick={closeRevisionPrompt}>
               Cancel
             </button>
           </div>
@@ -449,8 +518,29 @@ function ProposalCard({
           placeholder="Why is this not useful?"
         />
       </label>
-      {(apply.isError || dismiss.isError) && (
-        <p className="error-text">The proposal could not be updated. Your document is unchanged.</p>
+      {apply.isError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="The proposal could not be applied"
+          description="Your reviewed wording is preserved. Check the document's current revision before retrying."
+        />
+      )}
+      {dismiss.isError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="The proposal could not be dismissed"
+          description="Try again after any active apply finishes."
+        />
+      )}
+      {handoffError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Chat could not be opened"
+          description="Your feedback and proposal are preserved. Try preparing the request again."
+        />
       )}
     </article>
   )

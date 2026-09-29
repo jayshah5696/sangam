@@ -30,3 +30,10 @@ ALTER TABLE chat_proposals
 
 CREATE INDEX chat_proposals_run_idx
     ON chat_proposals(run_id);
+
+ALTER TABLE chat_proposals ADD COLUMN apply_payload_digest TEXT;
+ALTER TABLE chat_proposals ADD COLUMN apply_actor_id TEXT REFERENCES actors(actor_id);
+ALTER TABLE chat_proposals ADD COLUMN reviewed_content TEXT;
+ALTER TABLE chat_proposals ADD COLUMN applied_content TEXT;
+ALTER TABLE chat_proposals ADD COLUMN model_opinion TEXT;
+ALTER TABLE chat_runs ADD COLUMN sources_truncated INTEGER NOT NULL DEFAULT 0;

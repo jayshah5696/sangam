@@ -673,6 +673,10 @@ export const chatProposalSchema = z.object({
   applied_revision_id: z.string().nullable(),
   created_at: z.string(),
   applied_at: z.string().nullable(),
+  applied_content: z.string().nullable().optional(),
+  run_id: z.string().nullable().optional(),
+  model_opinion: z.string().nullable().optional(),
+  sources_retrieved_truncated: z.boolean().optional(),
   evidence: z
     .object({
       context_id: z.string(),
@@ -697,6 +701,9 @@ export const chatProposalSchema = z.object({
         annotation_id: z.string().nullable().optional(),
         snippet: z.string().default(''),
         location: z.string().nullable().optional(),
+        quote_start: z.number().int().nonnegative().nullable().optional(),
+        quote_end: z.number().int().nonnegative().nullable().optional(),
+        available: z.boolean().optional(),
       }),
     )
     .default([]),
@@ -722,6 +729,9 @@ export const chatProposalCitationSchema = z.object({
   annotation_id: z.string().nullable().optional(),
   snippet: z.string().default(''),
   location: z.string().nullable().optional(),
+  quote_start: z.number().int().nonnegative().nullable().optional(),
+  quote_end: z.number().int().nonnegative().nullable().optional(),
+  available: z.boolean().optional(),
 })
 export type ChatProposalCitation = z.infer<typeof chatProposalCitationSchema>
 

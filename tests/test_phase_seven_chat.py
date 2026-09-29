@@ -1771,7 +1771,7 @@ def test_editorial_chat_proposal_lifecycle_and_edited_apply(client: TestClient) 
     assert item["citations"][0]["document_id"] == doc_source["document_id"]
     assert item["citations"][0]["title"] == "Security Architecture"
     assert item["citations"][0]["snippet"] == "Containers should use non-root UID 1000."
-    assert item["citations"][0]["location"] == "Section 3.2"
+    assert item["citations"][0]["location"] == "Lines 1–1"
     assert len(item["sources_retrieved"]) == 1
     assert item["sources_retrieved"][0]["document_id"] == doc_source["document_id"]
     assert item["sources_retrieved"][0]["title"] == "Security Architecture"
@@ -1788,7 +1788,8 @@ def test_editorial_chat_proposal_lifecycle_and_edited_apply(client: TestClient) 
     assert apply_resp.status_code == 200
     applied_prop = apply_resp.json()
     assert applied_prop["status"] == "applied"
-    assert applied_prop["content"] == edited_content
+    assert applied_prop["content"] == proposal.content
+    assert applied_prop["applied_content"] == edited_content
 
     updated_doc = client.get(f"/api/v1/documents/{doc_target['document_id']}").json()
     assert updated_doc["content"] == edited_content
@@ -1881,9 +1882,7 @@ def test_chat_evidence_run_sources_bounded_to_50(client: TestClient) -> None:
     thread_id = create_thread(client, document_id=doc["document_id"])
     principal = _proposal_principal("bounded-actor")
     chat = client.app.state.services.chat
-    run_id = create_test_run(
-        client, principal, thread_id=thread_id, document_id=doc["document_id"]
-    )
+    run_id = create_test_run(client, principal, thread_id=thread_id, document_id=doc["document_id"])
 
     for i in range(60):
         chat.evidence.record_run_source(
@@ -1896,5 +1895,5 @@ def test_chat_evidence_run_sources_bounded_to_50(client: TestClient) -> None:
 
     sources = chat.evidence.list_run_sources(run_id)
     assert len(sources) == 50
-    pages = {s["page_number"] for s in sources}
+    pages = {s.page_number for s in sources}
     assert len(pages) == 50

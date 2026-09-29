@@ -36,8 +36,13 @@ def main() -> None:
         description="Fail when Sangam OpenAPI changes without a reviewed frontend contract update."
     )
     parser.add_argument("--print", action="store_true", dest="print_digest")
+    parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
     actual = contract_digest()
+    if args.write:
+        FINGERPRINT.write_text(actual + "\n", encoding="utf-8")
+        print(f"Updated OpenAPI fingerprint: {actual}")
+        return
     if args.print_digest:
         print(actual)
         return

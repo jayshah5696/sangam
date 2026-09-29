@@ -15,6 +15,8 @@ const chatSearchSchema = z.object({
   revision: z.string().max(200).optional(),
   returnTo: z.string().max(500).optional(),
   prompt: z.string().max(2000).optional(),
+  thread: z.string().max(200).optional(),
+  proposal: z.string().max(200).optional(),
 })
 
 export const Route = createFileRoute('/chat')({
@@ -29,6 +31,8 @@ function safeReturnPath(value: string | undefined) {
 function WorkspaceChat() {
   const search = Route.useSearch()
   const location = useLocation()
+  const initialPrompt =
+    z.string().max(2_020_000).optional().parse(location.state.sangamChatInitialPrompt) ?? search.prompt
   const selectedText = search.document ? (location.state.sangamChatContext?.selectedText ?? '') : ''
   const pdfPageNumber = search.document ? location.state.sangamChatContext?.pdfPageNumber : undefined
   const annotationId = search.document ? location.state.sangamChatContext?.annotationId : undefined
@@ -38,13 +42,19 @@ function WorkspaceChat() {
     queryKey: ['document', search.document],
     queryFn: () => api.getDocument(search.document!),
     enabled: Boolean(search.document),
+    refetchOnMount: 'always',
   })
   const document = documentQuery.data ?? null
   const contextIsCurrent = !document || !search.revision || document.current_revision_id === search.revision
   const clearContext = () =>
     navigate({
-      search: search.returnTo ? { returnTo: search.returnTo } : {},
-      state: {},
+      search: {
+        returnTo: search.returnTo,
+        prompt: search.prompt,
+        thread: search.thread,
+        proposal: search.proposal,
+      },
+      state: { sangamChatInitialPrompt: initialPrompt },
       replace: true,
     })
   const updateDocument = (nextDocument: Document) => {
@@ -79,7 +89,7 @@ function WorkspaceChat() {
         <MessageSquareText size="var(--icon-page)" />
       </header>
       <div className="workspace-chat-surface">
-        {documentQuery.isLoading ? (
+        {documentQuery.isLoading || (Boolean(search.document) && !documentQuery.isFetchedAfterMount) ? (
           <StateMessage kind="loading" title="Attaching document context" />
         ) : documentQuery.isError || (search.document && !document) ? (
           <StateMessage
@@ -109,13 +119,10 @@ function WorkspaceChat() {
           />
         ) : (
           <Suspense fallback={<StateMessage kind="loading" title="Preparing workspace chat" />}>
-            {search.prompt && (
-              <div className="chat-revision-draft-banner" role="status">
-                <span className="eyebrow">Revision requested</span>
-                <p>{search.prompt}</p>
-              </div>
-            )}
             <ChatPanel
+              key={`${search.thread ?? ''}:${search.proposal ?? ''}`}
+              initialPrompt={initialPrompt}
+              initialThreadId={search.thread}
               document={document}
               selectedText={selectedText}
               pdfPageNumber={document?.content_type === 'application/pdf' ? pdfPageNumber : null}

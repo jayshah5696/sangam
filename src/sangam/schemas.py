@@ -889,6 +889,9 @@ class ChatProposalCitation(BaseModel):
     annotation_id: str | None = None
     snippet: str = ""
     location: str | None = None
+    quote_start: int | None = None
+    quote_end: int | None = None
+    available: bool = True
 
 
 class ChatProposalSource(BaseModel):
@@ -916,6 +919,10 @@ class ChatProposal(BaseModel):
     judgment_needed: str | None = None
     citations: list[ChatProposalCitation] = Field(default_factory=list)
     sources_retrieved: list[ChatProposalSource] = Field(default_factory=list)
+    run_id: str | None = None
+    sources_retrieved_truncated: bool = False
+    applied_content: str | None = None
+    model_opinion: str | None = None
 
 
 class ApplyChatProposal(MutationRequest):

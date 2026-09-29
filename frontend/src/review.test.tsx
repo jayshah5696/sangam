@@ -275,7 +275,7 @@ describe('review inbox', () => {
     })
   })
 
-  it('handles requesting a revision by dismissing the proposal and navigating to chat', async () => {
+  it('hands off exact proposal context without dismissing before the reviewer sends', async () => {
     testProposals = [
       {
         proposal_id: 'prop-revision-test',
@@ -307,23 +307,26 @@ describe('review inbox', () => {
     const input = screen.getByPlaceholderText(/e\.g\. Tighten the second paragraph/i)
     fireEvent.change(input, { target: { value: 'Please add benchmarks to the performance section' } })
 
-    const sendBtn = screen.getByRole('button', { name: /Send revision request/i })
+    const sendBtn = screen.getByRole('button', { name: /Prepare revision request in chat/i })
     fireEvent.click(sendBtn)
 
     await waitFor(() => {
-      expect(mockDismissChatProposal).toHaveBeenCalledWith(
-        'prop-revision-test',
-        'Revision requested: Please add benchmarks to the performance section',
+      expect(mockDismissChatProposal).not.toHaveBeenCalled()
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: '/chat',
+          search: {
+            document: 'doc-1',
+            thread: 'thread-999',
+            proposal: 'prop-revision-test',
+            prompt: expect.stringContaining('Please add benchmarks to the performance section'),
+            returnTo: '/documents/doc-1',
+          },
+        }),
       )
-      expect(mockNavigate).toHaveBeenCalledWith({
-        to: '/chat',
-        search: {
-          document: 'doc-1',
-          revision: 'rev-1',
-          prompt: 'Please add benchmarks to the performance section',
-          returnTo: '/documents/doc-1',
-        },
-      })
+      expect(mockNavigate.mock.calls[0]?.[0].search.prompt).toContain('rev-1')
+      expect(mockNavigate.mock.calls[0]?.[0].search.prompt).toContain('prop-revision-test')
+      expect(mockNavigate.mock.calls[0]?.[0].state.sangamChatInitialPrompt).toContain('Proposed text')
     })
   })
 
