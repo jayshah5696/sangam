@@ -4,7 +4,7 @@ import asyncio
 import logging
 import threading
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from urllib.parse import quote, urlsplit
 
@@ -923,10 +923,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/v1/documents", response_model=Document, status_code=201)
     def create_document(
         body: CreateDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.create_document(
+        doc = workspace.create_document(
             principal,
             title=body.title,
             content=body.content,
@@ -934,6 +935,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content_type=body.content_type,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = _format_etag(doc.current_revision_id)
+        return doc
 
     app.include_router(
         create_pdf_router(
@@ -1290,6 +1293,53 @@ else fetch('/api/v1/trusted-previews/content', {
             headers={"Cache-Control": "no-store, max-age=0"},
         )
 
+    def _format_etag(revision_id: str) -> str:
+        return f'"{revision_id}"'
+
+    def _parse_if_match(if_match: str | None) -> list[str]:
+        if not if_match or not if_match.strip():
+            return []
+        tags: list[str] = []
+        for raw in if_match.split(","):
+            cleaned = raw.strip()
+            if (cleaned.startswith('"') and cleaned.endswith('"')) or (
+                cleaned.startswith("'") and cleaned.endswith("'")
+            ):
+                cleaned = cleaned[1:-1].strip()
+            if cleaned:
+                tags.append(cleaned)
+        return tags
+
+    def _resolve_expected_revision_id(
+        expected_revision_id: str | None,
+        if_match: str | None,
+        get_current_revision_id: Callable[[], str] | None = None,
+    ) -> str:
+        tags = _parse_if_match(if_match)
+        if tags:
+            if "*" in tags:
+                if expected_revision_id is not None:
+                    return expected_revision_id
+                if get_current_revision_id is not None:
+                    return get_current_revision_id()
+                raise ValidationError(
+                    "expected_revision_id in body or valid If-Match header is required"
+                )
+            if expected_revision_id is not None:
+                if expected_revision_id not in tags:
+                    raise ConflictError(
+                        "The document changed since it was read",
+                        details={
+                            "expected_revision_id": expected_revision_id,
+                            "if_match": if_match,
+                        },
+                    )
+                return expected_revision_id
+            return tags[0]
+        if expected_revision_id is not None:
+            return expected_revision_id
+        raise ValidationError("expected_revision_id in body or If-Match header is required")
+
     def document_artifact(document_id: str, principal: Principal) -> tuple[Document, bytes]:
         document = workspace.get_document(principal, document_id)
         content = (
@@ -1300,19 +1350,41 @@ else fetch('/api/v1/trusted-previews/content', {
         return document, content
 
     @app.get("/api/v1/documents/{document_id}/raw")
-    def raw_document(document_id: str, principal: Principal = principal_dependency) -> Response:
+    def raw_document(
+        document_id: str,
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        principal: Principal = principal_dependency,
+    ) -> Response:
         document, content = document_artifact(document_id, principal)
+        etag = _format_etag(document.current_revision_id)
+        if if_none_match:
+            tags = _parse_if_match(if_none_match)
+            if "*" in tags or document.current_revision_id in tags:
+                return Response(
+                    status_code=304,
+                    headers={"ETag": etag, "Cache-Control": "private, no-store"},
+                )
         return Response(
             content=content,
             media_type=document.content_type,
-            headers={"Cache-Control": "private, no-store"},
+            headers={"Cache-Control": "private, no-store", "ETag": etag},
         )
 
     @app.get("/api/v1/documents/{document_id}/download")
     def download_document(
-        document_id: str, principal: Principal = principal_dependency
+        document_id: str,
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        principal: Principal = principal_dependency,
     ) -> Response:
         document, content = document_artifact(document_id, principal)
+        etag = _format_etag(document.current_revision_id)
+        if if_none_match:
+            tags = _parse_if_match(if_none_match)
+            if "*" in tags or document.current_revision_id in tags:
+                return Response(
+                    status_code=304,
+                    headers={"ETag": etag, "Cache-Control": "private, no-store"},
+                )
         fallback_suffix = {
             "text/markdown": ".md",
             "text/html": ".html",
@@ -1327,58 +1399,97 @@ else fetch('/api/v1/trusted-previews/content', {
             headers={
                 "Cache-Control": "private, no-store",
                 "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+                "ETag": etag,
             },
         )
 
     @app.get("/api/v1/documents/{document_id}", response_model=Document)
-    def get_document(document_id: str, principal: Principal = principal_dependency) -> Document:
-        return workspace.get_document(principal, document_id)
+    def get_document(
+        document_id: str,
+        response: Response,
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        principal: Principal = principal_dependency,
+    ) -> Document | Response:
+        doc = workspace.get_document(principal, document_id)
+        etag = _format_etag(doc.current_revision_id)
+        response.headers["ETag"] = etag
+        if if_none_match:
+            tags = _parse_if_match(if_none_match)
+            if "*" in tags or doc.current_revision_id in tags:
+                return Response(status_code=304, headers={"ETag": etag})
+        return doc
 
     @app.patch("/api/v1/documents/{document_id}", response_model=Document)
     def update_document(
         document_id: str,
         body: UpdateDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.update_document(
+        expected_rev = _resolve_expected_revision_id(
+            body.expected_revision_id,
+            if_match,
+            lambda: (
+                workspace.get_document(
+                    principal, document_id, include_deleted=True
+                ).current_revision_id
+            ),
+        )
+        result = workspace.update_document(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
+            expected_revision_id=expected_rev,
             content=body.content,
             title=body.title,
             summary=body.summary,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = _format_etag(result.current_revision_id)
+        return result
 
     @app.post("/api/v1/documents/{document_id}/duplicate", response_model=Document, status_code=201)
     def duplicate_document(
         document_id: str,
         body: DuplicateDocument,
         background_tasks: BackgroundTasks,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
+        expected_rev = _resolve_expected_revision_id(
+            body.expected_revision_id,
+            if_match,
+            lambda: (
+                workspace.get_document(
+                    principal, document_id, include_deleted=True
+                ).current_revision_id
+            ),
+        )
         result = workspace.duplicate_document(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
+            expected_revision_id=expected_rev,
             title=body.title,
             path=body.path,
             idempotency_key=idempotency_key,
         )
         if result.content_type == "application/pdf":
             background_tasks.add_task(pdf_research.extract_text, result.document_id)
+        response.headers["ETag"] = _format_etag(result.current_revision_id)
         return result
 
     @app.patch("/api/v1/documents/{document_id}/metadata", response_model=Document)
     def update_document_metadata(
         document_id: str,
         body: UpdateDocumentMetadata,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.update_document_metadata(
+        result = workspace.update_document_metadata(
             principal,
             document_id=document_id,
             expected_metadata_version=body.expected_metadata_version,
@@ -1386,53 +1497,94 @@ else fetch('/api/v1/trusted-previews/content', {
             tag_ids=body.tag_ids,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = _format_etag(result.current_revision_id)
+        return result
 
     @app.post("/api/v1/documents/{document_id}/materialize", response_model=Document)
     def materialize_document(
         document_id: str,
         body: PathMutation,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.materialize_document(
+        expected_rev = _resolve_expected_revision_id(
+            body.expected_revision_id,
+            if_match,
+            lambda: (
+                workspace.get_document(
+                    principal, document_id, include_deleted=True
+                ).current_revision_id
+            ),
+        )
+        result = workspace.materialize_document(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
+            expected_revision_id=expected_rev,
             path=body.path,
             summary=body.summary,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = _format_etag(result.current_revision_id)
+        return result
 
     @app.post("/api/v1/documents/{document_id}/move", response_model=Document)
     def move_document(
         document_id: str,
         body: PathMutation,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.move_document(
+        expected_rev = _resolve_expected_revision_id(
+            body.expected_revision_id,
+            if_match,
+            lambda: (
+                workspace.get_document(
+                    principal, document_id, include_deleted=True
+                ).current_revision_id
+            ),
+        )
+        result = workspace.move_document(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
+            expected_revision_id=expected_rev,
             path=body.path,
             summary=body.summary,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = _format_etag(result.current_revision_id)
+        return result
 
     @app.delete("/api/v1/documents/{document_id}", response_model=Document)
     def delete_document(
         document_id: str,
         body: DeleteDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.delete_document(
+        expected_rev = _resolve_expected_revision_id(
+            body.expected_revision_id,
+            if_match,
+            lambda: (
+                workspace.get_document(
+                    principal, document_id, include_deleted=True
+                ).current_revision_id
+            ),
+        )
+        result = workspace.delete_document(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
+            expected_revision_id=expected_rev,
             summary=body.summary,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = _format_etag(result.current_revision_id)
+        return result
 
     @app.get("/api/v1/documents/{document_id}/history", response_model=list[Revision])
     def history(document_id: str, principal: Principal = principal_dependency) -> list[Revision]:
@@ -1456,17 +1608,30 @@ else fetch('/api/v1/trusted-previews/content', {
     def restore_document(
         document_id: str,
         body: RestoreDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.restore_document(
+        expected_rev = _resolve_expected_revision_id(
+            body.expected_revision_id,
+            if_match,
+            lambda: (
+                workspace.get_document(
+                    principal, document_id, include_deleted=True
+                ).current_revision_id
+            ),
+        )
+        result = workspace.restore_document(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
+            expected_revision_id=expected_rev,
             revision_id=body.revision_id,
             summary=body.summary,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = _format_etag(result.current_revision_id)
+        return result
 
     @app.get("/api/v1/reconciliation", response_model=ReconciliationReport)
     def reconciliation_status(
