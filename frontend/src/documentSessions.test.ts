@@ -214,4 +214,38 @@ describe('document session autosave', () => {
     expect(saveDocument).toHaveBeenCalledTimes(2)
     store.dispose()
   })
+
+  it('delegates text insertion to the active editor handle when mounted', async () => {
+    const { storage } = memoryStorage()
+    const store = new DocumentSessionStore({ storage })
+    await store.initializeDocument(documentAt('rev-1', 'Initial text'))
+
+    const insertedText: string[] = []
+    const unregister = store.registerEditor(
+      'doc-1',
+      () => {},
+      () => {},
+      (text) => insertedText.push(text),
+    )
+
+    const success = store.insertText('doc-1', '\n\n> Quoted evidence')
+    expect(success).toBe(true)
+    expect(insertedText).toEqual(['\n\n> Quoted evidence'])
+
+    unregister()
+    store.dispose()
+  })
+
+  it('updates session content safely when editor is not mounted', async () => {
+    const { storage } = memoryStorage()
+    const store = new DocumentSessionStore({ storage })
+    await store.initializeDocument(documentAt('rev-1', 'Draft paragraph.'))
+
+    const success = store.insertText('doc-1', '\n\n> Quoted evidence')
+    expect(success).toBe(true)
+    expect(store.getSession('doc-1').content).toBe('Draft paragraph.\n\n> Quoted evidence')
+    expect(store.getSession('doc-1').saveState).toBe('dirty')
+
+    store.dispose()
+  })
 })

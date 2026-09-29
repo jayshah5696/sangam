@@ -350,16 +350,14 @@ function GroupInspector({ documentId }: { documentId: string }) {
         >
           <SlidersHorizontal size="var(--icon-control)" />
         </button>
-        {document.content_type === 'application/pdf' && (
-          <button
-            className="icon-button"
-            aria-label="PDF research"
-            data-tooltip="PDF research"
-            onClick={() => openToTab('research')}
-          >
-            <NotebookTabs size="var(--icon-control)" />
-          </button>
-        )}
+        <button
+          className="icon-button"
+          aria-label={document.content_type === 'application/pdf' ? 'PDF research' : 'Workspace evidence'}
+          data-tooltip={document.content_type === 'application/pdf' ? 'PDF research' : 'Workspace evidence'}
+          onClick={() => openToTab('research')}
+        >
+          <NotebookTabs size="var(--icon-control)" />
+        </button>
         <button
           className="icon-button"
           aria-label="Document outline"

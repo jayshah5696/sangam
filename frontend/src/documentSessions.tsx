@@ -76,7 +76,7 @@ export class DocumentSessionStore {
   private readonly listeners = new Map<string, Set<() => void>>()
   private readonly editorHandles = new Map<
     string,
-    { focus: () => void; scrollToLine?: (line: number) => void }
+    { focus: () => void; scrollToLine?: (line: number) => void; insertText?: (text: string) => void }
   >()
   private online = true
 
@@ -88,8 +88,13 @@ export class DocumentSessionStore {
     this.options.getDefaultMode = getDefaultMode
   }
 
-  registerEditor = (documentId: string, focus: () => void, scrollToLine?: (line: number) => void) => {
-    this.editorHandles.set(documentId, { focus, scrollToLine })
+  registerEditor = (
+    documentId: string,
+    focus: () => void,
+    scrollToLine?: (line: number) => void,
+    insertText?: (text: string) => void,
+  ) => {
+    this.editorHandles.set(documentId, { focus, scrollToLine, insertText })
     return () => {
       if (this.editorHandles.get(documentId)?.focus === focus) this.editorHandles.delete(documentId)
     }
@@ -103,6 +108,24 @@ export class DocumentSessionStore {
     const handle = this.editorHandles.get(documentId)
     handle?.scrollToLine?.(line)
     handle?.focus()
+  }
+
+  insertText = (documentId: string, text: string): boolean => {
+    const handle = this.editorHandles.get(documentId)
+    if (handle?.insertText) {
+      handle.insertText(text)
+      handle.focus()
+      return true
+    }
+    const session = this.getSession(documentId)
+    const runtime = this.runtimes.get(documentId)
+    const currentContent = session.content ?? runtime?.document.content ?? ''
+    const newContent = `${currentContent.trimEnd()}${text}`
+    this.updateSession(documentId, {
+      content: newContent,
+      baseRevisionId: session.baseRevisionId ?? runtime?.document.current_revision_id,
+    })
+    return true
   }
 
   getSession = (documentId: string): DocumentSession => {

@@ -19,8 +19,10 @@ import { StateMessage } from '../ui/StateMessage'
 import { ActionMenu } from '../ActionMenu'
 import { workspaceLayoutPatch, workspaceLayoutPresets } from '../../workspaceLayout'
 
+import { WorkspaceEvidenceRail } from '../evidence/WorkspaceEvidenceRail'
+
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
-const standardInspectorTabs = ['properties', 'outline', 'history', 'chat'] as const
+const standardInspectorTabs = ['properties', 'research', 'outline', 'history', 'chat'] as const
 const inspectorFocusableSelector =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
@@ -53,10 +55,8 @@ export function DocumentInspector({
   const { preferences, updatePreferences } = useTheme()
   const isNarrow = useMediaQuery('(max-width: 900px)')
   const pdf = document.content_type === 'application/pdf'
-  const inspectorTabs = pdf
-    ? (['properties', 'research', 'outline', 'history', 'chat'] as const)
-    : standardInspectorTabs
-  const preferredTab = pdf || preferences.rightTab !== 'research' ? preferences.rightTab : 'properties'
+  const inspectorTabs = standardInspectorTabs
+  const preferredTab = preferences.rightTab
   const tab = isNarrow && preferredTab === 'chat' ? 'properties' : preferredTab
   const openChat = () =>
     navigate({
@@ -233,7 +233,12 @@ export function DocumentInspector({
             )}
           </>
         )}
-        {tab === 'research' && pdf && <PdfResearchRail document={document} />}
+        {tab === 'research' &&
+          (pdf ? (
+            <PdfResearchRail document={document} />
+          ) : (
+            <WorkspaceEvidenceRail document={document} />
+          ))}
         {tab === 'outline' && (
           <section className="outline-panel">
             {document.content_type === 'application/pdf' && (

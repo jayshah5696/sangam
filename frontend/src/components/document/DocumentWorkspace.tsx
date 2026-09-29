@@ -1,7 +1,9 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MessageSquare, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
+import { BookmarkCheck, Columns2, MessageSquare, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
+import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
+import { TextSelectionToolbar, type TextSelectionAnchor } from './TextSelectionToolbar'
 import { api, type Document, type Revision } from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
@@ -76,6 +78,47 @@ export function DocumentWorkspace({
     document.content_type === 'text/html' ? 'interactive.html' : 'first-document.md',
   )
   const [linkTarget, setLinkTarget] = useState('')
+  const [activeSelection, setActiveSelection] = useState<{
+    selectedText: string
+    anchor: TextSelectionAnchor
+  } | null>(null)
+
+  const checkTextSelection = useCallback(() => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !workspaceRef.current) {
+      return
+    }
+    const text = sel.toString().trim()
+    if (!text || text.length < 2) return
+    const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+    if (!range) return
+    if (!workspaceRef.current.contains(range.commonAncestorContainer)) return
+    const rect = range.getBoundingClientRect()
+    if (rect.width === 0 && rect.height === 0) return
+    setActiveSelection({
+      selectedText: text,
+      anchor: {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+      },
+    })
+  }, [])
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      setTimeout(checkTextSelection, 10)
+    }
+    const element = workspaceRef.current
+    element?.addEventListener('pointerup', handleMouseUp)
+    element?.addEventListener('keyup', handleMouseUp)
+    return () => {
+      element?.removeEventListener('pointerup', handleMouseUp)
+      element?.removeEventListener('keyup', handleMouseUp)
+    }
+  }, [checkTextSelection])
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(() =>
     citationTargetFromLocation(documentId),
   )
@@ -117,6 +160,7 @@ export function DocumentWorkspace({
             target.scrollIntoView({ behavior: 'smooth', block: 'start' })
           }
         },
+        (text) => editorRef.current?.insertText(text),
       ),
     [documentId, sessions],
   )
@@ -360,6 +404,27 @@ export function DocumentWorkspace({
           <button type="button" disabled={!linkTarget} onClick={insertLink}>
             Insert link
           </button>
+          {Boolean(selection.selectedCharacters && selection.selectedCharacters > 0) && (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => {
+                const sel = window.getSelection()?.toString().trim()
+                if (!sel) return
+                workspaceEvidenceStore.keepEvidence({
+                  sourceDocumentId: document.document_id,
+                  sourceTitle: document.title,
+                  sourcePath: document.path,
+                  sourceContentType: document.content_type,
+                  pinnedRevisionId: document.current_revision_id,
+                  selectedText: sel,
+                })
+              }}
+              title="Keep selected text as evidence"
+            >
+              <BookmarkCheck size="var(--icon-inline)" /> Keep evidence
+            </button>
+          )}
           <span>
             Ln {selection.line}, Col {selection.column}
             {selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}
@@ -406,6 +471,18 @@ export function DocumentWorkspace({
           </Suspense>
         )}
       </div>
+      {activeSelection && (
+        <TextSelectionToolbar
+          documentId={document.document_id}
+          documentTitle={document.title}
+          documentPath={document.path}
+          contentType={document.content_type}
+          pinnedRevisionId={document.current_revision_id}
+          selectedText={activeSelection.selectedText}
+          anchor={activeSelection.anchor}
+          onDismiss={() => setActiveSelection(null)}
+        />
+      )}
     </section>
   )
 }

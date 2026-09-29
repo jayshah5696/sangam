@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Copy, FileText, StickyNote } from 'lucide-react'
+import { BookmarkCheck, Check, Copy, FileText, StickyNote } from 'lucide-react'
+import { workspaceEvidenceStore } from '../workspaceEvidenceState'
 import type { PdfRect } from '../api'
 import { floatingPosition, markdownSelectionCitation } from '../pdfAnnotationUi'
 
@@ -33,6 +34,7 @@ export function PdfSelectionToolbar({
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: selection.anchor.left, top: selection.anchor.top })
   const [copied, setCopied] = useState<'text' | 'citation' | null>(null)
+  const [kept, setKept] = useState(false)
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current
@@ -94,6 +96,26 @@ export function PdfSelectionToolbar({
         ))}
       </div>
       <span className="pdf-selection-divider" />
+      <button
+        type="button"
+        disabled={pending}
+        aria-label="Keep as evidence"
+        title="Keep as evidence"
+        onClick={() => {
+          workspaceEvidenceStore.keepEvidence({
+            sourceDocumentId: documentId,
+            sourceTitle: documentTitle,
+            sourceContentType: 'application/pdf',
+            pageNumber: selection.pageNumber,
+            selectedText: selection.selectedText,
+          })
+          setKept(true)
+          setTimeout(() => setKept(false), 2000)
+        }}
+      >
+        {kept ? <Check size="var(--icon-inline)" /> : <BookmarkCheck size="var(--icon-inline)" />}
+        {kept ? 'Kept' : 'Keep as evidence'}
+      </button>
       <button type="button" disabled={pending} onClick={onAddNote}>
         <StickyNote size="var(--icon-inline)" /> Add note
       </button>
