@@ -217,7 +217,7 @@ describe('document session autosave', () => {
 
   it('delegates text insertion to the active editor handle when mounted', async () => {
     const { storage } = memoryStorage()
-    const store = new DocumentSessionStore({ storage })
+    const store = new DocumentSessionStore({ storage, saveDocument: async (doc) => doc })
     await store.initializeDocument(documentAt('rev-1', 'Initial text'))
 
     const insertedText: string[] = []
@@ -238,7 +238,7 @@ describe('document session autosave', () => {
 
   it('updates session content safely when editor is not mounted', async () => {
     const { storage } = memoryStorage()
-    const store = new DocumentSessionStore({ storage })
+    const store = new DocumentSessionStore({ storage, saveDocument: async (doc) => doc })
     await store.initializeDocument(documentAt('rev-1', 'Draft paragraph.'))
 
     const success = store.insertText('doc-1', '\n\n> Quoted evidence')

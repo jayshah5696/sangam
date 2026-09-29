@@ -163,9 +163,9 @@ describe('WorkspaceEvidenceRail', () => {
     fireEvent.click(insertBtn)
 
     expect(state.inserted).toHaveLength(1)
-    expect(state.inserted[0].documentId).toBe('draft-1')
-    expect(state.inserted[0].text).toContain('> Raft divides time into terms of arbitrary length.')
-    expect(state.inserted[0].text).toContain('[Source: Consensus Algorithms](sangam://document/source-doc-1?revision=rev-pinned-1)')
+    expect(state.inserted[0]?.documentId).toBe('draft-1')
+    expect(state.inserted[0]?.text).toContain('> Raft divides time into terms of arbitrary length.')
+    expect(state.inserted[0]?.text).toContain('[Source: Consensus Algorithms](sangam://document/source-doc-1?revision=rev-pinned-1)')
   })
 
   it('attaches and saves a claim statement to the evidence card', () => {
@@ -231,13 +231,13 @@ describe('WorkspaceEvidenceRail', () => {
     render(<WorkspaceEvidenceRail document={activeDraftDoc} />)
 
     const compareButtons = screen.getAllByRole('button', { name: 'Compare' })
-    fireEvent.click(compareButtons[0])
+    fireEvent.click(compareButtons[0]!)
 
     expect(screen.getByText(/Select another excerpt below to compare side by side/i)).toBeTruthy()
 
     // Click compare on second card
     const remainingCompareButtons = screen.getAllByRole('button', { name: 'Compare' })
-    fireEvent.click(remainingCompareButtons[1])
+    fireEvent.click(remainingCompareButtons[1]!)
 
     const dialog = screen.getByRole('dialog', { name: 'Compare evidence excerpts' })
     expect(dialog).toBeTruthy()

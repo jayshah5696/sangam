@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { Bookmark, BookmarkCheck, Check, Copy, Highlighter, MessageSquare, Quote, Search, StickyNote } from 'lucide-react'
 import { evidenceCitationMarkdown } from '../evidenceCitation'
@@ -264,6 +264,7 @@ function AnnotationComposer({
   draft: AnnotationDraft
   onClose: () => void
 }) {
+  const queryClient = useQueryClient()
   const [note, setNote] = useState('')
   const [tags, setTags] = useState('')
   const [color, setColor] = useState('#f0c75e')
@@ -326,6 +327,7 @@ function AnnotationComposer({
 }
 
 function AnnotationDetail({ annotation, onClose }: { annotation: Annotation; onClose: () => void }) {
+  const queryClient = useQueryClient()
   const [note, setNote] = useState(annotation.note ?? '')
   const [tags, setTags] = useState(annotation.tags.join(', '))
   const [color, setColor] = useState(annotation.color)

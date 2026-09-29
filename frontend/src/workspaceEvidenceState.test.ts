@@ -40,7 +40,7 @@ describe('workspaceEvidenceStore', () => {
 
     const items = workspaceEvidenceStore.getEvidence()
     expect(items).toHaveLength(1)
-    expect(items[0].id).toBe(item.id)
+    expect(items[0]?.id).toBe(item.id)
   })
 
   it('updates an evidence item with an attached claim or note', () => {

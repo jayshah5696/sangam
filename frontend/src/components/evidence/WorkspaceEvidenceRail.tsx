@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { api, type Document } from '../../api'
+import { api, type Document, type DocumentSummary } from '../../api'
 import { announceCitationNavigation } from '../../citationNavigation'
 import { useDocumentSessions } from '../../documentSessions'
 import {
@@ -211,7 +211,7 @@ function EvidenceCard({
 }: {
   item: EvidenceItem
   activeDraftId: string
-  availableDrafts: Document[]
+  availableDrafts: DocumentSummary[]
   isComparingTarget: boolean
   onInsert: (targetDraftId: string) => void
   onOpenSource: () => void
