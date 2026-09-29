@@ -21,6 +21,7 @@ from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
 from sangam.application import build_application_services, initialize_application_state
+from sangam.conditions import document_etag
 from sangam.config import Settings
 from sangam.errors import (
     AuthenticationError,
@@ -31,6 +32,7 @@ from sangam.errors import (
     InvalidPathError,
     MaterializationError,
     NotFoundError,
+    PreconditionError,
     SangamError,
     ServiceUnavailableError,
     ValidationError,
@@ -332,6 +334,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     operation_id = _camel_case(f"{resource}_{function_name}")
                 operation["operationId"] = operation_id
                 used_operation_ids.add(operation_id)
+                if (path, method) == ("/api/v1/documents", "post"):
+                    operation["responses"]["201"]["headers"] = {
+                        "ETag": {
+                            "description": "Strong document JSON representation validator.",
+                            "schema": {"type": "string"},
+                        },
+                    }
+                if (path, method) == ("/api/v1/documents/{document_id}", "get"):
+                    operation["responses"]["200"].setdefault("headers", {})[
+                        "X-Sangam-Revision-ID"
+                    ] = {
+                        "description": "Content revision for the independent body revision guard.",
+                        "schema": {"type": "string"},
+                    }
+                condition_headers = {
+                    parameter.get("name")
+                    for parameter in operation.get("parameters", [])
+                    if parameter.get("in") == "header"
+                }
+                if "If-Match" in condition_headers:
+                    responses = operation.setdefault("responses", {})
+                    responses["412"] = {
+                        "description": (
+                            "HTTP entity-tag precondition failed. "
+                            "Legacy body version conflicts remain 409."
+                        ),
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                            }
+                        },
+                    }
+                    if method == "get":
+                        responses["304"] = {
+                            "description": "Representation is unchanged",
+                            "headers": {"ETag": {"schema": {"type": "string"}}},
+                        }
+                    for status, response in responses.items():
+                        if status in {"200", "201", "304"}:
+                            response.setdefault("headers", {})["ETag"] = {
+                                "description": (
+                                    "Strong validator of the returned representation. "
+                                    "Document JSON includes all represented fields; "
+                                    "raw and download validate bytes and media type."
+                                ),
+                                "schema": {"type": "string"},
+                            }
                 if description := operation_descriptions.get((path, method)):
                     operation["description"] = description
                 if (path, method) not in public_operations:
@@ -476,6 +525,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status = 403
         elif isinstance(error, NotFoundError):
             status = 404
+        elif isinstance(error, PreconditionError):
+            status = 412
         elif isinstance(error, (ConflictError, IdempotencyError)):
             status = 409
         elif isinstance(error, (InvalidPathError, ValidationError)):
@@ -923,10 +974,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/v1/documents", response_model=Document, status_code=201)
     def create_document(
         body: CreateDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.create_document(
+        doc = workspace.create_document(
             principal,
             title=body.title,
             content=body.content,
@@ -934,6 +986,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content_type=body.content_type,
             idempotency_key=idempotency_key,
         )
+        response.headers["ETag"] = document_etag(doc)
+        return doc
 
     app.include_router(
         create_pdf_router(
@@ -986,29 +1040,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def update_document_trust(
         document_id: str,
         body: UpdateDocumentTrust,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = admin_dependency,
     ) -> Document:
-        result = documents.update_trust(
+        result = workspace.http_document_mutation(
+            principal,
             document_id=document_id,
-            expected_trust_version=body.expected_trust_version,
-            trust_level=body.trust_level,
-            actor_id=principal.actor_id,
-            idempotency_key=idempotency_key,
-        )
-        activity.record(
-            principal=principal,
             action="trust",
-            resource_type="document",
-            resource_id=document_id,
-            path=result.path,
-            outcome="accepted",
-            revision_id=result.current_revision_id,
-            details={
-                "trust_level": body.trust_level,
-                "expected_trust_version": body.expected_trust_version,
-            },
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
+            idempotency_key=idempotency_key,
+            operation=lambda _: documents.update_trust(
+                document_id=document_id,
+                expected_trust_version=body.expected_trust_version,
+                trust_level=body.trust_level,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            ),
         )
+        response.headers["ETag"] = document_etag(result)
         return result
 
     @app.post(
@@ -1290,29 +1344,48 @@ else fetch('/api/v1/trusted-previews/content', {
             headers={"Cache-Control": "no-store, max-age=0"},
         )
 
-    def document_artifact(document_id: str, principal: Principal) -> tuple[Document, bytes]:
-        document = workspace.get_document(principal, document_id)
-        content = (
-            pdf_research.pdf_bytes(document_id)[1]
-            if document.content_type == "application/pdf"
-            else document.content.encode("utf-8")
-        )
-        return document, content
-
     @app.get("/api/v1/documents/{document_id}/raw")
-    def raw_document(document_id: str, principal: Principal = principal_dependency) -> Response:
-        document, content = document_artifact(document_id, principal)
+    def raw_document(
+        document_id: str,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        principal: Principal = principal_dependency,
+    ) -> Response:
+        document, content, etag, changed = workspace.http_document_read(
+            principal,
+            document_id=document_id,
+            if_match=if_match,
+            if_none_match=if_none_match,
+            artifact=True,
+        )
+        if not changed:
+            return Response(
+                status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-store"}
+            )
         return Response(
             content=content,
             media_type=document.content_type,
-            headers={"Cache-Control": "private, no-store"},
+            headers={"Cache-Control": "private, no-store", "ETag": etag},
         )
 
     @app.get("/api/v1/documents/{document_id}/download")
     def download_document(
-        document_id: str, principal: Principal = principal_dependency
+        document_id: str,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        principal: Principal = principal_dependency,
     ) -> Response:
-        document, content = document_artifact(document_id, principal)
+        document, content, etag, changed = workspace.http_document_read(
+            principal,
+            document_id=document_id,
+            if_match=if_match,
+            if_none_match=if_none_match,
+            artifact=True,
+        )
+        if not changed:
+            return Response(
+                status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-store"}
+            )
         fallback_suffix = {
             "text/markdown": ".md",
             "text/html": ".html",
@@ -1327,112 +1400,209 @@ else fetch('/api/v1/trusted-previews/content', {
             headers={
                 "Cache-Control": "private, no-store",
                 "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+                "ETag": etag,
             },
         )
 
     @app.get("/api/v1/documents/{document_id}", response_model=Document)
-    def get_document(document_id: str, principal: Principal = principal_dependency) -> Document:
-        return workspace.get_document(principal, document_id)
+    def get_document(
+        document_id: str,
+        response: Response,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        principal: Principal = principal_dependency,
+    ) -> Document | Response:
+        doc, _, etag, changed = workspace.http_document_read(
+            principal, document_id=document_id, if_match=if_match, if_none_match=if_none_match
+        )
+        response.headers["ETag"] = etag
+        response.headers["X-Sangam-Revision-ID"] = doc.current_revision_id
+        if not changed:
+            return Response(status_code=304, headers={"ETag": etag})
+        return doc
 
     @app.patch("/api/v1/documents/{document_id}", response_model=Document)
     def update_document(
         document_id: str,
         body: UpdateDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.update_document(
+        result = workspace.http_document_mutation(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
-            content=body.content,
-            title=body.title,
-            summary=body.summary,
+            action="update",
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
             idempotency_key=idempotency_key,
+            operation=lambda expected_rev: documents.update_document(
+                document_id=document_id,
+                expected_revision_id=expected_rev,
+                content=body.content,
+                title=body.title,
+                summary=body.summary,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+            ),
         )
+        response.headers["ETag"] = document_etag(result)
+        return result
 
     @app.post("/api/v1/documents/{document_id}/duplicate", response_model=Document, status_code=201)
     def duplicate_document(
         document_id: str,
         body: DuplicateDocument,
         background_tasks: BackgroundTasks,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.duplicate_document(
+        result = workspace.http_document_mutation(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
-            title=body.title,
-            path=body.path,
+            action="duplicate",
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
             idempotency_key=idempotency_key,
+            operation=lambda expected_rev: documents.duplicate_document(
+                document_id=document_id,
+                expected_revision_id=expected_rev,
+                title=body.title,
+                path=body.path,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+            ),
         )
         if result.content_type == "application/pdf":
             background_tasks.add_task(pdf_research.extract_text, result.document_id)
+        response.headers["ETag"] = document_etag(result)
         return result
 
     @app.patch("/api/v1/documents/{document_id}/metadata", response_model=Document)
     def update_document_metadata(
         document_id: str,
         body: UpdateDocumentMetadata,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.update_document_metadata(
+        result = workspace.http_document_mutation(
             principal,
             document_id=document_id,
-            expected_metadata_version=body.expected_metadata_version,
-            category=body.category,
-            tag_ids=body.tag_ids,
+            action="tag",
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
             idempotency_key=idempotency_key,
+            operation=lambda _: documents.update_document_metadata(
+                document_id=document_id,
+                expected_metadata_version=body.expected_metadata_version,
+                category=body.category,
+                tag_ids=body.tag_ids,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+            ),
         )
+        response.headers["ETag"] = document_etag(result)
+        return result
 
     @app.post("/api/v1/documents/{document_id}/materialize", response_model=Document)
     def materialize_document(
         document_id: str,
         body: PathMutation,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.materialize_document(
+        result = workspace.http_document_mutation(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
-            path=body.path,
-            summary=body.summary,
+            action="materialize",
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
             idempotency_key=idempotency_key,
+            operation=lambda expected_rev: documents.materialize_document(
+                document_id=document_id,
+                expected_revision_id=expected_rev,
+                path=body.path,
+                summary=body.summary,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+            ),
         )
+        response.headers["ETag"] = document_etag(result)
+        return result
 
     @app.post("/api/v1/documents/{document_id}/move", response_model=Document)
     def move_document(
         document_id: str,
         body: PathMutation,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.move_document(
+        result = workspace.http_document_mutation(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
-            path=body.path,
-            summary=body.summary,
+            action="move",
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
             idempotency_key=idempotency_key,
+            operation=lambda expected_rev: documents.move_document(
+                document_id=document_id,
+                expected_revision_id=expected_rev,
+                path=body.path,
+                summary=body.summary,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+            ),
         )
+        response.headers["ETag"] = document_etag(result)
+        return result
 
     @app.delete("/api/v1/documents/{document_id}", response_model=Document)
     def delete_document(
         document_id: str,
         body: DeleteDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.delete_document(
+        result = workspace.http_document_mutation(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
-            summary=body.summary,
+            action="delete",
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
             idempotency_key=idempotency_key,
+            operation=lambda expected_rev: documents.delete_document(
+                document_id=document_id,
+                expected_revision_id=expected_rev,
+                summary=body.summary,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+            ),
         )
+        response.headers["ETag"] = document_etag(result)
+        return result
 
     @app.get("/api/v1/documents/{document_id}/history", response_model=list[Revision])
     def history(document_id: str, principal: Principal = principal_dependency) -> list[Revision]:
@@ -1456,17 +1626,31 @@ else fetch('/api/v1/trusted-previews/content', {
     def restore_document(
         document_id: str,
         body: RestoreDocument,
+        response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key"),
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        return workspace.restore_document(
+        result = workspace.http_document_mutation(
             principal,
             document_id=document_id,
-            expected_revision_id=body.expected_revision_id,
-            revision_id=body.revision_id,
-            summary=body.summary,
+            action="restore",
+            payload=body.model_dump(),
+            if_match=if_match,
+            if_none_match=if_none_match,
             idempotency_key=idempotency_key,
+            operation=lambda expected_rev: documents.restore_document(
+                document_id=document_id,
+                expected_revision_id=expected_rev,
+                revision_id=body.revision_id,
+                summary=body.summary,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+            ),
         )
+        response.headers["ETag"] = document_etag(result)
+        return result
 
     @app.get("/api/v1/reconciliation", response_model=ReconciliationReport)
     def reconciliation_status(

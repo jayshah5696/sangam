@@ -6,11 +6,15 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
+from sangam.conditions import conditional_fingerprint, validate_storage_condition
 from sangam.db import Database, utc_now
 from sangam.errors import IdempotencyError
 
 
 def request_hash(payload: dict[str, Any]) -> str:
+    conditional = conditional_fingerprint()
+    if conditional is not None:
+        return conditional
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -71,6 +75,7 @@ class IdempotencyStore:
         if row and (row["operation"] != operation or row["request_hash"] != request_hash):
             IdempotencyStore._raise_conflict(key)
         if row is None:
+            validate_storage_condition(connection)
             return None
         return MutationRecord(
             resource_type=row["resource_type"],

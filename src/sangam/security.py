@@ -52,6 +52,9 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "proxy-authorization",
     "proxy-authenticate",
     "passphrase",
+    "x-client-cert",
+    "ssl-client-cert",
+    "x-tls-client-cert",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -72,6 +75,8 @@ _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
     "cf-access-jwt-assertion",
     "passphrase",
     "proxy-authenticate",
+    "cert",
+    "signature",
 )
 
 _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
@@ -103,6 +108,14 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "refresh_token",
     "access_token",
     "api_token",
+    "access_token_secret",
+    "pem",
+    "cert",
+    "certificate",
+    "signature",
+    "oauth_token",
+    "env_var",
+    "env_val",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -128,8 +141,19 @@ _SAFE_HEADER_EXCEPTIONS: set[str] = {
 }
 
 _TOKEN_PATTERN = re.compile(
-    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9_-]{16,})\b"
+    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{22,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,})\b"
 )
+
+_PRIVATE_PEM = re.compile(
+    r"-----BEGIN (?P<kind>(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY)-----"
+    r".*?-----END (?P=kind)-----",
+    re.DOTALL,
+)
+
+
+def sanitize_sensitive_text(value: str) -> str:
+    # Diff lines include +/- prefixes, so redact the complete block across them.
+    return _TOKEN_PATTERN.sub("[REDACTED]", _PRIVATE_PEM.sub("[REDACTED]", value))
 
 
 def sanitize_headers(headers: object) -> dict[str, str]:
@@ -144,14 +168,14 @@ def sanitize_headers(headers: object) -> dict[str, str]:
         ):
             result[str(key)] = "[REDACTED]"
         else:
-            result[str(key)] = _TOKEN_PATTERN.sub("[REDACTED]", str(value))
+            result[str(key)] = sanitize_sensitive_text(str(value))
     return result
 
 
 def sanitize_sensitive_data(value: object) -> object:
     """Recursively redact sensitive token strings, passwords, and secret fields."""
     if isinstance(value, str):
-        return _TOKEN_PATTERN.sub("[REDACTED]", value)
+        return sanitize_sensitive_text(value)
     if isinstance(value, dict):
         sanitized_dict: dict[str, object] = {}
         for k, v in value.items():
@@ -244,16 +268,22 @@ class Principal:
 
 
 def normalize_scope_prefix(value: str | None) -> str | None:
-    if value is None or value.strip() in {"", "/", "/**", "**"}:
+    if value is None:
         return None
     if "\x00" in value:
         raise ValidationError("Token path scope prefix cannot contain null bytes")
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise ValidationError("Token path scope prefix cannot contain control characters")
+    if value.strip() in {"", "/", "/**", "**", "/*", "*"}:
+        return None
     candidate = value.strip().replace("\\", "/")
     if candidate.endswith("/**"):
         candidate = candidate[:-3]
+    elif candidate.endswith("/*"):
+        candidate = candidate[:-2]
     candidate = candidate.strip("/")
+    if "*" in candidate:
+        raise ValidationError("Only trailing /* and /** scope aliases are supported")
     pure = PurePosixPath(candidate)
     raw_parts = candidate.split("/")
     if (
