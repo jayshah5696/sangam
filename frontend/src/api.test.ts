@@ -171,3 +171,119 @@ describe('chat effect requests', () => {
     })
   })
 })
+
+describe('projects api', () => {
+  it('lists projects with parsed summary fields', async () => {
+    const mockProjects = [
+      {
+        project_id: 'proj_123',
+        name: 'Research Paper',
+        description: 'Deep dive into architecture',
+        brief_document_id: 'doc_brief',
+        brief_document_title: 'Research Paper Brief',
+        active_thread_id: 'thread_1',
+        version: 1,
+        document_count: 3,
+        thread_count: 1,
+        annotation_count: 2,
+        created_by: 'human:jay',
+        created_at: '2026-09-29T00:00:00Z',
+        updated_at: '2026-09-29T00:00:00Z',
+      },
+    ]
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify(mockProjects), { status: 200 }))
+
+    const projects = await api.listProjects()
+    expect(projects).toEqual(mockProjects)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/projects', expect.anything())
+  })
+
+  it('gets full project details including documents and layout state', async () => {
+    const mockDetail = {
+      project_id: 'proj_123',
+      name: 'Research Paper',
+      description: null,
+      brief_document_id: 'doc_brief',
+      brief_document_title: 'Brief',
+      active_thread_id: null,
+      version: 1,
+      document_count: 1,
+      thread_count: 0,
+      annotation_count: 0,
+      created_by: 'human:jay',
+      created_at: '2026-09-29T00:00:00Z',
+      updated_at: '2026-09-29T00:00:00Z',
+      workbench_state_json: '{"schemaVersion":1}',
+      documents: [
+        {
+          project_id: 'proj_123',
+          document_id: 'doc_1',
+          document_title: 'Doc 1',
+          document_path: 'paper.pdf',
+          content_type: 'application/pdf',
+          role: 'source',
+          pinned_page: 5,
+          notes: 'Key methodology citation',
+          current_revision_id: 'revision_1',
+          updated_at: '2026-09-29T00:00:00Z',
+          created_at: '2026-09-29T00:00:00Z',
+        },
+      ],
+      threads: [],
+      annotations: [],
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(mockDetail), { status: 200 }))
+
+    const detail = await api.getProject('proj_123')
+    expect(detail.name).toBe('Research Paper')
+    expect(detail.documents).toHaveLength(1)
+    expect(detail.documents[0]?.role).toBe('source')
+    expect(detail.documents[0]?.pinned_page).toBe(5)
+  })
+
+  it('creates a project with brief generation requested', async () => {
+    const mockCreated = {
+      project_id: 'proj_new',
+      name: 'New Investigation',
+      description: 'Project description',
+      brief_document_id: 'doc_auto_brief',
+      brief_document_title: 'New Investigation Brief',
+      active_thread_id: null,
+      version: 1,
+      document_count: 1,
+      thread_count: 0,
+      annotation_count: 0,
+      created_by: 'human:jay',
+      created_at: '2026-09-29T00:00:00Z',
+      updated_at: '2026-09-29T00:00:00Z',
+      workbench_state_json: null,
+      documents: [],
+      threads: [],
+      annotations: [],
+    }
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify(mockCreated), { status: 200 }))
+
+    const result = await api.createProject({
+      name: 'New Investigation',
+      description: 'Project description',
+      create_brief: true,
+    })
+
+    expect(result.project_id).toBe('proj_new')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/projects',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'New Investigation',
+          description: 'Project description',
+          create_brief: true,
+        }),
+      }),
+    )
+  })
+})

@@ -1,12 +1,34 @@
 import { useDeferredValue, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { FilePlus2, FileText, FileUp, MessageSquareText, Pin, Search, ShieldCheck } from 'lucide-react'
+import {
+  FilePlus2,
+  FileText,
+  FileUp,
+  FolderKanban,
+  MessageSquareText,
+  Pin,
+  Search,
+  ShieldCheck,
+} from 'lucide-react'
 import { api, DOCUMENT_PAGE_SIZE } from '../api'
 import { collectGroups, useWorkbench } from '../workbench'
 import { selectHomeDocuments } from '../workspaceHome'
+import { StateMessage } from '../components/ui/StateMessage'
+import { ProjectHome } from '../components/projects/ProjectHome'
+import { HOME_PROJECT_KEY } from '../projectResume'
 
 export const Route = createFileRoute('/')({ component: Welcome })
+
+type HomeSelection = { id: string | null; error: Error | null }
+
+function readHomeSelection(): HomeSelection {
+  try {
+    return { id: localStorage.getItem(HOME_PROJECT_KEY), error: null }
+  } catch (error) {
+    return { id: null, error: error instanceof Error ? error : new Error('Could not read Home selection') }
+  }
+}
 
 function Welcome() {
   const navigate = useNavigate()
@@ -14,8 +36,30 @@ function Welcome() {
   const workbench = useWorkbench()
   const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
   const [searchQuery, setSearchQuery] = useState('')
+  const [selection, setSelection] = useState(readHomeSelection)
+  const selectedProjectId = selection.id
+  const selectionError = selection.error
   const deferredSearch = useDeferredValue(searchQuery)
   const documents = useQuery({ queryKey: ['documents', 'welcome'], queryFn: () => api.listDocumentsPage() })
+  const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
+  const selected =
+    selectedProjectId === ''
+      ? undefined
+      : (projectsQuery.data?.find((p) => p.project_id === selectedProjectId) ??
+        [...(projectsQuery.data ?? [])].sort((a, b) =>
+          (b.last_worked_at ?? '').localeCompare(a.last_worked_at ?? ''),
+        )[0])
+  const selectProject = (id: string) => {
+    try {
+      localStorage.setItem(HOME_PROJECT_KEY, id)
+      setSelection({ id, error: null })
+    } catch (error) {
+      setSelection((current) => ({
+        ...current,
+        error: error instanceof Error ? error : new Error('Could not remember the selected project'),
+      }))
+    }
+  }
   const searchResults = useInfiniteQuery({
     queryKey: ['documents', 'welcome-search', deferredSearch],
     initialPageParam: 0,
@@ -31,7 +75,16 @@ function Welcome() {
         contentType,
       ),
     onSuccess: async (document) => {
-      await queryClient.invalidateQueries({ queryKey: ['documents'] })
+      if (selected)
+        await api.addProjectDocument(selected.project_id, {
+          document_id: document.document_id,
+          role: 'draft',
+        })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['documents'] }),
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+        queryClient.invalidateQueries({ queryKey: ['project'] }),
+      ])
       workbench.ensureDocumentOpen(document.document_id, document.title)
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
     },
@@ -44,7 +97,16 @@ function Welcome() {
         `research/${file.name.toLowerCase().endsWith('.pdf') ? file.name : `${file.name}.pdf`}`,
       ),
     onSuccess: async (document) => {
-      await queryClient.invalidateQueries({ queryKey: ['documents'] })
+      if (selected)
+        await api.addProjectDocument(selected.project_id, {
+          document_id: document.document_id,
+          role: 'source',
+        })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['documents'] }),
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+        queryClient.invalidateQueries({ queryKey: ['project'] }),
+      ])
       workbench.ensureDocumentOpen(document.document_id, document.title)
       await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
     },
@@ -60,21 +122,54 @@ function Welcome() {
     ? (searchResults.data?.pages.flatMap((page) => page.items) ?? [])
     : []
   return (
-    <section className="welcome">
+    <section className="welcome welcome-work">
       <div className="welcome-heading-row">
         <div>
-          <p className="eyebrow">Workspace</p>
-          <h1>{isEmpty ? 'Your workspace is empty' : 'Pick up where you left off.'}</h1>
+          <p className="eyebrow">{selected ? 'Ongoing work' : 'Workspace'}</p>
+          <h1>{selected?.name ?? (isEmpty ? 'Your workspace is empty' : 'Your workspace')}</h1>
         </div>
         <Link className="review-home-link" to="/review">
           <ShieldCheck size="var(--icon-inline)" /> Review
         </Link>
       </div>
       <p>
-        {isEmpty
-          ? 'Create a Markdown document or import a PDF to begin.'
-          : 'Open a document, continue a pinned thread, or check the changes waiting for your review.'}
+        {selected
+          ? selected.description
+          : isEmpty
+            ? 'Create a Markdown document or import a PDF to begin.'
+            : 'Open a document, continue a pinned thread, or check the changes waiting for your review.'}
       </p>
+      {projectsQuery.isError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Could not load projects"
+          description={projectsQuery.error.message}
+          action={<button onClick={() => void projectsQuery.refetch()}>Retry</button>}
+        />
+      )}
+      {selectionError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Could not save Home selection"
+          description={selectionError.message}
+        />
+      )}
+      <ProjectHome
+        projects={projectsQuery.data ?? []}
+        selectedId={selected?.project_id ?? ''}
+        onSelect={selectProject}
+      />
+      {documents.isError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Could not load workspace documents"
+          description={documents.error.message}
+          action={<button onClick={() => void documents.refetch()}>Retry</button>}
+        />
+      )}
       <label className="welcome-search">
         <Search size="var(--icon-control)" />
         <input
@@ -107,10 +202,19 @@ function Welcome() {
       </label>
       {trimmedSearch && (
         <div className="welcome-search-results" role="list" aria-label="Matching documents">
+          {searchResults.isError && (
+            <StateMessage
+              compact
+              kind="error"
+              title="Document search failed"
+              description={searchResults.error.message}
+              action={<button onClick={() => void searchResults.refetch()}>Retry</button>}
+            />
+          )}
           {searchResults.isFetching && matchingDocuments.length === 0 && (
             <p className="small-muted">Searching…</p>
           )}
-          {!searchResults.isFetching && matchingDocuments.length === 0 && (
+          {!searchResults.isFetching && !searchResults.isError && matchingDocuments.length === 0 && (
             <p className="small-muted">No documents match “{trimmedSearch}”.</p>
           )}
           {matchingDocuments.map((document) => (
@@ -165,6 +269,9 @@ function Welcome() {
         </button>
         <Link className="secondary-action welcome-chat-action" to="/chat">
           <MessageSquareText size="var(--icon-control)" /> Ask workspace
+        </Link>
+        <Link className="secondary-action" to="/projects">
+          <FolderKanban size="var(--icon-control)" /> Projects
         </Link>
         <label className="pdf-import-control">
           <FileUp size="var(--icon-control)" />
@@ -222,7 +329,12 @@ function Welcome() {
         </div>
       )}
       {(createDocument.isError || importPdf.isError) && (
-        <p className="error-text">The document could not be created or imported.</p>
+        <StateMessage
+          compact
+          kind="error"
+          title="The document could not be created, imported or attached"
+          description={(createDocument.error ?? importPdf.error)?.message}
+        />
       )}
     </section>
   )
