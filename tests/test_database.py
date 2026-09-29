@@ -49,8 +49,14 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "021",
         "022",
         "023",
+        "024",
     ]
     assert {
+        "projects_created_at_idx",
+        "projects_updated_at_idx",
+        "project_documents_doc_idx",
+        "project_threads_thread_idx",
+        "project_annotations_ann_idx",
         "operation_events_revision_outcome_created_idx",
         "documents_deleted_updated_idx",
         "documents_category_idx",
@@ -457,3 +463,74 @@ def test_pdf_migration_preserves_phase_four_documents_and_publications(
     assert tuple(document) == ("text/html", "rev-1")
     assert publication["document_id"] == "doc-1"
     assert pdf_table is not None
+
+
+def test_migration_024_project_tables_and_indexes(tmp_path: Path) -> None:
+    database = Database(tmp_path / "projects.sqlite3")
+    database.initialize()
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO actors(actor_id, display_name, actor_type, created_at)
+            VALUES ('human:test', 'Test Human', 'human', '2026-09-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO documents(
+                document_id, title, content_type, path, current_revision_id,
+                content_hash, size_bytes, materialization_state, created_by,
+                created_at, updated_at
+            ) VALUES (
+                'doc-brief', 'Brief', 'text/markdown', 'brief.md', NULL,
+                'hash', 5, 'none', 'human:test', '2026-09-01T00:00:00+00:00',
+                '2026-09-01T00:00:00+00:00'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO projects(
+                project_id, name, description, brief_document_id, workbench_state_json,
+                created_by, created_at, updated_at
+            ) VALUES (
+                'proj-1', 'Test Project', 'A test project', 'doc-brief', '{"tabs":[]}',
+                'human:test', '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO project_documents(
+                project_id, document_id, role, pinned_page, notes, created_at
+            ) VALUES (
+                'proj-1', 'doc-brief', 'draft', 1, 'Draft brief',
+                '2026-09-01T00:00:00+00:00'
+            )
+            """
+        )
+
+    with database.connection() as connection:
+        project = connection.execute(
+            "SELECT name, brief_document_id FROM projects WHERE project_id = 'proj-1'"
+        ).fetchone()
+        doc = connection.execute(
+            "SELECT role, pinned_page FROM project_documents WHERE project_id = 'proj-1'"
+        ).fetchone()
+        assert project["name"] == "Test Project"
+        assert project["brief_document_id"] == "doc-brief"
+        assert doc["role"] == "draft"
+        assert doc["pinned_page"] == 1
+
+        plan_created = connection.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM projects ORDER BY created_at DESC"
+        ).fetchall()
+        detail_created = " ".join(row["detail"] for row in plan_created)
+        assert "projects_created_at_idx" in detail_created
+
+        plan_doc = connection.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM project_documents WHERE document_id = ?",
+            ("doc-brief",),
+        ).fetchall()
+        detail_doc = " ".join(row["detail"] for row in plan_doc)
+        assert "project_documents_doc_idx" in detail_doc

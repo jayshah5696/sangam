@@ -987,3 +987,94 @@ class ChatEffectsSummary(BaseModel):
     retryable_failures: int
     terminal_failures: int
     total_history: int
+
+
+ProjectRole = Literal["source", "draft", "output", "note"]
+
+
+class ProjectDocumentItem(BaseModel):
+    project_id: str
+    document_id: str
+    document_title: str
+    document_path: str | None
+    content_type: str
+    role: ProjectRole
+    pinned_page: int | None = None
+    notes: str | None = None
+    created_at: str
+
+
+class ProjectThreadItem(BaseModel):
+    project_id: str
+    thread_id: str
+    title: str | None = None
+    created_at: str
+
+
+class ProjectAnnotationItem(BaseModel):
+    project_id: str
+    annotation_id: str
+    document_id: str
+    page_number: int
+    annotation_type: str
+    selected_text: str | None = None
+    note: str | None = None
+    created_at: str
+
+
+class ProjectSummary(BaseModel):
+    project_id: str
+    name: str
+    description: str | None = None
+    brief_document_id: str | None = None
+    brief_document_title: str | None = None
+    active_thread_id: str | None = None
+    document_count: int = 0
+    thread_count: int = 0
+    annotation_count: int = 0
+    created_by: str
+    created_at: str
+    updated_at: str
+
+
+class ProjectDetail(ProjectSummary):
+    workbench_state_json: str | None = None
+    documents: list[ProjectDocumentItem] = Field(default_factory=list)
+    threads: list[ProjectThreadItem] = Field(default_factory=list)
+    annotations: list[ProjectAnnotationItem] = Field(default_factory=list)
+
+
+class CreateProject(MutationRequest):
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    brief_document_id: str | None = None
+    create_brief: bool = True
+
+
+class UpdateProject(MutationRequest):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    brief_document_id: str | None = None
+    workbench_state_json: str | None = None
+    active_thread_id: str | None = None
+
+
+class AddProjectDocument(MutationRequest):
+    document_id: str
+    role: ProjectRole = "source"
+    pinned_page: int | None = Field(default=None, ge=1)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class UpdateProjectDocument(MutationRequest):
+    role: ProjectRole | None = None
+    pinned_page: int | None = Field(default=None, ge=1)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class AddProjectThread(MutationRequest):
+    thread_id: str
+
+
+class AddProjectAnnotation(MutationRequest):
+    annotation_id: str

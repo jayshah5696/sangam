@@ -73,6 +73,11 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "proposal_id",
     "trust_level",
     "expected_trust_version",
+    "project_id",
+    "project_name",
+    "role",
+    "pinned_page",
+    "thread_id",
 }
 
 

@@ -34,6 +34,7 @@ type WorkbenchActions = {
   closeGroup: (groupId: string) => void
   setSplitRatio: (splitId: string, ratio: number) => void
   resetLayout: () => void
+  restoreLayout: (nextState: WorkbenchLayoutState) => void
 }
 
 function defaultState(): WorkbenchLayoutState {
@@ -129,6 +130,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     const groupId = crypto.randomUUID()
     setState((current) => resetLayoutState(current, groupId))
   }, [])
+  const restoreLayout = useCallback((nextState: WorkbenchLayoutState) => {
+    setState(nextState)
+  }, [])
 
   const actions = useMemo<WorkbenchActions>(
     () => ({
@@ -144,6 +148,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       closeGroup,
       setSplitRatio,
       resetLayout,
+      restoreLayout,
     }),
     [
       activateTab,
@@ -153,6 +158,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       ensureDocumentOpen,
       reopenClosedTab,
       resetLayout,
+      restoreLayout,
       setActiveGroup,
       setSplitRatio,
       splitGroup,

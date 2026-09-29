@@ -20,6 +20,7 @@ from sangam.agent_docs import agent_skill, llms_txt
 from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
+from sangam.api_projects import create_projects_router
 from sangam.application import build_application_services, initialize_application_state
 from sangam.config import Settings
 from sangam.errors import (
@@ -109,6 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     karakeep = services.karakeep
     chat = services.chat
     readiness = services.readiness
+    projects = services.projects
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -268,6 +270,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
             ("/api/v1/pdfs/{document_id}/search", "get"): (
                 "Search extracted PDF page text and return page-aware snippets."
+            ),
+            ("/api/v1/projects", "get"): ("List all projects ordered by most recent activity."),
+            ("/api/v1/projects", "post"): ("Create a project with an optional brief document."),
+            ("/api/v1/projects/{project_id}", "get"): (
+                "Get detailed project state including documents, threads, and layout."
+            ),
+            ("/api/v1/projects/{project_id}", "patch"): (
+                "Update project details, active thread, or workbench layout state."
+            ),
+            ("/api/v1/projects/{project_id}", "delete"): (
+                "Delete a project while preserving its member documents, threads, and annotations."
             ),
             ("/api/v1/publications", "post"): (
                 "Publish a document at a stable slug with private, public, or unlisted access. "
@@ -948,6 +961,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             chat=chat,
             resolve_principal=resolve_principal,
             require_administrator=require_administrator,
+        )
+    )
+    app.include_router(
+        create_projects_router(
+            projects=projects,
+            resolve_principal=resolve_principal,
         )
     )
     app.include_router(

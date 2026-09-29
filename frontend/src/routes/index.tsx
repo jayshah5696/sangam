@@ -1,7 +1,16 @@
 import { useDeferredValue, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { FilePlus2, FileText, FileUp, MessageSquareText, Pin, Search, ShieldCheck } from 'lucide-react'
+import {
+  FilePlus2,
+  FileText,
+  FileUp,
+  FolderKanban,
+  MessageSquareText,
+  Pin,
+  Search,
+  ShieldCheck,
+} from 'lucide-react'
 import { api, DOCUMENT_PAGE_SIZE } from '../api'
 import { collectGroups, useWorkbench } from '../workbench'
 import { selectHomeDocuments } from '../workspaceHome'
@@ -16,6 +25,7 @@ function Welcome() {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
   const documents = useQuery({ queryKey: ['documents', 'welcome'], queryFn: () => api.listDocumentsPage() })
+  const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
   const searchResults = useInfiniteQuery({
     queryKey: ['documents', 'welcome-search', deferredSearch],
     initialPageParam: 0,
@@ -166,6 +176,9 @@ function Welcome() {
         <Link className="secondary-action welcome-chat-action" to="/chat">
           <MessageSquareText size="var(--icon-control)" /> Ask workspace
         </Link>
+        <Link className="secondary-action" to="/projects">
+          <FolderKanban size="var(--icon-control)" /> Projects
+        </Link>
         <label className="pdf-import-control">
           <FileUp size="var(--icon-control)" />
           <span>{importPdf.isPending ? 'Importing PDF…' : 'Import PDF'}</span>
@@ -188,6 +201,42 @@ function Welcome() {
           <kbd>/</kbd> focus search
         </span>
       </div>
+      {projectsQuery.data && projectsQuery.data.length > 0 && (
+        <div className="welcome-recent">
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              width: '100%',
+              marginBottom: 'var(--space-1)',
+            }}
+          >
+            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+              <FolderKanban size="var(--icon-inline)" /> Projects
+            </strong>
+            <Link
+              to="/projects"
+              style={{ fontSize: 'var(--text-meta)', color: 'var(--muted)', textDecoration: 'none' }}
+            >
+              View all ({projectsQuery.data.length})
+            </Link>
+          </div>
+          {projectsQuery.data.slice(0, 3).map((project) => (
+            <Link
+              key={project.project_id}
+              to="/projects"
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+            >
+              <span>{project.name}</span>
+              <small>
+                {project.document_count} {project.document_count === 1 ? 'doc' : 'docs'}
+                {project.brief_document_title ? ` · ${project.brief_document_title}` : ''}
+              </small>
+            </Link>
+          ))}
+        </div>
+      )}
       {(recentDocuments.length > 0 || fallbackDocuments.length > 0) && (
         <div className="welcome-recent">
           <strong>{recentDocuments.length > 0 ? 'Recently open' : 'Recently active'}</strong>
