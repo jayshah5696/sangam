@@ -132,6 +132,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       }),
     })
     viewRef.current = view
+    const initialSelection = view.state.selection.main
+    const initialLine = view.state.doc.lineAt(initialSelection.head)
+    onSelectionChangeRef.current?.({
+      line: initialLine.number,
+      column: initialSelection.head - initialLine.from + 1,
+      selectedCharacters: initialSelection.to - initialSelection.from,
+    })
     const reportScroll = () => {
       const selection = view.state.selection.main
       onViewStateChangeRef.current?.({

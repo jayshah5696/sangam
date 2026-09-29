@@ -9,6 +9,8 @@ test('creating a Markdown draft opens the editor with the cursor ready', async (
   const editor = page.locator('.cm-content')
   await expect(editor).toBeFocused()
   await expect(editor).toContainText('# Untitled document')
+  await expect(page.locator('.editor-tools')).toContainText('Ln 3, Col 1')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
   await page.keyboard.type('A note')
   await expect(editor.locator('.cm-line')).toHaveText(['# Untitled document', '', 'A note'])
   await expect(page.getByRole('status').filter({ hasText: 'Saved draft' })).toBeVisible()

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Issue 316 · Create to write</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #101113; color: #f4f4f3; }
+      * { box-sizing: border-box; }
+      body { max-width: 1440px; margin: 0 auto; padding: clamp(24px, 5vw, 72px); }
+      header { border-bottom: 1px solid #38393d; padding-bottom: 32px; margin-bottom: 36px; }
+      .eyebrow, .label { color: #aaa3f5; font-size: 12px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+      h1 { font-family: Georgia, serif; font-size: clamp(36px, 5vw, 60px); font-weight: 400; letter-spacing: -.04em; margin: 12px 0; }
+      p { color: #b8b9be; line-height: 1.6; margin: 0; }
+      .section { margin: 44px 0 60px; }
+      h2 { font-size: 19px; font-weight: 600; margin: 0 0 18px; }
+      .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      figure { margin: 0; min-width: 0; }
+      figcaption { display: flex; justify-content: space-between; gap: 16px; padding: 0 0 12px; color: #c6c6cc; font-size: 13px; }
+      figcaption strong { color: #fff; font-weight: 600; }
+      img { display: block; width: 100%; height: auto; border: 1px solid #38393d; border-radius: 8px; }
+      .mobile img { max-width: 390px; margin: 0 auto; }
+      .note { border-top: 1px solid #38393d; padding-top: 22px; }
+      .note p + p { margin-top: 10px; }
+      code { color: #d6d0ff; font-size: .95em; }
+      @media (max-width: 760px) { .pair { grid-template-columns: 1fr; gap: 28px; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="eyebrow">Sangam / issue 316</span>
+      <h1>Create, then write.</h1>
+      <p>The starter heading is already content. It should not make a new document open as a document to read.</p>
+    </header>
+    <section class="section" aria-labelledby="desktop-heading">
+      <span class="label">01 / desktop</span>
+      <h2 id="desktop-heading">1440 × 900 · Chromium</h2>
+      <div class="pair">
+        <figure><figcaption><strong>Before</strong><span>Preview selected</span></figcaption><a href="before-desktop.png"><img src="before-desktop.png" alt="Before: newly created Markdown document opens in Preview with the heading rendered and no editor." /></a></figure>
+        <figure><figcaption><strong>After</strong><span>Edit selected · cursor on line 3</span></figcaption><a href="after-desktop.png"><img src="after-desktop.png" alt="After: newly created Markdown document opens in Edit with the editor focused below the starter heading." /></a></figure>
+      </div>
+    </section>
+    <section class="section mobile" aria-labelledby="mobile-heading">
+      <span class="label">02 / touch mobile</span>
+      <h2 id="mobile-heading">390 × 844 · Chromium with touch</h2>
+      <div class="pair">
+        <figure><figcaption><strong>Before</strong><span>Preview selected</span></figcaption><a href="before-mobile.png"><img src="before-mobile.png" alt="Before on touch mobile: newly created Markdown document opens in Preview." /></a></figure>
+        <figure><figcaption><strong>After</strong><span>Edit selected · editor focused</span></figcaption><a href="after-mobile.png"><img src="after-mobile.png" alt="After on touch mobile: newly created Markdown document opens in Edit with the cursor below the starter heading." /></a></figure>
+      </div>
+    </section>
+    <div class="note">
+      <p><strong>Visual check.</strong> Compared the base commit (1ffeef5) and the fix on isolated instances with the same document title and browser profiles. The selected mode and editor state are the intended differences. The inspected captures show no clipped controls or overlapping panels. The browser test checks for page-level horizontal overflow.</p>
+      <p><strong>Behavior check.</strong> <code>just test-e2e 'e2e/create-to-write.spec.ts'</code> passed all 12 checks on desktop, narrow desktop, and touch-mobile Chromium. The test checks focus, the initial cursor label, typing after the starter heading, saving, and Preview selection after reload.</p>
+    </div>
+  </body>
+</html>
