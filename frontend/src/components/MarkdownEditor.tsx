@@ -31,10 +31,21 @@ type MarkdownEditorProps = {
   initialViewState?: EditorViewState
   onViewStateChange?: (viewState: EditorViewState) => void
   contentType?: 'text/markdown' | 'text/html'
+  focusOnOpen?: boolean
+  onFocused?: () => void
 }
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, onSelectionChange, initialViewState, onViewStateChange, contentType = 'text/markdown' },
+  {
+    value,
+    onChange,
+    onSelectionChange,
+    initialViewState,
+    onViewStateChange,
+    contentType = 'text/markdown',
+    focusOnOpen,
+    onFocused,
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -142,6 +153,12 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       viewRef.current = null
     }
   }, [contentType])
+
+  useEffect(() => {
+    if (!focusOnOpen || !viewRef.current) return
+    viewRef.current.focus()
+    onFocused?.()
+  }, [focusOnOpen, onFocused])
 
   useEffect(() => {
     const view = viewRef.current

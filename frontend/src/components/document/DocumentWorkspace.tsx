@@ -388,6 +388,8 @@ export function DocumentWorkspace({
               }
               initialViewState={session.viewState}
               onViewStateChange={(viewState) => sessions.updateSession(documentId, { viewState })}
+              focusOnOpen={session.focusOnOpen}
+              onFocused={() => sessions.updateSession(documentId, { focusOnOpen: false })}
             />
           </Suspense>
         )}
