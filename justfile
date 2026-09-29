@@ -28,8 +28,21 @@ check: test test-docs validate-compose
     ./scripts/smoke-package.sh
 
 # Run only the Python service and API tests.
-test-backend:
-    uv run pytest
+test-backend args="":
+    uv run pytest {{ args }}
+
+# Install the locked dependencies for a new checkout.
+setup:
+    uv sync --frozen
+    pnpm --dir frontend install --frozen-lockfile
+
+# Format selected Python files while independent changes are in progress.
+format-python args=".":
+    uv run ruff format {{ args }}
+
+# Check selected Python files.
+lint-python args=".":
+    uv run ruff check {{ args }}
 
 # Run reproducible concurrency, backpressure saturation, and audit integrity benchmark.
 benchmark-concurrency workers="20" ops="15":

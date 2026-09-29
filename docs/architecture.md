@@ -52,6 +52,14 @@ Backups are paired artifacts: one SQLite dump plus one workspace tarball taken f
 
 Full-text search runs on SQLite FTS5 across documents and PDF page text. Query results link back to exact documents (and page numbers for PDFs).
 
+SQLite triggers record changed document IDs in `search_dirty_documents` in the
+same transaction as searchable source changes. Index synchronization reads the
+canonical state and removes that marker in one transaction. Startup repairs
+only pending IDs, so healthy startup does not rebuild the corpus. The migration
+marks existing documents for one initial rebuild. Explicit reindexing remains
+available for maintenance. Changes to indexed fields must also update the
+trigger coverage.
+
 ## Agent access model
 
 Agents never share the human's session. Each agent gets a bearer token created in Settings or via the API with:
