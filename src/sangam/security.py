@@ -244,7 +244,7 @@ class Principal:
 
 
 def normalize_scope_prefix(value: str | None) -> str | None:
-    if value is None or value.strip() in {"", "/", "/**", "**"}:
+    if value is None or value.strip() in {"", "/", "/*", "/**", "*", "**"}:
         return None
     if "\x00" in value:
         raise ValidationError("Token path scope prefix cannot contain null bytes")
@@ -253,7 +253,11 @@ def normalize_scope_prefix(value: str | None) -> str | None:
     candidate = value.strip().replace("\\", "/")
     if candidate.endswith("/**"):
         candidate = candidate[:-3]
+    elif candidate.endswith("/*"):
+        candidate = candidate[:-2]
     candidate = candidate.strip("/")
+    if candidate in {"", "*", "**"}:
+        return None
     pure = PurePosixPath(candidate)
     raw_parts = candidate.split("/")
     if (

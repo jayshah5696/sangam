@@ -113,6 +113,30 @@ def test_whitespace_padded_traversal_in_token_scope_is_rejected(invalid_scope: s
         normalize_scope_prefix(invalid_scope)
 
 
+@pytest.mark.parametrize(
+    ("raw_scope", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("/", None),
+        ("/*", None),
+        ("/**", None),
+        ("*", None),
+        ("**", None),
+        ("  /*  ", None),
+        ("docs/*", "docs"),
+        ("docs/**", "docs"),
+        ("/docs/*", "docs"),
+        ("projects/sub/*", "projects/sub"),
+        ("projects/sub/**", "projects/sub"),
+    ],
+)
+def test_normalize_scope_prefix_wildcards(raw_scope: str | None, expected: str | None) -> None:
+    from sangam.security import normalize_scope_prefix
+
+    assert normalize_scope_prefix(raw_scope) == expected
+
+
 @pytest.mark.parametrize("bad_char", ["\x00", "\n", "\r", "\x1f", "\x7f"])
 def test_document_title_rejects_null_bytes_and_control_characters(
     client: TestClient, bad_char: str

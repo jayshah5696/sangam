@@ -910,3 +910,58 @@ def test_list_search_and_document_payloads_are_bounded(tmp_path: Path) -> None:
             "size_bytes": 1_025,
             "max_document_bytes": 1_024,
         }
+
+
+def test_agent_token_issuance_and_access_with_wildcard_scope_prefixes(
+    client: TestClient,
+) -> None:
+    # 1. Test token with "docs/*" wildcard scope prefix
+    issued_wildcard = issue_token(
+        client,
+        actor_id="agent:wildcard",
+        display_name="Wildcard Agent",
+        scopes=[
+            {"capability": "read", "path_prefix": "docs/*"},
+            {"capability": "create", "path_prefix": "docs/*"},
+        ],
+    )
+    assert issued_wildcard["scopes"][0]["path_prefix"] == "docs"
+    token_wildcard = issued_wildcard["token"]
+
+    # Create document under docs/
+    create_docs = client.post(
+        "/api/v1/documents",
+        headers=bearer(token_wildcard, "wildcard-create-1"),
+        json={"title": "Docs Doc", "content": "hello", "path": "docs/guide.md"},
+    )
+    assert create_docs.status_code == 201
+    assert create_docs.json()["path"] == "docs/guide.md"
+
+    # Attempt create outside docs/ should be denied
+    create_outside = client.post(
+        "/api/v1/documents",
+        headers=bearer(token_wildcard, "wildcard-create-2"),
+        json={"title": "Outside Doc", "content": "hello", "path": "other/guide.md"},
+    )
+    assert create_outside.status_code == 403
+
+    # 2. Test token with "/*" root wildcard scope prefix
+    issued_root = issue_token(
+        client,
+        actor_id="agent:rootwildcard",
+        display_name="Root Wildcard Agent",
+        scopes=[
+            {"capability": "read", "path_prefix": "/*"},
+            {"capability": "create", "path_prefix": "/*"},
+        ],
+    )
+    assert issued_root["scopes"][0]["path_prefix"] is None
+    token_root = issued_root["token"]
+
+    # Create document anywhere
+    create_anywhere = client.post(
+        "/api/v1/documents",
+        headers=bearer(token_root, "root-create-1"),
+        json={"title": "Root Doc", "content": "hello", "path": "anywhere/root.md"},
+    )
+    assert create_anywhere.status_code == 201
