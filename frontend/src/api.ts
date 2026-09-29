@@ -36,6 +36,39 @@ export const documentSummarySchema = documentSchema.omit({ content: true })
 
 export type DocumentSummary = z.infer<typeof documentSummarySchema>
 
+export const projectDocumentSchema = z.object({
+  project_id: z.string(),
+  document_id: z.string(),
+  role: z.string(),
+  context_summary: z.string().nullable().optional(),
+  resume_hint: z.string().nullable().optional(),
+  sort_order: z.number(),
+  created_at: z.string(),
+  title: z.string(),
+  path: z.string().nullable().optional(),
+  content_type: z.string(),
+  updated_at: z.string(),
+  snippet: z.string().nullable().optional(),
+})
+
+export type ProjectDocument = z.infer<typeof projectDocumentSchema>
+
+export const projectSchema = z.object({
+  project_id: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  primary_document_id: z.string().nullable().optional(),
+  resume_hint: z.string().nullable().optional(),
+  archived: z.boolean(),
+  metadata_version: z.number(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  documents: z.array(projectDocumentSchema),
+  primary_document: projectDocumentSchema.nullable().optional(),
+})
+
+export type Project = z.infer<typeof projectSchema>
+
 export const karakeepAssetSchema = z.object({
   asset_id: z.string(),
   asset_type: z.string(),
@@ -1506,5 +1539,68 @@ export const api = {
         karakeep_configured: z.boolean().optional(),
       })
       .parse(await request('/health'))
+  },
+  async listProjects(includeArchived = false): Promise<Project[]> {
+    const params = new URLSearchParams()
+    if (includeArchived) params.set('include_archived', 'true')
+    const query = params.size ? `?${params.toString()}` : ''
+    return z.array(projectSchema).parse(await request(`/projects${query}`))
+  },
+  async getProject(projectId: string): Promise<Project> {
+    return projectSchema.parse(await request(`/projects/${projectId}`))
+  },
+  async createProject(input: {
+    name: string
+    description?: string | null
+    primary_document_id?: string | null
+    resume_hint?: string | null
+    document_ids?: string[]
+  }): Promise<Project> {
+    return projectSchema.parse(
+      await request('/projects', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async updateProject(
+    projectId: string,
+    input: {
+      expected_metadata_version?: number
+      name?: string | null
+      description?: string | null
+      primary_document_id?: string | null
+      resume_hint?: string | null
+      archived?: boolean | null
+    },
+  ): Promise<Project> {
+    return projectSchema.parse(
+      await request(`/projects/${projectId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async deleteProject(projectId: string): Promise<void> {
+    await request(`/projects/${projectId}`, { method: 'DELETE' })
+  },
+  async addProjectDocument(
+    projectId: string,
+    input: {
+      document_id: string
+      role?: string
+      context_summary?: string | null
+      resume_hint?: string | null
+    },
+  ): Promise<ProjectDocument> {
+    return projectDocumentSchema.parse(
+      await request(`/projects/${projectId}/documents`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async removeProjectDocument(projectId: string, documentId: string): Promise<void> {
+    await request(`/projects/${projectId}/documents/${documentId}`, { method: 'DELETE' })
   },
 }

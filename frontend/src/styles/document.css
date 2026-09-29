@@ -69,6 +69,29 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .welcome-recent a:hover, .welcome-recent a:focus-visible { border-color: var(--line); background: var(--surface); }
 .welcome-recent a span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-label); }
 .welcome-recent a small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: var(--text-meta); }
+.welcome-resume-panel { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--shadow-panel); }
+@media (min-width: 640px) { .welcome-resume-panel { flex-direction: row; align-items: flex-start; justify-content: space-between; } }
+.welcome-resume-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.welcome-resume-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.welcome-resume-badge { display: inline-flex; align-items: center; padding: 2px var(--space-2); border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-text); font-size: var(--text-meta); font-weight: 500; text-transform: uppercase; letter-spacing: .05em; }
+.welcome-project-picker { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-meta); color: var(--muted); }
+.welcome-project-picker select { border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); padding: 4px var(--space-2); font-size: var(--text-meta); }
+.welcome-resume-title { font-family: var(--font-display); font-size: var(--text-display-sm); font-weight: 400; color: var(--text); margin: 0; letter-spacing: -.02em; }
+.welcome-resume-hint { margin: 0; font-size: var(--text-control); color: var(--text); }
+.welcome-resume-snippet { margin: 0; font-size: var(--text-meta); color: var(--muted); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.welcome-resume-button { align-self: flex-start; white-space: nowrap; gap: var(--space-2); text-decoration: none; margin-top: var(--space-1); }
+.welcome-review-panel { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text); }
+.welcome-review-info { display: flex; align-items: center; gap: var(--space-3); }
+.welcome-review-info strong { display: block; font-size: var(--text-control); color: var(--text); }
+.welcome-review-info p { margin: 0; font-size: var(--text-meta); color: var(--muted); }
+.welcome-project-categories { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-4); margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.welcome-category-group { display: flex; flex-direction: column; gap: var(--space-2); }
+.welcome-category-group > strong { font-size: var(--text-label); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.welcome-category-list { display: flex; flex-direction: column; gap: var(--space-1); }
+.welcome-category-list a { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border-radius: var(--radius-control); color: var(--text); text-decoration: none; font-size: var(--text-label); }
+.welcome-category-list a:hover, .welcome-category-list a:focus-visible { background: var(--surface-soft); }
+.welcome-category-list a span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.welcome-category-list a small { color: var(--muted); font-size: var(--text-meta); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 .document-layout { display: flex; min-height: 100dvh; }
 .document-workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: var(--space-4) var(--space-5) var(--space-5); }

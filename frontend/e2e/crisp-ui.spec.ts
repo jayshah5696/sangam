@@ -726,6 +726,44 @@ test('home page searches documents inline and opens the top result', async ({ pa
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
 })
 
+test('home page resumes ongoing project work and hides empty project state', async ({
+  page,
+  request,
+  seededWorkspace,
+}) => {
+  await page.goto('/')
+  await expect(page.locator('.welcome-resume-panel')).toHaveCount(0)
+  await expect(page.locator('.welcome-review-panel')).toHaveCount(0)
+
+  const projectRes = await request.post('/api/v1/projects', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      name: 'Alpha Initiative',
+      description: 'Testing ongoing work resume flow.',
+    },
+  })
+  expect(projectRes.ok(), await projectRes.text()).toBeTruthy()
+  const project = await projectRes.json()
+
+  const addDocRes = await request.post(`/api/v1/projects/${project.project_id}/documents`, {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      document_id: seededWorkspace.documentId,
+      role: 'draft',
+    },
+  })
+  expect(addDocRes.ok(), await addDocRes.text()).toBeTruthy()
+
+  await page.goto('/')
+  const resumePanel = page.locator('.welcome-resume-panel')
+  await expect(resumePanel).toBeVisible()
+  await expect(resumePanel).toContainText('Resume draft')
+  await expect(resumePanel).toContainText(seededWorkspace.documentTitle)
+
+  await resumePanel.getByRole('link', { name: /Resume draft/i }).click()
+  await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
+})
+
 test('large search remains bounded and exposes the next result page', async ({ page, request }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'large workspace measurement uses desktop only')
   test.setTimeout(120_000)

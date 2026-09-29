@@ -20,6 +20,7 @@ from sangam.agent_docs import agent_skill, llms_txt
 from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
+from sangam.api_projects import create_projects_router
 from sangam.application import build_application_services, initialize_application_state
 from sangam.config import Settings
 from sangam.errors import (
@@ -109,6 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     karakeep = services.karakeep
     chat = services.chat
     readiness = services.readiness
+    projects = services.projects
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -954,6 +956,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         create_karakeep_router(
             karakeep=karakeep,
             require_administrator=require_administrator,
+        )
+    )
+    app.include_router(
+        create_projects_router(
+            projects=projects,
+            require_principal=resolve_principal,
         )
     )
 

@@ -445,4 +445,100 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
       .locator('.document-inspector')
       .screenshot({ path: path.join(outDir, 'issue-133-compact-chat-290px.png') })
   })
+
+  test('capture issue 307 (home page resume ongoing work and empty state)', async ({ page, request }) => {
+    await page.goto('/')
+    await expect(page.getByRole('searchbox', { name: 'Quick search documents' })).toBeVisible()
+    await expect(page.locator('.welcome-resume-panel')).toHaveCount(0)
+    await expect(page.locator('.welcome-review-panel')).toHaveCount(0)
+    await page.screenshot({
+      path: path.join(outDir, 'issue-307-home-before-clean.png'),
+      fullPage: false,
+    })
+
+    const projectRes = await request.post('/api/v1/projects', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        name: 'Distributed Systems 2.0',
+        description: 'Next generation consensus, replication, and distributed storage engine.',
+      },
+    })
+    expect(projectRes.ok()).toBeTruthy()
+    const project = await projectRes.json()
+
+    const srcDoc = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Paxos & Raft Specification',
+        content: '# Paxos & Raft Specification\n\nCanonical background references on distributed consensus.',
+      },
+    })
+    const srcDocJson = await srcDoc.json()
+    await request.post(`/api/v1/projects/${project.project_id}/documents`, {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { document_id: srcDocJson.document_id, role: 'source' },
+    })
+
+    const noteDoc = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Storage Engine Benchmarks',
+        content: '# Storage Engine Benchmarks\n\nNotes from performance profiling on NVMe drives.',
+      },
+    })
+    const noteDocJson = await noteDoc.json()
+    await request.post(`/api/v1/projects/${project.project_id}/documents`, {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { document_id: noteDocJson.document_id, role: 'note' },
+    })
+
+    const outputDoc = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'RFC 402 Final Spec',
+        content: '# RFC 402 Final Spec\n\nApproved architecture proposal for release.',
+      },
+    })
+    const outputDocJson = await outputDoc.json()
+    await request.post(`/api/v1/projects/${project.project_id}/documents`, {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { document_id: outputDocJson.document_id, role: 'output' },
+    })
+
+    const draftDoc = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Cluster Membership & Quorum Recovery',
+        content:
+          '# Cluster Membership & Quorum Recovery\n\nThis draft outlines dynamic node membership reconfiguration protocols during split-brain partitions.',
+      },
+    })
+    const draftDocJson = await draftDoc.json()
+    await request.post(`/api/v1/projects/${project.project_id}/documents`, {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { document_id: draftDocJson.document_id, role: 'draft' },
+    })
+
+    await page.goto('/')
+    const resumePanel = page.locator('.welcome-resume-panel')
+    await expect(resumePanel).toBeVisible()
+    await expect(resumePanel).toContainText('Resume draft')
+    await expect(resumePanel).toContainText('Cluster Membership & Quorum Recovery')
+    await expect(page.locator('.welcome-project-categories')).toBeVisible()
+
+    await page.screenshot({
+      path: path.join(outDir, 'issue-307-home-after-active-project.png'),
+      fullPage: false,
+    })
+
+    await resumePanel.getByRole('link', { name: /Resume draft/i }).click()
+    await expect(
+      page.getByRole('heading', { name: 'Cluster Membership & Quorum Recovery' }).first(),
+    ).toBeVisible()
+    await page.waitForTimeout(300)
+    await page.screenshot({
+      path: path.join(outDir, 'issue-307-resumed-document-workbench.png'),
+      fullPage: false,
+    })
+  })
 })

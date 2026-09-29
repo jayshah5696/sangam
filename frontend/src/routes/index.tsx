@@ -1,10 +1,24 @@
 import { useDeferredValue, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { FilePlus2, FileText, FileUp, MessageSquareText, Pin, Search, ShieldCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  BookOpen,
+  FileCheck2,
+  FileCode,
+  FilePlus2,
+  FileText,
+  FileUp,
+  MessageSquareText,
+  Pin,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+} from 'lucide-react'
 import { api, DOCUMENT_PAGE_SIZE } from '../api'
+import { reviewableProposals } from '../review'
 import { collectGroups, useWorkbench } from '../workbench'
-import { selectHomeDocuments } from '../workspaceHome'
+import { categorizeProjectDocuments, getProjectResumeAction, selectHomeDocuments } from '../workspaceHome'
 
 export const Route = createFileRoute('/')({ component: Welcome })
 
@@ -14,8 +28,22 @@ function Welcome() {
   const workbench = useWorkbench()
   const [contentType, setContentType] = useState<'text/markdown' | 'text/html'>('text/markdown')
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const deferredSearch = useDeferredValue(searchQuery)
-  const documents = useQuery({ queryKey: ['documents', 'welcome'], queryFn: () => api.listDocumentsPage() })
+
+  const documents = useQuery({
+    queryKey: ['documents', 'welcome'],
+    queryFn: () => api.listDocumentsPage(),
+  })
+  const projectsQuery = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => api.listProjects(),
+  })
+  const proposalsQuery = useQuery({
+    queryKey: ['chat-proposals', 'workspace-review'],
+    queryFn: () => api.listChatProposals(),
+  })
+
   const searchResults = useInfiniteQuery({
     queryKey: ['documents', 'welcome-search', deferredSearch],
     initialPageParam: 0,
@@ -23,6 +51,7 @@ function Welcome() {
     getNextPageParam: (lastPage, pages) => (lastPage.hasMore ? pages.length * DOCUMENT_PAGE_SIZE : undefined),
     enabled: deferredSearch.trim().length > 0,
   })
+
   const createDocument = useMutation({
     mutationFn: () =>
       api.createDocument(
@@ -33,9 +62,13 @@ function Welcome() {
     onSuccess: async (document) => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
       workbench.ensureDocumentOpen(document.document_id, document.title)
-      await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
+      await navigate({
+        to: '/documents/$documentId',
+        params: { documentId: document.document_id },
+      })
     },
   })
+
   const importPdf = useMutation({
     mutationFn: (file: File) =>
       api.importPdf(
@@ -46,35 +79,209 @@ function Welcome() {
     onSuccess: async (document) => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
       workbench.ensureDocumentOpen(document.document_id, document.title)
-      await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
+      await navigate({
+        to: '/documents/$documentId',
+        params: { documentId: document.document_id },
+      })
     },
   })
-  const isEmpty = Boolean(documents.data && documents.data.items.length === 0 && !documents.data.hasMore)
+
+  const projects = projectsQuery.data ?? []
+  const activeProject =
+    (selectedProjectId ? projects.find((p) => p.project_id === selectedProjectId) : null) ??
+    projects[0] ??
+    null
+  const hasActiveProject = Boolean(activeProject)
+
+  const reviewable = reviewableProposals(proposalsQuery.data ?? [])
+  const reviewCount = reviewable.length
+
+  const resumeAction = activeProject ? getProjectResumeAction(activeProject) : null
+  const categorizedDocs = activeProject ? categorizeProjectDocuments(activeProject.documents) : null
+
+  const isEmpty = Boolean(
+    documents.data && documents.data.items.length === 0 && !documents.data.hasMore && !hasActiveProject,
+  )
+
   const openTabs = collectGroups(workbench.root).flatMap((group) => group.tabs)
   const homeDocuments = selectHomeDocuments(documents.data?.items ?? [], openTabs)
   const recentDocuments = homeDocuments.recent.slice(0, 4)
   const pinnedDocuments = homeDocuments.pinned.slice(0, 4)
-  const fallbackDocuments = recentDocuments.length === 0 ? (documents.data?.items ?? []).slice(0, 4) : []
+  const fallbackDocuments =
+    recentDocuments.length === 0 && !hasActiveProject ? (documents.data?.items ?? []).slice(0, 4) : []
   const trimmedSearch = deferredSearch.trim()
   const matchingDocuments = trimmedSearch
     ? (searchResults.data?.pages.flatMap((page) => page.items) ?? [])
     : []
+
+  const heroTitle = activeProject
+    ? activeProject.name
+    : isEmpty
+      ? 'Your workspace is empty'
+      : 'Pick up where you left off.'
+
+  const heroSubtitle = activeProject
+    ? activeProject.description || 'Active project drafts and context.'
+    : isEmpty
+      ? 'Create a Markdown document or import a PDF to begin.'
+      : 'Open a document or continue editing your workspace.'
+
   return (
     <section className="welcome">
       <div className="welcome-heading-row">
         <div>
-          <p className="eyebrow">Workspace</p>
-          <h1>{isEmpty ? 'Your workspace is empty' : 'Pick up where you left off.'}</h1>
+          <p className="eyebrow">{hasActiveProject ? 'Active project' : 'Workspace'}</p>
+          <h1>{heroTitle}</h1>
         </div>
-        <Link className="review-home-link" to="/review">
-          <ShieldCheck size="var(--icon-inline)" /> Review
-        </Link>
+        {activeProject && reviewCount > 0 && (
+          <Link className="review-home-link" to="/review">
+            <ShieldCheck size="var(--icon-inline)" /> Review ({reviewCount})
+          </Link>
+        )}
       </div>
-      <p>
-        {isEmpty
-          ? 'Create a Markdown document or import a PDF to begin.'
-          : 'Open a document, continue a pinned thread, or check the changes waiting for your review.'}
-      </p>
+      <p>{heroSubtitle}</p>
+
+      {activeProject && resumeAction && (
+        <section className="welcome-resume-panel" aria-label="Resume next action">
+          <div className="welcome-resume-content">
+            <div className="welcome-resume-header">
+              <span className="welcome-resume-badge">{resumeAction.actionLabel}</span>
+              {projects.length > 1 && (
+                <div className="welcome-project-picker">
+                  <label htmlFor="welcome-project-select">Switch project</label>
+                  <select
+                    id="welcome-project-select"
+                    value={activeProject.project_id}
+                    onChange={(event) => setSelectedProjectId(event.target.value)}
+                  >
+                    {projects.map((project) => (
+                      <option key={project.project_id} value={project.project_id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <h2 className="welcome-resume-title">{resumeAction.title}</h2>
+            <p className="welcome-resume-hint">{resumeAction.hint}</p>
+            {resumeAction.snippet && <p className="welcome-resume-snippet">{resumeAction.snippet}</p>}
+          </div>
+          {resumeAction.documentId && (
+            <Link
+              className="primary-button welcome-resume-button"
+              to="/documents/$documentId"
+              params={{ documentId: resumeAction.documentId }}
+              onClick={() => {
+                if (resumeAction.documentId) {
+                  workbench.ensureDocumentOpen(resumeAction.documentId, resumeAction.title)
+                }
+              }}
+            >
+              Resume draft <ArrowRight size="var(--icon-inline)" />
+            </Link>
+          )}
+        </section>
+      )}
+
+      {activeProject && reviewCount > 0 && (
+        <section className="welcome-review-panel" aria-label="Needs review">
+          <div className="welcome-review-info">
+            <ShieldAlert size="var(--icon-control)" />
+            <div>
+              <strong>Needs review</strong>
+              <p>
+                {reviewCount} pending agent proposal{reviewCount === 1 ? '' : 's'} waiting for approval.
+              </p>
+            </div>
+          </div>
+          <Link className="secondary-action" to="/review">
+            Open review inbox
+          </Link>
+        </section>
+      )}
+
+      {activeProject && categorizedDocs && (
+        <div className="welcome-project-categories" aria-label="Project documents">
+          {categorizedDocs.drafts.length > 0 && (
+            <div className="welcome-category-group">
+              <strong>Drafts</strong>
+              <div className="welcome-category-list">
+                {categorizedDocs.drafts.map((doc) => (
+                  <Link
+                    key={doc.document_id}
+                    to="/documents/$documentId"
+                    params={{ documentId: doc.document_id }}
+                    onClick={() => workbench.ensureDocumentOpen(doc.document_id, doc.title)}
+                  >
+                    <FileText size="var(--icon-inline)" />
+                    <span>{doc.title}</span>
+                    <small>{doc.path ?? 'Draft'}</small>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+          {categorizedDocs.sources.length > 0 && (
+            <div className="welcome-category-group">
+              <strong>Sources</strong>
+              <div className="welcome-category-list">
+                {categorizedDocs.sources.map((doc) => (
+                  <Link
+                    key={doc.document_id}
+                    to="/documents/$documentId"
+                    params={{ documentId: doc.document_id }}
+                    onClick={() => workbench.ensureDocumentOpen(doc.document_id, doc.title)}
+                  >
+                    <BookOpen size="var(--icon-inline)" />
+                    <span>{doc.title}</span>
+                    <small>{doc.path ?? 'Source'}</small>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+          {categorizedDocs.notes.length > 0 && (
+            <div className="welcome-category-group">
+              <strong>Notes</strong>
+              <div className="welcome-category-list">
+                {categorizedDocs.notes.map((doc) => (
+                  <Link
+                    key={doc.document_id}
+                    to="/documents/$documentId"
+                    params={{ documentId: doc.document_id }}
+                    onClick={() => workbench.ensureDocumentOpen(doc.document_id, doc.title)}
+                  >
+                    <FileCode size="var(--icon-inline)" />
+                    <span>{doc.title}</span>
+                    <small>{doc.path ?? 'Note'}</small>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+          {categorizedDocs.outputs.length > 0 && (
+            <div className="welcome-category-group">
+              <strong>Outputs</strong>
+              <div className="welcome-category-list">
+                {categorizedDocs.outputs.map((doc) => (
+                  <Link
+                    key={doc.document_id}
+                    to="/documents/$documentId"
+                    params={{ documentId: doc.document_id }}
+                    onClick={() => workbench.ensureDocumentOpen(doc.document_id, doc.title)}
+                  >
+                    <FileCheck2 size="var(--icon-inline)" />
+                    <span>{doc.title}</span>
+                    <small>{doc.path ?? 'Output'}</small>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <label className="welcome-search">
         <Search size="var(--icon-control)" />
         <input

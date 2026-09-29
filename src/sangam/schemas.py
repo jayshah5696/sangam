@@ -987,3 +987,56 @@ class ChatEffectsSummary(BaseModel):
     retryable_failures: int
     terminal_failures: int
     total_history: int
+
+
+class ProjectDocument(BaseModel):
+    project_id: str
+    document_id: str
+    role: str = "draft"
+    context_summary: str | None = None
+    resume_hint: str | None = None
+    sort_order: int = 0
+    created_at: str
+    title: str
+    path: str | None = None
+    content_type: str = "text/markdown"
+    updated_at: str
+    snippet: str | None = None
+
+
+class Project(BaseModel):
+    project_id: str
+    name: str
+    description: str | None = None
+    primary_document_id: str | None = None
+    resume_hint: str | None = None
+    archived: bool = False
+    metadata_version: int = 0
+    created_at: str
+    updated_at: str
+    documents: list[ProjectDocument] = Field(default_factory=list)
+    primary_document: ProjectDocument | None = None
+
+
+class CreateProject(MutationRequest):
+    name: str = Field(min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=1000)
+    primary_document_id: str | None = None
+    resume_hint: str | None = Field(default=None, max_length=500)
+    document_ids: list[str] = Field(default_factory=list)
+
+
+class UpdateProject(MutationRequest):
+    expected_metadata_version: int | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=1000)
+    primary_document_id: str | None = None
+    resume_hint: str | None = Field(default=None, max_length=500)
+    archived: bool | None = None
+
+
+class AddProjectDocument(MutationRequest):
+    document_id: str = Field(min_length=1, max_length=200)
+    role: str = Field(default="draft", max_length=50)
+    context_summary: str | None = Field(default=None, max_length=500)
+    resume_hint: str | None = Field(default=None, max_length=500)
