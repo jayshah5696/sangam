@@ -435,3 +435,62 @@ def test_extended_sensitive_header_and_data_sanitization() -> None:
     assert isinstance(sanitized_data, dict)
     for key in sensitive_payload:
         assert sanitized_data[key] == "[REDACTED]"
+
+
+def test_audit_event_structured_action_and_target_fields(client: TestClient) -> None:
+    doc_path = "docs/structured_change_test.md"
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Structured Change Doc",
+            "content": "# Line 1\nInitial content.",
+            "path": doc_path,
+        },
+        headers=headers("idemp_struct_create"),
+    )
+    assert create_resp.status_code == 201
+    created_doc = create_resp.json()
+    doc_id = created_doc["document_id"]
+    rev1 = created_doc["current_revision_id"]
+
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "# Line 1\nUpdated content.",
+            "title": "Structured Change Doc (Updated)",
+        },
+        headers=headers("idemp_struct_update"),
+    )
+    assert update_resp.status_code == 200
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    doc_events = [e for e in events if e["resource_id"] == doc_id]
+    actions = {e["action"]: e for e in doc_events}
+
+    assert "create" in actions
+    assert actions["create"]["action"] == "create"
+    assert actions["create"]["path"] == doc_path
+    assert "lines_added" in actions["create"]["details"]
+
+    assert "update" in actions
+    assert actions["update"]["action"] == "update"
+    assert actions["update"]["path"] == doc_path
+    assert "diff" in actions["update"]["details"]
+    assert actions["update"]["details"]["lines_added"] == 1
+    assert actions["update"]["details"]["lines_removed"] == 1
+
+
+def test_openai_github_aws_token_pattern_sanitization() -> None:
+    text_with_secrets = (
+        "Key openai: sk-proj-123456789012345678, github: ghp_1234567890123456, "
+        "aws: AKIA1234567890123456, sangam: sgm_agt_98765"
+    )
+    sanitized = sanitize_sensitive_data(text_with_secrets)
+    assert "sk-proj-123456789012345678" not in str(sanitized)
+    assert "ghp_1234567890123456" not in str(sanitized)
+    assert "AKIA1234567890123456" not in str(sanitized)
+    assert "sgm_agt_98765" not in str(sanitized)

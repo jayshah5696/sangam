@@ -80,6 +80,7 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "token",
     "credential",
     "api_key",
+    "api_secret",
     "auth",
     "authorization",
     "auth_header",
@@ -91,6 +92,7 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "jwt",
     "bearer",
     "env",
+    "environment",
     "private_payload",
     "passphrase",
     "dsn",
@@ -128,7 +130,7 @@ _SAFE_HEADER_EXCEPTIONS: set[str] = {
 }
 
 _TOKEN_PATTERN = re.compile(
-    r"\b(sgm_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9_-]{16,})\b"
+    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{22,}|AKIA[0-9A-Z]{16})\b"
 )
 
 
