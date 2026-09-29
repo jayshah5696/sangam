@@ -1669,3 +1669,232 @@ def test_execution_budget_defaults_support_longer_runs() -> None:
     assert defaults["chat_max_tool_rounds"].default == 24
     with pytest.raises(PydanticValidationError):
         Settings(chat_max_tool_rounds=49, chat_max_output_tokens=32_769)
+
+
+def create_test_run(
+    client: TestClient, principal: Principal, thread_id: str, document_id: str | None = None
+) -> str:
+    import uuid
+
+    chat = client.app.state.services.chat
+    entry_point = "document" if document_id else "workspace"
+    turn = chat.evidence.create_turn_context(
+        principal,
+        entry_point=entry_point,
+        document_id=document_id,
+        revision_id=None,
+        selected_text="",
+    )
+    manifest = ()
+    item_id = f"item_{uuid.uuid4().hex}"
+    turn = chat.evidence.attach_turn_context(
+        principal,
+        context_id=turn.context_id,
+        thread_id=thread_id,
+        user_item_id=item_id,
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+    return chat.evidence.begin_run(
+        principal,
+        thread_id=thread_id,
+        user_item_id=item_id,
+        context_id=turn.context_id,
+        connection_id="openrouter",
+        model_ref="openrouter::openai/gpt-5.4-nano",
+        capability_manifest=manifest,
+    )
+
+
+def test_editorial_chat_proposal_lifecycle_and_edited_apply(client: TestClient) -> None:
+    doc_target = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Deployment Guide",
+            "content": "Initial deployment content.",
+            "path": "deploy.md",
+        },
+        headers=headers("editorial-target-doc"),
+    ).json()
+    doc_source = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Security Architecture",
+            "content": "Containers should use non-root UID 1000.",
+            "path": "sec.md",
+        },
+        headers=headers("editorial-source-doc"),
+    ).json()
+
+    thread_id = create_thread(client, document_id=doc_target["document_id"])
+    principal = _proposal_principal("editorial-proposal-actor")
+    chat = client.app.state.services.chat
+    run_id = create_test_run(
+        client, principal, thread_id=thread_id, document_id=doc_target["document_id"]
+    )
+
+    chat.evidence.record_run_source(
+        run_id=run_id,
+        document_id=doc_source["document_id"],
+        revision_id=doc_source["current_revision_id"],
+        title=doc_source["title"],
+        path=doc_source["path"],
+    )
+
+    proposal = chat.proposals.create(
+        principal=principal,
+        document_id=doc_target["document_id"],
+        expected_revision_id=doc_target["current_revision_id"],
+        thread_id=thread_id,
+        content="Deploy with non-root UID 1000 in Kubernetes.",
+        summary="Update security requirements for deployment",
+        rationale="Security audit mandates unprivileged containers.",
+        judgment_needed="Confirm whether host network access is required.",
+        run_id=run_id,
+        citations=[
+            {
+                "document_id": doc_source["document_id"],
+                "revision_id": doc_source["current_revision_id"],
+                "snippet": "Containers should use non-root UID 1000.",
+                "location": "Section 3.2",
+            }
+        ],
+    )
+
+    listed = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id}).json()
+    assert len(listed) == 1
+    item = listed[0]
+    assert item["proposal_id"] == proposal.proposal_id
+    assert item["rationale"] == "Security audit mandates unprivileged containers."
+    assert item["judgment_needed"] == "Confirm whether host network access is required."
+    assert len(item["citations"]) == 1
+    assert item["citations"][0]["document_id"] == doc_source["document_id"]
+    assert item["citations"][0]["title"] == "Security Architecture"
+    assert item["citations"][0]["snippet"] == "Containers should use non-root UID 1000."
+    assert item["citations"][0]["location"] == "Section 3.2"
+    assert len(item["sources_retrieved"]) == 1
+    assert item["sources_retrieved"][0]["document_id"] == doc_source["document_id"]
+    assert item["sources_retrieved"][0]["title"] == "Security Architecture"
+
+    edited_content = "Deploy with unprivileged user UID 1000 in Kubernetes pods."
+    apply_resp = client.post(
+        f"/api/v1/chat/proposals/{proposal.proposal_id}/apply",
+        json={
+            "expected_revision_id": proposal.expected_revision_id,
+            "content": edited_content,
+        },
+        headers=headers("apply-edited-proposal"),
+    )
+    assert apply_resp.status_code == 200
+    applied_prop = apply_resp.json()
+    assert applied_prop["status"] == "applied"
+    assert applied_prop["content"] == edited_content
+
+    updated_doc = client.get(f"/api/v1/documents/{doc_target['document_id']}").json()
+    assert updated_doc["content"] == edited_content
+
+    conflict_resp = client.post(
+        f"/api/v1/chat/proposals/{proposal.proposal_id}/apply",
+        json={"expected_revision_id": proposal.expected_revision_id},
+        headers=headers("apply-again-conflict"),
+    )
+    assert conflict_resp.status_code == 409
+
+
+def test_editorial_proposal_redacts_citations_when_source_deleted(client: TestClient) -> None:
+    doc_target = client.post(
+        "/api/v1/documents",
+        json={"title": "Target Document", "content": "Target content", "path": "target.md"},
+        headers=headers("redact-target-doc"),
+    ).json()
+    doc_source = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Confidential Research",
+            "content": "Secret algorithmic detail.",
+            "path": "secret.md",
+        },
+        headers=headers("redact-source-doc"),
+    ).json()
+
+    thread_id = create_thread(client, document_id=doc_target["document_id"])
+    principal = _proposal_principal("redact-actor")
+    chat = client.app.state.services.chat
+    run_id = create_test_run(
+        client, principal, thread_id=thread_id, document_id=doc_target["document_id"]
+    )
+
+    chat.evidence.record_run_source(
+        run_id=run_id,
+        document_id=doc_source["document_id"],
+        title=doc_source["title"],
+        path=doc_source["path"],
+    )
+
+    _ = chat.proposals.create(
+        principal=principal,
+        document_id=doc_target["document_id"],
+        expected_revision_id=doc_target["current_revision_id"],
+        thread_id=thread_id,
+        content="Target content with secret applied.",
+        summary="Apply secret insight",
+        rationale="Based on secret research",
+        judgment_needed=None,
+        run_id=run_id,
+        citations=[
+            {
+                "document_id": doc_source["document_id"],
+                "snippet": "Secret algorithmic detail.",
+                "location": "Confidential memo",
+            }
+        ],
+    )
+
+    del_resp = client.request(
+        "DELETE",
+        f"/api/v1/documents/{doc_source['document_id']}",
+        json={"expected_revision_id": doc_source["current_revision_id"]},
+        headers=headers("delete-confidential-doc"),
+    )
+    assert del_resp.status_code == 200
+
+    listed = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id}).json()
+    assert len(listed) == 1
+    prop = listed[0]
+    assert len(prop["citations"]) == 1
+    assert prop["citations"][0]["snippet"] == ""
+    assert prop["citations"][0]["title"] is None
+    assert "Secret algorithmic detail" not in json.dumps(prop)
+    assert len(prop["sources_retrieved"]) == 0
+
+
+def test_chat_evidence_run_sources_bounded_to_50(client: TestClient) -> None:
+    doc = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Multi Page Source",
+            "content": "Source with multiple pages",
+            "path": "multi.md",
+        },
+        headers=headers("multi-source-doc"),
+    ).json()
+    thread_id = create_thread(client, document_id=doc["document_id"])
+    principal = _proposal_principal("bounded-actor")
+    chat = client.app.state.services.chat
+    run_id = create_test_run(
+        client, principal, thread_id=thread_id, document_id=doc["document_id"]
+    )
+
+    for i in range(60):
+        chat.evidence.record_run_source(
+            run_id=run_id,
+            document_id=doc["document_id"],
+            title="Multi Page Source",
+            path="multi.md",
+            page_number=i + 1,
+        )
+
+    sources = chat.evidence.list_run_sources(run_id)
+    assert len(sources) == 50
+    pages = {s["page_number"] for s in sources}
+    assert len(pages) == 50

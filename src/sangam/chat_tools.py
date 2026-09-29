@@ -18,6 +18,7 @@ from sangam.chat_capabilities import (
     ChatCapabilityRegistry,
     CreateDocumentInput,
     InspectWorkspaceOrganizationInput,
+    ProposalCitationInput,
     ProposeUpdateInput,
     PublishDocumentInput,
     ReadDocumentInput,
@@ -169,6 +170,16 @@ class ChatToolset:
                 limit=validated.limit,
                 offset=validated.offset,
             )
+            run_id = ctx.context.request_context.run_id
+            if run_id:
+                for document in documents:
+                    self.evidence.record_run_source(
+                        run_id,
+                        document_id=document.document_id,
+                        revision_id=document.current_revision_id,
+                        title=document.title,
+                        path=document.path or "",
+                    )
             return {
                 "results": [
                     self._document_source(document, snippet=document.search_snippet)
@@ -251,6 +262,15 @@ class ChatToolset:
                 content = revision.content
                 revision_id = revision.revision_id
             total_chars = len(content)
+            run_id = ctx.context.request_context.run_id
+            if run_id:
+                self.evidence.record_run_source(
+                    run_id,
+                    document_id=document.document_id,
+                    revision_id=revision_id,
+                    title=document.title,
+                    path=document.path or "",
+                )
             return {
                 "source": self._document_source(document, revision_id=revision_id),
                 "content": content[validated.offset : validated.offset + validated.limit],
@@ -278,6 +298,16 @@ class ChatToolset:
             page = next((item for item in pages if item.page_number == page_number), None)
             if page is None:
                 raise NotFoundError(f"PDF page not found: {page_number}")
+            run_id = ctx.context.request_context.run_id
+            if run_id:
+                self.evidence.record_run_source(
+                    run_id,
+                    document_id=document.document_id,
+                    revision_id=document.current_revision_id,
+                    title=document.title,
+                    path=document.path or "",
+                    page_number=page_number,
+                )
             annotations = self.workspace.list_annotations(
                 principal,
                 document_id,
@@ -317,6 +347,9 @@ class ChatToolset:
         mode: Literal["full", "replace", "insert_before", "insert_after", "append"] = "full",
         anchor: str | None = None,
         replace_all: bool = False,
+        rationale: str | None = None,
+        judgment_needed: str | None = None,
+        citations: list[ProposalCitationInput] | None = None,
     ) -> str:
         validated = ProposeUpdateInput.model_validate(
             {
@@ -327,6 +360,9 @@ class ChatToolset:
                 "anchor": anchor,
                 "replace_all": replace_all,
                 "summary": summary,
+                "rationale": rationale,
+                "judgment_needed": judgment_needed,
+                "citations": citations or [],
             }
         )
 
@@ -349,6 +385,10 @@ class ChatToolset:
                 anchor=validated.anchor,
                 replace_all=validated.replace_all,
                 context_id=context_id,
+                run_id=request_context.run_id,
+                rationale=validated.rationale,
+                judgment_needed=validated.judgment_needed,
+                citations=[c.model_dump() for c in validated.citations],
             )
             return {
                 "proposal_id": proposal.proposal_id,

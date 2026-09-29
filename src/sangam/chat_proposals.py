@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from sangam.access import WorkspaceAccessService
 from sangam.chat_evidence import ChatEvidenceRepository
@@ -16,7 +17,12 @@ from sangam.errors import (
     ValidationError,
     validate_metadata_text,
 )
-from sangam.schemas import ChatProposal, ChatProposalEvidence
+from sangam.schemas import (
+    ChatProposal,
+    ChatProposalCitation,
+    ChatProposalEvidence,
+    ChatProposalSource,
+)
 from sangam.security import Principal
 
 
@@ -52,6 +58,11 @@ class ChatProposalRepository:
         content: str,
         summary: str | None,
         context_id: str | None,
+        run_id: str | None = None,
+        rationale: str | None = None,
+        judgment_needed: str | None = None,
+        citations_json: str = "[]",
+        sources_retrieved_json: str = "[]",
     ) -> ChatProposal:
         self.require_thread_owner(thread_id, principal)
         with self.database.transaction() as connection:
@@ -60,8 +71,9 @@ class ChatProposalRepository:
                 INSERT INTO chat_proposals(
                     proposal_id, thread_id, document_id, expected_revision_id,
                     content, summary, status, applied_revision_id, created_at, applied_at,
-                    apply_idempotency_key, context_id
-                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL, NULL, ?)
+                    apply_idempotency_key, context_id, run_id, rationale, judgment_needed,
+                    citations_json, sources_retrieved_json
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(proposal_id) DO NOTHING
                 """,
                 (
@@ -73,9 +85,31 @@ class ChatProposalRepository:
                     summary,
                     utc_now(),
                     context_id,
+                    run_id,
+                    rationale,
+                    judgment_needed,
+                    citations_json,
+                    sources_retrieved_json,
                 ),
             )
         return self.get_owned(principal, proposal_id)
+
+    def update_content(
+        self,
+        principal: Principal,
+        proposal_id: str,
+        content: str,
+    ) -> None:
+        with self.database.transaction() as connection:
+            self._owned_row(connection, principal, proposal_id)
+            connection.execute(
+                """
+                UPDATE chat_proposals
+                SET content = ?
+                WHERE proposal_id = ? AND status = 'pending'
+                """,
+                (content, proposal_id),
+            )
 
     def list_owned(
         self, principal: Principal, *, thread_id: str | None, document_id: str | None
@@ -253,8 +287,16 @@ class ChatProposalService:
         anchor: str | None = None,
         replace_all: bool = False,
         context_id: str | None = None,
+        run_id: str | None = None,
+        rationale: str | None = None,
+        judgment_needed: str | None = None,
+        citations: list[dict[str, Any]] | None = None,
     ) -> ChatProposal:
         validate_metadata_text(summary, "Proposal summary")
+        if rationale:
+            validate_metadata_text(rationale, "Proposal rationale")
+        if judgment_needed:
+            validate_metadata_text(judgment_needed, "Proposal judgment")
         thread_owner = self.repository.require_thread_owner(thread_id, principal)
         if context_id is not None:
             context = self.evidence.get_turn_context(principal, context_id)
@@ -287,6 +329,35 @@ class ChatProposalService:
                 f"{hashlib.sha256(resolved_content.encode()).hexdigest()}",
             )
         )
+        enriched_citations: list[dict[str, Any]] = []
+        for raw_citation in citations or []:
+            citation_doc_id = raw_citation.get("document_id")
+            title = raw_citation.get("title")
+            path = raw_citation.get("path")
+            if citation_doc_id and (not title or path is None):
+                try:
+                    doc = self.workspace.get_document(principal, citation_doc_id)
+                    title = title or doc.title
+                    path = path if path is not None else doc.path
+                except Exception:
+                    pass
+            enriched_citations.append(
+                {
+                    "document_id": citation_doc_id,
+                    "revision_id": raw_citation.get("revision_id"),
+                    "title": title,
+                    "path": path,
+                    "page_number": raw_citation.get("page_number"),
+                    "annotation_id": raw_citation.get("annotation_id"),
+                    "snippet": raw_citation.get("snippet", ""),
+                    "location": raw_citation.get("location"),
+                }
+            )
+
+        sources_retrieved: list[dict[str, Any]] = []
+        if run_id:
+            sources_retrieved = self.evidence.list_run_sources(run_id)
+
         proposal = self.repository.create(
             principal,
             proposal_id=proposal_id,
@@ -296,6 +367,11 @@ class ChatProposalService:
             content=resolved_content,
             summary=_bounded_text(summary, 500),
             context_id=context_id,
+            run_id=run_id,
+            rationale=_bounded_text(rationale, 1000) if rationale else None,
+            judgment_needed=_bounded_text(judgment_needed, 1000) if judgment_needed else None,
+            citations_json=json.dumps(enriched_citations, sort_keys=True),
+            sources_retrieved_json=json.dumps(sources_retrieved, sort_keys=True),
         )
         return self._visible_evidence(principal, proposal)
 
@@ -378,18 +454,28 @@ class ChatProposalService:
         proposal_id: str,
         expected_revision_id: str,
         idempotency_key: str,
+        content: str | None = None,
     ) -> ChatProposal:
         proposal = self.repository.get_owned(principal, proposal_id)
         if proposal.expected_revision_id != expected_revision_id:
             raise ConflictError("The proposal revision does not match the reviewed revision")
         reserved = self.repository.reserve_apply(principal, proposal_id, idempotency_key)
         proposal = reserved.proposal
+        applied_content = content if content is not None else proposal.content
+        if content is not None and content != proposal.content:
+            self.workspace.validate_proposed_update(
+                principal,
+                document_id=proposal.document_id,
+                expected_revision_id=expected_revision_id,
+                content=applied_content,
+            )
+            self.repository.update_content(principal, proposal_id, applied_content)
         try:
             document = self.workspace.update_document(
                 principal,
                 document_id=proposal.document_id,
                 expected_revision_id=expected_revision_id,
-                content=proposal.content,
+                content=applied_content,
                 title=None,
                 summary=proposal.summary,
                 idempotency_key=reserved.idempotency_key,
@@ -418,12 +504,46 @@ class ChatProposalService:
         )
 
     def _visible_evidence(self, principal: Principal, proposal: ChatProposal) -> ChatProposal:
-        if proposal.evidence is None:
-            return proposal
-        try:
-            self.workspace.get_document(principal, proposal.evidence.document_id)
-        except (AuthorizationError, NotFoundError):
-            return proposal.model_copy(update={"evidence": None, "evidence_status": "unavailable"})
+        updates: dict[str, Any] = {}
+        if proposal.evidence is not None:
+            try:
+                self.workspace.get_document(principal, proposal.evidence.document_id)
+            except (AuthorizationError, NotFoundError):
+                updates["evidence"] = None
+                updates["evidence_status"] = "unavailable"
+        if proposal.citations:
+            visible_citations: list[ChatProposalCitation] = []
+            has_redacted = False
+            for cit in proposal.citations:
+                try:
+                    self.workspace.get_document(principal, cit.document_id)
+                    visible_citations.append(cit)
+                except (AuthorizationError, NotFoundError):
+                    has_redacted = True
+                    visible_citations.append(
+                        cit.model_copy(
+                            update={
+                                "title": None,
+                                "path": None,
+                                "snippet": "",
+                                "location": "Source document deleted or inaccessible",
+                            }
+                        )
+                    )
+            updates["citations"] = visible_citations
+            if has_redacted:
+                updates["evidence_status"] = "unavailable"
+        if proposal.sources_retrieved:
+            visible_sources: list[ChatProposalSource] = []
+            for src in proposal.sources_retrieved:
+                try:
+                    self.workspace.get_document(principal, src.document_id)
+                    visible_sources.append(src)
+                except (AuthorizationError, NotFoundError):
+                    pass
+            updates["sources_retrieved"] = visible_sources
+        if updates:
+            return proposal.model_copy(update=updates)
         return proposal
 
 
@@ -449,6 +569,27 @@ def _proposal_from_row(row: sqlite3.Row) -> ChatProposal:
         evidence_status = "recorded"
     elif context_id is not None:
         evidence_status = "unavailable"
+
+    row_keys = row.keys()
+    rationale = row["rationale"] if "rationale" in row_keys else None
+    judgment_needed = row["judgment_needed"] if "judgment_needed" in row_keys else None
+
+    citations: list[ChatProposalCitation] = []
+    if "citations_json" in row_keys and row["citations_json"]:
+        try:
+            raw_citations = json.loads(row["citations_json"])
+            citations = [ChatProposalCitation.model_validate(c) for c in raw_citations]
+        except Exception:
+            citations = []
+
+    sources_retrieved: list[ChatProposalSource] = []
+    if "sources_retrieved_json" in row_keys and row["sources_retrieved_json"]:
+        try:
+            raw_sources = json.loads(row["sources_retrieved_json"])
+            sources_retrieved = [ChatProposalSource.model_validate(s) for s in raw_sources]
+        except Exception:
+            sources_retrieved = []
+
     return ChatProposal(
         proposal_id=row["proposal_id"],
         thread_id=row["thread_id"],
@@ -462,6 +603,10 @@ def _proposal_from_row(row: sqlite3.Row) -> ChatProposal:
         applied_at=row["applied_at"],
         evidence=evidence,
         evidence_status=evidence_status,
+        rationale=rationale,
+        judgment_needed=judgment_needed,
+        citations=citations,
+        sources_retrieved=sources_retrieved,
     )
 
 

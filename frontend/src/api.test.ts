@@ -117,6 +117,8 @@ describe('chat proposal requests', () => {
       applied_at: null,
       evidence: null,
       evidence_status: 'not_recorded',
+      citations: [],
+      sources_retrieved: [],
     }
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

@@ -14,6 +14,7 @@ const chatSearchSchema = z.object({
   document: z.string().max(200).optional(),
   revision: z.string().max(200).optional(),
   returnTo: z.string().max(500).optional(),
+  prompt: z.string().max(2000).optional(),
 })
 
 export const Route = createFileRoute('/chat')({
@@ -108,6 +109,12 @@ function WorkspaceChat() {
           />
         ) : (
           <Suspense fallback={<StateMessage kind="loading" title="Preparing workspace chat" />}>
+            {search.prompt && (
+              <div className="chat-revision-draft-banner" role="status">
+                <span className="eyebrow">Revision requested</span>
+                <p>{search.prompt}</p>
+              </div>
+            )}
             <ChatPanel
               document={document}
               selectedText={selectedText}

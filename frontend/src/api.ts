@@ -684,7 +684,55 @@ export const chatProposalSchema = z.object({
     })
     .nullable(),
   evidence_status: z.enum(['not_recorded', 'recorded', 'unavailable']),
+  rationale: z.string().nullable().optional(),
+  judgment_needed: z.string().nullable().optional(),
+  citations: z
+    .array(
+      z.object({
+        document_id: z.string(),
+        revision_id: z.string().nullable().optional(),
+        title: z.string().nullable().optional(),
+        path: z.string().nullable().optional(),
+        page_number: z.number().int().positive().nullable().optional(),
+        annotation_id: z.string().nullable().optional(),
+        snippet: z.string().default(''),
+        location: z.string().nullable().optional(),
+      }),
+    )
+    .default([]),
+  sources_retrieved: z
+    .array(
+      z.object({
+        document_id: z.string(),
+        revision_id: z.string().nullable().optional(),
+        title: z.string(),
+        path: z.string(),
+        page_number: z.number().int().positive().nullable().optional(),
+      }),
+    )
+    .default([]),
 })
+
+export const chatProposalCitationSchema = z.object({
+  document_id: z.string(),
+  revision_id: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  path: z.string().nullable().optional(),
+  page_number: z.number().int().positive().nullable().optional(),
+  annotation_id: z.string().nullable().optional(),
+  snippet: z.string().default(''),
+  location: z.string().nullable().optional(),
+})
+export type ChatProposalCitation = z.infer<typeof chatProposalCitationSchema>
+
+export const chatProposalSourceSchema = z.object({
+  document_id: z.string(),
+  revision_id: z.string().nullable().optional(),
+  title: z.string(),
+  path: z.string(),
+  page_number: z.number().int().positive().nullable().optional(),
+})
+export type ChatProposalSource = z.infer<typeof chatProposalSourceSchema>
 
 export type ChatProposal = z.infer<typeof chatProposalSchema>
 
@@ -893,12 +941,15 @@ export const api = {
     if (threadId) params.set('thread_id', threadId)
     return z.array(chatProposalSchema).parse(await request(`/chat/proposals?${params.toString()}`))
   },
-  async applyChatProposal(proposal: ChatProposal): Promise<ChatProposal> {
+  async applyChatProposal(proposal: ChatProposal, content?: string): Promise<ChatProposal> {
     return chatProposalSchema.parse(
       await request(`/chat/proposals/${proposal.proposal_id}/apply`, {
         method: 'POST',
         headers: { 'Idempotency-Key': `chat-proposal:${proposal.proposal_id}` },
-        body: JSON.stringify({ expected_revision_id: proposal.expected_revision_id }),
+        body: JSON.stringify({
+          expected_revision_id: proposal.expected_revision_id,
+          content: content !== undefined ? content : null,
+        }),
       }),
     )
   },

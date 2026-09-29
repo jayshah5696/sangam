@@ -880,6 +880,25 @@ class ChatProposalEvidence(BaseModel):
     annotation_id: str | None
 
 
+class ChatProposalCitation(BaseModel):
+    document_id: str
+    revision_id: str | None = None
+    title: str | None = None
+    path: str | None = None
+    page_number: int | None = None
+    annotation_id: str | None = None
+    snippet: str = ""
+    location: str | None = None
+
+
+class ChatProposalSource(BaseModel):
+    document_id: str
+    revision_id: str | None = None
+    title: str
+    path: str
+    page_number: int | None = None
+
+
 class ChatProposal(BaseModel):
     proposal_id: str
     thread_id: str
@@ -893,10 +912,15 @@ class ChatProposal(BaseModel):
     applied_at: str | None
     evidence: ChatProposalEvidence | None = None
     evidence_status: Literal["not_recorded", "recorded", "unavailable"] = "not_recorded"
+    rationale: str | None = None
+    judgment_needed: str | None = None
+    citations: list[ChatProposalCitation] = Field(default_factory=list)
+    sources_retrieved: list[ChatProposalSource] = Field(default_factory=list)
 
 
 class ApplyChatProposal(MutationRequest):
     expected_revision_id: str
+    content: str | None = Field(default=None, max_length=2_000_000)
 
 
 class DismissChatProposal(MutationRequest):
