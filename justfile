@@ -44,9 +44,21 @@ format-python args=".":
 lint-python args=".":
     uv run ruff check {{ args }}
 
+# Explain OpenAPI changes against the reviewed contract.
+verify-openapi:
+    uv run python scripts/verify_openapi_contract.py
+
+# Record an intentional contract update and its review rationale.
+update-openapi-baseline reason:
+    uv run python scripts/verify_openapi_contract.py --update-baseline --reason {{ quote(reason) }}
+
 # Run reproducible concurrency, backpressure saturation, and audit integrity benchmark.
 benchmark-concurrency workers="20" ops="15":
     uv run python scripts/benchmark_concurrency.py --workers "{{ workers }}" --ops-per-worker "{{ ops }}" 
+
+# Measure cold-process startup with a healthy index and a full repair backlog.
+benchmark-search-startup count="250":
+    uv run python scripts/benchmark_search_startup.py --count "{{ count }}"
 
 # Type-check the provider and chat boundary introduced by the architecture foundation.
 typecheck:
