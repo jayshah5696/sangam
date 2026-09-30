@@ -463,9 +463,7 @@ def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters
     project_id = project["project_id"]
 
     # 2. Project update rejecting null bytes and control characters
-    bad_update_name = client.patch(
-        f"/api/v1/projects/{project_id}", json={"name": "Bad\x00Update"}
-    )
+    bad_update_name = client.patch(f"/api/v1/projects/{project_id}", json={"name": "Bad\x00Update"})
     assert bad_update_name.status_code == 422
     msg = bad_update_name.json()["error"]["message"]
     assert "Project name cannot contain null bytes" in msg
