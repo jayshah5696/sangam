@@ -5,6 +5,7 @@ import { api, type ProjectSummary } from '../../api'
 import { StateMessage } from '../ui/StateMessage'
 import { projectDraft, useProjectResume } from '../../projectResume'
 import { CreateProjectDialog } from '../../routes/projects'
+import { ProjectAssignments } from './ProjectAssignments'
 
 export function ProjectHome({
   projects,
@@ -151,6 +152,7 @@ export function ProjectHome({
           <Link to="/review">{attention(workspaceReviews)}</Link>
         </section>
       )}
+      {detail && <ProjectAssignments key={detail.project_id} project={detail} />}
       {detail && (
         <div className="project-home-categories" aria-label="Project documents">
           {(['source', 'draft', 'note', 'decision', 'output'] as const).map((role) => {

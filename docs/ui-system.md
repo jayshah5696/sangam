@@ -124,6 +124,12 @@ Saved layouts restore the selected group and tab, split ratios, PDF pages and th
 attached conversation. Project URLs preserve the selected project on reload.
 See [Projects and ongoing work](projects.md) for the workflow and API contract.
 
+Project Home includes recorded return briefings and bounded project review
+assignments. The controls and source selectors reuse project fields and rows.
+See [Persistent project reviews](project-assignments.md) for control and recovery
+semantics. The review inbox compares intervening edits and can start a durable
+fresh-candidate assignment without dismissing its original proposal.
+
 The Home route uses the persisted workbench tabs to show up to four recently
 open documents and up to four pinned documents. It removes stale and duplicate
 tabs before rendering either list. If no persisted tab is available, Home uses

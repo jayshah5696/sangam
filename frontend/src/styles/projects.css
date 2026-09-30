@@ -7,6 +7,20 @@
   font-family: var(--font-ui);
 }
 
+.project-assignment-source {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .project-assignment-source {
+    min-height: var(--control-touch);
+  }
+}
+
 .projects-page h1,
 .welcome-work h1 {
   margin: 0;
@@ -96,7 +110,7 @@
 
 .projects-page a,
 .project-home a {
-  color: var(--accent);
+  color: var(--text);
 }
 
 .project-home a.primary-button {

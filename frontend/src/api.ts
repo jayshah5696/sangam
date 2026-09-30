@@ -895,6 +895,44 @@ export const projectDetailSchema = projectSummarySchema.extend({
 })
 export type ProjectDetail = z.infer<typeof projectDetailSchema>
 
+export const assignmentSchema = z.object({
+  assignment_id: z.string(),
+  project_id: z.string().nullable(),
+  thread_id: z.string(),
+  status: z.enum(['queued', 'running', 'paused', 'stopped', 'completed', 'failed', 'exhausted']),
+  instructions: z.string(),
+  document_ids: z.array(z.string()),
+  max_steps: z.number(),
+  max_seconds: z.number(),
+  steps: z.number(),
+  elapsed_seconds: z.number(),
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+  artifact_ids: z.array(z.string()),
+  proposal_ids: z.array(z.string()),
+  error: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type Assignment = z.infer<typeof assignmentSchema>
+export const projectBriefingSchema = z.object({
+  project_id: z.string(),
+  since: z.string().nullable(),
+  as_of: z.string(),
+  truncated: z.boolean(),
+  changes: z.array(
+    z.object({
+      kind: z.enum(['source_changed', 'document_changed', 'applied_edit', 'pending_proposal']),
+      document_id: z.string(),
+      title: z.string(),
+      revision_id: z.string(),
+      previous_revision_id: z.string().nullable(),
+      proposal_id: z.string().nullable(),
+      occurred_at: z.string(),
+    }),
+  ),
+})
+
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
   valid: z.boolean(),
@@ -976,6 +1014,65 @@ export async function collectPages<T>(
 }
 
 export const api = {
+  async listAssignments(projectId: string) {
+    return z.array(assignmentSchema).parse(await request(`/projects/${projectId}/assignments`))
+  },
+  async getAssignment(id: string) {
+    return assignmentSchema.parse(await request(`/assignments/${id}`))
+  },
+  async proposalAssignments(id: string) {
+    return z.array(assignmentSchema).parse(await request(`/chat/proposals/${id}/refresh`))
+  },
+  async createAssignment(
+    projectId: string,
+    input: {
+      instructions: string
+      document_ids: string[]
+      max_steps: number
+      max_seconds: number
+      resume_after_restart: boolean
+    },
+    key: string,
+  ) {
+    return assignmentSchema.parse(
+      await request(`/projects/${projectId}/assignments`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': key },
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async controlAssignment(
+    id: string,
+    action: 'steer' | 'pause' | 'resume' | 'stop',
+    content: string,
+    key: string,
+  ) {
+    return assignmentSchema.parse(
+      await request(`/assignments/${id}/control`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': key },
+        body: JSON.stringify({ action, content }),
+      }),
+    )
+  },
+  async refreshProposal(id: string, feedback: string, reviewedContent: string, key: string) {
+    return assignmentSchema.parse(
+      await request(`/chat/proposals/${id}/refresh`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': key },
+        body: JSON.stringify({ feedback, reviewed_content: reviewedContent }),
+      }),
+    )
+  },
+  async projectBriefing(projectId: string) {
+    return projectBriefingSchema.parse(await request(`/projects/${projectId}/briefing`))
+  },
+  async recordProjectVisit(projectId: string, key: string) {
+    return projectBriefingSchema.parse(
+      await request(`/projects/${projectId}/visits`, { method: 'POST', headers: { 'Idempotency-Key': key } }),
+    )
+  },
   async chatConfig(): Promise<ChatRuntimeConfig> {
     return chatRuntimeConfigSchema.parse(await request('/chat/config'))
   },

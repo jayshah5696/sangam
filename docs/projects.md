@@ -1,5 +1,8 @@
 # Projects and ongoing work
 
+Project Home also supports [persistent project reviews](project-assignments.md),
+recorded return briefings and controls for server-owned assignments.
+
 A project has a purpose brief and references to existing documents, conversations
 and PDF annotations. A document can belong to several projects without a copy or
 a path change. Deleting a project keeps its documents and conversations.

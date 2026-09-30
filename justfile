@@ -33,6 +33,9 @@ verify-projects port="8872":
     uv run python scripts/verify_projects.py
 
 # Run focused backend behavior regressions.
+verify-assignments:
+    uv run python scripts/verify_assignments.py
+
 test-backend-focused args="":
     uv run pytest {{ args }}
 
@@ -139,7 +142,9 @@ typecheck:
         src/sangam/chat_models.py \
         src/sangam/chat_context.py \
         src/sangam/chat.py \
-        src/sangam/chat_tools.py
+        src/sangam/chat_tools.py \
+        src/sangam/assignments.py \
+        src/sangam/api_assignments.py
 
 # Run only the browser client build, lint, and unit tests.
 test-frontend:

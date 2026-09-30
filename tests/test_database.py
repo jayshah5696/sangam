@@ -52,6 +52,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "024",
         "025",
         "026",
+        "027",
     ]
     assert {
         "projects_created_at_idx",
