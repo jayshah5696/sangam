@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from functools import partial
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
 from sangam.access import WorkspaceAccessService
-from sangam.errors import ValidationError
+from sangam.errors import ServiceUnavailableError, ValidationError
 from sangam.pdf_research import PdfResearchService
+from sangam.pdf_runtime import run_pdf_io, spooled_pdf_body
 from sangam.schemas import (
     Annotation,
     AnnotationEvent,
@@ -47,31 +49,6 @@ def _parse_byte_range(value: str, size: int) -> tuple[int, int]:
     return start, min(end, size - 1)
 
 
-async def _read_limited_body(request: Request, *, max_bytes: int) -> bytes:
-    raw_length = request.headers.get("content-length")
-    if raw_length is not None:
-        try:
-            declared_length = int(raw_length)
-        except ValueError as error:
-            raise ValidationError("Content-Length must be a non-negative integer") from error
-        if declared_length < 0:
-            raise ValidationError("Content-Length must be a non-negative integer")
-        if declared_length > max_bytes:
-            raise ValidationError(
-                "PDF exceeds the configured size limit",
-                details={"size_bytes": declared_length, "max_pdf_bytes": max_bytes},
-            )
-    content = bytearray()
-    async for chunk in request.stream():
-        if len(content) + len(chunk) > max_bytes:
-            raise ValidationError(
-                "PDF exceeds the configured size limit",
-                details={"size_bytes": len(content) + len(chunk), "max_pdf_bytes": max_bytes},
-            )
-        content.extend(chunk)
-    return bytes(content)
-
-
 def create_pdf_router(
     *,
     workspace: WorkspaceAccessService,
@@ -83,11 +60,11 @@ def create_pdf_router(
     router = APIRouter(prefix="/api/v1")
     principal_dependency = Depends(resolve_principal)
     admin_dependency = Depends(require_administrator)
+    upload_slots = asyncio.Semaphore(2)
 
     @router.post("/pdfs", response_model=Document, status_code=201)
     async def import_pdf(
         request: Request,
-        background_tasks: BackgroundTasks,
         title: str = Query(min_length=1, max_length=240),
         path: str = Query(min_length=1, max_length=500),
         supersedes_document_id: str | None = Query(default=None),
@@ -97,18 +74,27 @@ def create_pdf_router(
         content_type = request.headers.get("content-type", "").split(";", 1)[0].casefold()
         if content_type != "application/pdf":
             raise ValidationError("PDF imports require Content-Type: application/pdf")
-        content = await _read_limited_body(request, max_bytes=pdf_research.max_pdf_bytes)
-        document = await asyncio.to_thread(
-            workspace.import_pdf,
-            principal,
-            title=title,
-            path=path,
-            content=content,
-            supersedes_document_id=supersedes_document_id,
-            idempotency_key=idempotency_key,
-        )
-        background_tasks.add_task(pdf_research.extract_text, document.document_id)
-        return document
+        if upload_slots.locked():
+            raise ServiceUnavailableError("PDF upload capacity is full; retry later")
+        async with upload_slots:
+            try:
+                async with asyncio.timeout(60):
+                    async with spooled_pdf_body(
+                        request, max_bytes=pdf_research.max_pdf_bytes
+                    ) as content:
+                        return await run_pdf_io(
+                            partial(
+                                workspace.import_pdf,
+                                principal,
+                                title=title,
+                                path=path,
+                                content=content,
+                                supersedes_document_id=supersedes_document_id,
+                                idempotency_key=idempotency_key,
+                            )
+                        )
+            except TimeoutError as error:
+                raise ValidationError("PDF upload must finish within 60 seconds") from error
 
     @router.get("/pdfs/{document_id}/content")
     def pdf_content(
@@ -158,12 +144,10 @@ def create_pdf_router(
     @router.post("/pdfs/{document_id}/extract", response_model=Document)
     def retry_pdf_extraction(
         document_id: str,
-        background_tasks: BackgroundTasks,
         principal: Principal = admin_dependency,
     ) -> Document:
         del principal
         document = pdf_research.retry_extraction(document_id)
-        background_tasks.add_task(pdf_research.extract_text, document_id)
         return document
 
     @router.get("/pdfs/{document_id}/annotations", response_model=list[Annotation])

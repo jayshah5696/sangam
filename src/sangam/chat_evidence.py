@@ -78,14 +78,13 @@ class ChatEvidenceRepository:
                     raise NotFoundError(f"PDF annotation not found: {annotation_id}")
             pinned_revision = revision_id or document.current_revision_id
             if pinned_revision != document.current_revision_id:
-                revisions = {
-                    item.revision_id for item in self.workspace.history(principal, document_id)
-                }
-                if pinned_revision not in revisions:
+                try:
+                    self.workspace.get_revision(principal, document_id, pinned_revision)
+                except NotFoundError as error:
                     raise NotFoundError(
                         "The attached document revision no longer exists. "
                         "Return to the document and attach its current revision."
-                    )
+                    ) from error
         elif revision_id:
             raise ValidationError("A revision requires a document context")
         context_id = f"ctx_{uuid.uuid4().hex}"

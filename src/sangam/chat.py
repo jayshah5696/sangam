@@ -31,6 +31,7 @@ from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_models import ChatModelCatalog
 from sangam.chat_proposals import ChatProposalRepository, ChatProposalService
+from sangam.chat_runtime import BoundedChatAdmission
 from sangam.chat_store import SQLiteChatKitStore
 from sangam.chat_tools import ChatToolset
 from sangam.config import ChatServerConfig
@@ -135,7 +136,17 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         )
         self.tools = self.toolset.as_agent_tools()
         self.item_converter = SangamThreadItemConverter()
-        self._run_semaphore = asyncio.Semaphore(config.max_concurrent_runs)
+        self.admission = BoundedChatAdmission(
+            max_active=config.max_concurrent_runs,
+            max_waiting=config.max_waiting_runs,
+            wait_timeout=config.queue_wait_timeout_seconds,
+        )
+
+    async def close(self, timeout: float = 35.0) -> None:
+        try:
+            await self.admission.close(timeout=timeout)
+        finally:
+            await self.store_adapter.close(timeout=timeout)
 
     def runtime_config(self, *, request_is_loopback: bool = True) -> ChatRuntimeConfig:
         state = self.model_catalog.state()
@@ -194,13 +205,13 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         input_user_message: UserMessageItem | None,
         context: ChatRequestContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
-        state = self.model_catalog.state()
+        state = await self.admission.run_sync(self.model_catalog.state)
         if not state.workspace_enabled:
             raise CustomStreamError("Workspace inference is disabled in AI settings.")
         selected_ref = state.default_model
         if input_user_message and input_user_message.inference_options.model:
             selected_ref = input_user_message.inference_options.model
-        selected_model = self.model_catalog.get_model(selected_ref)
+        selected_model = await self.admission.run_sync(self.model_catalog.get_model, selected_ref)
         if selected_model.id not in state.enabled_models:
             raise CustomStreamError("That model is not enabled for this Sangam server.")
         if not context.principal.administrator and context.principal.identity_kind != "system":
@@ -219,15 +230,25 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
 
         item_id = input_user_message.id if input_user_message else None
         turn_record = (
-            self.evidence.context_for_item(context.principal, item_id) if item_id else None
+            await self.admission.run_sync(
+                self.evidence.context_for_item, context.principal, item_id
+            )
+            if item_id
+            else None
         )
         if turn_record is not None:
             document_id = turn_record.document_id
             if not turn_record.model_ref:
                 raise CustomStreamError("The stored turn context does not include a model.")
-            selected_model = self.model_catalog.get_model(turn_record.model_ref)
+            selected_model = await self.admission.run_sync(
+                self.model_catalog.get_model, turn_record.model_ref
+            )
             document = (
-                self.workspace.get_document(context.principal, document_id) if document_id else None
+                await self.admission.run_sync(
+                    self.workspace.get_document, context.principal, document_id
+                )
+                if document_id
+                else None
             )
             currently_allowed = self.capabilities.resolve(
                 principal=context.principal,
@@ -254,13 +275,16 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             entry_point = "document" if document_id else context.entry_point
             try:
                 if context.context_snapshot_id:
-                    turn_record = self.evidence.get_turn_context(
-                        context.principal, context.context_snapshot_id
+                    turn_record = await self.admission.run_sync(
+                        self.evidence.get_turn_context,
+                        context.principal,
+                        context.context_snapshot_id,
                     )
                     document_id = turn_record.document_id
                     entry_point = turn_record.entry_point
                 else:
-                    turn_record = self.evidence.create_turn_context(
+                    turn_record = await self.admission.run_sync(
+                        self.evidence.create_turn_context,
                         context.principal,
                         entry_point=entry_point,
                         document_id=document_id,
@@ -268,7 +292,9 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                         selected_text="",
                     )
                 document = (
-                    self.workspace.get_document(context.principal, document_id)
+                    await self.admission.run_sync(
+                        self.workspace.get_document, context.principal, document_id
+                    )
                     if document_id
                     else None
                 )
@@ -284,7 +310,8 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             )
             manifest = tuple(capability.manifest_item() for capability in resolved_capabilities)
             if item_id:
-                turn_record = self.evidence.attach_turn_context(
+                turn_record = await self.admission.run_sync(
+                    self.evidence.attach_turn_context,
                     context.principal,
                     context_id=turn_record.context_id,
                     thread_id=thread.id,
@@ -295,9 +322,12 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
 
         if selected_model.id not in state.enabled_models:
             raise CustomStreamError("The model pinned to this turn is no longer enabled.")
-        connection = self.provider_connections.get(selected_model.connection_id)
+        connection = await self.admission.run_sync(
+            self.provider_connections.get, selected_model.connection_id
+        )
         if connection.status != "ready":
-            raise CustomStreamError(self.runtime_config().message)
+            runtime = await self.admission.run_sync(self.runtime_config)
+            raise CustomStreamError(runtime.message)
         manifest = tuple(capability.manifest_item() for capability in resolved_capabilities)
         request_context = replace(
             context,
@@ -336,7 +366,8 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         reasoning: Reasoning | None = None
         if self.config.reasoning_effort != "none" and selected_model.supports_reasoning is True:
             reasoning = Reasoning(effort=self.config.reasoning_effort)
-        run_id = self.evidence.begin_run(
+        run_id = await self.admission.run_sync(
+            self.evidence.begin_run,
             context.principal,
             thread_id=thread.id,
             user_item_id=item_id,
@@ -353,39 +384,45 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         )
         try:
             stream_failed = False
-            async with self._run_semaphore:
-                result = Runner.run_streamed(
-                    agent,
-                    input=input_items,
-                    context=agent_context,
-                    max_turns=self.config.max_turns,
-                    run_config=RunConfig(
-                        model=selected_model.model_id,
-                        model_provider=self.provider_connections.model_provider(
-                            connection.connection_id
-                        ),
-                        model_settings=ModelSettings(
-                            reasoning=reasoning,
-                            max_tokens=self.config.max_output_tokens,
-                            store=False,
-                            parallel_tool_calls=all(
-                                capability.effect_class == EffectClass.READ
-                                for capability in resolved_capabilities
-                            ),
-                        ),
-                        tracing_disabled=True,
-                        workflow_name="Sangam workspace chat",
+            result = Runner.run_streamed(
+                agent,
+                input=input_items,
+                context=agent_context,
+                max_turns=self.config.max_turns,
+                run_config=RunConfig(
+                    model=selected_model.model_id,
+                    model_provider=await self.admission.run_sync(
+                        self.provider_connections.model_provider, connection.connection_id
                     ),
-                )
-                async for event in stream_agent_response(agent_context, result):
-                    if getattr(event, "type", None) == "error":
-                        stream_failed = True
-                    yield event
+                    model_settings=ModelSettings(
+                        reasoning=reasoning,
+                        max_tokens=self.config.max_output_tokens,
+                        store=False,
+                        parallel_tool_calls=all(
+                            capability.effect_class == EffectClass.READ
+                            for capability in resolved_capabilities
+                        ),
+                    ),
+                    tracing_disabled=True,
+                    workflow_name="Sangam workspace chat",
+                ),
+            )
+            async for event in stream_agent_response(agent_context, result):
+                if getattr(event, "type", None) == "error":
+                    stream_failed = True
+                yield event
         except asyncio.CancelledError:
-            self.evidence.complete_run(run_id, status="cancelled")
+            await asyncio.shield(
+                self.admission.run_sync(self.evidence.complete_run, run_id, status="cancelled")
+            )
             raise
         except Exception as error:
-            self.evidence.complete_run(run_id, status="failed", error_class=type(error).__name__)
+            await self.admission.run_sync(
+                self.evidence.complete_run,
+                run_id,
+                status="failed",
+                error_class=type(error).__name__,
+            )
             raise
         else:
             input_tokens = sum(response.usage.input_tokens for response in result.raw_responses)
@@ -398,7 +435,8 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                 ),
                 None,
             )
-            self.evidence.complete_run(
+            await self.admission.run_sync(
+                self.evidence.complete_run,
                 run_id,
                 status="failed" if stream_failed else "completed",
                 input_tokens=input_tokens,
@@ -410,7 +448,9 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
     async def _app_context(self, context: ChatRequestContext) -> str:
         if not context.document_id:
             return "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
-        document = self.workspace.get_document(context.principal, context.document_id)
+        document = await self.admission.run_sync(
+            self.workspace.get_document, context.principal, context.document_id
+        )
         revision_id = context.pinned_revision_id or document.current_revision_id
         pdf_context = ""
         if context.pdf_page_number is not None:

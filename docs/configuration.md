@@ -71,6 +71,14 @@ every variable.
 | `SANGAM_CHAT_MAX_REQUEST_BYTES` | Inbound chat request cap |
 | `SANGAM_CHAT_MAX_OUTPUT_TOKENS` | Completion cap (default 16384) |
 | `SANGAM_CHAT_MAX_CONCURRENT_RUNS` | Parallel chat runs |
+| `SANGAM_CHAT_MAX_WAITING_RUNS` | Waiting chat requests, default 8; use 0 to reject excess work immediately |
+| `SANGAM_CHAT_QUEUE_WAIT_TIMEOUT_SECONDS` | Maximum wait for chat admission, default 5 seconds |
+
+Chat admission happens before request-body buffering. Excess or expired waiting
+requests receive HTTP 503 with `Retry-After: 1`. A request body must arrive within
+30 seconds and stay within `SANGAM_CHAT_MAX_REQUEST_BYTES`; invalid bodies receive
+the existing HTTP 422 validation envelope. A streaming request holds its slot
+until the stream finishes or disconnects.
 
 ## Karakeep bridge
 

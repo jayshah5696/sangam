@@ -8,6 +8,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Iterator
+from typing import BinaryIO
 
 from pypdf import PdfReader
 
@@ -65,7 +66,7 @@ class PdfResearchService:
         *,
         title: str,
         path: str,
-        content: bytes,
+        content: bytes | BinaryIO,
         supersedes_document_id: str | None,
         actor_id: str,
         idempotency_key: str,
@@ -79,7 +80,7 @@ class PdfResearchService:
                 title=title,
                 path=path,
                 normalized_path=normalized_path,
-                content=content,
+                content=io.BytesIO(content) if isinstance(content, bytes) else content,
                 supersedes_document_id=supersedes_document_id,
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
@@ -91,7 +92,7 @@ class PdfResearchService:
         title: str,
         path: str,
         normalized_path: str,
-        content: bytes,
+        content: BinaryIO,
         supersedes_document_id: str | None,
         actor_id: str,
         idempotency_key: str,
@@ -100,16 +101,23 @@ class PdfResearchService:
         title = title.strip()
         if not title:
             raise ValidationError("PDF title is required")
-        if not content.startswith(b"%PDF-"):
+        content.seek(0)
+        if content.read(5) != b"%PDF-":
             raise ValidationError("The uploaded file is not a PDF")
-        if len(content) > self.max_pdf_bytes:
+        size_bytes = content.seek(0, 2)
+        if size_bytes > self.max_pdf_bytes:
             raise ValidationError(
                 "PDF exceeds the configured size limit",
-                details={"size_bytes": len(content), "max_pdf_bytes": self.max_pdf_bytes},
+                details={"size_bytes": size_bytes, "max_pdf_bytes": self.max_pdf_bytes},
             )
         if not normalized_path.lower().endswith(".pdf"):
             raise ValidationError("PDF document paths must end in .pdf")
-        content_hash = hashlib.sha256(content).hexdigest()
+        content.seek(0)
+        digest = hashlib.sha256()
+        while chunk := content.read(65536):
+            digest.update(chunk)
+        content_hash = digest.hexdigest()
+        content.seek(0)
         fingerprint = request_hash(
             {
                 "title": title,
@@ -143,13 +151,13 @@ class PdfResearchService:
             created_file = not self.workspace.is_document_file(normalized_path)
             file_written_by_this_call = False
             if created_file:
-                file_hash = self.workspace.write_atomic_bytes(normalized_path, content)
+                file_hash = self.workspace.write_atomic_stream(normalized_path, content)
                 file_written_by_this_call = True
             else:
                 # An import may have been interrupted after the durable file rename but
                 # before SQLite committed. Adopt only the exact bytes the caller supplied;
                 # a different existing file must remain a visible reconciliation conflict.
-                file_hash = hashlib.sha256(self.workspace.read_binary(normalized_path)).hexdigest()
+                file_hash = self.workspace.binary_hash(normalized_path)
                 if file_hash != content_hash:
                     raise ValidationError("A different workspace file already exists at that path")
             try:
@@ -179,7 +187,7 @@ class PdfResearchService:
                             title,
                             normalized_path,
                             content_hash,
-                            len(content),
+                            size_bytes,
                             file_hash,
                             actor_id,
                             now,
@@ -196,7 +204,7 @@ class PdfResearchService:
                             content_hash, size_bytes, actor_id, operation, summary, created_at
                         ) VALUES (?, ?, NULL, '', ?, ?, ?, 'create', 'Imported immutable PDF', ?)
                         """,
-                        (revision_id, document_id, content_hash, len(content), actor_id, now),
+                        (revision_id, document_id, content_hash, size_bytes, actor_id, now),
                     )
                     connection.execute(
                         "UPDATE documents SET current_revision_id = ? WHERE document_id = ?",
@@ -310,14 +318,16 @@ class PdfResearchService:
             )
         return updated.rowcount
 
-    def pending_extractions(self) -> list[str]:
+    def pending_extractions(self, *, limit: int = 100) -> list[str]:
         with self.database.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT document_id FROM pdf_documents
-                WHERE extraction_status = 'pending'
-                ORDER BY imported_at
-                """
+                SELECT p.document_id FROM pdf_documents p
+                JOIN documents d ON d.document_id = p.document_id
+                WHERE p.extraction_status = 'pending' AND d.deleted = 0
+                ORDER BY p.imported_at LIMIT ?
+                """,
+                (limit,),
             ).fetchall()
         return [row["document_id"] for row in rows]
 

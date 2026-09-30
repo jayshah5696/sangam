@@ -29,6 +29,8 @@ class ChatServerConfig:
     max_request_bytes: int
     max_output_tokens: int
     max_concurrent_runs: int
+    max_waiting_runs: int
+    queue_wait_timeout_seconds: float
 
 
 class Settings(BaseSettings):
@@ -46,6 +48,7 @@ class Settings(BaseSettings):
     max_document_bytes: int = Field(default=2_000_000, ge=1_024, le=50_000_000)
     max_pdf_bytes: int = Field(default=100_000_000, ge=1_024, le=1_000_000_000)
     pdf_extraction_shutdown_timeout_seconds: float = Field(default=5.0, ge=0.1, le=60.0)
+    pdf_extraction_workers: int = Field(default=2, ge=1, le=8)
     max_publication_asset_bytes: int = Field(default=10_000_000, ge=1_024, le=100_000_000)
     max_karakeep_source_bytes: int = Field(default=5_000_000, ge=1_024, le=50_000_000)
     karakeep_base_url: str | None = None
@@ -72,6 +75,8 @@ class Settings(BaseSettings):
     chat_max_request_bytes: int = Field(default=1_000_000, ge=16_384, le=10_000_000)
     chat_max_output_tokens: int = Field(default=16_384, ge=128, le=32_768)
     chat_max_concurrent_runs: int = Field(default=4, ge=1, le=32)
+    chat_max_waiting_runs: int = Field(default=8, ge=0, le=256)
+    chat_queue_wait_timeout_seconds: float = Field(default=5.0, ge=0.1, le=60.0)
     auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"
     trusted_identity_value: str = "human:jay"
@@ -187,6 +192,8 @@ class Settings(BaseSettings):
             max_request_bytes=self.chat_max_request_bytes,
             max_output_tokens=self.chat_max_output_tokens,
             max_concurrent_runs=self.chat_max_concurrent_runs,
+            max_waiting_runs=self.chat_max_waiting_runs,
+            queue_wait_timeout_seconds=self.chat_queue_wait_timeout_seconds,
         )
 
 

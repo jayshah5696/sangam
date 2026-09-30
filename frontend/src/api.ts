@@ -219,6 +219,17 @@ export const revisionSchema = z.object({
 
 export type Revision = z.infer<typeof revisionSchema>
 
+export const revisionSummarySchema = revisionSchema.omit({ content: true })
+
+export type RevisionSummary = z.infer<typeof revisionSummarySchema>
+
+export const revisionPageSchema = z.object({
+  items: z.array(revisionSummarySchema),
+  next_cursor: z.string().nullable(),
+})
+
+export type RevisionPage = z.infer<typeof revisionPageSchema>
+
 export const revisionDiffSchema = z.object({
   document_id: z.string(),
   from_revision_id: z.string(),
@@ -1425,6 +1436,18 @@ export const api = {
   },
   async history(documentId: string): Promise<Revision[]> {
     return z.array(revisionSchema).parse(await request(`/documents/${documentId}/history`))
+  },
+  async revisions(documentId: string, cursor?: string): Promise<RevisionPage> {
+    const parameters = new URLSearchParams({ limit: '20' })
+    if (cursor) parameters.set('cursor', cursor)
+    return revisionPageSchema.parse(
+      await request(`/documents/${documentId}/revisions?${parameters.toString()}`),
+    )
+  },
+  async revision(documentId: string, revisionId: string): Promise<Revision> {
+    return revisionSchema.parse(
+      await request(`/documents/${documentId}/revisions/${encodeURIComponent(revisionId)}`),
+    )
   },
   async revisionDiff(
     documentId: string,

@@ -150,6 +150,26 @@ class Revision(BaseModel):
     created_at: str
 
 
+class RevisionSummary(BaseModel):
+    revision_id: str
+    document_id: str
+    parent_revision_id: str | None
+    content_hash: str
+    size_bytes: int
+    actor_id: str
+    actor_display_name: str | None = None
+    actor_kind: str | None = None
+    operation_id: str | None = None
+    operation: str
+    summary: str | None
+    created_at: str
+
+
+class RevisionPage(BaseModel):
+    items: list[RevisionSummary]
+    next_cursor: str | None = None
+
+
 class CreateDocument(MutationRequest):
     title: str = Field(min_length=1, max_length=240)
     content: str = ""

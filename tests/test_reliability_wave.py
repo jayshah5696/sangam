@@ -201,15 +201,15 @@ def test_pdf_extraction_claim_allows_only_one_worker(
 def test_startup_extraction_shutdown_is_cooperative_and_bounded(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    services = create_app(settings).state.services
-    services.pdf_research.import_pdf(
-        title="Pending extraction",
-        path="research/pending.pdf",
-        content=_text_pdf(),
-        supersedes_document_id=None,
-        actor_id="human:jay",
-        idempotency_key="pending-extraction",
-    )
+    with TestClient(create_app(settings)) as seed_client:
+        seed_client.app.state.services.pdf_research.import_pdf(
+            title="Pending extraction",
+            path="research/pending.pdf",
+            content=_text_pdf(),
+            supersedes_document_id=None,
+            actor_id="human:jay",
+            idempotency_key="pending-extraction",
+        )
     started = threading.Event()
 
     def wait_for_shutdown(

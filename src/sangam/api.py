@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 import uuid
+import weakref
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, Query, Request
@@ -71,6 +71,7 @@ from sangam.schemas import (
     RestoreDocument,
     Revision,
     RevisionDiff,
+    RevisionPage,
     Tag,
     TrustedPreviewGrant,
     UpdateAgentToken,
@@ -82,6 +83,8 @@ from sangam.schemas import (
     UpdatePublication,
 )
 from sangam.security import Principal, PublicationAccess, sanitize_headers
+from sangam.pdf_runtime import PdfExtractionScheduler
+from sangam.storage_ownership import StorageOwnership
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +96,19 @@ def _camel_case(value: str) -> str:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or Settings()
-    database = initialize_application_state(resolved_settings)
-    services = build_application_services(resolved_settings, initialized_database=database)
+    storage_ownership = StorageOwnership(
+        (
+            resolved_settings.database_path,
+            resolved_settings.workspace_root,
+            resolved_settings.backup_root,
+        )
+    )
+    try:
+        database = initialize_application_state(resolved_settings)
+        services = build_application_services(resolved_settings, initialized_database=database)
+    except BaseException:
+        storage_ownership.close()
+        raise
     documents = services.documents
     reconciliation = services.reconciliation
     backups = services.backups
@@ -112,60 +126,103 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        application.state.startup_reconciliation = None
-        application.state.startup_reconciliation_error = None
+        pdf_scheduler: PdfExtractionScheduler | None = None
         try:
-            application.state.startup_reconciliation = reconciliation.scan()
-        except MaterializationError as error:
-            logger.exception("Startup materialization remains pending: %s", error.message)
-            application.state.startup_reconciliation_error = error
-
-        async def maintain_backups() -> None:
-            while True:
-                try:
-                    await asyncio.to_thread(backups.create_if_due)
-                except Exception:
-                    logger.exception("Scheduled backup failed")
-                await asyncio.sleep(resolved_settings.backup_check_interval_seconds)
-
-        backup_task: asyncio.Task[None] | None = None
-        if resolved_settings.backups_enabled:
-            backup_task = asyncio.create_task(maintain_backups())
-        extraction_cancel = threading.Event()
-        extraction_tasks = {
-            asyncio.create_task(
-                asyncio.to_thread(pdf_research.extract_text, document_id, extraction_cancel)
-            )
-            for document_id in pdf_research.pending_extractions()
-        }
-        yield
-        if backup_task:
-            backup_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await backup_task
-        if extraction_tasks:
-            extraction_cancel.set()
-            _, pending = await asyncio.wait(
-                extraction_tasks,
-                timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds,
-            )
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-        shutdown_error: Exception | None = None
-        if hasattr(services, "chat") and hasattr(services.chat, "store_adapter"):
+            application.state.startup_reconciliation = None
+            application.state.startup_reconciliation_error = None
             try:
-                await services.chat.store_adapter.close()
-            except Exception as error:
-                shutdown_error = error
+                application.state.startup_reconciliation = reconciliation.scan()
+            except MaterializationError as error:
+                logger.exception("Startup materialization remains pending: %s", error.message)
+                application.state.startup_reconciliation_error = error
+            pdf_scheduler = PdfExtractionScheduler(
+                pdf_research, workers=resolved_settings.pdf_extraction_workers
+            )
+            application.state.pdf_scheduler = pdf_scheduler
+            pdf_scheduler.start()
+
+            backup_stop = asyncio.Event()
+
+            async def maintain_backups() -> None:
+                while not backup_stop.is_set():
+                    try:
+                        await asyncio.to_thread(backups.create_if_due)
+                    except Exception:
+                        logger.exception("Scheduled backup failed")
+                    try:
+                        await asyncio.wait_for(
+                            backup_stop.wait(),
+                            timeout=resolved_settings.backup_check_interval_seconds,
+                        )
+                    except TimeoutError:
+                        pass
+
+            backup_task: asyncio.Task[None] | None = None
+            if resolved_settings.backups_enabled:
+                backup_task = asyncio.create_task(maintain_backups())
+        except BaseException:
+            ownership_is_safe = True
+            if pdf_scheduler is not None:
+                try:
+                    await pdf_scheduler.close(
+                        timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds
+                    )
+                except Exception:
+                    ownership_is_safe = False
+            if ownership_is_safe:
+                storage_ownership.close()
+            else:
+                application.state.storage_ownership_finalizer.detach()
+                storage_ownership.retain_until_process_exit()
+            raise
         try:
-            services.activity.close()
-        except Exception as error:
-            if shutdown_error is None:
-                shutdown_error = error
-        if shutdown_error is not None:
-            raise shutdown_error
+            yield
+        finally:
+            shutdown_error: Exception | None = None
+            unsafe_shutdown = False
+            if backup_task:
+                backup_stop.set()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(backup_task),
+                        timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds,
+                    )
+                except TimeoutError as error:
+                    shutdown_error = error
+                    unsafe_shutdown = True
+                except Exception as error:
+                    shutdown_error = error
+                    unsafe_shutdown = True
+            try:
+                if pdf_scheduler is None:
+                    raise RuntimeError("PDF extraction scheduler did not start")
+                await pdf_scheduler.close(
+                    timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds
+                )
+            except Exception as error:
+                if shutdown_error is None:
+                    shutdown_error = error
+                unsafe_shutdown = True
+            if hasattr(services, "chat") and hasattr(services.chat, "store_adapter"):
+                try:
+                    await services.chat.close()
+                except Exception as error:
+                    if shutdown_error is None:
+                        shutdown_error = error
+                    unsafe_shutdown = True
+            try:
+                services.activity.close()
+            except Exception as error:
+                if shutdown_error is None:
+                    shutdown_error = error
+                unsafe_shutdown = True
+            if not unsafe_shutdown:
+                storage_ownership.close()
+            else:
+                application.state.storage_ownership_finalizer.detach()
+                storage_ownership.retain_until_process_exit()
+            if shutdown_error is not None:
+                raise shutdown_error
 
     app = FastAPI(
         title="Sangam API",
@@ -187,6 +244,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     app.state.services = services
+    app.state.storage_ownership = storage_ownership
+    app.state.storage_ownership_finalizer = weakref.finalize(app, storage_ownership.close)
 
     def openapi_schema() -> dict:
         if app.openapi_schema:
@@ -1437,6 +1496,26 @@ else fetch('/api/v1/trusted-previews/content', {
     @app.get("/api/v1/documents/{document_id}/history", response_model=list[Revision])
     def history(document_id: str, principal: Principal = principal_dependency) -> list[Revision]:
         return workspace.history(principal, document_id)
+
+    @app.get("/api/v1/documents/{document_id}/revisions", response_model=RevisionPage)
+    def revision_page(
+        document_id: str,
+        limit: int = Query(default=20, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=1000),
+        principal: Principal = principal_dependency,
+    ) -> RevisionPage:
+        return workspace.revision_page(principal, document_id, limit=limit, cursor=cursor)
+
+    @app.get(
+        "/api/v1/documents/{document_id}/revisions/{revision_id}",
+        response_model=Revision,
+    )
+    def get_revision(
+        document_id: str,
+        revision_id: str,
+        principal: Principal = principal_dependency,
+    ) -> Revision:
+        return workspace.get_revision(principal, document_id, revision_id)
 
     @app.get("/api/v1/documents/{document_id}/diff", response_model=RevisionDiff)
     def revision_diff(

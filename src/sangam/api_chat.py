@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from chatkit.server import NonStreamingResult, StreamingResult
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from sangam.chat import ChatRequestContext, SangamChatServer
-from sangam.errors import ValidationError
+from sangam.chat_runtime import ChatAdmissionLease, read_limited_body
+from sangam.errors import ServiceUnavailableError, ValidationError
 from sangam.schemas import (
     AcknowledgeChatEffectsRequest,
     ApplyChatProposal,
@@ -157,31 +159,34 @@ def create_chat_router(
         entry_point: str = Header(default="workspace", alias="X-Sangam-Chat-Entry"),
         principal: Principal = principal_dependency,
     ) -> Response:
-        content_length = request.headers.get("content-length")
-        if content_length:
+        try:
+            lease = await chat.admission.acquire()
+        except ServiceUnavailableError as error:
+            return _overloaded_response(error)
+        try:
             try:
-                declared_length = int(content_length)
-            except ValueError as error:
-                raise ValidationError("Chat request Content-Length is invalid") from error
-            if declared_length > chat.config.max_request_bytes:
-                raise ValidationError("Chat request exceeds the configured size limit")
-        body = await request.body()
-        if len(body) > chat.config.max_request_bytes:
-            raise ValidationError("Chat request exceeds the configured size limit")
-        result = await chat.process(
-            body,
-            context=ChatRequestContext(
-                principal=principal,
-                document_id=document_id,
-                requested_revision_id=revision_id,
-                workspace_context=workspace_context == "1",
-                context_snapshot_id=context_id,
-                entry_point="document" if entry_point == "document" else "workspace",
-            ),
-        )
+                async with asyncio.timeout(30):
+                    body = await read_limited_body(request, max_bytes=chat.config.max_request_bytes)
+            except TimeoutError as error:
+                raise ValidationError("Chat request body must arrive within 30 seconds") from error
+            result = await chat.process(
+                body,
+                context=ChatRequestContext(
+                    principal=principal,
+                    document_id=document_id,
+                    requested_revision_id=revision_id,
+                    workspace_context=workspace_context == "1",
+                    context_snapshot_id=context_id,
+                    entry_point="document" if entry_point == "document" else "workspace",
+                ),
+            )
+        except BaseException:
+            await lease.release()
+            raise
         if isinstance(result, StreamingResult):
-            return StreamingResponse(
+            return _LeasedStreamingResponse(
                 result,
+                lease,
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache, no-store",
@@ -189,7 +194,9 @@ def create_chat_router(
                 },
             )
         if not isinstance(result, NonStreamingResult):
+            await lease.release()
             raise TypeError("Unsupported ChatKit result")
+        await lease.release()
         return Response(content=result.json, media_type="application/json")
 
     @router.post("/chat/contexts", response_model=ChatTurnContext, status_code=201)
@@ -314,6 +321,33 @@ def create_chat_router(
         return chat.proposals.dismiss(principal, proposal_id, body.reason)
 
     return router
+
+
+class _LeasedStreamingResponse(StreamingResponse):
+    def __init__(self, response: StreamingResult, lease: ChatAdmissionLease, **kwargs: object):
+        super().__init__(response, **kwargs)
+        self._lease = lease
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await asyncio.shield(self._lease.release())
+
+
+def _overloaded_response(error: ServiceUnavailableError) -> JSONResponse:
+    retry_after = str(error.details.get("retry_after_seconds", 1))
+    return JSONResponse(
+        status_code=503,
+        headers={"Retry-After": retry_after},
+        content={
+            "error": {
+                "code": error.code,
+                "message": error.message,
+                "details": error.details,
+            }
+        },
+    )
 
 
 def _request_is_loopback(request: Request, origin: str | None) -> bool:

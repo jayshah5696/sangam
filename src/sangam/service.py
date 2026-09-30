@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import difflib
+import base64
+import binascii
 import hashlib
 import json
 import sqlite3
@@ -24,6 +26,8 @@ from sangam.organization import WorkspaceOrganizationService
 from sangam.schemas import (
     Document,
     DocumentSummary,
+    RevisionPage,
+    RevisionSummary,
     Revision,
     RevisionDiff,
     Tag,
@@ -34,6 +38,28 @@ from sangam.workspace import WorkspaceFilesystem
 
 def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _encode_revision_cursor(document_id: str, created_at: str, revision_id: str) -> str:
+    payload = json.dumps([document_id, created_at, revision_id], separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_revision_cursor(cursor: str, document_id: str) -> tuple[str, str]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        value = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise ValidationError("Invalid revision cursor") from error
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or value[0] != document_id
+        or not isinstance(value[1], str)
+        or not isinstance(value[2], str)
+    ):
+        raise ValidationError("Revision cursor does not match this document")
+    return value[1], value[2]
 
 
 class DocumentService:
@@ -1268,6 +1294,73 @@ class DocumentService:
                 (document_id,),
             ).fetchall()
         return [Revision.model_validate(dict(row)) for row in rows]
+
+    def revision_page(self, document_id: str, *, limit: int, cursor: str | None) -> RevisionPage:
+        """Read a bounded page of revision metadata without selecting revision content."""
+        self.get_document(document_id, include_deleted=True)
+        before: tuple[str, str] | None = None
+        if cursor:
+            before = _decode_revision_cursor(cursor, document_id)
+        parameters: list[object] = [document_id]
+        boundary = ""
+        if before:
+            boundary = "AND (r.created_at, r.revision_id) < (?, ?)"
+            parameters.extend(before)
+        parameters.append(limit + 1)
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT r.revision_id, r.document_id, r.parent_revision_id,
+                    r.content_hash, r.size_bytes, r.actor_id,
+                    a.display_name AS actor_display_name,
+                    a.identity_kind AS actor_kind, r.operation, r.summary, r.created_at,
+                    (
+                        SELECT e.operation_id FROM operation_events e
+                        WHERE e.revision_id = r.revision_id AND e.outcome = 'accepted'
+                        ORDER BY e.created_at, e.operation_id LIMIT 1
+                    ) AS operation_id
+                FROM revisions r
+                JOIN actors a ON a.actor_id = r.actor_id
+                WHERE r.document_id = ? {boundary}
+                ORDER BY r.created_at DESC, r.revision_id DESC
+                LIMIT ?
+                """,
+                parameters,
+            ).fetchall()
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        next_cursor = None
+        if has_more and visible:
+            last = visible[-1]
+            next_cursor = _encode_revision_cursor(
+                document_id, last["created_at"], last["revision_id"]
+            )
+        return RevisionPage(
+            items=[RevisionSummary.model_validate(dict(row)) for row in visible],
+            next_cursor=next_cursor,
+        )
+
+    def get_revision(self, document_id: str, revision_id: str) -> Revision:
+        self.get_document(document_id, include_deleted=True)
+        with self.database.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT r.*, a.display_name AS actor_display_name,
+                    a.identity_kind AS actor_kind,
+                    (
+                        SELECT e.operation_id FROM operation_events e
+                        WHERE e.revision_id = r.revision_id AND e.outcome = 'accepted'
+                        ORDER BY e.created_at, e.operation_id LIMIT 1
+                    ) AS operation_id
+                FROM revisions r
+                JOIN actors a ON a.actor_id = r.actor_id
+                WHERE r.document_id = ? AND r.revision_id = ?
+                """,
+                (document_id, revision_id),
+            ).fetchone()
+        if row is None:
+            raise NotFoundError("Revision does not belong to this document")
+        return Revision.model_validate(dict(row))
 
     def revision_diff(
         self, *, document_id: str, from_revision_id: str, to_revision_id: str | None

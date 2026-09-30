@@ -32,7 +32,7 @@ export default defineConfig({
     {
       name: 'chromium-touch-mobile',
       testMatch:
-        /(?:crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader)\.spec\.ts/,
+        /(?:crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|revision-history)\.spec\.ts/,
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
     },
     {
