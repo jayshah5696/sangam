@@ -11,16 +11,16 @@ async function expectRenderedIconSize(locator: import('@playwright/test').Locato
   expect(box!.height).toBe(expected)
 }
 
-test('display type scale stays consistent across routes and editor modes', async ({
+test('Home uses compact titles while publications and document modes retain their type roles', async ({
   page,
   seededWorkspace,
 }) => {
   await page.goto('/')
-  const heroSize = await page
+  const homeSize = await page
     .locator('.welcome h1')
     .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
-  expect(heroSize).toBeGreaterThanOrEqual(36)
-  expect(heroSize).toBeLessThanOrEqual(64)
+  expect(homeSize).toBeGreaterThanOrEqual(22)
+  expect(homeSize).toBeLessThanOrEqual(31)
 
   const publicationSize = await (async () => {
     await page.goto('/publications')
@@ -29,7 +29,8 @@ test('display type scale stays consistent across routes and editor modes', async
     return Number.parseFloat(await header.evaluate((element) => getComputedStyle(element).fontSize))
   })()
   if (publicationSize !== null) {
-    expect(publicationSize).toBe(heroSize)
+    expect(publicationSize).toBeGreaterThanOrEqual(36)
+    expect(publicationSize).toBeLessThanOrEqual(64)
   }
 
   await page.goto(`/documents/${seededWorkspace.documentId}`)
@@ -647,6 +648,7 @@ test('settings switches between fixed rail and drawer at the 1100px breakpoint',
   await page.goto('/settings')
   await expect(page.getByRole('complementary', { name: 'Settings sidebar' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Show settings sidebar' })).toHaveCount(0)
+  await expectNoHorizontalOverflow(page)
 
   await page.setViewportSize({ width: 1099, height: 800 })
   await expect(page.getByRole('complementary', { name: 'Settings sidebar' })).toBeHidden()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 
 class MutationCoordinator:
@@ -59,6 +59,22 @@ class MutationCoordinator:
                 yield
         finally:
             self._release_document_lock(document_id)
+
+    @contextmanager
+    def documents(self, *document_ids: str) -> Iterator[None]:
+        """Acquire a known set together so replay cannot invert document locks."""
+        retained = [
+            (document_id, self._retain_document_lock(document_id))
+            for document_id in sorted(set(document_ids))
+        ]
+        try:
+            with self.mutation(), ExitStack() as stack:
+                for _, lock in retained:
+                    stack.enter_context(lock)
+                yield
+        finally:
+            for document_id, _ in reversed(retained):
+                self._release_document_lock(document_id)
 
     @contextmanager
     def mutation(self) -> Iterator[None]:

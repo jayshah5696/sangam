@@ -13,6 +13,10 @@ setup:
     uv sync --locked
     pnpm --dir frontend install --frozen-lockfile
 
+# Refresh the frontend lockfile after reviewed dependency-policy changes.
+update-frontend-lock:
+    pnpm --dir frontend install --lockfile-only
+
 # Exercise the project API failure cases.
 test-projects:
     uv run pytest tests/test_projects.py tests/test_projects_perf.py

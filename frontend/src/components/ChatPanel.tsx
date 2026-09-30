@@ -1587,7 +1587,12 @@ function WorkspaceChatSurface({
         observedRoot = host.shadowRoot
         observer.observe(observedRoot, { childList: true, subtree: true })
       }
-      if (hasMountedChatInterface(host)) setPhase('ready')
+      // DOM presence establishes initial mounting, not transport recovery. A failed
+      // frame retains its composer/iframe and can still deliver late DOM work.
+      // Only an explicit retry remounts the surface in the connecting phase.
+      if (hasMountedChatInterface(host)) {
+        setPhase((current) => (current === 'connecting' ? 'ready' : current))
+      }
     }
     check()
     const interval = window.setInterval(check, 250)
@@ -1661,8 +1666,8 @@ function WorkspaceChatSurface({
           <div className="chatkit-state-overlay">
             <StateMessage
               kind="error"
-              title="Workspace chat could not finish loading"
-              description="ChatKit did not mount a composer. Check domain registration and the browser connection, then retry."
+              title="Workspace chat connection failed"
+              description="ChatKit could not establish or maintain its connection. Retry to reconnect."
               action={
                 <button className="secondary-action" onClick={onReset}>
                   Retry workspace chat

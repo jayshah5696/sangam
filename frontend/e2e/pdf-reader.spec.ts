@@ -140,6 +140,9 @@ test('PDF selection toolbar creates highlights and annotation pins expose action
   const toolbar = page.getByRole('toolbar', { name: 'Selected PDF text actions' })
   await expect(toolbar).toBeVisible()
   await expect(page.getByRole('button', { name: /^Highlight color/ })).toHaveCount(5)
+  await page.locator('.pdf-page-scroll').dispatchEvent('scroll')
+  await expect(toolbar).toBeVisible()
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('Sangam Technical Architecture')
   await page.getByRole('button', { name: 'Copy Markdown citation' }).click()
   // SAFETY: test spy sets __copiedText property on global window
   await expect

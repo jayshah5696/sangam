@@ -176,6 +176,14 @@ def compute_document_diff(
     return diff, lines_added, lines_removed, metadata
 
 
+class _RetryHttpMutation(Exception):
+    """Restart admission or lock selection before any storage side effect."""
+
+    def __init__(self, estimated_bytes: int, replay_document_id: str | None = None) -> None:
+        self.estimated_bytes = estimated_bytes
+        self.replay_document_id = replay_document_id
+
+
 class WorkspaceAccessService:
     """Public workspace boundary that authenticates policy before domain services run."""
 
@@ -220,9 +228,11 @@ class WorkspaceAccessService:
     ) -> Document:
         """Authorize fresh paths, then evaluate HTTP conditions in storage transactions."""
         details = dict(payload)
+        admitted_bound = self.activity.estimate_payload_bytes(details) + 2048
+        locked_document_ids = {document_id}
 
         def authorized() -> Document:
-            with self.documents.mutations.document(document_id):
+            with self.documents.mutations.documents(*locked_document_ids):
                 current = self.documents.get_document(document_id, include_deleted=True)
                 capability = {
                     "update": Capability.UPDATE,
@@ -286,7 +296,13 @@ class WorkspaceAccessService:
                     )
                     details.update(diff=diff, lines_added=added, lines_removed=removed, **meta)
 
-                if not has_conditions:
+                needed_bound = self.activity.estimate_payload_bytes(details)
+                if needed_bound > admitted_bound:
+                    # Do not expand an audit reservation inside a transaction,
+                    # or wait for capacity while retaining document locks.
+                    raise _RetryHttpMutation(needed_bound + 2048)
+
+                if not has_conditions and action != "duplicate":
                     return operation(expected or current.current_revision_id)
                 fingerprint = request_hash(
                     {
@@ -300,17 +316,41 @@ class WorkspaceAccessService:
                 # Replay precedes precondition evaluation, but never authorization.
                 with self.documents.database.connection() as connection:
                     replay = connection.execute(
-                        "SELECT request_hash, document_id AS resource_id FROM idempotency_keys "
+                        "SELECT request_hash, document_id AS resource_id, revision_id, operation "
+                        "FROM idempotency_keys "
                         "WHERE actor_id = ? AND idempotency_key = ? UNION ALL "
-                        "SELECT request_hash, resource_id FROM mutation_idempotency_keys "
+                        "SELECT request_hash, resource_id, NULL AS revision_id, operation "
+                        "FROM mutation_idempotency_keys "
                         "WHERE actor_id = ? AND idempotency_key = ?",
                         (principal.actor_id, idempotency_key, principal.actor_id, idempotency_key),
                     ).fetchone()
                     if replay:
-                        if replay["request_hash"] != fingerprint:
+                        legacy_duplicate = (
+                            action == "duplicate"
+                            and not has_conditions
+                            and replay["request_hash"] != fingerprint
+                            and replay["operation"] == "create"
+                            and replay["revision_id"] is not None
+                            and self.documents.legacy_duplicate_replay_matches(
+                                connection,
+                                actor_id=principal.actor_id,
+                                source_document_id=document_id,
+                                expected_revision_id=expected,
+                                title=payload.get("title"),
+                                path=payload.get("path"),
+                                result_document_id=replay["resource_id"],
+                                result_revision_id=replay["revision_id"],
+                                stored_request_hash=replay["request_hash"],
+                            )
+                        )
+                        if replay["request_hash"] != fingerprint and not legacy_duplicate:
                             raise IdempotencyError(
                                 "Idempotency key was already used for a different mutation"
                             )
+                        if replay["resource_id"] not in locked_document_ids:
+                            # Re-enter with all locks in one order. Never acquire
+                            # an arbitrary replay target while holding its source.
+                            raise _RetryHttpMutation(admitted_bound, replay["resource_id"])
                         with self.documents.mutations.document(replay["resource_id"]):
                             result = self.documents.get_document(
                                 replay["resource_id"], include_deleted=True
@@ -345,9 +385,21 @@ class WorkspaceAccessService:
                 with conditional_mutation(ConditionalMutation(fingerprint, validate)):
                     return operation(expected or current.current_revision_id)
 
-        return self._run(
-            principal, action, "document", authorized, resource_id=document_id, details=details
-        )
+        while True:
+            try:
+                return self._run(
+                    principal,
+                    action,
+                    "document",
+                    authorized,
+                    resource_id=document_id,
+                    details=details,
+                    estimated_bytes=admitted_bound,
+                )
+            except _RetryHttpMutation as retry:
+                admitted_bound = max(admitted_bound, retry.estimated_bytes)
+                if retry.replay_document_id is not None:
+                    locked_document_ids.add(retry.replay_document_id)
 
     def __init__(
         self,
@@ -2191,6 +2243,10 @@ class WorkspaceAccessService:
                     self.documents.database.post_commit_hook(audit_post_commit_hook),
                 ):
                     result = operation()
+            except _RetryHttpMutation:
+                # The operation has unwound its locks and commit hooks without
+                # writing. Admission releases this unused ticket before retry.
+                raise
             except Exception as error:
                 audit_err: Exception | None = None
                 if audit_committed:

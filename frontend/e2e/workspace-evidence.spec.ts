@@ -50,6 +50,29 @@ async function selectPassage(page: Page, selector = '.editing-surface .markdown-
   await page.keyboard.press('Escape')
 }
 
+test('a selected Markdown passage survives the capture toolbar render', async ({ page, request }) => {
+  const source = await create(request, '# Source\n\nKeep this selection intact.')
+  await page.goto(`/documents/${source.document_id}`)
+  await page.getByRole('radio', { name: 'preview' }).click()
+  const passage = page.locator('.editing-surface .markdown-preview p').first()
+  await expect(passage).toHaveText('Keep this selection intact.')
+  await passage.evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+  })
+  await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible()
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('Keep this selection intact.')
+  await page.getByRole('button', { name: 'Keep as evidence', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Keep as evidence', exact: true })).toContainText('Kept')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0)
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('')
+})
+
 test('capture, switch drafts, preview insertion and unopened destination preserve persisted content', async ({
   page,
   request,
@@ -68,6 +91,7 @@ test('capture, switch drafts, preview insertion and unopened destination preserv
   await page.getByRole('button', { name: 'Insert at cursor', exact: true }).click()
   await expect(page.getByRole('radio', { name: 'edit' })).toHaveAttribute('aria-checked', 'true')
   await expect(page.locator('.cm-content')).toBeFocused()
+  await expect(page.locator('.editor-tools')).toContainText('Ln 6, Col 1')
   await expect
     .poll(
       async () =>
@@ -76,8 +100,10 @@ test('capture, switch drafts, preview insertion and unopened destination preserv
     .toContain('The exact passage')
   const savedB = documentSchema.parse(await (await request.get(`/api/v1/documents/${b.document_id}`)).json())
   expect(savedB.content).toContain('Keep B intact.')
+  await expect(page.locator('.editor-tools')).toContainText('Ln 6, Col 1')
   const cardB = page.getByRole('article', { name: `Evidence from ${source.title}` })
   if (!(await cardB.isVisible())) await research(page)
+  await expect(page.locator('.editor-tools')).toContainText('Ln 6, Col 1')
   await cardB.getByRole('button', { name: '+ Attach to a claim', exact: true }).click()
   await cardB.getByLabel('Claim statement').fill('This conclusion is supported by the source.')
   await cardB.getByRole('button', { name: 'Save', exact: true }).click()

@@ -1,8 +1,11 @@
 // Deterministic substitute for the external ChatKit component, using its public
 // methods and the real options.api.fetch transport supplied by ChatPanel.
 class EditorialChatKit extends HTMLElement {
+  static instanceCount = 0
+
   connectedCallback() {
     if (this.shadowRoot) return
+    this.dataset.editorialInstance = String(++EditorialChatKit.instanceCount)
     const root = this.attachShadow({ mode: 'open' })
     const style = document.createElement('style')
     style.textContent = ':host { display:block; height:100%; } textarea { box-sizing:border-box; width:100%; height:60%; } button { min-height:44px; }'
@@ -14,6 +17,15 @@ class EditorialChatKit extends HTMLElement {
     this.status.setAttribute('role', 'status')
     send.addEventListener('click', () => this.sendUserMessage({ text: this.composer.value }))
     root.append(style, this.composer, send, this.status)
+    // A transport failure does not remove the already-mounted iframe/composer.
+    // Late initialization notifications and DOM work can arrive after that failure.
+    this.addEventListener('editorial:transport-error', () => {
+      this.dispatchEvent(new CustomEvent('chatkit.error', { detail: { message: 'Transport interrupted' } }))
+    })
+    this.addEventListener('editorial:late-ready', () => {
+      this.dispatchEvent(new CustomEvent('chatkit.ready', { detail: {} }))
+      this.status.textContent = 'Retained frame after transport error'
+    })
   }
   setOptions(options) {
     this.options = options

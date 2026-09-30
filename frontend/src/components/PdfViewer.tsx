@@ -66,6 +66,7 @@ export function PdfViewer({
   const queryClient = useQueryClient()
   const pageNumber = pdfState.pageNumber
   const scrollRef = useRef<HTMLDivElement>(null)
+  const selectionScrollTop = useRef<number | null>(null)
   const initialStateRef = useRef(pdfState)
   useEffect(() => {
     initialStateRef.current = pdfState
@@ -157,8 +158,13 @@ export function PdfViewer({
     updatePdfState({ scale: effectiveScale, zoomMode: 'fit-width' })
   }
   const dismissSelection = useCallback(() => {
+    selectionScrollTop.current = null
     setTextSelection(null)
     window.getSelection()?.removeAllRanges()
+  }, [])
+  const captureSelection = useCallback((selection: PdfTextSelection) => {
+    selectionScrollTop.current = scrollRef.current?.scrollTop ?? null
+    setTextSelection(selection)
   }, [])
 
   return (
@@ -278,8 +284,11 @@ export function PdfViewer({
         className="pdf-page-scroll"
         ref={scrollRef}
         onScroll={(event) => {
-          dismissSelection()
           const host = event.currentTarget
+          // A queued scroll notification can arrive after selection finished at
+          // this same position. Only actual movement invalidates its geometry.
+          if (selectionScrollTop.current !== null && host.scrollTop !== selectionScrollTop.current)
+            dismissSelection()
           const position = host.scrollTop + host.offsetTop + host.clientHeight * 0.35
           const visible = Array.from(host.querySelectorAll<HTMLElement>('[data-pdf-page]'))
             .filter((element) => element.offsetTop <= position)
@@ -303,7 +312,7 @@ export function PdfViewer({
                 active={Math.abs(number - pageNumber) <= 1}
                 isSelectingArea={isSelectingArea && number === pageNumber}
                 onSelectAnnotation={onSelectAnnotation}
-                onTextSelection={setTextSelection}
+                onTextSelection={captureSelection}
                 setDraft={setDraft}
                 finishArea={() => setIsSelectingArea(false)}
               />

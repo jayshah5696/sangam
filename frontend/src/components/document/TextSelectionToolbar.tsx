@@ -55,12 +55,18 @@ export function TextSelectionToolbar({
   }, [anchor])
 
   useEffect(() => {
+    const dismiss = () => {
+      // Escape does not collapse a native selection in every browser. Clear it
+      // so the workspace's keyup/pointerup capture cannot reopen this toolbar.
+      window.getSelection()?.removeAllRanges()
+      onDismiss()
+    }
     const dismissFromKeyboard = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onDismiss()
+      if (event.key === 'Escape') dismiss()
     }
     const dismissFromPointer = (event: PointerEvent) => {
       if (event.target instanceof Node && !toolbarRef.current?.contains(event.target)) {
-        onDismiss()
+        dismiss()
       }
     }
     window.addEventListener('keydown', dismissFromKeyboard)

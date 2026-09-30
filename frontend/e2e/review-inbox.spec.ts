@@ -108,7 +108,7 @@ test('editorial pinned source can be kept, reopened with an evidence locator and
   page,
   request,
   editorial,
-}) => {
+}, testInfo) => {
   const { proposal, source } = editorial
   await page.route('https://cdn.platform.openai.com/deployments/chatkit/chatkit.js', (route) =>
     route.fulfill({
@@ -151,9 +151,42 @@ test('editorial pinned source can be kept, reopened with an evidence locator and
   await expect(evidence).toContainText(source.current_revision_id.slice(0, 8))
   await evidence.getByRole('button', { name: 'Source', exact: true }).click()
   await expect(page).toHaveURL(/text=.*&start=/)
+  const sourceIsRevealed = async () => {
+    if (await page.evaluate(() => matchMedia('(max-width: 900px)').matches))
+      await expect(page.getByRole('dialog', { name: 'Document inspector', exact: true })).not.toBeVisible()
+    await expect(page.locator('.citation-evidence')).toBeFocused()
+    await expect(page.locator('.citation-evidence mark')).toBeInViewport()
+    await expect
+      .poll(() =>
+        page.locator('.citation-evidence mark').evaluate((element) => {
+          const passage = element.getBoundingClientRect()
+          const panel = element.closest('.citation-evidence')?.getBoundingClientRect()
+          return Boolean(
+            panel &&
+            passage.top >= Math.max(0, panel.top) &&
+            passage.bottom <= Math.min(innerHeight, panel.bottom),
+          )
+        }),
+      )
+      .toBe(true)
+  }
+  await sourceIsRevealed()
   await expect(page.locator('.citation-evidence mark')).toHaveText('Exact evidence for the editorial change.')
+  if (testInfo.project.name === 'chromium-desktop') {
+    const viewport = page.viewportSize()
+    for (const width of [901, 899, 320, 844]) {
+      await page.setViewportSize({ width, height: width === 844 ? 390 : 844 })
+      await openResearch()
+      await evidence.getByRole('button', { name: 'Source', exact: true }).click()
+      await sourceIsRevealed()
+      if (width === 901) await expect(page.locator('.document-inspector')).toBeVisible()
+    }
+    if (viewport) await page.setViewportSize(viewport)
+  }
   await page.reload()
   await expect(page.locator('.citation-evidence mark')).toHaveText('Exact evidence for the editorial change.')
+  await sourceIsRevealed()
+  await page.screenshot({ path: testInfo.outputPath('editorial-evidence-source.png'), scale: 'css' })
   await page.getByRole('button', { name: 'Close cited revision' }).click()
   const cleared = new URL(page.url()).searchParams
   for (const key of ['revision', 'text', 'start', 'representation', 'quoteStart', 'quoteEnd'])
@@ -226,6 +259,7 @@ test('revision request prefills the actual ChatPanel and explicit Send persists 
   const { proposal } = editorial
   // Only the external ChatKit web component is replaced. All Sangam requests,
   // including turn creation and ChatKit message persistence, reach the real server.
+  await page.clock.install()
   await page.route('https://cdn.platform.openai.com/deployments/chatkit/chatkit.js', (route) =>
     route.fulfill({
       path: path.resolve('e2e/chatkit-editorial-driver.js'),
@@ -275,13 +309,28 @@ test('revision request prefills the actual ChatPanel and explicit Send persists 
   }
   expect(composerBox?.width).toBeGreaterThan(viewportWidth / 2)
   expect((composerBox?.x ?? 0) + (composerBox?.width ?? 0)).toBeLessThanOrEqual(viewportWidth)
-  await page
-    .locator('openai-chatkit')
-    .evaluate((host) =>
-      host.dispatchEvent(new CustomEvent('chatkit.error', { detail: { message: 'Transport interrupted' } })),
-    )
-  await page.getByRole('button', { name: 'Retry workspace chat' }).click()
-  await expect(composer).toHaveValue(new RegExp(proposal.proposal_id))
+  const preparedFeedback = await composer.inputValue()
+  const frame = page.locator('openai-chatkit')
+  const retry = page.getByRole('button', { name: 'Retry workspace chat' })
+  for (let interruption = 0; interruption < 2; interruption += 1) {
+    const instance = await frame.getAttribute('data-editorial-instance')
+    expect(instance).not.toBeNull()
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
+    await frame.evaluate((host) => host.dispatchEvent(new CustomEvent('editorial:transport-error')))
+    await expect(retry).toBeVisible()
+    await frame.evaluate((host) => host.dispatchEvent(new CustomEvent('editorial:late-ready')))
+    // Exercise four application polling ticks, not an arbitrary real-time wait.
+    await page.clock.runFor(1000)
+    await expect(retry).toBeVisible()
+    await expect(frame).toHaveAttribute('data-editorial-instance', instance!)
+    await expect(composer).toHaveValue(preparedFeedback)
+    await page.clock.resume()
+    await retry.click()
+    await expect(frame).not.toHaveAttribute('data-editorial-instance', instance!)
+    await expect(retry).toHaveCount(0)
+    await expect(composer).toHaveValue(preparedFeedback)
+    await expect(composer).toBeFocused()
+  }
   await page.screenshot({
     path: testInfo.outputPath('editorial-feedback-composer.png'),
     fullPage: true,

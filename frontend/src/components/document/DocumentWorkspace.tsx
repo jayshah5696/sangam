@@ -72,6 +72,7 @@ export function DocumentWorkspace({
 }) {
   const documentId = initialDocument.document_id
   const queryClient = useQueryClient()
+  const { updatePreferences } = useTheme()
   const { updateDocumentTitle } = useWorkbenchActions()
   const sessions = useDocumentSessions()
   const session = useDocumentSession(documentId)
@@ -208,6 +209,13 @@ export function DocumentWorkspace({
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(() =>
     citationTargetFromLocation(documentId),
   )
+  const revealedCitation = useRef<CitationTarget | null>(null)
+  useEffect(() => {
+    if (revealedCitation.current === citationTarget) return
+    revealedCitation.current = citationTarget
+    // Reveal each new source navigation, while allowing Research to reopen afterward.
+    if (citationTarget && matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
+  }, [citationTarget, updatePreferences])
   const [draftTitle, setDraftTitle] = useState(document.title)
   const selectedMaterializePath = materializePath(materializeFolder, materializeFilename)
 
@@ -677,14 +685,18 @@ function CitedRevisionEvidence({
         : undefined
   useEffect(() => {
     if (!revision || !locator) return
-    if (hasQuote && quoteLocator) {
-      quoteRef.current?.scrollIntoView({ block: 'nearest' })
-      quoteRef.current?.focus({ preventScroll: true })
-      return
-    }
-    ref.current?.focus({ preventScroll: true })
-    ref.current?.querySelector('mark')?.scrollIntoView({ block: 'center' })
-  }, [revision, locator, hasQuote, quoteLocator])
+    // The citation owns destination focus after the inspector sheet has closed.
+    const frame = requestAnimationFrame(() => {
+      if (hasQuote && quoteLocator) {
+        quoteRef.current?.scrollIntoView({ block: 'nearest' })
+        quoteRef.current?.focus({ preventScroll: true })
+        return
+      }
+      ref.current?.focus({ preventScroll: true })
+      ref.current?.querySelector('mark')?.scrollIntoView({ block: 'center' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [revision, target, locator, hasQuote, quoteLocator])
   return (
     <section ref={ref} tabIndex={-1} className="citation-evidence" aria-labelledby="citation-evidence-title">
       <header>
