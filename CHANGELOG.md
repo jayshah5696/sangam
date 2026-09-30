@@ -7,6 +7,36 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.1] - 2026-09-30
+
+### Added
+
+- Persistent Project home and membership management: reference-based project model, double-bezel cards and bento layout, project session, draft, and split restoration, context pins, and pass-through PDF inspection (#306, #331, #347).
+- Reusable workspace evidence: cross-workspace evidence rail, source pins, literal citation titles, evidence locator handoff, and safe cursor insertion (#330, #332, #347).
+- Editorial review activity: review changes inbox, exact-wording proposal application, and feedback handoff to ChatPanel (#314, #333, #347).
+- HTTP conditional concurrency headers: `ETag` and `If-Match` support for document concurrency control (#305, #347).
+- Database migrations: assigned projects migration `024` and editorial review migration `025` (#347).
+
+### Security
+
+- Hardened project metadata text inputs (name, description, document notes) against null bytes and ASCII control characters (#348).
+- Hardened sensitive header provenance and audit payload data sanitization (#304, #347).
+- Hardened agent wildcard token path scope normalization and aligned tag scoping (#303, #347).
+
+### Fixed
+
+- Fixed keyboard accessibility for `@pierre/trees` virtualized file tree scroll container (`[data-file-tree-virtualized-scroll="true"]`), resolving WCAG 2.1.1 `scrollable-region-focusable` violations across primary routes.
+- Ordered mutation generation entry before document locks to prevent crossed duplicate-replay lock cycles (#347).
+- Bounded mutation replay and corrected oversized audit reservation handling under high contention (#347).
+- Preserved native text selection during unchanged Markdown re-renders and fixed mobile citation navigation behind the inspector (#347).
+- Restored unopened-draft recovery, exact historical citations, and error-state retention during chat mounting polls (#347).
+
+### Changed
+
+- Resolved dependency advisory for `undici` by updating override to `8.11.2` (#347).
+- Upgraded `brace-expansion` to `5.0.12` (#348).
+
+
 ## [0.13.0] - 2026-09-27
 
 ### Added
@@ -429,7 +459,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/jayshah5696/sangam/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/jayshah5696/sangam/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/jayshah5696/sangam/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/jayshah5696/sangam/releases/tag/v0.12.2

@@ -105,6 +105,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const pendingFocusDocumentIdRef = useRef<string | null>(null)
   const pendingSelectionRef = useRef<{ documentIds: string[]; folderIds: string[] } | null>(null)
+  const treeShellRef = useRef<HTMLDivElement>(null)
   const [explorerSort, setExplorerSort] = useState<ExplorerSort>(() => {
     try {
       const stored = localStorage.getItem(sortStorageKey)
@@ -608,6 +609,26 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
     }
   })
 
+  useEffect(() => {
+    const node = treeShellRef.current
+    if (!node) return
+    const ensureAccessibility = () => {
+      const scrollable = node.querySelector<HTMLElement>('[data-file-tree-virtualized-scroll="true"]')
+      if (scrollable) {
+        if (!scrollable.hasAttribute('tabindex')) {
+          scrollable.setAttribute('tabindex', '0')
+        }
+        if (!scrollable.hasAttribute('aria-label')) {
+          scrollable.setAttribute('aria-label', 'Files')
+        }
+      }
+    }
+    ensureAccessibility()
+    const observer = new MutationObserver(ensureAccessibility)
+    observer.observe(node, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
+
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'F2') {
       const path = model.getFocusedPath()
@@ -742,7 +763,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       )}
       {documents.isLoading && <p className="sidebar-message">Loading files…</p>}
       {documents.isError && <p className="sidebar-message error-text">Files could not be loaded.</p>}
-      <div className="pierre-tree-shell">
+      <div className="pierre-tree-shell" ref={treeShellRef}>
         <PierreFileTree
           aria-label="Files"
           className="sangam-file-tree"
