@@ -428,3 +428,96 @@ def test_project_performance_and_bulk_operations(settings: Settings) -> None:
         ).fetchall()
         plan_desc = " ".join(r["detail"] for r in plan)
         assert "projects_updated_at_idx" in plan_desc
+
+
+def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    # 1. Project creation rejecting null bytes and control characters
+    bad_name_null = client.post("/api/v1/projects", json={"name": "Bad\x00Name"})
+    assert bad_name_null.status_code == 422
+    msg = bad_name_null.json()["error"]["message"]
+    assert "Project name cannot contain null bytes" in msg
+
+    bad_name_ctrl = client.post("/api/v1/projects", json={"name": "Bad\x07Name"})
+    assert bad_name_ctrl.status_code == 422
+    msg = bad_name_ctrl.json()["error"]["message"]
+    assert "Project name cannot contain control characters" in msg
+
+    bad_desc_null = client.post(
+        "/api/v1/projects", json={"name": "Valid", "description": "Bad\x00Desc"}
+    )
+    assert bad_desc_null.status_code == 422
+    msg = bad_desc_null.json()["error"]["message"]
+    assert "Project description cannot contain null bytes" in msg
+
+    bad_desc_ctrl = client.post(
+        "/api/v1/projects", json={"name": "Valid", "description": "Bad\x1fDesc"}
+    )
+    assert bad_desc_ctrl.status_code == 422
+    msg = bad_desc_ctrl.json()["error"]["message"]
+    assert "Project description cannot contain control characters" in msg
+
+    # Create a valid project for update tests
+    project = client.post("/api/v1/projects", json={"name": "Sanitization Test"}).json()
+    project_id = project["project_id"]
+
+    # 2. Project update rejecting null bytes and control characters
+    bad_update_name = client.patch(f"/api/v1/projects/{project_id}", json={"name": "Bad\x00Update"})
+    assert bad_update_name.status_code == 422
+    msg = bad_update_name.json()["error"]["message"]
+    assert "Project name cannot contain null bytes" in msg
+
+    bad_update_desc = client.patch(
+        f"/api/v1/projects/{project_id}", json={"description": "Bad\x08Desc"}
+    )
+    assert bad_update_desc.status_code == 422
+    msg = bad_update_desc.json()["error"]["message"]
+    assert "Project description cannot contain control characters" in msg
+
+    # Create a valid document to attach
+    doc = client.post(
+        "/api/v1/documents",
+        json={"title": "Test Doc", "content": "Sample content"},
+        headers=headers("doc-sanitization"),
+    ).json()
+
+    # 3. Adding project document notes rejecting null bytes and control characters
+    bad_add_notes_null = client.post(
+        f"/api/v1/projects/{project_id}/documents",
+        json={"document_id": doc["document_id"], "role": "source", "notes": "Bad\x00Note"},
+    )
+    assert bad_add_notes_null.status_code == 422
+    msg = bad_add_notes_null.json()["error"]["message"]
+    assert "Document notes cannot contain null bytes" in msg
+
+    bad_add_notes_ctrl = client.post(
+        f"/api/v1/projects/{project_id}/documents",
+        json={"document_id": doc["document_id"], "role": "source", "notes": "Bad\x03Note"},
+    )
+    assert bad_add_notes_ctrl.status_code == 422
+    msg = bad_add_notes_ctrl.json()["error"]["message"]
+    assert "Document notes cannot contain control characters" in msg
+
+    # Add document with valid notes
+    client.post(
+        f"/api/v1/projects/{project_id}/documents",
+        json={"document_id": doc["document_id"], "role": "source", "notes": "Valid notes"},
+    )
+
+    # 4. Updating project document notes rejecting null bytes and control characters
+    bad_update_notes_null = client.patch(
+        f"/api/v1/projects/{project_id}/documents/{doc['document_id']}",
+        json={"notes": "Bad\x00UpdateNote"},
+    )
+    assert bad_update_notes_null.status_code == 422
+    msg = bad_update_notes_null.json()["error"]["message"]
+    assert "Document notes cannot contain null bytes" in msg
+
+    bad_update_notes_ctrl = client.patch(
+        f"/api/v1/projects/{project_id}/documents/{doc['document_id']}",
+        json={"notes": "Bad\x1eUpdateNote"},
+    )
+    assert bad_update_notes_ctrl.status_code == 422
+    msg = bad_update_notes_ctrl.json()["error"]["message"]
+    assert "Document notes cannot contain control characters" in msg

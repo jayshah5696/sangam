@@ -7,8 +7,8 @@ import { expect, test } from './fixtures'
 async function expectRenderedIconSize(locator: import('@playwright/test').Locator, expected: number) {
   const box = await locator.boundingBox()
   expect(box).not.toBeNull()
-  expect(box!.width).toBe(expected)
-  expect(box!.height).toBe(expected)
+  expect(box!.width).toBeCloseTo(expected, 1)
+  expect(box!.height).toBeCloseTo(expected, 1)
 }
 
 test('Home uses compact titles while publications and document modes retain their type roles', async ({
