@@ -2338,6 +2338,11 @@ class WorkspaceAccessService:
                     result_resource_id = result.document_id
                     result_path = result.path if result.path is not None else path
                     revision_id = result.current_revision_id
+                elif isinstance(result, Folder):
+                    result_resource_id = result.folder_id
+                    result_path = result.path if result.path is not None else path
+                elif isinstance(result, (Publication, IssuedPublication)):
+                    result_resource_id = result.publication_id
                 reservation.record(
                     principal=principal,
                     action=action,

@@ -230,6 +230,7 @@ class WorkspaceOrganizationService:
                     resource_type="folder",
                     resource_id=folder_id,
                 )
+            self.database.set_audit_target(resource_id=folder_id, path=normalized_path)
             row = connection.execute(
                 "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
             ).fetchone()
@@ -301,6 +302,7 @@ class WorkspaceOrganizationService:
                     resource_type="folder",
                     resource_id=folder_id,
                 )
+            self.database.set_audit_target(resource_id=folder_id, path=row["path"])
             updated = connection.execute(
                 "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
             ).fetchone()
@@ -534,6 +536,7 @@ class WorkspaceOrganizationService:
             resource_type="folder",
             resource_id=folder_id,
         )
+        self.database.set_audit_target(resource_id=folder_id, path=destination_path)
         updated = connection.execute(
             "SELECT * FROM folders WHERE folder_id = ?", (folder_id,)
         ).fetchone()
