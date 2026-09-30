@@ -284,7 +284,7 @@
 .activity-outcome { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); font-size: var(--text-meta); text-transform: capitalize; }
 .activity-event.denied .activity-outcome, .activity-event.conflict .activity-outcome, .activity-event.failed .activity-outcome { color: var(--danger); }
 .settings-nav-items button { grid-template-columns: 18px minmax(0, 1fr) auto; }
-.settings-attention-badge { min-width: 20px !important; display: inline-flex !important; place-content: center; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--danger); color: white; font-size: var(--text-meta); font-weight: 700; }
+.settings-attention-badge { min-width: 20px !important; display: inline-flex !important; place-content: center; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--danger); color: var(--danger-text); font-size: var(--text-meta); font-weight: 700; }
 .agent-access-health { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-soft); }
 .agent-health-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
 .agent-health-metrics span { min-width: 0; display: grid; gap: 2px; color: var(--muted); font-size: var(--text-meta); }
