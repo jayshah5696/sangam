@@ -3,6 +3,7 @@ import { expect, test } from './fixtures'
 import { documentSchema, projectDetailSchema } from '../src/api'
 import { z } from 'zod'
 import { chatProposalSchema } from '../src/api'
+import AxeBuilder from '@axe-core/playwright'
 
 test('project briefing records a visit and assignment controls survive reload', async ({
   page,
@@ -35,6 +36,11 @@ test('project briefing records a visit and assignment controls survive reload', 
   const briefing = page.getByRole('region', { name: 'Since you last worked here' })
   await expect(briefing).toContainText('Source changed')
   await expect(briefing.getByRole('link', { name: /CPU evidence/ })).toBeVisible()
+  const accessibility = await new AxeBuilder({ page })
+    .include('[aria-label="Since you last worked here"]')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze()
+  expect(accessibility.violations).toEqual([])
   await page.getByRole('button', { name: 'Mark this visit' }).click()
   await expect(briefing).toContainText('No recorded changes since your last visit')
   await page.getByRole('button', { name: 'Review project claims' }).click()

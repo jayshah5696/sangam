@@ -172,7 +172,7 @@ export function ProjectAssignments({ project }: { project: ProjectDetail }) {
             </p>
             {briefing.data.changes.length === 0 && <p>No recorded changes since your last visit.</p>}
             {briefing.data.changes.map((change, index) => (
-              <div key={`${change.kind}-${change.document_id}-${index}`}>
+              <div className="project-briefing-change" key={`${change.kind}-${change.document_id}-${index}`}>
                 <a
                   href={
                     change.kind === 'pending_proposal'
