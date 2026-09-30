@@ -2313,3 +2313,86 @@ def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_re
             p.get("text", "") for p in payload.get("content", []) if p.get("type") == "output_text"
         )
         assert db_text == asst_text
+
+
+def test_concurrent_text_document_mutations_targeting_same_path_preserves_winning_file(
+    client: TestClient, settings
+) -> None:
+    target_path = "research/raced_doc.md"
+
+    # Initial setup: Create Document 1 at target_path
+    res1 = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Doc One",
+            "content": "# Initial Doc One Content\n",
+            "path": target_path,
+        },
+        headers=headers("create-doc-1"),
+    )
+    assert res1.status_code == 201
+    doc1 = res1.json()
+    doc1_id = doc1["document_id"]
+    doc1_rev = doc1["current_revision_id"]
+
+    # Also create Document 2 at a separate path
+    res2 = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Doc Two",
+            "content": "# Initial Doc Two Content\n",
+            "path": "research/doc_two_original.md",
+        },
+        headers=headers("create-doc-2"),
+    )
+    assert res2.status_code == 201
+    doc2 = res2.json()
+    doc2_id = doc2["document_id"]
+    doc2_rev = doc2["current_revision_id"]
+
+    results = []
+
+    def op_update_doc1(idx: int):
+        resp = client.patch(
+            f"/api/v1/documents/{doc1_id}",
+            json={
+                "content": "# Updated Doc One Content\n",
+                "expected_revision_id": doc1_rev,
+            },
+            headers=headers(f"update-race-{idx}"),
+        )
+        results.append(("update", resp))
+
+    def op_move_doc2(idx: int):
+        resp = client.post(
+            f"/api/v1/documents/{doc2_id}/move",
+            json={
+                "path": target_path,
+                "expected_revision_id": doc2_rev,
+            },
+            headers=headers(f"move-race-{idx}"),
+        )
+        results.append(("move", resp))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(op_update_doc1, 1)
+        f2 = executor.submit(op_move_doc2, 2)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    status_codes = sorted(r[1].status_code for r in results)
+    assert status_codes[0] == 200
+    assert status_codes[1] in (409, 422)
+
+    file_path = settings.workspace_root / target_path
+    assert file_path.is_file(), "Winning workspace file was deleted or missing!"
+    disk_content = file_path.read_text(encoding="utf-8")
+
+    fetch_resp = client.get(
+        f"/api/v1/documents/{doc1_id}",
+        headers=headers("fetch-winner-text"),
+    )
+    assert fetch_resp.status_code == 200
+    winner_doc = fetch_resp.json()
+    assert winner_doc["content"] == disk_content
+    assert disk_content == "# Updated Doc One Content\n"
