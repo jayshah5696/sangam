@@ -612,22 +612,43 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   useEffect(() => {
     const node = treeShellRef.current
     if (!node) return
+
+    const shadowObservers = new Map<ShadowRoot, MutationObserver>()
+
     const ensureAccessibility = () => {
-      const scrollable = node.querySelector<HTMLElement>('[data-file-tree-virtualized-scroll="true"]')
-      if (scrollable) {
-        if (!scrollable.hasAttribute('tabindex')) {
-          scrollable.setAttribute('tabindex', '0')
+      const elements = node.querySelectorAll<HTMLElement>('*')
+      for (const el of elements) {
+        if (el.shadowRoot && !shadowObservers.has(el.shadowRoot)) {
+          const shadowObserver = new MutationObserver(ensureAccessibility)
+          shadowObserver.observe(el.shadowRoot, { childList: true, subtree: true })
+          shadowObservers.set(el.shadowRoot, shadowObserver)
         }
-        if (!scrollable.hasAttribute('aria-label')) {
-          scrollable.setAttribute('aria-label', 'Files')
+      }
+
+      for (const el of elements) {
+        const root = el.shadowRoot
+        if (!root) continue
+        const first = root.querySelector<HTMLElement>('[role="treeitem"]')
+        if (first) {
+          const hasFocusable = root.querySelector('[role="treeitem"][tabindex="0"]')
+          if (!hasFocusable) {
+            first.setAttribute('tabindex', '0')
+          }
         }
       }
     }
+
     ensureAccessibility()
     const observer = new MutationObserver(ensureAccessibility)
     observer.observe(node, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [])
+    return () => {
+      observer.disconnect()
+      for (const shadowObs of shadowObservers.values()) {
+        shadowObs.disconnect()
+      }
+      shadowObservers.clear()
+    }
+  }, [documents.data])
 
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'F2') {

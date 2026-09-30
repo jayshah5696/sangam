@@ -263,4 +263,23 @@ describe('FileExplorerPanel', () => {
     const options = state.useFileTreeOptions[0]
     expect(options && 'sort' in options).toBe(false)
   })
+
+  it('ensures shadow DOM file tree has keyboard accessibility on the first treeitem', async () => {
+    const { container } = render(<FileExplorerPanel onSearch={vi.fn()} />)
+    const treeShell = container.querySelector('.pierre-tree-shell')
+    expect(treeShell).not.toBeNull()
+
+    // Simulate custom element with shadow root hosting virtualized tree items
+    const customHost = window.document.createElement('file-tree-container')
+    const shadow = customHost.attachShadow({ mode: 'open' })
+    const item = window.document.createElement('div')
+    item.setAttribute('role', 'treeitem')
+    shadow.appendChild(item)
+
+    await act(async () => {
+      treeShell!.appendChild(customHost)
+    })
+
+    expect(item.getAttribute('tabindex')).toBe('0')
+  })
 })
