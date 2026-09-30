@@ -20,7 +20,10 @@ from pathlib import Path
 import sys, time
 from sangam.api import create_app
 from sangam.config import Settings
-app = create_app(Settings(database_path=Path(sys.argv[1]), workspace_root=Path(sys.argv[2]), backup_root=Path(sys.argv[3]), backups_enabled=False, frontend_dist=Path('/missing')))
+app = create_app(Settings(
+    database_path=Path(sys.argv[1]), workspace_root=Path(sys.argv[2]),
+    backup_root=Path(sys.argv[3]), backups_enabled=False, frontend_dist=Path('/missing'),
+))
 print('ready', flush=True)
 time.sleep(30)
 """
@@ -43,7 +46,10 @@ from pathlib import Path
 import sys
 from sangam.api import create_app
 from sangam.config import Settings
-create_app(Settings(database_path=Path(sys.argv[1]), workspace_root=Path(sys.argv[2]), backup_root=Path(sys.argv[3]), backups_enabled=False, frontend_dist=Path('/missing')))
+create_app(Settings(
+    database_path=Path(sys.argv[1]), workspace_root=Path(sys.argv[2]),
+    backup_root=Path(sys.argv[3]), backups_enabled=False, frontend_dist=Path('/missing'),
+))
 """
     return subprocess.run(
         [sys.executable, "-c", code, str(database), str(workspace), str(backup)],
@@ -143,9 +149,8 @@ def test_storage_ownership_is_retained_if_extraction_outlives_shutdown(
 
     monkeypatch.setattr(PdfResearchService, "extract_text", hold_extraction)
     try:
-        with pytest.raises(RuntimeError, match="shutdown timed out"):
-            with TestClient(app):
-                assert started.wait(timeout=5)
+        with pytest.raises(RuntimeError, match="shutdown timed out"), TestClient(app):
+            assert started.wait(timeout=5)
 
         with pytest.raises(StorageOwnershipError, match="already in use"):
             create_app(settings)
@@ -174,9 +179,8 @@ def test_storage_ownership_is_retained_if_backup_outlives_shutdown(
 
     app.state.services.backups.create_if_due = hold_backup
     try:
-        with pytest.raises(TimeoutError):
-            with TestClient(app):
-                assert started.wait(timeout=5)
+        with pytest.raises(TimeoutError), TestClient(app):
+            assert started.wait(timeout=5)
 
         with pytest.raises(StorageOwnershipError, match="already in use"):
             create_app(settings)

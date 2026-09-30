@@ -302,13 +302,11 @@ export function DocumentWorkspace({
     retry: false,
   })
   const citedHistoryQuery = useQuery({
-    queryKey: ['history', documentId],
-    queryFn: () => api.history(documentId),
+    queryKey: ['revision', documentId, citationTarget?.revisionId],
+    queryFn: () => api.revision(documentId, citationTarget?.revisionId ?? ''),
     enabled: Boolean(citationTarget?.revisionId),
   })
-  const citedRevision = citedHistoryQuery.data?.find(
-    (revision) => revision.revision_id === citationTarget?.revisionId,
-  )
+  const citedRevision = citedHistoryQuery.data
   const rebaseAndRetry = () => {
     const serverHead = conflictHeadQuery.data
     if (!serverHead) return

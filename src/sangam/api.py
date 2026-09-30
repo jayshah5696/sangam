@@ -5,7 +5,7 @@ import logging
 import uuid
 import weakref
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, Query, Request
@@ -38,6 +38,7 @@ from sangam.errors import (
     ServiceUnavailableError,
     ValidationError,
 )
+from sangam.pdf_runtime import PdfExtractionScheduler
 from sangam.schemas import (
     ActivityProblemAcknowledgement,
     ActivitySummary,
@@ -86,7 +87,6 @@ from sangam.schemas import (
     UpdatePublication,
 )
 from sangam.security import Principal, PublicationAccess, sanitize_headers
-from sangam.pdf_runtime import PdfExtractionScheduler
 from sangam.storage_ownership import StorageOwnership
 
 logger = logging.getLogger(__name__)
@@ -153,13 +153,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         await asyncio.to_thread(backups.create_if_due)
                     except Exception:
                         logger.exception("Scheduled backup failed")
-                    try:
+                    with suppress(TimeoutError):
                         await asyncio.wait_for(
                             backup_stop.wait(),
                             timeout=resolved_settings.backup_check_interval_seconds,
                         )
-                    except TimeoutError:
-                        pass
 
             backup_task: asyncio.Task[None] | None = None
             if resolved_settings.backups_enabled:

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
 from conftest import headers, issue_agent_token
+from fastapi.testclient import TestClient
 
 
 def create_document(client: TestClient, path: str, content: str = "first") -> dict[str, object]:

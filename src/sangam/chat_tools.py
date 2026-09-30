@@ -261,9 +261,7 @@ class ChatToolset:
                 and ctx.context.request_context.document_id == document_id
                 and pinned_revision != document.current_revision_id
             ):
-                revision = self.workspace.get_revision(
-                    principal, document_id, pinned_revision
-                )
+                revision = self.workspace.get_revision(principal, document_id, pinned_revision)
                 content = revision.content
                 revision_id = revision.revision_id
             total_chars = len(content)

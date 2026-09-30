@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import difflib
 import base64
 import binascii
+import difflib
 import hashlib
 import json
 import sqlite3
@@ -27,10 +27,10 @@ from sangam.organization import WorkspaceOrganizationService
 from sangam.schemas import (
     Document,
     DocumentSummary,
-    RevisionPage,
-    RevisionSummary,
     Revision,
     RevisionDiff,
+    RevisionPage,
+    RevisionSummary,
     Tag,
 )
 from sangam.search import SearchIndex

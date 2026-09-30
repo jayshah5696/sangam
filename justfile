@@ -36,9 +36,9 @@ verify-projects port="8872":
 test-backend-focused args="":
     uv run pytest {{ args }}
 
-# Regenerate the API fingerprint after intentional contract changes.
-update-openapi:
-    uv run python scripts/verify_openapi_contract.py --write
+# Review and accept an intentional API contract change.
+update-openapi reason:
+    just update-openapi-baseline {{ quote(reason) }}
 
 # Serve disposable browser fixtures for interactive investigation.
 serve-e2e port="8873":
@@ -95,11 +95,6 @@ check: test test-docs validate-compose
 # Run only the Python service and API tests.
 test-backend args="":
     uv run pytest {{ args }}
-
-# Install the locked dependencies for a new checkout.
-setup:
-    uv sync --frozen
-    pnpm --dir frontend install --frozen-lockfile
 
 # Format selected Python files while independent changes are in progress.
 format-python args=".":

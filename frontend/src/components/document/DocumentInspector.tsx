@@ -1,8 +1,15 @@
 import { lazy, Suspense, useState, type KeyboardEvent } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { ArrowRight, Maximize2, NotebookTabs, Upload } from 'lucide-react'
-import { api, type Document, type Publication, type Revision, type Tag } from '../../api'
+import {
+  api,
+  type Document,
+  type Publication,
+  type Revision,
+  type RevisionSummary,
+  type Tag,
+} from '../../api'
 import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { extractMarkdownHeadings } from '../../markdownHeadings'
@@ -90,9 +97,11 @@ export function DocumentInspector({
     }
     updatePreferences({ rightTab: next })
   }
-  const historyQuery = useQuery({
+  const historyQuery = useInfiniteQuery({
     queryKey: ['history', documentId],
-    queryFn: () => api.history(documentId),
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => api.revisions(documentId, pageParam),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: tab === 'history',
   })
   const tagsQuery = useQuery({ queryKey: ['tags'], queryFn: api.listTags, enabled: tab === 'properties' })
@@ -113,10 +122,24 @@ export function DocumentInspector({
       sessions.updateSession(documentId, { compareFrom: undefined, compareTo: undefined })
     },
   })
-  const history = historyQuery.data ?? []
+  const history = historyQuery.data?.pages.flatMap((page) => page.items) ?? []
   const compareFrom = session.compareFrom
   const compareTo = session.compareTo ?? document.current_revision_id
   const [previewRevision, setPreviewRevision] = useState<Revision | null>(null)
+  const readRevision = useMutation({
+    mutationFn: ({ revisionId, action }: { revisionId: string; action: 'preview' | 'copy' }) =>
+      api.revision(documentId, revisionId).then((revision) => ({ revision, action })),
+    onSuccess: ({ revision, action }) => {
+      if (action === 'preview') setPreviewRevision(revision)
+      else {
+        sessions.updateSession(documentId, {
+          content: revision.content,
+          baseRevisionId: document.current_revision_id,
+        })
+        onFocusEditor()
+      }
+    },
+  })
   const exposeRevision = useMutation({
     mutationFn: (revisionId: string) => {
       if (!publicationQuery.data) throw new Error('Publish the document first')
@@ -125,8 +148,19 @@ export function DocumentInspector({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['publication', documentId] }),
   })
   const headings = extractMarkdownHeadings(content)
-  const fromRevision = history.find((revision) => revision.revision_id === compareFrom)
-  const toRevision = history.find((revision) => revision.revision_id === compareTo)
+  const comparisonEnabled = tab === 'history' && Boolean(compareFrom) && compareFrom !== compareTo
+  const fromQuery = useQuery({
+    queryKey: ['revision', documentId, compareFrom],
+    queryFn: () => api.revision(documentId, compareFrom ?? ''),
+    enabled: comparisonEnabled,
+  })
+  const toQuery = useQuery({
+    queryKey: ['revision', documentId, compareTo],
+    queryFn: () => api.revision(documentId, compareTo),
+    enabled: comparisonEnabled,
+  })
+  const fromRevision = fromQuery.data
+  const toRevision = toQuery.data
   const setComparison = (from: string, to: string) => {
     sessions.updateSession(documentId, { compareFrom: from, compareTo: to })
   }
@@ -274,6 +308,10 @@ export function DocumentInspector({
         )}
         {tab === 'history' && (
           <>
+            {historyQuery.isLoading && <StateMessage kind="loading" title="Loading history" />}
+            {(historyQuery.isError || readRevision.isError || fromQuery.isError || toQuery.isError) && (
+              <StateMessage kind="error" title="Could not load revision" />
+            )}
             {document.content_type !== 'application/pdf' && (
               <section className="compare-controls">
                 <label>
@@ -350,21 +388,27 @@ export function DocumentInspector({
               binary={document.content_type === 'application/pdf'}
               history={history}
               currentRevisionId={document.current_revision_id}
-              busy={restore.isPending || session.saveState !== 'saved'}
+              busy={restore.isPending || readRevision.isPending || session.saveState !== 'saved'}
               onCompare={(revisionId) => setComparison(revisionId, document.current_revision_id)}
-              onPreview={(revision) => setPreviewRevision(revision)}
+              onPreview={(revision) =>
+                readRevision.mutate({ revisionId: revision.revision_id, action: 'preview' })
+              }
               onExpose={
                 publicationQuery.data?.active ? (revisionId) => exposeRevision.mutate(revisionId) : undefined
               }
               onCopy={(revision) => {
-                sessions.updateSession(documentId, {
-                  content: revision.content,
-                  baseRevisionId: document.current_revision_id,
-                })
-                onFocusEditor()
+                readRevision.mutate({ revisionId: revision.revision_id, action: 'copy' })
               }}
               onRestore={(revisionId) => restore.mutate(revisionId)}
             />
+            {historyQuery.hasNextPage && (
+              <button
+                disabled={historyQuery.isFetchingNextPage}
+                onClick={() => void historyQuery.fetchNextPage()}
+              >
+                Load older revisions
+              </button>
+            )}
           </>
         )}
         {chatActivated && (
@@ -469,13 +513,13 @@ function HistoryList({
   onRestore,
 }: {
   binary?: boolean
-  history: Revision[]
+  history: RevisionSummary[]
   currentRevisionId: string
   busy: boolean
   onCompare: (revisionId: string) => void
-  onPreview: (revision: Revision) => void
+  onPreview: (revision: RevisionSummary) => void
   onExpose?: (revisionId: string) => void
-  onCopy: (revision: Revision) => void
+  onCopy: (revision: RevisionSummary) => void
   onRestore: (revisionId: string) => void
 }) {
   return (
@@ -504,7 +548,9 @@ function HistoryList({
           )}
           {!binary && (
             <div className="revision-actions">
-              <button onClick={() => onPreview(revision)}>Preview</button>
+              <button disabled={busy} onClick={() => onPreview(revision)}>
+                Preview
+              </button>
               {onExpose && revision.revision_id !== currentRevisionId && (
                 <button onClick={() => onExpose(revision.revision_id)}>Expose URL</button>
               )}
@@ -525,7 +571,7 @@ function HistoryList({
   )
 }
 
-function revisionStory(revision: Revision) {
+function revisionStory(revision: RevisionSummary) {
   if (revision.summary) return revision.summary
   const actor = revision.actor_kind === 'agent' ? 'Agent' : 'You'
   const operation = revision.operation.toLowerCase()

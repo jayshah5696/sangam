@@ -6,12 +6,12 @@ import threading
 import time
 
 import pytest
-from starlette.requests import Request
 from pypdf import PdfWriter
+from starlette.requests import Request
+from test_phase_five_pdf_research import text_pdf
 
 from sangam.errors import ValidationError
 from sangam.pdf_runtime import PdfExtractionScheduler, spooled_pdf_body
-from test_phase_five_pdf_research import text_pdf
 
 
 class BoundedReads(io.BytesIO):
@@ -103,7 +103,14 @@ def test_extraction_scheduler_keeps_backlog_in_database_and_bounds_workers(clien
         assert peak == 2
         unblock.set()
         deadline = time.monotonic() + 5
-        while service.pending_extractions() and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            with service.database.connection() as connection:
+                remaining = connection.execute(
+                    "SELECT count(*) FROM pdf_documents "
+                    "WHERE extraction_status IN ('pending', 'processing')"
+                ).fetchone()[0]
+            if not remaining:
+                break
             time.sleep(0.02)
     finally:
         unblock.set()

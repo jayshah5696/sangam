@@ -9,7 +9,8 @@ import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import BinaryIO, TypeVar
+from functools import partial
+from typing import BinaryIO
 
 from starlette.requests import Request
 
@@ -17,10 +18,9 @@ from sangam.errors import ValidationError
 from sangam.pdf_research import PdfResearchService
 
 logger = logging.getLogger(__name__)
-T = TypeVar("T")
 
 
-async def run_pdf_io(call: Callable[[], T]) -> T:
+async def run_pdf_io[T](call: Callable[[], T]) -> T:
     """Keep temporary files owned until their disk operation actually finishes."""
     task = asyncio.create_task(asyncio.to_thread(call))
     try:
@@ -50,7 +50,7 @@ async def spooled_pdf_body(request: Request, *, max_bytes: int) -> AsyncIterator
             if received > max_bytes:
                 raise ValidationError("PDF exceeds the configured size limit")
             # Wait for disk writes before closing the file on cancellation.
-            await run_pdf_io(lambda: content.write(chunk))
+            await run_pdf_io(partial(content.write, chunk))
         await run_pdf_io(lambda: content.seek(0))
         yield content
 
