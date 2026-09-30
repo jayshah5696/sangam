@@ -121,6 +121,7 @@
   --warning-soft: rgba(213, 138, 31, 0.18);
   --danger: #ef6b73;
   --danger-soft: rgba(239, 107, 115, 0.18);
+  --danger-text: #08090a;
   --shadow: rgba(0, 0, 0, 0.45);
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -147,6 +148,7 @@
   --success: #27a644;
   --danger: #bd493c;
   --danger-soft: #f2cbc2;
+  --danger-text: #ffffff;
   --shadow: rgba(51, 56, 50, .09);
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.45);
@@ -173,6 +175,7 @@
   --success: #27a644;
   --danger: #9d3f28;
   --danger-soft: #efb8a3;
+  --danger-text: #ffffff;
   --shadow: rgba(75, 49, 25, .13);
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.45);
@@ -199,6 +202,7 @@
   --success: #27a644;
   --danger: #c94c42;
   --danger-soft: #ffd7d2;
+  --danger-text: #ffffff;
   --shadow: rgba(22, 69, 112, .1);
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.45);
