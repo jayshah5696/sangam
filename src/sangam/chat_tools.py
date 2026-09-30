@@ -18,6 +18,7 @@ from sangam.chat_capabilities import (
     ChatCapabilityRegistry,
     CreateDocumentInput,
     InspectWorkspaceOrganizationInput,
+    ProposalCitationInput,
     ProposeUpdateInput,
     PublishDocumentInput,
     ReadDocumentInput,
@@ -30,6 +31,7 @@ from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_proposals import ChatProposalService
 from sangam.errors import NotFoundError, SangamError, ValidationError
 from sangam.schemas import OrganizationOperation
+from sangam.security import IdentityService
 
 
 class ChatToolset:
@@ -50,6 +52,7 @@ class ChatToolset:
         self.registry = registry
         self.effects = effects
         self.evidence = evidence
+        self.identity = IdentityService(evidence.database)
         self.max_result_bytes = max_result_bytes
         self.policies = registry.by_id
 
@@ -135,6 +138,19 @@ class ChatToolset:
         request_context = ctx.context.request_context
 
         def operation() -> dict[str, Any]:
+            if request_context.run_id and request_context.document_id:
+                document = self.workspace.get_document(
+                    self.identity.reauthorize(request_context.principal),
+                    request_context.document_id,
+                )
+                self.evidence.record_run_source(
+                    request_context.run_id,
+                    document_id=document.document_id,
+                    revision_id=request_context.pinned_revision_id,
+                    title=document.title,
+                    path=document.path,
+                    page_number=request_context.pdf_page_number,
+                )
             return {
                 "document_id": request_context.document_id,
                 "revision_id": request_context.pinned_revision_id,
@@ -160,7 +176,7 @@ class ChatToolset:
 
         def operation() -> dict[str, Any]:
             documents = self.workspace.search_documents(
-                ctx.context.request_context.principal,
+                self.identity.reauthorize(ctx.context.request_context.principal),
                 query=validated.query,
                 tag_id=None,
                 category=None,
@@ -169,6 +185,16 @@ class ChatToolset:
                 limit=validated.limit,
                 offset=validated.offset,
             )
+            run_id = ctx.context.request_context.run_id
+            if run_id:
+                for document in documents:
+                    self.evidence.record_run_source(
+                        run_id,
+                        document_id=document.document_id,
+                        revision_id=document.current_revision_id,
+                        title=document.title,
+                        path=document.path or "",
+                    )
             return {
                 "results": [
                     self._document_source(document, snippet=document.search_snippet)
@@ -199,7 +225,7 @@ class ChatToolset:
 
         def operation() -> dict[str, Any]:
             page = self.workspace.inspect_workspace_organization(
-                ctx.context.request_context.principal,
+                self.identity.reauthorize(ctx.context.request_context.principal),
                 item_type=validated.item_type,
                 path_prefix=validated.path_prefix,
                 offset=validated.offset,
@@ -223,9 +249,8 @@ class ChatToolset:
         document_id = validated.document_id
 
         def operation() -> dict[str, Any]:
-            document = self.workspace.get_document(
-                ctx.context.request_context.principal, document_id
-            )
+            principal = self.identity.reauthorize(ctx.context.request_context.principal)
+            document = self.workspace.get_document(principal, document_id)
             if document.content_type == "application/pdf":
                 raise ValidationError("Use read_pdf_page for PDF documents")
             pinned_revision = ctx.context.request_context.pinned_revision_id
@@ -237,11 +262,20 @@ class ChatToolset:
                 and pinned_revision != document.current_revision_id
             ):
                 revision = self.workspace.get_revision(
-                    ctx.context.request_context.principal, document_id, pinned_revision
+                    principal, document_id, pinned_revision
                 )
                 content = revision.content
                 revision_id = revision.revision_id
             total_chars = len(content)
+            run_id = ctx.context.request_context.run_id
+            if run_id:
+                self.evidence.record_run_source(
+                    run_id,
+                    document_id=document.document_id,
+                    revision_id=revision_id,
+                    title=document.title,
+                    path=document.path or "",
+                )
             return {
                 "source": self._document_source(document, revision_id=revision_id),
                 "content": content[validated.offset : validated.offset + validated.limit],
@@ -261,7 +295,7 @@ class ChatToolset:
         page_number = validated.page_number
 
         def operation() -> dict[str, Any]:
-            principal = ctx.context.request_context.principal
+            principal = self.identity.reauthorize(ctx.context.request_context.principal)
             document = self.workspace.get_document(principal, document_id)
             if document.content_type != "application/pdf":
                 raise ValidationError("The requested document is not a PDF")
@@ -269,6 +303,16 @@ class ChatToolset:
             page = next((item for item in pages if item.page_number == page_number), None)
             if page is None:
                 raise NotFoundError(f"PDF page not found: {page_number}")
+            run_id = ctx.context.request_context.run_id
+            if run_id:
+                self.evidence.record_run_source(
+                    run_id,
+                    document_id=document.document_id,
+                    revision_id=document.current_revision_id,
+                    title=document.title,
+                    path=document.path or "",
+                    page_number=page_number,
+                )
             annotations = self.workspace.list_annotations(
                 principal,
                 document_id,
@@ -308,6 +352,10 @@ class ChatToolset:
         mode: Literal["full", "replace", "insert_before", "insert_after", "append"] = "full",
         anchor: str | None = None,
         replace_all: bool = False,
+        rationale: str | None = None,
+        judgment_needed: str | None = None,
+        model_opinion: str | None = None,
+        citations: list[ProposalCitationInput] | None = None,
     ) -> str:
         validated = ProposeUpdateInput.model_validate(
             {
@@ -318,6 +366,10 @@ class ChatToolset:
                 "anchor": anchor,
                 "replace_all": replace_all,
                 "summary": summary,
+                "rationale": rationale,
+                "judgment_needed": judgment_needed,
+                "model_opinion": model_opinion,
+                "citations": citations or [],
             }
         )
 
@@ -340,6 +392,11 @@ class ChatToolset:
                 anchor=validated.anchor,
                 replace_all=validated.replace_all,
                 context_id=context_id,
+                run_id=request_context.run_id,
+                rationale=validated.rationale,
+                judgment_needed=validated.judgment_needed,
+                model_opinion=validated.model_opinion,
+                citations=validated.citations,
             )
             return {
                 "proposal_id": proposal.proposal_id,

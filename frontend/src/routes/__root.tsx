@@ -6,6 +6,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import {
   CloudOff,
   FileText,
+  FolderKanban,
   Globe2,
   MessageSquareText,
   PanelLeftClose,
@@ -318,6 +319,7 @@ function PrimarySidebar({
 
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   const links = [
+    { to: '/projects' as const, label: 'Projects', icon: FolderKanban },
     { to: '/chat' as const, label: 'Workspace chat', icon: MessageSquareText },
     { to: '/review' as const, label: 'Review changes', icon: ShieldAlert },
     { to: '/publications' as const, label: 'Publications', icon: Globe2 },

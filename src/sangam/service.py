@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from pathlib import PurePosixPath
 
 from sangam.actors import ActorService
+from sangam.conditions import validate_storage_condition
 from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
@@ -289,6 +290,12 @@ class DocumentService:
                     resource_type="document",
                     resource_id=document_id,
                 )
+                current = self._get_document_in_connection(connection, document_id)
+                self.database.set_audit_target(
+                    resource_id=document_id,
+                    revision_id=current.current_revision_id,
+                    path=current.path,
+                )
         return self.get_document(document_id)
 
     def list_documents(self, *, include_deleted: bool = False) -> list[Document]:
@@ -377,6 +384,7 @@ class DocumentService:
             (actor_id, key),
         ).fetchone()
         if not row:
+            validate_storage_condition(connection)
             return None
         if row["operation"] != operation or row["request_hash"] != request_hash:
             raise IdempotencyError(
@@ -405,6 +413,68 @@ class DocumentService:
             """,
             (actor_id, key, operation, request_hash, document_id, revision_id, utc_now()),
         )
+
+    def legacy_duplicate_replay_matches(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        actor_id: str,
+        source_document_id: str,
+        expected_revision_id: str,
+        title: str | None,
+        path: str | None,
+        result_document_id: str,
+        result_revision_id: str,
+        stored_request_hash: str,
+    ) -> bool:
+        """Recover old create-shaped duplicate keys only with source-bound provenance.
+
+        Old duplicates recorded a create revision but an accepted duplicate audit.
+        Ordinary create keys, including keys later misused by the old wrapper,
+        must never become duplicate replay grants.
+        """
+        source_revision = connection.execute(
+            "SELECT r.content, d.title, d.content_type FROM revisions r "
+            "JOIN documents d ON d.document_id = r.document_id "
+            "WHERE r.document_id = ? AND r.revision_id = ?",
+            (source_document_id, expected_revision_id),
+        ).fetchone()
+        if source_revision is None:
+            return False
+        if connection.execute(
+            "SELECT 1 FROM operation_events WHERE actor_id = ? AND resource_id = ? "
+            "AND revision_id = ? AND action = 'create' AND outcome = 'accepted'",
+            (actor_id, result_document_id, result_revision_id),
+        ).fetchone():
+            return False
+        normalized_path = self._normalize_path(path) if path is not None else None
+        # Audit strings can be redacted. The original checksum still proves
+        # exact arguments using the immutable source revision, not its new head.
+        checksum_matches = stored_request_hash == request_hash(
+            {
+                "title": title or f"{source_revision['title']} copy",
+                "content": source_revision["content"],
+                "path": normalized_path,
+                "content_type": source_revision["content_type"],
+            }
+        )
+        rows = connection.execute(
+            "SELECT detail_json FROM operation_events WHERE actor_id = ? "
+            "AND resource_id = ? AND revision_id = ? "
+            "AND action = 'duplicate' AND outcome = 'accepted'",
+            (actor_id, result_document_id, result_revision_id),
+        ).fetchall()
+        for row in rows:
+            details = json.loads(row["detail_json"])
+            original_path = details.get("destination_path")
+            if original_path is not None:
+                original_path = self._normalize_path(original_path)
+            if details.get("expected_revision_id") == expected_revision_id and (
+                checksum_matches
+                or (details.get("title") == title and original_path == normalized_path)
+            ):
+                return True
+        return False
 
     def _finish_if_current(self, document_id: str, revision_id: str) -> None:
         document = self.get_document(document_id, include_deleted=True)
@@ -1630,6 +1700,11 @@ class DocumentService:
                 WHERE document_id = ? AND current_revision_id = ?
                 """,
                 (file_hash, document.document_id, document.current_revision_id),
+            )
+            self.database.set_audit_target(
+                resource_id=document.document_id,
+                revision_id=document.current_revision_id,
+                path=document.path,
             )
 
     def rematerialize_document(self, document_id: str) -> Document:

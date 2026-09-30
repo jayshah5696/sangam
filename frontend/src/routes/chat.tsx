@@ -14,6 +14,9 @@ const chatSearchSchema = z.object({
   document: z.string().max(200).optional(),
   revision: z.string().max(200).optional(),
   returnTo: z.string().max(500).optional(),
+  prompt: z.string().max(2000).optional(),
+  thread: z.string().max(200).optional(),
+  proposal: z.string().max(200).optional(),
 })
 
 export const Route = createFileRoute('/chat')({
@@ -28,6 +31,8 @@ function safeReturnPath(value: string | undefined) {
 function WorkspaceChat() {
   const search = Route.useSearch()
   const location = useLocation()
+  const initialPrompt =
+    z.string().max(2_020_000).optional().parse(location.state.sangamChatInitialPrompt) ?? search.prompt
   const selectedText = search.document ? (location.state.sangamChatContext?.selectedText ?? '') : ''
   const pdfPageNumber = search.document ? location.state.sangamChatContext?.pdfPageNumber : undefined
   const annotationId = search.document ? location.state.sangamChatContext?.annotationId : undefined
@@ -37,13 +42,36 @@ function WorkspaceChat() {
     queryKey: ['document', search.document],
     queryFn: () => api.getDocument(search.document!),
     enabled: Boolean(search.document),
+    refetchOnMount: 'always',
   })
   const document = documentQuery.data ?? null
-  const contextIsCurrent = !document || !search.revision || document.current_revision_id === search.revision
+  const historyQuery = useQuery({
+    queryKey: ['history', search.document],
+    queryFn: () => api.history(search.document!),
+    enabled: Boolean(document && search.revision && document.current_revision_id !== search.revision),
+  })
+  const historical = historyQuery.data?.find((revision) => revision.revision_id === search.revision)
+  const contextDocument =
+    document && historical
+      ? {
+          ...document,
+          content: historical.content,
+          current_revision_id: historical.revision_id,
+          content_hash: historical.content_hash,
+          size_bytes: historical.size_bytes,
+        }
+      : document
+  const contextIsCurrent =
+    !document || !search.revision || document.current_revision_id === search.revision || Boolean(historical)
   const clearContext = () =>
     navigate({
-      search: search.returnTo ? { returnTo: search.returnTo } : {},
-      state: {},
+      search: {
+        returnTo: search.returnTo,
+        prompt: search.prompt,
+        thread: search.thread,
+        proposal: search.proposal,
+      },
+      state: { sangamChatInitialPrompt: initialPrompt },
       replace: true,
     })
   const updateDocument = (nextDocument: Document) => {
@@ -78,7 +106,9 @@ function WorkspaceChat() {
         <MessageSquareText size="var(--icon-page)" />
       </header>
       <div className="workspace-chat-surface">
-        {documentQuery.isLoading ? (
+        {documentQuery.isLoading ||
+        historyQuery.isLoading ||
+        (Boolean(search.document) && !documentQuery.isFetchedAfterMount) ? (
           <StateMessage kind="loading" title="Attaching document context" />
         ) : documentQuery.isError || (search.document && !document) ? (
           <StateMessage
@@ -109,7 +139,10 @@ function WorkspaceChat() {
         ) : (
           <Suspense fallback={<StateMessage kind="loading" title="Preparing workspace chat" />}>
             <ChatPanel
-              document={document}
+              key={`${search.thread ?? ''}:${search.proposal ?? ''}`}
+              initialPrompt={initialPrompt}
+              initialThreadId={search.thread}
+              document={contextDocument}
               selectedText={selectedText}
               pdfPageNumber={document?.content_type === 'application/pdf' ? pdfPageNumber : null}
               annotationId={document?.content_type === 'application/pdf' ? annotationId : null}

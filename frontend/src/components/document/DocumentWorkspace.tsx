@@ -1,11 +1,30 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Columns2, MessageSquare, MoreHorizontal, PanelRightClose, PanelRightOpen, Rows2 } from 'lucide-react'
+import {
+  BookmarkCheck,
+  Columns2,
+  MessageSquare,
+  MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
+  Rows2,
+} from 'lucide-react'
+import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
+import {
+  evidenceTextForLocator,
+  locateEvidencePassage,
+  locatePassage,
+  type TextLocator,
+} from '../../evidenceCitation'
+import { StateMessage } from '../ui/StateMessage'
+import { SelectableHtmlText } from '../SelectableHtmlText'
+import { TextSelectionToolbar, type TextSelectionAnchor } from './TextSelectionToolbar'
 import { api, type Document, type Revision } from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
   citationTargetFromLocation,
+  clearCitationNavigation,
   type CitationTarget,
 } from '../../citationNavigation'
 import {
@@ -53,10 +72,17 @@ export function DocumentWorkspace({
 }) {
   const documentId = initialDocument.document_id
   const queryClient = useQueryClient()
+  const { updatePreferences } = useTheme()
   const { updateDocumentTitle } = useWorkbenchActions()
   const sessions = useDocumentSessions()
   const session = useDocumentSession(documentId)
   const editorRef = useRef<MarkdownEditorHandle>(null)
+  const editorSelectionSnapshot = useRef<{
+    content: string
+    selectedText: string
+    occurrence: number
+    revisionId?: string
+  } | null>(null)
   const document = queryClient.getQueryData<Document>(['document', documentId]) ?? initialDocument
   const content = session.content ?? document.content
   const saveState = session.saveState
@@ -76,9 +102,120 @@ export function DocumentWorkspace({
     document.content_type === 'text/html' ? 'interactive.html' : 'first-document.md',
   )
   const [linkTarget, setLinkTarget] = useState('')
+  const [activeSelection, setActiveSelection] = useState<{
+    selectedText: string
+    anchor: TextSelectionAnchor
+    sourceContent: string
+    revisionId?: string
+    occurrence: number
+  } | null>(null)
+  const [captureError, setCaptureError] = useState<string | null>(null)
+
+  const keepSelection = async (
+    selectedText: string,
+    sourceContent: string,
+    revisionId?: string,
+    occurrence = 0,
+  ) => {
+    try {
+      const pinned =
+        revisionId ?? (await sessions.flushSnapshot(documentId, sourceContent)).current_revision_id
+      const textLocator = locateEvidencePassage(
+        sourceContent,
+        document.content_type,
+        selectedText,
+        occurrence,
+      )
+      if (!textLocator) throw new Error('The selected passage does not match the source. Select it again.')
+      await workspaceEvidenceStore.keepEvidence({
+        sourceDocumentId: documentId,
+        sourceTitle: document.title,
+        sourcePath: document.path,
+        sourceContentType: document.content_type,
+        pinnedRevisionId: pinned,
+        selectedText,
+        textLocator,
+      })
+      setCaptureError(null)
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  }
+
+  const checkTextSelection = useCallback(() => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !workspaceRef.current) {
+      return
+    }
+    const text = sel.toString().trim()
+    if (!text || text.length < 2) return
+    const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+    if (!range) return
+    const container =
+      range.commonAncestorContainer instanceof Element
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement
+    if (
+      !workspaceRef.current.contains(range.commonAncestorContainer) &&
+      container?.closest<HTMLElement>('[data-evidence-source]')?.dataset.evidenceSource !== documentId
+    )
+      return
+    if (!container?.closest('.markdown-preview, .html-source-text')) return
+    const surface = container.closest('.markdown-preview, .html-source-text article')
+    const preceding = range.cloneRange()
+    if (surface) {
+      preceding.selectNodeContents(surface)
+      preceding.setEnd(range.startContainer, range.startOffset)
+    }
+    const occurrence = surface ? preceding.toString().split(text).length - 1 : 0
+    const revisionId = container.closest<HTMLElement>('[data-source-revision]')?.dataset.sourceRevision
+    const historical = revisionId
+      ? queryClient
+          .getQueryData<Revision[]>(['history', documentId])
+          ?.find((revision) => revision.revision_id === revisionId)
+      : undefined
+    const rect = range.getBoundingClientRect()
+    if (revisionId && !historical) return
+    if (rect.width === 0 && rect.height === 0) return
+    setActiveSelection({
+      selectedText: text,
+      occurrence,
+      sourceContent: historical?.content ?? content,
+      revisionId:
+        historical?.revision_id ?? (content === document.content ? document.current_revision_id : undefined),
+      anchor: {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+      },
+    })
+  }, [content, document.content, document.current_revision_id, documentId, queryClient])
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      requestAnimationFrame(checkTextSelection)
+    }
+    const element = window
+    element?.addEventListener('pointerup', handleMouseUp)
+    element?.addEventListener('keyup', handleMouseUp)
+    return () => {
+      element?.removeEventListener('pointerup', handleMouseUp)
+      element?.removeEventListener('keyup', handleMouseUp)
+    }
+  }, [checkTextSelection])
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(() =>
     citationTargetFromLocation(documentId),
   )
+  const revealedCitation = useRef<CitationTarget | null>(null)
+  useEffect(() => {
+    if (revealedCitation.current === citationTarget) return
+    revealedCitation.current = citationTarget
+    // Reveal each new source navigation, while allowing Research to reopen afterward.
+    if (citationTarget && matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
+  }, [citationTarget, updatePreferences])
   const [draftTitle, setDraftTitle] = useState(document.title)
   const selectedMaterializePath = materializePath(materializeFolder, materializeFilename)
 
@@ -105,7 +242,7 @@ export function DocumentWorkspace({
     [document.title, documentId, updateDocumentTitle],
   )
   const workspaceRef = useRef<HTMLElement>(null)
-  useEffect(
+  const registerReadyEditor = useCallback(
     () =>
       sessions.registerEditor(
         documentId,
@@ -117,6 +254,7 @@ export function DocumentWorkspace({
             target.scrollIntoView({ behavior: 'smooth', block: 'start' })
           }
         },
+        (text, expectedContent) => editorRef.current?.insertText(text, expectedContent) ?? false,
       ),
     [documentId, sessions],
   )
@@ -124,7 +262,10 @@ export function DocumentWorkspace({
     const receiveCitation = (event: Event) => {
       // SAFETY: CITATION_NAVIGATION_EVENT dispatches CustomEvent with detail: CitationTarget
       const target = (event as CustomEvent<CitationTarget>).detail
-      if (target?.documentId === documentId) setCitationTarget(target)
+      if (target?.documentId === documentId) {
+        setCitationTarget(target)
+        clearCitationNavigation(documentId)
+      }
     }
     window.addEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
     return () => window.removeEventListener(CITATION_NAVIGATION_EVENT, receiveCitation)
@@ -294,6 +435,9 @@ export function DocumentWorkspace({
           onRetry={() => sessions.retryDraftPersistence(documentId)}
         />
       )}
+      {captureError && (
+        <StateMessage compact kind="error" title="Evidence could not be kept" description={captureError} />
+      )}
       {document.content_type !== 'application/pdf' && !document.path && (
         <form
           className="materialize-bar"
@@ -336,7 +480,18 @@ export function DocumentWorkspace({
           error={citedHistoryQuery.isError || (citedHistoryQuery.isSuccess && !citedRevision)}
           onClose={() => {
             const url = new URL(window.location.href)
-            url.searchParams.delete('revision')
+            for (const key of [
+              'revision',
+              'page',
+              'annotation',
+              'text',
+              'start',
+              'representation',
+              'quoteStart',
+              'quoteEnd',
+            ])
+              url.searchParams.delete(key)
+            clearCitationNavigation(documentId)
             window.history.replaceState(window.history.state, '', url)
             setCitationTarget(null)
           }}
@@ -360,6 +515,26 @@ export function DocumentWorkspace({
           <button type="button" disabled={!linkTarget} onClick={insertLink}>
             Insert link
           </button>
+          {Boolean(selection.selectedCharacters && selection.selectedCharacters > 0) && (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => {
+                const captured = editorSelectionSnapshot.current
+                const snapshot = captured?.content ?? ''
+                const sel = captured?.selectedText ?? ''
+                if (!sel) return
+                void keepSelection(sel, snapshot, captured?.revisionId, captured?.occurrence ?? 0).catch(
+                  () => {
+                    /* The capture error is displayed above. */
+                  },
+                )
+              }}
+              title="Keep selected text as evidence"
+            >
+              <BookmarkCheck size="var(--icon-inline)" /> Keep evidence
+            </button>
+          )}
           <span>
             Ln {selection.line}, Col {selection.column}
             {selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}
@@ -387,7 +562,33 @@ export function DocumentWorkspace({
                 sessions.updateSession(documentId, { selection: nextSelection })
               }
               initialViewState={session.viewState}
-              onViewStateChange={(viewState) => sessions.updateSession(documentId, { viewState })}
+              onViewStateChange={(viewState) => {
+                const snapshot = sessions.getSession(documentId).content ?? document.content
+                if (viewState.anchor !== viewState.head) {
+                  const selectedText = snapshot
+                    .slice(
+                      Math.min(viewState.anchor, viewState.head),
+                      Math.max(viewState.anchor, viewState.head),
+                    )
+                    .trim()
+                  editorSelectionSnapshot.current = {
+                    content: snapshot,
+                    selectedText,
+                    revisionId:
+                      sessions.getSession(documentId).saveState === 'saved'
+                        ? sessions.getSession(documentId).baseRevisionId
+                        : undefined,
+                    occurrence: selectedText
+                      ? snapshot.slice(0, Math.min(viewState.anchor, viewState.head)).split(selectedText)
+                          .length - 1
+                      : 0,
+                  }
+                }
+                sessions.updateSession(documentId, { viewState })
+              }}
+              focusOnOpen={session.focusOnOpen}
+              onFocused={() => sessions.updateSession(documentId, { focusOnOpen: false })}
+              onReady={registerReadyEditor}
             />
           </Suspense>
         )}
@@ -405,7 +606,29 @@ export function DocumentWorkspace({
             )}
           </Suspense>
         )}
+        {mode !== 'edit' && document.content_type === 'text/html' && <SelectableHtmlText content={content} />}
       </div>
+      {activeSelection && (
+        <TextSelectionToolbar
+          key={`${documentId}:${activeSelection.revisionId ?? 'draft'}:${activeSelection.occurrence}:${activeSelection.selectedText}`}
+          documentId={document.document_id}
+          documentTitle={document.title}
+          documentPath={document.path}
+          contentType={document.content_type}
+          pinnedRevisionId={activeSelection.revisionId}
+          selectedText={activeSelection.selectedText}
+          anchor={activeSelection.anchor}
+          onDismiss={() => setActiveSelection(null)}
+          onKeep={() =>
+            keepSelection(
+              activeSelection.selectedText,
+              activeSelection.sourceContent,
+              activeSelection.revisionId,
+              activeSelection.occurrence,
+            )
+          }
+        />
+      )}
     </section>
   )
 }
@@ -426,8 +649,56 @@ function CitedRevisionEvidence({
   onClose: () => void
 }) {
   const current = target.revisionId === document.current_revision_id
+  const ref = useRef<HTMLElement>(null)
+  const quoteRef = useRef<HTMLElement>(null)
+  const hasQuote = !target.textLocator && target.quoteStart !== undefined && target.quoteEnd !== undefined
+  // Editorial offsets address raw UTF-16 source; evidence locators may address rendered text.
+  const quoteLocator = useMemo<TextLocator | undefined>(
+    () =>
+      !target.textLocator &&
+      revision &&
+      target.quoteStart !== undefined &&
+      target.quoteEnd !== undefined &&
+      Number.isInteger(target.quoteStart) &&
+      Number.isInteger(target.quoteEnd) &&
+      target.quoteStart >= 0 &&
+      target.quoteEnd > target.quoteStart &&
+      target.quoteEnd <= revision.content.length
+        ? {
+            exact: revision.content.slice(target.quoteStart, target.quoteEnd),
+            start: target.quoteStart,
+            end: target.quoteEnd,
+            prefix: '',
+            suffix: '',
+            representation: 'source',
+          }
+        : undefined,
+    [revision, target],
+  )
+  const locator = target.textLocator ?? quoteLocator
+  const sourceText = revision ? evidenceTextForLocator(revision.content, document.content_type, locator) : ''
+  const passage =
+    locator && sourceText.slice(locator.start, locator.end) === locator.exact
+      ? locator
+      : locator
+        ? locatePassage(sourceText, locator.exact)
+        : undefined
+  useEffect(() => {
+    if (!revision || !locator) return
+    // The citation owns destination focus after the inspector sheet has closed.
+    const frame = requestAnimationFrame(() => {
+      if (hasQuote && quoteLocator) {
+        quoteRef.current?.scrollIntoView({ block: 'nearest' })
+        quoteRef.current?.focus({ preventScroll: true })
+        return
+      }
+      ref.current?.focus({ preventScroll: true })
+      ref.current?.querySelector('mark')?.scrollIntoView({ block: 'center' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [revision, target, locator, hasQuote, quoteLocator])
   return (
-    <section className="citation-evidence" aria-labelledby="citation-evidence-title">
+    <section ref={ref} tabIndex={-1} className="citation-evidence" aria-labelledby="citation-evidence-title">
       <header>
         <div>
           <p className="eyebrow">Pinned chat citation</p>
@@ -449,8 +720,28 @@ function CitedRevisionEvidence({
           substituted.
         </p>
       )}
-      {!current && revision && (
-        <details open>
+      {quoteLocator && document.content_type !== 'application/pdf' && (
+        <section
+          ref={quoteRef}
+          tabIndex={-1}
+          className="citation-quote"
+          aria-label="Exact cited passage"
+          data-source-revision={revision?.revision_id}
+        >
+          <p className="eyebrow">Exact cited passage</p>
+          <blockquote>{quoteLocator.exact}</blockquote>
+        </section>
+      )}
+      {revision && hasQuote && !quoteLocator && (
+        <StateMessage
+          compact
+          kind="error"
+          title="The passage locator is outside this revision"
+          description="The current head has not been substituted."
+        />
+      )}
+      {revision && (
+        <details open data-source-revision={revision.revision_id}>
           <summary>Exact cited content</summary>
           {document.content_type === 'text/markdown' ? (
             <Suspense fallback={<div className="markdown-preview muted">Preparing cited Markdown…</div>}>
@@ -461,6 +752,22 @@ function CitedRevisionEvidence({
               <HtmlPreview content={revision.content} />
             </Suspense>
           ) : null}
+          {document.content_type === 'text/html' && <SelectableHtmlText content={revision.content} />}
+          {passage && (
+            <pre className="cited-source-text" aria-label="Exact cited passage">
+              {sourceText.slice(0, passage.start)}
+              <mark>{sourceText.slice(passage.start, passage.end)}</mark>
+              {sourceText.slice(passage.end)}
+            </pre>
+          )}
+          {locator && !passage && (
+            <StateMessage
+              compact
+              kind="error"
+              title="The cited passage is absent from this revision"
+              description="The pin has been preserved. The current head has not been substituted."
+            />
+          )}
         </details>
       )}
     </section>

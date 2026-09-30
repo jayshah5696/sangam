@@ -26,4 +26,12 @@ describe('stable document links', () => {
       ),
     ).toBe('/documents/0d10bbdc-e3c8-4c2b-afdd-06e263ada380?page=4&annotation=abc-123')
   })
+
+  it('preserves validated revision targets in Sangam document links', () => {
+    expect(
+      internalDocumentHref(
+        'sangam://document/0d10bbdc-e3c8-4c2b-afdd-06e263ada380?revision=8f2ac41d-9999-4a4b-8c8d-123456789abc',
+      ),
+    ).toBe('/documents/0d10bbdc-e3c8-4c2b-afdd-06e263ada380?revision=8f2ac41d-9999-4a4b-8c8d-123456789abc')
+  })
 })

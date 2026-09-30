@@ -1,0 +1,230 @@
+.projects-page {
+  width: min(1140px, calc(100% - var(--space-5) * 2));
+  margin: 0 auto;
+  padding: var(--space-5) 0;
+  display: grid;
+  gap: var(--space-4);
+  font-family: var(--font-ui);
+}
+
+.projects-page h1,
+.welcome-work h1 {
+  margin: 0;
+  font-size: var(--text-display-sm);
+  line-height: var(--leading-tight);
+}
+
+.projects-page h2,
+.project-home h2,
+.project-modal-dialog h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-body);
+  font-family: var(--font-ui);
+}
+
+.projects-header,
+.project-section-header,
+.project-detail-actions,
+.project-doc-actions,
+.project-home-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.projects-header p,
+.project-home p {
+  margin: var(--space-2) 0;
+  font-size: var(--text-body);
+}
+
+.projects-grid,
+.project-home-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--space-4);
+}
+
+.project-section-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.project-section-header,
+.project-section-body {
+  padding: var(--space-4);
+}
+
+.project-section-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.project-doc-table,
+.project-modal-form,
+.project-modal-field,
+.project-doc-main,
+.project-home {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.project-doc-row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.project-doc-main {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.project-doc-main p {
+  margin: 0;
+  font-size: var(--text-control);
+  color: var(--muted);
+}
+
+.projects-page a,
+.project-home a {
+  color: var(--accent);
+}
+
+.project-home a.primary-button {
+  color: var(--accent-text);
+}
+
+.project-doc-title-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-control);
+  text-align: left;
+  min-height: var(--control-height);
+}
+
+.project-modal-dialog {
+  width: min(38rem, calc(100vw - var(--space-5) * 2));
+  max-height: calc(100dvh - var(--space-5) * 2);
+  margin: auto;
+  overflow-y: auto;
+  padding: var(--space-4);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  font-family: var(--font-ui);
+}
+
+.project-modal-dialog::backdrop {
+  background: color-mix(in srgb, var(--text) 45%, transparent);
+}
+
+.project-modal-input,
+.project-modal-select,
+.project-modal-textarea,
+.project-home-toolbar select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-control);
+}
+
+.welcome.welcome-work {
+  margin: 0 auto;
+  padding: var(--space-5);
+}
+
+.sidebar-collapsed .welcome.welcome-work .welcome-heading-row {
+  padding-left: calc(var(--control-height) + var(--space-4) - var(--space-5));
+}
+
+.project-home-resume .primary-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.project-home-resume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-block: 1px solid var(--line);
+}
+
+.project-home-excerpt {
+  color: var(--text);
+}
+
+.project-home-attention {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-control);
+}
+
+.project-home-document {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: var(--space-3) 0;
+  color: var(--text);
+  font-size: var(--text-control);
+  overflow-wrap: anywhere;
+}
+
+.project-home-document small {
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+@media (max-width: 720px) {
+  .projects-page {
+    width: calc(100% - var(--space-4) * 2);
+  }
+  .project-home-resume {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .project-doc-row {
+    flex-direction: column;
+  }
+  .project-doc-main {
+    width: 100%;
+  }
+}
+
+@media (pointer: coarse) {
+  .sidebar-collapsed .welcome.welcome-work .welcome-heading-row {
+    padding-left: calc(var(--control-touch) + var(--space-4) - var(--space-5));
+  }
+  .projects-page button,
+  .project-modal-dialog button,
+  .project-modal-dialog input,
+  .project-modal-dialog select,
+  .projects-page select,
+  .project-home button,
+  .project-home select,
+  .project-home a {
+    min-height: var(--control-touch);
+  }
+}

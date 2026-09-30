@@ -370,31 +370,31 @@ class OrganizationSnapshotPage(BaseModel):
 
 
 class UpdateDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     content: str
     title: str | None = Field(default=None, min_length=1, max_length=240)
     summary: str | None = Field(default=None, max_length=500)
 
 
 class PathMutation(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     path: str
     summary: str | None = Field(default=None, max_length=500)
 
 
 class DeleteDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     summary: str | None = Field(default=None, max_length=500)
 
 
 class RestoreDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     revision_id: str
     summary: str | None = Field(default=None, max_length=500)
 
 
 class DuplicateDocument(MutationRequest):
-    expected_revision_id: str
+    expected_revision_id: str | None = None
     title: str | None = Field(default=None, min_length=1, max_length=240)
     path: str | None = Field(default=None, max_length=500)
 
@@ -900,6 +900,28 @@ class ChatProposalEvidence(BaseModel):
     annotation_id: str | None
 
 
+class ChatProposalCitation(BaseModel):
+    document_id: str
+    revision_id: str | None = None
+    title: str | None = None
+    path: str | None = None
+    page_number: int | None = None
+    annotation_id: str | None = None
+    snippet: str = ""
+    location: str | None = None
+    quote_start: int | None = None
+    quote_end: int | None = None
+    available: bool = True
+
+
+class ChatProposalSource(BaseModel):
+    document_id: str
+    revision_id: str | None = None
+    title: str
+    path: str
+    page_number: int | None = None
+
+
 class ChatProposal(BaseModel):
     proposal_id: str
     thread_id: str
@@ -913,10 +935,19 @@ class ChatProposal(BaseModel):
     applied_at: str | None
     evidence: ChatProposalEvidence | None = None
     evidence_status: Literal["not_recorded", "recorded", "unavailable"] = "not_recorded"
+    rationale: str | None = None
+    judgment_needed: str | None = None
+    citations: list[ChatProposalCitation] = Field(default_factory=list)
+    sources_retrieved: list[ChatProposalSource] = Field(default_factory=list)
+    run_id: str | None = None
+    sources_retrieved_truncated: bool = False
+    applied_content: str | None = None
+    model_opinion: str | None = None
 
 
 class ApplyChatProposal(MutationRequest):
     expected_revision_id: str
+    content: str | None = Field(default=None, max_length=2_000_000)
 
 
 class DismissChatProposal(MutationRequest):
@@ -1007,3 +1038,185 @@ class ChatEffectsSummary(BaseModel):
     retryable_failures: int
     terminal_failures: int
     total_history: int
+
+
+ProjectRole = Literal["source", "draft", "output", "note", "decision"]
+
+
+class ProjectTab(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    documentId: str = Field(min_length=1)
+    title: str
+    pinned: bool
+
+
+class ProjectGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["group"]
+    id: str = Field(min_length=1)
+    tabs: list[ProjectTab] = Field(max_length=100)
+    activeTabId: str | None
+
+
+class ProjectSplit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["split"]
+    id: str = Field(min_length=1)
+    direction: Literal["horizontal", "vertical"]
+    ratio: float = Field(ge=10, le=90)
+    first: ProjectGroup | ProjectSplit
+    second: ProjectGroup | ProjectSplit
+
+
+class ProjectClosedTab(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    groupId: str = Field(min_length=1)
+    tab: ProjectTab
+
+
+class ProjectLayout(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal[1]
+    root: ProjectGroup | ProjectSplit
+    activeGroupId: str
+    recentlyClosed: list[ProjectClosedTab] = Field(default_factory=list, max_length=12)
+
+    def groups(self) -> list[ProjectGroup]:
+        def visit(node: ProjectGroup | ProjectSplit) -> list[ProjectGroup]:
+            return (
+                [node] if isinstance(node, ProjectGroup) else visit(node.first) + visit(node.second)
+            )
+
+        return visit(self.root)
+
+    @model_validator(mode="after")
+    def valid_selection(self) -> ProjectLayout:
+        def node_ids(node: ProjectGroup | ProjectSplit) -> list[str]:
+            return (
+                [node.id]
+                if isinstance(node, ProjectGroup)
+                else [node.id, *node_ids(node.first), *node_ids(node.second)]
+            )
+
+        all_ids = node_ids(self.root)
+        if len(set(all_ids)) != len(all_ids):
+            raise ValueError("Layout node IDs must be unique")
+        groups = self.groups()
+        ids = [g.id for g in groups]
+        if len(groups) > 16 or len(set(ids)) != len(ids) or self.activeGroupId not in ids:
+            raise ValueError("Layout requires unique groups and a valid active group")
+        for group in groups:
+            tabs = [t.documentId for t in group.tabs]
+            if len(set(tabs)) != len(tabs) or (
+                group.activeTabId is not None and group.activeTabId not in tabs
+            ):
+                raise ValueError("Active tab must belong to its group")
+        return self
+
+
+class ProjectDocumentItem(BaseModel):
+    project_id: str
+    document_id: str
+    document_title: str
+    document_path: str | None
+    content_type: str
+    role: ProjectRole
+    pinned_page: int | None = None
+    notes: str | None = None
+    source_revision_id: str | None = None
+    current_revision_id: str
+    source_updated: bool = False
+    excerpt: str = ""
+    updated_at: str
+    created_at: str
+
+
+class ProjectThreadItem(BaseModel):
+    project_id: str
+    thread_id: str
+    title: str | None = None
+    created_at: str
+
+
+class ProjectAnnotationItem(BaseModel):
+    project_id: str
+    annotation_id: str
+    document_id: str
+    page_number: int
+    annotation_type: str
+    selected_text: str | None = None
+    note: str | None = None
+    created_at: str
+
+
+class ProjectSummary(BaseModel):
+    project_id: str
+    name: str
+    description: str | None = None
+    brief_document_id: str | None = None
+    brief_document_title: str | None = None
+    active_thread_id: str | None = None
+    active_document_id: str | None = None
+    version: int = 1
+    last_worked_at: str | None = None
+    document_count: int = 0
+    thread_count: int = 0
+    annotation_count: int = 0
+    created_by: str
+    created_at: str
+    updated_at: str
+
+
+class ProjectDetail(ProjectSummary):
+    workbench_state_json: str | None = Field(default=None, max_length=200_000)
+    documents: list[ProjectDocumentItem] = Field(default_factory=list)
+    threads: list[ProjectThreadItem] = Field(default_factory=list)
+    annotations: list[ProjectAnnotationItem] = Field(default_factory=list)
+
+
+class CreateProject(MutationRequest):
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    brief_document_id: str | None = None
+    create_brief: bool = True
+
+
+class UpdateProject(MutationRequest):
+    expected_version: int | None = Field(default=None, ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    brief_document_id: str | None = None
+    workbench_state_json: str | None = Field(default=None, max_length=200_000)
+    active_thread_id: str | None = None
+    active_document_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_layout(self) -> UpdateProject:
+        if self.workbench_state_json is not None:
+            ProjectLayout.model_validate_json(self.workbench_state_json)
+        if "name" in self.model_fields_set and (self.name is None or not self.name.strip()):
+            raise ValueError("Project name cannot be empty")
+        return self
+
+
+class AddProjectDocument(MutationRequest):
+    document_id: str
+    role: ProjectRole = "source"
+    pinned_page: int | None = Field(default=None, ge=1)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class UpdateProjectDocument(MutationRequest):
+    expected_version: int | None = Field(default=None, ge=1)
+    source_revision_id: str | None = None
+    role: ProjectRole | None = None
+    pinned_page: int | None = Field(default=None, ge=1)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class AddProjectThread(MutationRequest):
+    thread_id: str
+
+
+class AddProjectAnnotation(MutationRequest):
+    annotation_id: str

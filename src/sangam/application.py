@@ -21,6 +21,7 @@ from sangam.karakeep_repository import KarakeepRepository
 from sangam.mutations import MutationCoordinator
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
+from sangam.projects import ProjectService
 from sangam.provider_connections import (
     ProviderConnectionRepository,
     ProviderConnectionService,
@@ -54,6 +55,7 @@ class ApplicationServices:
     chat: SangamChatServer
     provider_connections: ProviderConnectionService
     readiness: ReadinessService
+    projects: ProjectService
 
 
 def initialize_application_state(settings: Settings) -> Database:
@@ -211,6 +213,11 @@ def build_application_services(
         model_settings_repository,
         connections=provider_connections,
     )
+    projects = ProjectService(
+        database=database,
+        documents=documents,
+        activity=activity,
+    )
     chat = SangamChatServer(
         database=database,
         workspace=workspace_access,
@@ -235,6 +242,7 @@ def build_application_services(
         chat=chat,
         provider_connections=provider_connections,
         readiness=readiness,
+        projects=projects,
     )
 
 

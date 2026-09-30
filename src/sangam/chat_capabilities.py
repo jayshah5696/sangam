@@ -131,6 +131,20 @@ class ReadPdfPageResult(StrictCapabilityModel):
 ProposeUpdateMode = Literal["full", "replace", "insert_before", "insert_after", "append"]
 
 
+class ProposalCitationInput(StrictCapabilityModel):
+    document_id: str = Field(min_length=1, max_length=200)
+    revision_id: str | None = Field(default=None, max_length=200)
+    page_number: int | None = Field(default=None, ge=1)
+    annotation_id: str | None = Field(default=None, max_length=200)
+    snippet: str = Field(default="", max_length=2000)
+    location: str | None = Field(default=None, max_length=200)
+    quote_start: int | None = Field(
+        default=None,
+        ge=0,
+        description="Exact UTF-16 offset for a repeated passage. Otherwise quote a unique passage.",
+    )
+
+
 class ProposeUpdateInput(StrictCapabilityModel):
     document_id: str = Field(min_length=1, max_length=200)
     expected_revision_id: str = Field(min_length=1, max_length=200)
@@ -139,6 +153,10 @@ class ProposeUpdateInput(StrictCapabilityModel):
     anchor: str | None = Field(default=None, max_length=100_000)
     replace_all: bool = False
     summary: str = Field(min_length=1, max_length=500)
+    rationale: str | None = Field(default=None, max_length=1000)
+    judgment_needed: str | None = Field(default=None, max_length=1000)
+    model_opinion: str | None = Field(default=None, max_length=2000)
+    citations: list[ProposalCitationInput] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def _check_mode_shape(self) -> ProposeUpdateInput:

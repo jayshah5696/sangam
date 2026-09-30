@@ -12,8 +12,21 @@ from typing import BinaryIO, TypeVar
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
+from sangam.conditions import (
+    ConditionalMutation,
+    Preconditions,
+    artifact_etag,
+    conditional_mutation,
+    document_etag,
+)
 from sangam.db import utc_now
-from sangam.errors import AuthorizationError, ConflictError, SangamError, ValidationError
+from sangam.errors import (
+    AuthorizationError,
+    ConflictError,
+    IdempotencyError,
+    SangamError,
+    ValidationError,
+)
 from sangam.idempotency import request_hash
 from sangam.organization import WorkspaceOrganizationService
 from sangam.pdf_research import PdfResearchService
@@ -50,7 +63,7 @@ from sangam.schemas import (
     RevisionPage,
     Tag,
 )
-from sangam.security import Principal, path_matches
+from sangam.security import Principal, path_matches, sanitize_sensitive_text
 from sangam.service import DocumentService
 from sangam.workspace import canonicalize_document_path
 
@@ -154,11 +167,240 @@ def compute_document_diff(
         "line_ending": detect_line_ending(new_content),
         "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
     }
-    return "".join(formatted_lines), lines_added, lines_removed, metadata
+    diff = "".join(formatted_lines)
+    safe_old = sanitize_sensitive_text(old_content)
+    safe_new = sanitize_sensitive_text(new_content)
+    if safe_old != old_content or safe_new != new_content:
+        # Redact before diffing so a hunk inside a PEM block cannot lose its
+        # identifying delimiters. Counts still describe the actual edit.
+        diff = compute_document_diff(safe_old, safe_new, fromfile, tofile)[0] or "[REDACTED]\n"
+    return diff, lines_added, lines_removed, metadata
+
+
+class _RetryHttpMutation(Exception):
+    """Restart admission or lock selection before any storage side effect."""
+
+    def __init__(self, estimated_bytes: int, replay_document_id: str | None = None) -> None:
+        self.estimated_bytes = estimated_bytes
+        self.replay_document_id = replay_document_id
 
 
 class WorkspaceAccessService:
     """Public workspace boundary that authenticates policy before domain services run."""
+
+    def http_document_read(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        if_match: str | None,
+        if_none_match: str | None,
+        artifact: bool = False,
+    ) -> tuple[Document, bytes | None, str, bool]:
+        def operation() -> tuple[Document, bytes | None, str, bool]:
+            document = self.documents.get_document(document_id)
+            self.policy.require(principal, Capability.READ, document.path)
+            content = None
+            if artifact:
+                content = (
+                    self.pdf_research.pdf_bytes(document_id)[1]
+                    if document.content_type == "application/pdf"
+                    else document.content.encode("utf-8")
+                )
+                etag = artifact_etag(content, document.content_type)
+            else:
+                etag = document_etag(document)
+            changed = Preconditions.parse(if_match, if_none_match).evaluate(etag, read=True)
+            return document, content, etag, changed
+
+        return self._run(principal, "read", "document", operation, resource_id=document_id)
+
+    def http_document_mutation(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        action: str,
+        payload: dict[str, object],
+        if_match: str | None,
+        if_none_match: str | None,
+        idempotency_key: str,
+        operation: Callable[[str], Document],
+    ) -> Document:
+        """Authorize fresh paths, then evaluate HTTP conditions in storage transactions."""
+        details = dict(payload)
+        admitted_bound = self.activity.estimate_payload_bytes(details) + 2048
+        locked_document_ids = {document_id}
+
+        def authorized() -> Document:
+            with self.documents.mutations.documents(*locked_document_ids):
+                current = self.documents.get_document(document_id, include_deleted=True)
+                capability = {
+                    "update": Capability.UPDATE,
+                    "duplicate": Capability.READ,
+                    "move": Capability.MOVE,
+                    "materialize": Capability.MOVE,
+                    "delete": Capability.DELETE,
+                    "restore": Capability.RESTORE,
+                    "tag": Capability.TAG,
+                }.get(action)
+                if action == "trust":
+                    if not principal.administrator:
+                        raise AuthorizationError("Document trust requires administrator access")
+                elif capability is not None:
+                    self.policy.require(principal, capability, current.path)
+                else:
+                    raise ValidationError("Unsupported conditional document operation")
+                if action in {"move", "materialize", "duplicate"}:
+                    details["source_path"] = current.path
+                    destination = payload.get("path")
+                    if (
+                        action == "duplicate"
+                        and destination is None
+                        and current.content_type == "application/pdf"
+                        and current.path
+                    ):
+                        source = PurePosixPath(current.path)
+                        destination = (
+                            source.parent / f"{source.stem} copy{source.suffix}"
+                        ).as_posix()
+                    self._authorize_destination_path(
+                        principal,
+                        capability=Capability.CREATE if action == "duplicate" else Capability.MOVE,
+                        path=destination,
+                    )
+                    details["destination_path"] = destination
+                conditions = Preconditions.parse(if_match, if_none_match)
+                has_conditions = if_match is not None or if_none_match is not None
+                expected = payload.get("expected_revision_id")
+                if action not in {"trust", "tag"} and expected is None and not has_conditions:
+                    raise ValidationError(
+                        "expected_revision_id in body or HTTP condition is required"
+                    )
+
+                if action in {"update", "duplicate", "restore"}:
+                    content = payload.get("content", current.content)
+                    if action == "restore":
+                        details["current_revision_id"] = payload.get("revision_id")
+                        with self.documents.database.connection() as connection:
+                            row = connection.execute(
+                                "SELECT content FROM revisions "
+                                "WHERE document_id = ? AND revision_id = ?",
+                                (document_id, payload.get("revision_id")),
+                            ).fetchone()
+                            content = row["content"] if row else ""
+                    diff, added, removed, meta = compute_document_diff(
+                        "" if action == "duplicate" else current.content,
+                        content,
+                        fromfile=current.current_revision_id,
+                        tofile="current",
+                    )
+                    details.update(diff=diff, lines_added=added, lines_removed=removed, **meta)
+
+                needed_bound = self.activity.estimate_payload_bytes(details)
+                if needed_bound > admitted_bound:
+                    # Do not expand an audit reservation inside a transaction,
+                    # or wait for capacity while retaining document locks.
+                    raise _RetryHttpMutation(needed_bound + 2048)
+
+                if not has_conditions and action != "duplicate":
+                    return operation(expected or current.current_revision_id)
+                fingerprint = request_hash(
+                    {
+                        "document_id": document_id,
+                        "action": action,
+                        "payload": payload,
+                        "if_match": if_match,
+                        "if_none_match": if_none_match,
+                    }
+                )
+                # Replay precedes precondition evaluation, but never authorization.
+                with self.documents.database.connection() as connection:
+                    replay = connection.execute(
+                        "SELECT request_hash, document_id AS resource_id, revision_id, operation "
+                        "FROM idempotency_keys "
+                        "WHERE actor_id = ? AND idempotency_key = ? UNION ALL "
+                        "SELECT request_hash, resource_id, NULL AS revision_id, operation "
+                        "FROM mutation_idempotency_keys "
+                        "WHERE actor_id = ? AND idempotency_key = ?",
+                        (principal.actor_id, idempotency_key, principal.actor_id, idempotency_key),
+                    ).fetchone()
+                    if replay:
+                        legacy_duplicate = (
+                            action == "duplicate"
+                            and not has_conditions
+                            and replay["request_hash"] != fingerprint
+                            and replay["operation"] == "create"
+                            and replay["revision_id"] is not None
+                            and self.documents.legacy_duplicate_replay_matches(
+                                connection,
+                                actor_id=principal.actor_id,
+                                source_document_id=document_id,
+                                expected_revision_id=expected,
+                                title=payload.get("title"),
+                                path=payload.get("path"),
+                                result_document_id=replay["resource_id"],
+                                result_revision_id=replay["revision_id"],
+                                stored_request_hash=replay["request_hash"],
+                            )
+                        )
+                        if replay["request_hash"] != fingerprint and not legacy_duplicate:
+                            raise IdempotencyError(
+                                "Idempotency key was already used for a different mutation"
+                            )
+                        if replay["resource_id"] not in locked_document_ids:
+                            # Re-enter with all locks in one order. Never acquire
+                            # an arbitrary replay target while holding its source.
+                            raise _RetryHttpMutation(admitted_bound, replay["resource_id"])
+                        with self.documents.mutations.document(replay["resource_id"]):
+                            result = self.documents.get_document(
+                                replay["resource_id"], include_deleted=True
+                            )
+                            if action == "duplicate":
+                                self.policy.require(principal, Capability.CREATE, result.path)
+                            self.documents._finish_if_current(
+                                result.document_id, result.current_revision_id
+                            )
+                            result = self.documents.get_document(
+                                result.document_id, include_deleted=True
+                            )
+                            with self.documents.database.transaction():
+                                self.documents.database.set_audit_target(
+                                    resource_id=result.document_id,
+                                    revision_id=result.current_revision_id,
+                                    path=result.path,
+                                )
+                                self.documents.search_index.sync(result)
+                            return result
+
+                def validate(connection: sqlite3.Connection) -> None:
+                    snapshot = self.documents._get_document_in_connection(
+                        connection, document_id, include_deleted=True
+                    )
+                    conditions.evaluate(document_etag(snapshot))
+
+                # Validate before any filesystem side effect, then again in the
+                # committing storage transaction through its replay lookup.
+                with self.documents.database.connection() as connection:
+                    validate(connection)
+                with conditional_mutation(ConditionalMutation(fingerprint, validate)):
+                    return operation(expected or current.current_revision_id)
+
+        while True:
+            try:
+                return self._run(
+                    principal,
+                    action,
+                    "document",
+                    authorized,
+                    resource_id=document_id,
+                    details=details,
+                    estimated_bytes=admitted_bound,
+                )
+            except _RetryHttpMutation as retry:
+                admitted_bound = max(admitted_bound, retry.estimated_bytes)
+                if retry.replay_document_id is not None:
+                    locked_document_ids.add(retry.replay_document_id)
 
     def __init__(
         self,
@@ -1128,6 +1370,24 @@ class WorkspaceAccessService:
         offset: int,
         limit: int,
     ) -> OrganizationSnapshotPage:
+        return self._run(
+            principal,
+            "list_organization",
+            "workspace",
+            lambda: self._inspect_workspace_organization(
+                principal, item_type=item_type, path_prefix=path_prefix, offset=offset, limit=limit
+            ),
+        )
+
+    def _inspect_workspace_organization(
+        self,
+        principal: Principal,
+        *,
+        item_type: str | None,
+        path_prefix: str | None,
+        offset: int,
+        limit: int,
+    ) -> OrganizationSnapshotPage:
         """Return a bounded, path-authorized organization snapshot."""
         if item_type not in {None, "document", "folder", "tag"}:
             raise ValidationError("Unknown organization item type")
@@ -1135,14 +1395,26 @@ class WorkspaceAccessService:
             self.organization.normalize_folder_path(path_prefix) if path_prefix else None
         )
         allowed = self.policy.allowed_prefixes(principal, Capability.READ)
+        document_prefixes = allowed
+        if normalized_prefix is not None:
+            document_prefixes = (
+                (normalized_prefix,)
+                if allowed is None
+                else tuple(
+                    normalized_prefix if path_matches(prefix, normalized_prefix) else prefix
+                    for prefix in allowed
+                    if path_matches(prefix, normalized_prefix)
+                    or path_matches(normalized_prefix, prefix)
+                )
+            )
         items: list[
             OrganizationDocumentSnapshot | OrganizationFolderSnapshot | OrganizationTagSnapshot
         ] = []
         source_limit = offset + limit + 1
         if item_type in {None, "document"}:
-            documents = self.documents.list_document_summaries(
-                include_deleted=False,
-                path_prefixes=allowed,
+            documents = self.documents.search_documents(
+                path_prefixes=document_prefixes,
+                sort="path",
                 limit=source_limit,
                 offset=0,
             )
@@ -1162,7 +1434,7 @@ class WorkspaceAccessService:
                 if normalized_prefix is None or path_matches(normalized_prefix, document.path)
             )
         if item_type in {None, "folder"}:
-            for folder in self.organization.list_folders(limit=source_limit):
+            for folder in self._visible_folders(principal):
                 if allowed == () or (
                     allowed is not None
                     and not any(
@@ -1185,12 +1457,24 @@ class WorkspaceAccessService:
                         descendant_document_count=folder.document_count,
                     )
                 )
-        if item_type in {None, "tag"} and allowed != ():
+        if item_type in {None, "tag"} and allowed is None:
             items.extend(
                 OrganizationTagSnapshot(tag_id=tag.tag_id, name=tag.name, color=tag.color)
-                for tag in self.organization.list_tags(limit=source_limit)
+                for tag in self.organization.list_tags()
             )
-        items.sort(key=lambda item: (item.kind, getattr(item, "path", ""), repr(item)))
+
+        def item_key(
+            item: OrganizationDocumentSnapshot
+            | OrganizationFolderSnapshot
+            | OrganizationTagSnapshot,
+        ) -> tuple[str, str, str]:
+            if isinstance(item, OrganizationDocumentSnapshot):
+                return item.kind, item.path or "", item.document_id
+            if isinstance(item, OrganizationFolderSnapshot):
+                return item.kind, item.path, item.folder_id
+            return item.kind, item.name, item.tag_id
+
+        items.sort(key=item_key)
         page = items[offset : offset + limit]
         return OrganizationSnapshotPage(
             items=page,
@@ -1401,23 +1685,47 @@ class WorkspaceAccessService:
         return self._run(principal, "list_tags", "tag", operation)
 
     def list_folders(self, principal: Principal) -> list[Folder]:
-        def operation() -> list[Folder]:
-            allowed = self.policy.allowed_prefixes(principal, Capability.READ)
-            if allowed == ():
-                return []
-            folders = self.organization.list_folders()
-            if allowed is None:
-                return folders
-            return [
-                folder
-                for folder in folders
-                if any(
-                    path_matches(prefix, folder.path) or path_matches(folder.path, prefix)
-                    for prefix in allowed
-                )
-            ]
+        return self._run(
+            principal, "list_folders", "folder", lambda: self._visible_folders(principal)
+        )
 
-        return self._run(principal, "list_folders", "folder", operation)
+    def _visible_folders(self, principal: Principal) -> list[Folder]:
+        allowed = self.policy.allowed_prefixes(principal, Capability.READ)
+        if allowed == ():
+            return []
+        folders = self.organization.list_folders()
+        if allowed is None:
+            return folders
+        visible: list[Folder] = []
+        with self.documents.database.connection() as connection:
+            for folder in folders:
+                if any(path_matches(prefix, folder.path) for prefix in allowed):
+                    visible.append(folder)
+                elif any(path_matches(folder.path, prefix) for prefix in allowed):
+                    clauses = ["d.deleted = 0"]
+                    parameters: list[object] = []
+                    self.documents._add_path_filter(
+                        clauses,
+                        parameters,
+                        tuple(prefix for prefix in allowed if path_matches(folder.path, prefix)),
+                    )
+                    count = connection.execute(
+                        "SELECT COUNT(*) FROM documents d WHERE " + " AND ".join(clauses),
+                        parameters,
+                    ).fetchone()[0]
+                    visible.append(
+                        folder.model_copy(
+                            update={
+                                "category": None,
+                                "tags": [],
+                                "metadata_version": 0,
+                                "document_count": count,
+                                "created_at": "",
+                                "updated_at": "",
+                            }
+                        )
+                    )
+        return visible
 
     def create_tag(
         self, principal: Principal, *, name: str, color: str, idempotency_key: str
@@ -1901,6 +2209,7 @@ class WorkspaceAccessService:
             "diff",
             "list_tags",
             "list_folders",
+            "list_organization",
         }
         if estimated_bytes is None:
             estimated_bytes = 2048
@@ -1962,6 +2271,10 @@ class WorkspaceAccessService:
                     self.documents.database.post_commit_hook(audit_post_commit_hook),
                 ):
                     result = operation()
+            except _RetryHttpMutation:
+                # The operation has unwound its locks and commit hooks without
+                # writing. Admission releases this unused ticket before retry.
+                raise
             except Exception as error:
                 audit_err: Exception | None = None
                 if audit_committed:

@@ -22,6 +22,10 @@ class CredentialConflictError(ConflictError):
     code = "credential_conflict"
 
 
+class PreconditionError(ConflictError):
+    code = "precondition_failed"
+
+
 class IdempotencyError(SangamError):
     code = "idempotency_conflict"
 

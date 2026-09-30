@@ -682,6 +682,52 @@ def test_path_scoped_reads_filter_lists_search_and_unmaterialized_documents(
     assert client.get("/api/v1/tags", headers=bearer(token)).status_code == 403
 
 
+def test_path_scoped_agent_cannot_access_tags_via_organization_snapshot(
+    client: TestClient,
+) -> None:
+    tag_res = client.post(
+        "/api/v1/tags",
+        json={"name": "Confidential", "color": "#ff0000"},
+        headers={"Idempotency-Key": "tag-create-admin"},
+    )
+    assert tag_res.status_code == 201
+
+    scoped_token = issue_token(
+        client,
+        actor_id="agent:scopedtag",
+        scopes=[
+            {"capability": "read", "path_prefix": "agents"},
+        ],
+    )["token"]
+
+    global_token = issue_token(
+        client,
+        actor_id="agent:globaltag",
+        scopes=[
+            {"capability": "read", "path_prefix": None},
+        ],
+    )["token"]
+
+    assert client.get("/api/v1/tags", headers=bearer(scoped_token)).status_code == 403
+
+    scoped_org = client.get(
+        "/api/v1/organization",
+        params={"item_type": "tag"},
+        headers=bearer(scoped_token),
+    )
+    assert scoped_org.status_code == 200
+    assert scoped_org.json()["items"] == []
+
+    global_org = client.get(
+        "/api/v1/organization",
+        params={"item_type": "tag"},
+        headers=bearer(global_token),
+    )
+    assert global_org.status_code == 200
+    tag_items = global_org.json()["items"]
+    assert any(item["name"] == "Confidential" for item in tag_items)
+
+
 def test_scoped_filters_run_before_pagination_and_intersect_search_authority(
     client: TestClient,
 ) -> None:

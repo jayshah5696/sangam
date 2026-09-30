@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Copy, FileText, StickyNote } from 'lucide-react'
+import { BookmarkCheck, Check, Copy, FileText, StickyNote } from 'lucide-react'
+import { workspaceEvidenceStore } from '../workspaceEvidenceState'
+import { StateMessage } from './ui/StateMessage'
 import type { PdfRect } from '../api'
 import { floatingPosition, markdownSelectionCitation } from '../pdfAnnotationUi'
 
@@ -16,6 +18,7 @@ export type PdfTextSelection = {
 export function PdfSelectionToolbar({
   documentId,
   documentTitle,
+  pinnedRevisionId,
   selection,
   pending,
   onHighlight,
@@ -24,6 +27,7 @@ export function PdfSelectionToolbar({
 }: {
   documentId: string
   documentTitle: string
+  pinnedRevisionId?: string
   selection: PdfTextSelection
   pending: boolean
   onHighlight: (color: string) => void
@@ -33,6 +37,25 @@ export function PdfSelectionToolbar({
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: selection.anchor.left, top: selection.anchor.top })
   const [copied, setCopied] = useState<'text' | 'citation' | null>(null)
+  const [kept, setKept] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const keep = async () => {
+    try {
+      await workspaceEvidenceStore.keepEvidence({
+        sourceDocumentId: documentId,
+        sourceTitle: documentTitle,
+        sourceContentType: 'application/pdf',
+        pinnedRevisionId,
+        pageNumber: selection.pageNumber,
+        geometry: selection.geometry,
+        selectedText: selection.selectedText,
+      })
+      setKept(true)
+      setError(null)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current
@@ -94,6 +117,17 @@ export function PdfSelectionToolbar({
         ))}
       </div>
       <span className="pdf-selection-divider" />
+      <button
+        type="button"
+        disabled={pending}
+        aria-label="Keep as evidence"
+        title="Keep as evidence"
+        onClick={() => void keep()}
+      >
+        {kept ? <Check size="var(--icon-inline)" /> : <BookmarkCheck size="var(--icon-inline)" />}
+        {kept ? 'Kept' : 'Keep as evidence'}
+      </button>
+      {error && <StateMessage compact kind="error" title="Evidence storage failed" description={error} />}
       <button type="button" disabled={pending} onClick={onAddNote}>
         <StickyNote size="var(--icon-inline)" /> Add note
       </button>
