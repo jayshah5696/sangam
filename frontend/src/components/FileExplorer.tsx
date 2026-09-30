@@ -439,6 +439,23 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   }, [adapter, model, sortComparator])
 
   useEffect(() => {
+    // Pierre's virtual scroll host can contain no tabbable rows when the
+    // selected row is offscreen. Give the actual scroll owner keyboard access.
+    const makeScrollFocusable = () => {
+      const scroll = model
+        .getFileTreeContainer()
+        ?.shadowRoot?.querySelector<HTMLElement>('[data-file-tree-virtualized-scroll]')
+      if (scroll) {
+        scroll.setAttribute('role', 'group')
+        scroll.setAttribute('aria-label', 'Files')
+        scroll.tabIndex = 0
+      }
+    }
+    makeScrollFocusable()
+    return model.subscribe(makeScrollFocusable)
+  }, [model])
+
+  useEffect(() => {
     if (!activeDocumentId) return
     const activePath = adapter.treePathByDocumentId.get(activeDocumentId)
     if (!activePath) return

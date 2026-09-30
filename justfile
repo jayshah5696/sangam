@@ -250,6 +250,21 @@ verify-negative port="8995":
 verify-doctor:
     ./scripts/control-sangam.sh doctor
 
+# Prove chat saturation, bounded revision pages, and concurrent PDF work over HTTP.
+verify-api-reliability port="8896":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-api-control.XXXXXX")"
+    export SANGAM_CHAT_MAX_CONCURRENT_RUNS=1
+    export SANGAM_CHAT_MAX_WAITING_RUNS=1
+    export SANGAM_CHAT_QUEUE_WAIT_TIMEOUT_SECONDS=0.5
+    export SANGAM_CHAT_MAX_REQUEST_BYTES=16384
+    trap './scripts/control-sangam.sh cleanup; rm -rf "$TMPDIR"' EXIT
+    ./scripts/control-sangam.sh launch "{{ port }}"
+    ./scripts/control-sangam.sh doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/verify_api_reliability.py
+
 # Seed rich multi-modal test data into the active verification instance.
 verify-seed:
     ./scripts/control-sangam.sh seed

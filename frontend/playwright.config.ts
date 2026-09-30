@@ -39,7 +39,7 @@ export default defineConfig({
     },
     {
       name: 'webkit-mobile-evidence',
-      testMatch: /(?:workspace-evidence|create-to-write)\.spec\.ts/,
+      testMatch: /(?:workspace-evidence|create-to-write|revision-history)\.spec\.ts/,
       use: { ...devices['iPhone 13'] },
     },
     {
