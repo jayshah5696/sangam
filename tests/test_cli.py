@@ -90,7 +90,7 @@ def test_cli_commands_map_to_http_api(monkeypatch: pytest.MonkeyPatch, tmp_path)
         "/documents/doc-1/materialize",
         {"expected_revision_id": "r2", "path": "projects/cli.md"},
     ) in calls
-    assert ("GET", "/documents/doc-1/history", None) in calls
+    assert ("GET", "/documents/doc-1/revisions?limit=20", None) in calls
     assert (
         "POST",
         "/documents/doc-1/move",

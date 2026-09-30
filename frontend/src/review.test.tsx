@@ -53,9 +53,9 @@ vi.mock('@tanstack/react-query', () => ({
     if (queryKey[0] === 'document' && queryKey[2] === 'review') {
       return { data: testDocument, isLoading: false, isError: false }
     }
-    if (queryKey[0] === 'document' && queryKey[2] === 'history') {
+    if (queryKey[0] === 'document' && queryKey[2] === 'revision') {
       return {
-        data: [{ revision_id: 'rev-1', content: 'Original document content' }],
+        data: { revision_id: 'rev-1', content: 'Original document content' },
         isLoading: false,
         isError: false,
       }
@@ -106,7 +106,7 @@ vi.mock('./api', () => ({
     listChatProposals: vi.fn(),
     listDocuments: vi.fn(),
     getDocument: vi.fn(),
-    history: vi.fn(),
+    revision: vi.fn(),
     applyChatProposal: (proposal: ChatProposal, content?: string) => mockApplyChatProposal(proposal, content),
     dismissChatProposal: (id: string, reason?: string) => mockDismissChatProposal(id, reason),
   },

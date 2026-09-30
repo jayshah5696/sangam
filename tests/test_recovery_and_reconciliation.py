@@ -72,20 +72,20 @@ def test_failure_before_database_commit_rolls_back_everything(
 
 
 def test_app_startup_completes_pending_materialization(
-    client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
+    settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    service: DocumentService = client.app.state.services.documents
-
     def fail_write(_path: str, _content: str) -> str:
         raise OSError("injected")
 
-    monkeypatch.setattr(service.workspace, "write_atomic", fail_write)
-    failed = client.post(
-        "/api/v1/documents",
-        json={"title": "Startup", "content": "recover on startup", "path": "startup.md"},
-        headers=headers("startup-failure"),
-    )
-    document_id = failed.json()["error"]["details"]["document_id"]
+    with TestClient(create_app(settings)) as client:
+        service: DocumentService = client.app.state.services.documents
+        monkeypatch.setattr(service.workspace, "write_atomic", fail_write)
+        failed = client.post(
+            "/api/v1/documents",
+            json={"title": "Startup", "content": "recover on startup", "path": "startup.md"},
+            headers=headers("startup-failure"),
+        )
+        document_id = failed.json()["error"]["details"]["document_id"]
 
     with TestClient(create_app(settings)) as restarted:
         recovered = restarted.get(f"/api/v1/documents/{document_id}").json()

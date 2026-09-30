@@ -34,12 +34,12 @@ export default defineConfig({
     {
       name: 'chromium-touch-mobile',
       testMatch:
-        /(?:projects|capture-projects-screenshots|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence|review-inbox)\.spec\.ts/,
+        /(?:projects|capture-projects-screenshots|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence|review-inbox|revision-history)\.spec\.ts/,
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
     },
     {
       name: 'webkit-mobile-evidence',
-      testMatch: /(?:workspace-evidence|create-to-write)\.spec\.ts/,
+      testMatch: /(?:workspace-evidence|create-to-write|revision-history)\.spec\.ts/,
       use: { ...devices['iPhone 13'] },
     },
     {

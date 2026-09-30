@@ -258,9 +258,26 @@ def materialize(
 
 
 @app.command()
-def history(document_id: str) -> None:
-    """Show immutable revision history."""
-    _print_json(_request("GET", f"/documents/{document_id}/history"))
+def history(
+    document_id: str,
+    limit: Annotated[int, typer.Option(min=1, max=100)] = 20,
+    cursor: Annotated[str | None, typer.Option()] = None,
+    legacy: Annotated[bool, typer.Option("--legacy")] = False,
+) -> None:
+    """Show a bounded revision summary page. --legacy returns the old full-content list."""
+    if legacy:
+        _print_json(_request("GET", f"/documents/{document_id}/history"))
+        return
+    parameters = {"limit": str(limit)}
+    if cursor:
+        parameters["cursor"] = cursor
+    _print_json(_request("GET", f"/documents/{document_id}/revisions?{urlencode(parameters)}"))
+
+
+@app.command()
+def revision(document_id: str, revision_id: str) -> None:
+    """Read exact immutable revision content."""
+    _print_json(_request("GET", f"/documents/{document_id}/revisions/{revision_id}"))
 
 
 @app.command()

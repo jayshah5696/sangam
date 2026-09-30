@@ -1,0 +1,49 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Fixture", "version": "1"},
+  "paths": {
+    "/items": {
+      "get": {
+        "operationId": "listItems",
+        "parameters": [
+          {"name": "state", "in": "query", "required": false, "schema": {"type": "string", "enum": ["open", "closed"]}}
+        ],
+        "responses": {
+          "200": {"description": "Items", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemList"}}}}
+        }
+      },
+      "post": {
+        "operationId": "createItem",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateItem"}}}},
+        "responses": {
+          "201": {"description": "Created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Item"}}}}
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateItem": {
+        "type": "object",
+        "required": ["name", "state"],
+        "properties": {
+          "name": {"type": "string"},
+          "state": {"type": "string", "enum": ["open", "closed"]}
+        }
+      },
+      "Item": {
+        "type": "object",
+        "required": ["id", "state"],
+        "properties": {
+          "id": {"type": "integer"},
+          "state": {"type": "string", "enum": ["open", "closed"]}
+        }
+      },
+      "ItemList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/Item"}}}
+      }
+    }
+  }
+}

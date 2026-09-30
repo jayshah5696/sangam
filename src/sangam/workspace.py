@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import mimetypes
 import os
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 from sangam.errors import ConflictError, InvalidPathError, NotFoundError
 
@@ -62,6 +63,10 @@ class WorkspaceFilesystem(Protocol):
     def write_atomic(self, path: str, content: str) -> str: ...
 
     def write_atomic_bytes(self, path: str, content: bytes, *, overwrite: bool = False) -> str: ...
+
+    def write_atomic_stream(
+        self, path: str, content: BinaryIO, *, overwrite: bool = False
+    ) -> str: ...
 
     def delete_document(self, path: str) -> None: ...
 
@@ -135,6 +140,9 @@ class DiskWorkspaceFilesystem:
         return self.write_atomic_bytes(path, content.encode("utf-8"), overwrite=True)
 
     def write_atomic_bytes(self, path: str, content: bytes, *, overwrite: bool = False) -> str:
+        return self.write_atomic_stream(path, io.BytesIO(content), overwrite=overwrite)
+
+    def write_atomic_stream(self, path: str, content: BinaryIO, *, overwrite: bool = False) -> str:
         destination = self._document_path(path)
         if destination.exists() and not overwrite:
             raise InvalidPathError("A workspace file already exists at that path")
@@ -144,12 +152,16 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
+            digest = hashlib.sha256()
             with os.fdopen(descriptor, "wb") as output:
-                output.write(content)
+                while chunk := content.read(65536):
+                    output.write(chunk)
+                    digest.update(chunk)
                 output.flush()
                 os.fsync(output.fileno())
-            actual_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
-            expected_hash = hashlib.sha256(content).hexdigest()
+            with temporary.open("rb") as written:
+                actual_hash = hashlib.file_digest(written, "sha256").hexdigest()
+            expected_hash = digest.hexdigest()
             if actual_hash != expected_hash:
                 raise OSError("Materialized file hash does not match the committed revision")
             if overwrite:

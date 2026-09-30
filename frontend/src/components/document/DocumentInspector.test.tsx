@@ -16,6 +16,10 @@ const state = vi.hoisted(() => {
 })
 
 vi.mock('@tanstack/react-query', () => ({
+  useInfiniteQuery: (options: { queryKey: unknown[]; enabled?: boolean }) => {
+    state.queries.push(options)
+    return { data: undefined, isLoading: false }
+  },
   useMutation: () => ({ isPending: false, mutate: vi.fn() }),
   useQuery: (options: { queryKey: unknown[]; enabled?: boolean }) => {
     state.queries.push(options)

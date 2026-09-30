@@ -528,16 +528,7 @@ class ChatProposalService:
         if expected_revision_id == document.current_revision_id:
             document_content = document.content
         else:
-            revision = next(
-                (
-                    item
-                    for item in self.workspace.history(principal, document_id)
-                    if item.revision_id == expected_revision_id
-                ),
-                None,
-            )
-            if revision is None:
-                raise NotFoundError(f"Document revision not found: {expected_revision_id}")
+            revision = self.workspace.get_revision(principal, document_id, expected_revision_id)
             document_content = revision.content
         if mode == "append":
             boundary = "" if (document_content.endswith("\n") or content.startswith("\n")) else "\n"

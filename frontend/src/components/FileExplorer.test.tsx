@@ -40,6 +40,7 @@ const state = vi.hoisted(() => {
     useFileTreeOptions,
     item,
     model: {
+      getFileTreeContainer: vi.fn(() => undefined),
       getFocusedPath: vi.fn((): string | null => null),
       getItem: vi.fn(() => item),
       getSelectedPaths: vi.fn((): string[] => []),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import time
 
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
@@ -44,12 +45,23 @@ def import_pdf(
     query = {"title": title, "path": path}
     if supersedes:
         query["supersedes_document_id"] = supersedes
-    return client.post(
+    response = client.post(
         "/api/v1/pdfs",
         params=query,
         content=content,
         headers={**headers(key), "Content-Type": "application/pdf"},
     )
+    if response.status_code == 201:
+        document_id = response.json()["document_id"]
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            current = client.get(f"/api/v1/documents/{document_id}").json()
+            if current["pdf_extraction_status"] in {"ready", "failed"}:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("PDF extraction did not reach a terminal state")
+    return response
 
 
 def test_pdf_import_extraction_range_search_and_immutability(client: TestClient, settings) -> None:
@@ -300,7 +312,12 @@ def test_extraction_failure_is_visible_and_does_not_block_pdf_bytes(client: Test
 
     retried = client.post(f"/api/v1/pdfs/{document_id}/extract")
     assert retried.status_code == 200
-    after_retry = client.get(f"/api/v1/documents/{document_id}").json()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        after_retry = client.get(f"/api/v1/documents/{document_id}").json()
+        if after_retry["pdf_extraction_status"] == "failed":
+            break
+        time.sleep(0.02)
     assert after_retry["pdf_extraction_status"] == "failed"
 
 

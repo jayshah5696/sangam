@@ -46,11 +46,11 @@ function WorkspaceChat() {
   })
   const document = documentQuery.data ?? null
   const historyQuery = useQuery({
-    queryKey: ['history', search.document],
-    queryFn: () => api.history(search.document!),
+    queryKey: ['revision', search.document, search.revision],
+    queryFn: () => api.revision(search.document!, search.revision!),
     enabled: Boolean(document && search.revision && document.current_revision_id !== search.revision),
   })
-  const historical = historyQuery.data?.find((revision) => revision.revision_id === search.revision)
+  const historical = historyQuery.data
   const contextDocument =
     document && historical
       ? {

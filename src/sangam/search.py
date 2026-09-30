@@ -16,15 +16,26 @@ class SearchIndex:
         with self.database.transaction() as connection:
             connection.execute("DELETE FROM document_search")
             for document in documents:
-                self._replace(connection, document)
+                self._replace(connection, document.document_id)
 
     def sync(self, document: Document) -> None:
+        """Index canonical state under the writer lock, never a caller's stale snapshot."""
         with self.database.transaction() as connection:
-            connection.execute(
-                "DELETE FROM document_search WHERE document_id = ?",
-                (document.document_id,),
-            )
-            self._replace(connection, document)
+            self._replace(connection, document.document_id)
+
+    def repair_pending(self) -> int:
+        """Repair only committed source changes whose index update was interrupted."""
+        repaired = 0
+        while True:
+            with self.database.transaction() as connection:
+                rows = connection.execute(
+                    "SELECT document_id FROM search_dirty_documents ORDER BY document_id LIMIT 100"
+                ).fetchall()
+                if not rows:
+                    return repaired
+                for row in rows:
+                    self._replace(connection, row["document_id"])
+                repaired += len(rows)
 
     @staticmethod
     def compile_expression(query: str) -> str | None:
@@ -34,8 +45,22 @@ class SearchIndex:
         return " AND ".join(f'"{term}"*' for term in terms)
 
     @staticmethod
-    def _replace(connection: sqlite3.Connection, document: Document) -> None:
-        if document.deleted:
+    def _replace(connection: sqlite3.Connection, document_id: str) -> None:
+        connection.execute("DELETE FROM document_search WHERE document_id = ?", (document_id,))
+        connection.execute(
+            "DELETE FROM search_dirty_documents WHERE document_id = ?", (document_id,)
+        )
+        document = connection.execute(
+            """
+            SELECT d.title, d.path, d.category, d.deleted, r.content,
+                (SELECT group_concat(t.name, ' ') FROM document_tags dt
+                 JOIN tags t ON t.tag_id = dt.tag_id WHERE dt.document_id = d.document_id) AS tags
+            FROM documents d LEFT JOIN revisions r ON r.revision_id = d.current_revision_id
+            WHERE d.document_id = ?
+            """,
+            (document_id,),
+        ).fetchone()
+        if document is None or document["deleted"]:
             return
         revision_search = connection.execute(
             """
@@ -46,7 +71,7 @@ class SearchIndex:
             JOIN actors a ON a.actor_id = r.actor_id
             WHERE r.document_id = ?
             """,
-            (document.document_id,),
+            (document_id,),
         ).fetchone()
         pdf_search = connection.execute(
             """
@@ -58,7 +83,7 @@ class SearchIndex:
                     ' '
                 ) FROM annotations WHERE document_id = ? AND deleted = 0) AS annotations
             """,
-            (document.document_id, document.document_id),
+            (document_id, document_id),
         ).fetchone()
         connection.execute(
             """
@@ -67,20 +92,20 @@ class SearchIndex:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                document.document_id,
-                document.title,
-                document.path or "",
+                document_id,
+                document["title"],
+                document["path"] or "",
                 " ".join(
                     value
                     for value in (
-                        document.content,
+                        document["content"],
                         pdf_search["pages"],
                         pdf_search["annotations"],
                     )
                     if value
                 ),
-                " ".join(tag.name for tag in document.tags),
-                document.category or "",
+                document["tags"] or "",
+                document["category"] or "",
                 revision_search["authors"] or "",
                 revision_search["summaries"] or "",
             ),

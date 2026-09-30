@@ -36,6 +36,12 @@ The image is multi-stage (Node frontend build → python:3.14-slim runtime), run
 
 ## Production
 
+Run one Sangam process for each database, workspace, and backup set. Multiple Uvicorn workers and
+multiple replicas that share any of these storage roots are unsupported. Sangam takes exclusive OS
+locks for the canonical database, workspace, and backup paths before initialization; a second
+process using an overlapping storage root exits with an ownership error. The locks release on clean
+shutdown and when the process dies, so stale lock files do not need manual removal.
+
 Published images are at `ghcr.io/jayshah5696/sangam:{tag}` for linux/amd64 + arm64, Sigstore-signed with SBOM and provenance attestations. Verify before deploying:
 
 ```sh

@@ -5,11 +5,17 @@ import io
 import json
 import re
 import sqlite3
+import subprocess
+import sys
+import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
+from typing import BinaryIO
 
-from pypdf import PdfReader
+from pydantic import TypeAdapter
 
 from sangam.actors import ActorService
 from sangam.db import Database, utc_now
@@ -59,13 +65,16 @@ class PdfResearchService:
         self.search_index = search_index
         self.mutations = mutations
         self.max_pdf_bytes = max_pdf_bytes
+        self.max_pdf_pages = 1000
+        self.max_extracted_text_bytes = 10_000_000
+        self.extraction_timeout_seconds = 30.0
 
     def import_pdf(
         self,
         *,
         title: str,
         path: str,
-        content: bytes,
+        content: bytes | BinaryIO,
         supersedes_document_id: str | None,
         actor_id: str,
         idempotency_key: str,
@@ -79,7 +88,7 @@ class PdfResearchService:
                 title=title,
                 path=path,
                 normalized_path=normalized_path,
-                content=content,
+                content=io.BytesIO(content) if isinstance(content, bytes) else content,
                 supersedes_document_id=supersedes_document_id,
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
@@ -91,7 +100,7 @@ class PdfResearchService:
         title: str,
         path: str,
         normalized_path: str,
-        content: bytes,
+        content: BinaryIO,
         supersedes_document_id: str | None,
         actor_id: str,
         idempotency_key: str,
@@ -100,16 +109,23 @@ class PdfResearchService:
         title = title.strip()
         if not title:
             raise ValidationError("PDF title is required")
-        if not content.startswith(b"%PDF-"):
+        content.seek(0)
+        if content.read(5) != b"%PDF-":
             raise ValidationError("The uploaded file is not a PDF")
-        if len(content) > self.max_pdf_bytes:
+        size_bytes = content.seek(0, 2)
+        if size_bytes > self.max_pdf_bytes:
             raise ValidationError(
                 "PDF exceeds the configured size limit",
-                details={"size_bytes": len(content), "max_pdf_bytes": self.max_pdf_bytes},
+                details={"size_bytes": size_bytes, "max_pdf_bytes": self.max_pdf_bytes},
             )
         if not normalized_path.lower().endswith(".pdf"):
             raise ValidationError("PDF document paths must end in .pdf")
-        content_hash = hashlib.sha256(content).hexdigest()
+        content.seek(0)
+        digest = hashlib.sha256()
+        while chunk := content.read(65536):
+            digest.update(chunk)
+        content_hash = digest.hexdigest()
+        content.seek(0)
         fingerprint = request_hash(
             {
                 "title": title,
@@ -143,13 +159,13 @@ class PdfResearchService:
             created_file = not self.workspace.is_document_file(normalized_path)
             file_written_by_this_call = False
             if created_file:
-                file_hash = self.workspace.write_atomic_bytes(normalized_path, content)
+                file_hash = self.workspace.write_atomic_stream(normalized_path, content)
                 file_written_by_this_call = True
             else:
                 # An import may have been interrupted after the durable file rename but
                 # before SQLite committed. Adopt only the exact bytes the caller supplied;
                 # a different existing file must remain a visible reconciliation conflict.
-                file_hash = hashlib.sha256(self.workspace.read_binary(normalized_path)).hexdigest()
+                file_hash = self.workspace.binary_hash(normalized_path)
                 if file_hash != content_hash:
                     raise ValidationError("A different workspace file already exists at that path")
             try:
@@ -179,7 +195,7 @@ class PdfResearchService:
                             title,
                             normalized_path,
                             content_hash,
-                            len(content),
+                            size_bytes,
                             file_hash,
                             actor_id,
                             now,
@@ -196,7 +212,7 @@ class PdfResearchService:
                             content_hash, size_bytes, actor_id, operation, summary, created_at
                         ) VALUES (?, ?, NULL, '', ?, ?, ?, 'create', 'Imported immutable PDF', ?)
                         """,
-                        (revision_id, document_id, content_hash, len(content), actor_id, now),
+                        (revision_id, document_id, content_hash, size_bytes, actor_id, now),
                     )
                     connection.execute(
                         "UPDATE documents SET current_revision_id = ? WHERE document_id = ?",
@@ -310,14 +326,16 @@ class PdfResearchService:
             )
         return updated.rowcount
 
-    def pending_extractions(self) -> list[str]:
+    def pending_extractions(self, *, limit: int = 100) -> list[str]:
         with self.database.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT document_id FROM pdf_documents
-                WHERE extraction_status = 'pending'
-                ORDER BY imported_at
-                """
+                SELECT p.document_id FROM pdf_documents p
+                JOIN documents d ON d.document_id = p.document_id
+                WHERE p.extraction_status = 'pending' AND d.deleted = 0
+                ORDER BY p.imported_at LIMIT ?
+                """,
+                (limit,),
             ).fetchall()
         return [row["document_id"] for row in rows]
 
@@ -338,13 +356,7 @@ class PdfResearchService:
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise _ExtractionCancelled
-            _, content = self.pdf_bytes(document_id)
-            reader = PdfReader(io.BytesIO(content), strict=False)
-            pages: list[str] = []
-            for page in reader.pages:
-                if cancel_event is not None and cancel_event.is_set():
-                    raise _ExtractionCancelled
-                pages.append(page.extract_text() or "")
+            pages = self._parse_pages(document_id, cancel_event)
             if cancel_event is not None and cancel_event.is_set():
                 raise _ExtractionCancelled
             with self.database.transaction() as connection:
@@ -385,6 +397,58 @@ class PdfResearchService:
             return False
         self.search_index.sync(self.documents.get_document(document_id))
         return True
+
+    def _parse_pages(self, document_id: str, cancel_event: threading.Event | None) -> list[str]:
+        """Spool verified immutable bytes and terminate parsers at the wall-clock deadline."""
+        document, _ = self.pdf_stream_info(document_id)
+        if document.path is None:
+            raise ValidationError("PDF document is not materialized")
+        with tempfile.TemporaryDirectory(prefix="sangam-pdf-extract-") as directory:
+            source = Path(directory) / "source.pdf"
+            output = Path(directory) / "pages.json"
+            with source.open("wb") as content:
+                for chunk in self.workspace.iter_binary(document.path, chunk_size=65536):
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise _ExtractionCancelled
+                    content.write(chunk)
+            deadline = time.monotonic() + self.extraction_timeout_seconds
+            # A file bounds diagnostic buffering even when a corrupt PDF is noisy.
+            with (
+                (Path(directory) / "parser.log").open("w+b") as diagnostics,
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sangam.pdf_parser",
+                        str(source),
+                        str(output),
+                        str(self.max_pdf_pages),
+                        str(self.max_extracted_text_bytes),
+                    ],
+                    stdout=diagnostics,
+                    stderr=diagnostics,
+                ) as process,
+            ):
+                try:
+                    while process.poll() is None:
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise _ExtractionCancelled
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise ValidationError("PDF extraction execution deadline expired")
+                        try:
+                            process.wait(timeout=min(0.05, remaining))
+                        except subprocess.TimeoutExpired:
+                            continue
+                    if process.returncode:
+                        diagnostics.seek(0)
+                        message = diagnostics.read(1000).decode("utf-8", errors="replace")
+                        raise ValidationError("PDF extraction failed: " + message)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+            return TypeAdapter(list[str]).validate_json(output.read_bytes())
 
     def retry_extraction(self, document_id: str) -> Document:
         self._require_pdf(document_id)

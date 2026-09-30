@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import suppress
 from pathlib import PurePosixPath
-from typing import TypeVar
+from typing import BinaryIO, TypeVar
 
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
@@ -60,6 +60,7 @@ from sangam.schemas import (
     PublicationRevision,
     Revision,
     RevisionDiff,
+    RevisionPage,
     Tag,
 )
 from sangam.security import Principal, path_matches, sanitize_sensitive_text
@@ -445,7 +446,7 @@ class WorkspaceAccessService:
         *,
         title: str,
         path: str,
-        content: bytes,
+        content: bytes | BinaryIO,
         supersedes_document_id: str | None,
         idempotency_key: str,
     ) -> Document:
@@ -1258,6 +1259,33 @@ class WorkspaceAccessService:
             action="history",
             current=current,
             operation=lambda: self.documents.history(document_id),
+        )
+
+    def revision_page(
+        self,
+        principal: Principal,
+        document_id: str,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> RevisionPage:
+        current = self.documents.get_document(document_id, include_deleted=True)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="revision_page",
+            current=current,
+            operation=lambda: self.documents.revision_page(document_id, limit=limit, cursor=cursor),
+        )
+
+    def get_revision(self, principal: Principal, document_id: str, revision_id: str) -> Revision:
+        current = self.documents.get_document(document_id, include_deleted=True)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="read_revision",
+            current=current,
+            operation=lambda: self.documents.get_revision(document_id, revision_id),
         )
 
     def revision_diff(

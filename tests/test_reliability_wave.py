@@ -167,6 +167,7 @@ def test_pdf_extraction_claim_allows_only_one_worker(
 ) -> None:
     document = _import_pdf(client, _text_pdf(), key="claimed-pdf")
     service: PdfResearchService = client.app.state.services.pdf_research
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
     with service.database.transaction() as connection:
         connection.execute(
             "UPDATE pdf_documents SET extraction_status = 'pending' WHERE document_id = ?",
@@ -175,14 +176,14 @@ def test_pdf_extraction_claim_allows_only_one_worker(
 
     entered = threading.Event()
     release = threading.Event()
-    original_pdf_bytes = service.pdf_bytes
+    original_pdf_bytes = service.pdf_stream_info
 
     def delayed_pdf_bytes(document_id: str):
         entered.set()
         assert release.wait(5)
         return original_pdf_bytes(document_id)
 
-    monkeypatch.setattr(service, "pdf_bytes", delayed_pdf_bytes)
+    monkeypatch.setattr(service, "pdf_stream_info", delayed_pdf_bytes)
     first_result: list[bool] = []
     worker = threading.Thread(
         target=lambda: first_result.append(service.extract_text(document["document_id"]))
@@ -201,15 +202,15 @@ def test_pdf_extraction_claim_allows_only_one_worker(
 def test_startup_extraction_shutdown_is_cooperative_and_bounded(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    services = create_app(settings).state.services
-    services.pdf_research.import_pdf(
-        title="Pending extraction",
-        path="research/pending.pdf",
-        content=_text_pdf(),
-        supersedes_document_id=None,
-        actor_id="human:jay",
-        idempotency_key="pending-extraction",
-    )
+    with TestClient(create_app(settings)) as seed_client:
+        seed_client.app.state.services.pdf_research.import_pdf(
+            title="Pending extraction",
+            path="research/pending.pdf",
+            content=_text_pdf(),
+            supersedes_document_id=None,
+            actor_id="human:jay",
+            idempotency_key="pending-extraction",
+        )
     started = threading.Event()
 
     def wait_for_shutdown(

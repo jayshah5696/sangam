@@ -109,8 +109,8 @@ function ProposalCard({
     queryFn: () => api.getDocument(proposal.document_id),
   })
   const historyQuery = useQuery({
-    queryKey: ['document', proposal.document_id, 'history', 'review'],
-    queryFn: () => api.history(proposal.document_id),
+    queryKey: ['document', proposal.document_id, 'revision', proposal.expected_revision_id, 'review'],
+    queryFn: () => api.revision(proposal.document_id, proposal.expected_revision_id),
     enabled: Boolean(documentQuery.data),
   })
   const apply = useMutation({
@@ -127,9 +127,7 @@ function ProposalCard({
     },
   })
   const document = documentQuery.data
-  const expectedRevision = historyQuery.data?.find(
-    (revision) => revision.revision_id === proposal.expected_revision_id,
-  )
+  const expectedRevision = historyQuery.data
   const original = expectedRevision?.content
   const current = document?.current_revision_id === proposal.expected_revision_id
   const busy = apply.isPending || dismiss.isPending

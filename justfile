@@ -36,9 +36,9 @@ verify-projects port="8872":
 test-backend-focused args="":
     uv run pytest {{ args }}
 
-# Regenerate the API fingerprint after intentional contract changes.
-update-openapi:
-    uv run python scripts/verify_openapi_contract.py --write
+# Review and accept an intentional API contract change.
+update-openapi reason:
+    just update-openapi-baseline {{ quote(reason) }}
 
 # Serve disposable browser fixtures for interactive investigation.
 serve-e2e port="8873":
@@ -93,8 +93,24 @@ check: test test-docs validate-compose
     ./scripts/smoke-package.sh
 
 # Run only the Python service and API tests.
-test-backend:
-    uv run pytest
+test-backend args="":
+    uv run pytest {{ args }}
+
+# Format selected Python files while independent changes are in progress.
+format-python args=".":
+    uv run ruff format {{ args }}
+
+# Check selected Python files.
+lint-python args=".":
+    uv run ruff check {{ args }}
+
+# Explain OpenAPI changes against the reviewed contract.
+verify-openapi:
+    uv run python scripts/verify_openapi_contract.py
+
+# Record an intentional contract update and its review rationale.
+update-openapi-baseline reason:
+    uv run python scripts/verify_openapi_contract.py --update-baseline --reason {{ quote(reason) }}
 
 # Run the security consolidation failure cases against real temporary storage.
 test-security:
@@ -107,6 +123,14 @@ generate-api:
 # Run reproducible concurrency, backpressure saturation, and audit integrity benchmark.
 benchmark-concurrency workers="20" ops="15":
     uv run python scripts/benchmark_concurrency.py --workers "{{ workers }}" --ops-per-worker "{{ ops }}" 
+
+# Measure cold startup against a repair backlog or an optional baseline checkout.
+benchmark-search-startup count="250" baseline_source="":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    args=(--count "{{ count }}")
+    if [[ -n "{{ baseline_source }}" ]]; then args+=(--baseline-source "{{ baseline_source }}"); fi
+    uv run python scripts/benchmark_search_startup.py "${args[@]}"
 
 # Type-check the provider and chat boundary introduced by the architecture foundation.
 typecheck:
@@ -229,6 +253,21 @@ verify-negative port="8995":
 # Run a read-only doctor health and integrity check on the active verification instance.
 verify-doctor:
     ./scripts/control-sangam.sh doctor
+
+# Prove chat saturation, bounded revision pages, and concurrent PDF work over HTTP.
+verify-api-reliability port="8896":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-api-control.XXXXXX")"
+    export SANGAM_CHAT_MAX_CONCURRENT_RUNS=1
+    export SANGAM_CHAT_MAX_WAITING_RUNS=1
+    export SANGAM_CHAT_QUEUE_WAIT_TIMEOUT_SECONDS=0.5
+    export SANGAM_CHAT_MAX_REQUEST_BYTES=16384
+    trap './scripts/control-sangam.sh cleanup; rm -rf "$TMPDIR"' EXIT
+    ./scripts/control-sangam.sh launch "{{ port }}"
+    ./scripts/control-sangam.sh doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/verify_api_reliability.py
 
 # Seed rich multi-modal test data into the active verification instance.
 verify-seed:

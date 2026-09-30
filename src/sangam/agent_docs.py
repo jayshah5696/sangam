@@ -176,7 +176,8 @@ def agent_skill(base_url: str) -> str:
         History and diffs are available at:
 
         ```text
-        GET /api/v1/documents/{{document_id}}/history
+        GET /api/v1/documents/{{document_id}}/revisions?limit=20&cursor=...
+        GET /api/v1/documents/{{document_id}}/revisions/{{revision_id}}
         GET /api/v1/documents/{{document_id}}/diff?from_revision_id=...&to_revision_id=...
         ```
 

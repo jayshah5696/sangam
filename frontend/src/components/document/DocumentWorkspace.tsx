@@ -171,9 +171,7 @@ export function DocumentWorkspace({
     const occurrence = surface ? preceding.toString().split(text).length - 1 : 0
     const revisionId = container.closest<HTMLElement>('[data-source-revision]')?.dataset.sourceRevision
     const historical = revisionId
-      ? queryClient
-          .getQueryData<Revision[]>(['history', documentId])
-          ?.find((revision) => revision.revision_id === revisionId)
+      ? queryClient.getQueryData<Revision>(['revision', documentId, revisionId])
       : undefined
     const rect = range.getBoundingClientRect()
     if (revisionId && !historical) return
@@ -302,13 +300,11 @@ export function DocumentWorkspace({
     retry: false,
   })
   const citedHistoryQuery = useQuery({
-    queryKey: ['history', documentId],
-    queryFn: () => api.history(documentId),
+    queryKey: ['revision', documentId, citationTarget?.revisionId],
+    queryFn: () => api.revision(documentId, citationTarget?.revisionId ?? ''),
     enabled: Boolean(citationTarget?.revisionId),
   })
-  const citedRevision = citedHistoryQuery.data?.find(
-    (revision) => revision.revision_id === citationTarget?.revisionId,
-  )
+  const citedRevision = citedHistoryQuery.data
   const rebaseAndRetry = () => {
     const serverHead = conflictHeadQuery.data
     if (!serverHead) return

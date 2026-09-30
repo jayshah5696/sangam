@@ -29,6 +29,7 @@ from sangam.chat_context import ToolContext
 from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_proposals import ChatProposalService
+from sangam.chat_runtime import BoundedChatAdmission
 from sangam.errors import NotFoundError, SangamError, ValidationError
 from sangam.schemas import OrganizationOperation
 from sangam.security import IdentityService
@@ -45,6 +46,7 @@ class ChatToolset:
         registry: ChatCapabilityRegistry,
         effects: ChatEffectService,
         evidence: ChatEvidenceRepository,
+        runtime: BoundedChatAdmission,
         max_result_bytes: int,
     ) -> None:
         self.workspace = workspace
@@ -52,6 +54,7 @@ class ChatToolset:
         self.registry = registry
         self.effects = effects
         self.evidence = evidence
+        self.runtime = runtime
         self.identity = IdentityService(evidence.database)
         self.max_result_bytes = max_result_bytes
         self.policies = registry.by_id
@@ -261,16 +264,7 @@ class ChatToolset:
                 and ctx.context.request_context.document_id == document_id
                 and pinned_revision != document.current_revision_id
             ):
-                revision = next(
-                    (
-                        item
-                        for item in self.workspace.history(principal, document_id)
-                        if item.revision_id == pinned_revision
-                    ),
-                    None,
-                )
-                if revision is None:
-                    raise NotFoundError(f"Pinned document revision not found: {pinned_revision}")
+                revision = self.workspace.get_revision(principal, document_id, pinned_revision)
                 content = revision.content
                 revision_id = revision.revision_id
             total_chars = len(content)
@@ -460,7 +454,9 @@ class ChatToolset:
     async def publish_document(
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
     ) -> str | None:
-        document = self.workspace.get_document(ctx.context.request_context.principal, document_id)
+        document = await self.runtime.run_sync(
+            self.workspace.get_document, ctx.context.request_context.principal, document_id
+        )
         if document.content_type == "application/pdf":
             raise ValidationError("PDF documents cannot be published")
         arguments = PublishDocumentInput.model_validate(
@@ -489,13 +485,14 @@ class ChatToolset:
         request_context = ctx.context.request_context
         if not request_context.run_id:
             raise RuntimeError("Durable chat effects require a persisted run")
-        if self.evidence.cancel_requested(request_context.run_id):
+        if await self.runtime.run_sync(self.evidence.cancel_requested, request_context.run_id):
             raise ValidationError("The chat run was cancelled before this effect was requested")
         tool_call_id = getattr(ctx, "tool_call_id", None)
         if not tool_call_id:
             raise RuntimeError("Durable chat effects require a tool call ID")
         try:
-            effect = self.effects.propose(
+            effect = await self.runtime.run_sync(
+                self.effects.propose,
                 request_context.principal,
                 run_id=request_context.run_id,
                 thread_id=ctx.context.thread.id,
@@ -505,7 +502,8 @@ class ChatToolset:
                 preview=preview,
             )
         except SangamError as error:
-            self.evidence.record_tool(
+            await self.runtime.run_sync(
+                self.evidence.record_tool,
                 run_id=request_context.run_id,
                 tool_call_id=tool_call_id,
                 capability_id=capability.capability_id,
@@ -529,7 +527,8 @@ class ChatToolset:
                 }
             )
 
-        self.evidence.record_tool(
+        await self.runtime.run_sync(
+            self.evidence.record_tool,
             run_id=request_context.run_id,
             tool_call_id=tool_call_id,
             capability_id=capability.capability_id,
@@ -574,10 +573,10 @@ class ChatToolset:
         try:
             request_context = getattr(ctx.context, "request_context", None)
             run_id = getattr(request_context, "run_id", None)
-            if run_id and self.evidence.cancel_requested(run_id):
+            if run_id and await self.runtime.run_sync(self.evidence.cancel_requested, run_id):
                 raise ValidationError("The chat run was cancelled before this tool executed")
             payload = await asyncio.wait_for(
-                asyncio.to_thread(operation), timeout=policy.timeout_seconds
+                self.runtime.run_sync(operation), timeout=policy.timeout_seconds
             )
             payload = policy.result_schema.model_validate(payload).model_dump(mode="json")
         except TimeoutError:
@@ -624,7 +623,8 @@ class ChatToolset:
         request_context = getattr(ctx.context, "request_context", None)
         run_id = getattr(request_context, "run_id", None)
         if run_id:
-            self.evidence.record_tool(
+            await self.runtime.run_sync(
+                self.evidence.record_tool,
                 run_id=run_id,
                 tool_call_id=getattr(ctx, "tool_call_id", None),
                 capability_id=policy.capability_id,

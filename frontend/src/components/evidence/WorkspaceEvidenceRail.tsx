@@ -608,8 +608,8 @@ function SourceVersionComparisonModal({
   const dialogRef = useComparisonDialog(onClose)
   const [error, setError] = useState<string | null>(null)
   const historyQuery = useQuery({
-    queryKey: ['history', item.sourceDocumentId],
-    queryFn: () => api.history(item.sourceDocumentId),
+    queryKey: ['revision', item.sourceDocumentId, item.pinnedRevisionId],
+    queryFn: () => api.revision(item.sourceDocumentId, item.pinnedRevisionId ?? ''),
     enabled: Boolean(item.pinnedRevisionId),
   })
 
@@ -618,8 +618,7 @@ function SourceVersionComparisonModal({
     queryFn: () => api.getDocument(item.sourceDocumentId),
   })
 
-  const history = historyQuery.data ?? []
-  const pinnedRev = history.find((r) => r.revision_id === item.pinnedRevisionId)
+  const pinnedRev = historyQuery.data
   const currentDoc = docQuery.data
   const currentRevId = currentDoc?.current_revision_id
   const remapped = currentDoc && remapEvidencePassage(currentDoc.content, item)
