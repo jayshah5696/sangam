@@ -59,6 +59,8 @@ export function ChatPanel({
   pdfPageNumber,
   annotationId,
   compact = false,
+  initialPrompt,
+  initialThreadId,
 }: {
   document?: Document | null
   selectedText?: string
@@ -67,6 +69,8 @@ export function ChatPanel({
   pdfPageNumber?: number | null
   annotationId?: string | null
   compact?: boolean
+  initialPrompt?: string
+  initialThreadId?: string
 }) {
   const activeDocument = document ?? null
   const activeSelectedText = selectedText ?? ''
@@ -74,7 +78,9 @@ export function ChatPanel({
   const queryClient = useQueryClient()
   const { preferences } = useTheme()
   const threadStorageKey = THREAD_STORAGE_KEY
-  const [threadId, setThreadId] = useState<string | null>(() => localStorage.getItem(threadStorageKey))
+  const [threadId, setThreadId] = useState<string | null>(
+    () => initialThreadId ?? localStorage.getItem(threadStorageKey),
+  )
   const [chatEpoch, setChatEpoch] = useState(0)
   const [pendingPublication, setPendingPublication] = useState<PublishConfirmationRequest | null>(null)
   const [publishError, setPublishError] = useState(false)
@@ -397,18 +403,18 @@ export function ChatPanel({
     },
     [],
   )
-  // A full remount is the only reliable way to recover a wedged ChatKit frame;
-  // clearing the stored thread also protects against server-side resets that
-  // would otherwise leave the frame blank with no visible error.
+  // Remount a failed frame. An explicit handoff stays in its source thread;
+  // ordinary workspace chat clears a potentially obsolete stored thread.
   const resetChatSurface = useCallback(() => {
     const currentThreadId = threadIdRef.current
     if (currentThreadId) void api.cancelChatRun(currentThreadId)
     discardThreadReviews(currentThreadId)
-    localStorage.removeItem(threadStorageKey)
-    threadIdRef.current = null
-    setThreadId(null)
+    if (!initialThreadId) localStorage.removeItem(threadStorageKey)
+    const recoveredThreadId = initialThreadId ?? null
+    threadIdRef.current = recoveredThreadId
+    setThreadId(recoveredThreadId)
     setChatEpoch((epoch) => epoch + 1)
-  }, [discardThreadReviews, threadStorageKey])
+  }, [discardThreadReviews, threadStorageKey, initialThreadId])
   const models = useMemo(
     () =>
       (configQuery.data?.available_models ?? []).map((model) => ({
@@ -624,6 +630,14 @@ export function ChatPanel({
 
   return (
     <div className={`chat-panel ${compact ? 'chat-panel-compact' : ''}`}>
+      {initialPrompt && (
+        <StateMessage
+          compact
+          kind="empty"
+          title="Message draft"
+          description="Review the prepared message in the composer, then choose Send."
+        />
+      )}
       {!compact && (
         <ChatContextBanner
           document={activeDocument}
@@ -775,6 +789,7 @@ export function ChatPanel({
               inferenceEnabled={configQuery.data.inference_enabled}
               models={models}
               initialThreadId={threadId}
+              initialPrompt={initialPrompt}
               activeThreadId={threadId}
               onThreadChange={handleThreadChange}
               onResponseEnd={handleResponseEnd}
@@ -1401,6 +1416,7 @@ function WorkspaceChatSurface({
   onCitationDeeplink,
   onReset,
   compact,
+  initialPrompt,
 }: {
   liveRef: React.MutableRefObject<LiveChatContext>
   theme: 'dark' | 'light'
@@ -1418,10 +1434,14 @@ function WorkspaceChatSurface({
   onCitationDeeplink: (event: { name: string; data?: CitationDataPayload }) => void
   onReset: () => void
   compact: boolean
+  initialPrompt?: string
 }) {
   const [phase, setPhase] = useState<ChatFramePhase>('connecting')
   const [isResponding, setIsResponding] = useState(false)
   const responseAbortRef = useRef<AbortController | null>(null)
+  const hydratedPrompt = useRef<string | null>(null)
+  const [promptError, setPromptError] = useState(false)
+  const [promptAttempt, setPromptAttempt] = useState(0)
   useEffect(() => {
     // ChatKit can fail silently (blocked CDN subresource, stale thread id after a
     // server reset). If the frame never reports ready, surface a recoverable
@@ -1542,6 +1562,20 @@ function WorkspaceChatSurface({
   })
   const chatkitHostRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
+    if (phase !== 'ready' || !initialPrompt || hydratedPrompt.current === initialPrompt) return
+    hydratedPrompt.current = initialPrompt
+    void chatkit
+      .setComposerValue({ text: initialPrompt })
+      .then(() => {
+        setPromptError(false)
+        return chatkit.focusComposer()
+      })
+      .catch(() => {
+        hydratedPrompt.current = null
+        setPromptError(true)
+      })
+  }, [phase, initialPrompt, chatkit, promptAttempt])
+  useEffect(() => {
     let stopped = false
     let observedRoot: ShadowRoot | null = null
     const observer = new MutationObserver(() => check())
@@ -1553,7 +1587,12 @@ function WorkspaceChatSurface({
         observedRoot = host.shadowRoot
         observer.observe(observedRoot, { childList: true, subtree: true })
       }
-      if (hasMountedChatInterface(host)) setPhase('ready')
+      // DOM presence establishes initial mounting, not transport recovery. A failed
+      // frame retains its composer/iframe and can still deliver late DOM work.
+      // Only an explicit retry remounts the surface in the connecting phase.
+      if (hasMountedChatInterface(host)) {
+        setPhase((current) => (current === 'connecting' ? 'ready' : current))
+      }
     }
     check()
     const interval = window.setInterval(check, 250)
@@ -1565,6 +1604,25 @@ function WorkspaceChatSurface({
   }, [])
   return (
     <>
+      {promptError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="The revision draft could not be placed in the composer"
+          description="Your feedback is still available. Retry when chat is connected."
+          action={
+            <button
+              className="secondary-action"
+              onClick={() => {
+                setPromptError(false)
+                setPromptAttempt((attempt) => attempt + 1)
+              }}
+            >
+              Retry draft handoff
+            </button>
+          }
+        />
+      )}
       {compact && (
         <CompactChatControls
           onNewChat={() => {
@@ -1608,8 +1666,8 @@ function WorkspaceChatSurface({
           <div className="chatkit-state-overlay">
             <StateMessage
               kind="error"
-              title="Workspace chat could not finish loading"
-              description="ChatKit did not mount a composer. Check domain registration and the browser connection, then retry."
+              title="Workspace chat connection failed"
+              description="ChatKit could not establish or maintain its connection. Retry to reconnect."
               action={
                 <button className="secondary-action" onClick={onReset}>
                   Retry workspace chat

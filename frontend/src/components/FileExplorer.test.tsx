@@ -112,6 +112,10 @@ vi.mock('../workbench', () => ({
 
 vi.mock('../splitPolicy', () => ({ preferredSplitDirection: () => 'horizontal' }))
 
+vi.mock('../documentSessions', () => ({
+  useDocumentSessions: () => ({ openForWriting: vi.fn() }),
+}))
+
 vi.mock('../api', () => ({
   DOCUMENT_PAGE_SIZE: 200,
   api: {

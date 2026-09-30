@@ -303,6 +303,7 @@ def create_chat_router(
             proposal_id=proposal_id,
             expected_revision_id=body.expected_revision_id,
             idempotency_key=idempotency_key,
+            content=body.content,
         )
 
     @router.post("/chat/proposals/{proposal_id}/dismiss", response_model=ChatProposal)

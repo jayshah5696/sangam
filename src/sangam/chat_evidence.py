@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from sangam.access import WorkspaceAccessService
 from sangam.db import Database, utc_now
 from sangam.errors import NotFoundError, ValidationError
+from sangam.schemas import ChatProposalSource
 from sangam.security import Principal
 
 
@@ -278,6 +279,100 @@ class ChatEvidenceRepository:
                 "SELECT cancel_requested_at FROM chat_runs WHERE run_id = ?", (run_id,)
             ).fetchone()
         return row is not None and row["cancel_requested_at"] is not None
+
+    def record_run_source(
+        self,
+        run_id: str,
+        *,
+        document_id: str,
+        title: str | None = None,
+        path: str | None = None,
+        revision_id: str | None = None,
+        page_number: int | None = None,
+    ) -> None:
+        """Record a bounded source document/page retrieved during a run."""
+        rev = revision_id or ""
+        page = page_number or 0
+        doc_title = title or ""
+        doc_path = path or ""
+        with self.database.transaction() as connection:
+            count_row = connection.execute(
+                "SELECT COUNT(*) AS count FROM chat_run_sources WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if count_row and count_row["count"] >= 50:
+                existing = connection.execute(
+                    "SELECT 1 FROM chat_run_sources WHERE run_id = ? AND document_id = ? "
+                    "AND revision_id = ? AND page_number = ?",
+                    (run_id, document_id, rev, page),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        "UPDATE chat_runs SET sources_truncated = 1 WHERE run_id = ?", (run_id,)
+                    )
+                return
+            connection.execute(
+                """
+                INSERT INTO chat_run_sources(
+                    source_id, run_id, document_id, revision_id,
+                    page_number, title, path, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, document_id, revision_id, page_number) DO NOTHING
+                """,
+                (
+                    f"crs_{uuid.uuid4().hex}",
+                    run_id,
+                    document_id,
+                    rev,
+                    page,
+                    doc_title,
+                    doc_path,
+                    utc_now(),
+                ),
+            )
+
+    def require_run_owner(self, principal: Principal, run_id: str, thread_id: str) -> None:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT actor_id, thread_id FROM chat_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        if (
+            row is None
+            or row["thread_id"] != thread_id
+            or (row["actor_id"] != principal.actor_id and not principal.administrator)
+        ):
+            raise NotFoundError(f"Chat run not found: {run_id}")
+
+    def run_sources_truncated(self, run_id: str) -> bool:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT sources_truncated FROM chat_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        return bool(row and row["sources_truncated"])
+
+    def list_run_sources(self, run_id: str) -> list[ChatProposalSource]:
+        """List bounded retrieved sources for a run."""
+        with self.database.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT document_id, revision_id, page_number, title, path
+                FROM chat_run_sources
+                WHERE run_id = ?
+                ORDER BY created_at ASC
+                LIMIT 50
+                """,
+                (run_id,),
+            ).fetchall()
+            return [
+                ChatProposalSource(
+                    document_id=row["document_id"],
+                    revision_id=row["revision_id"] or None,
+                    page_number=row["page_number"] or None,
+                    title=row["title"],
+                    path=row["path"],
+                )
+                for row in rows
+            ]
 
     def record_tool(
         self,

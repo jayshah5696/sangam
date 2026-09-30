@@ -111,6 +111,19 @@ Open-document tabs in an editor group use equal-width fluid distribution:
 
 ## Workspace home and layouts
 
+Home gives the selected project a compact ongoing-work area. It shows the active
+draft's body excerpt, saved source context, categorized references and the next
+action. The project picker remains reachable for empty projects and the selected
+project is remembered in the browser. Project attention is separate from workspace
+attention. Stale proposals are labeled separately from pending changes. Source
+updates compare the membership's pinned revision with the current head.
+
+Projects use the same quiet rows, controls and state messages as the rest of the
+workspace. The ordinary Markdown purpose brief is distinct from the active draft.
+Saved layouts restore the selected group and tab, split ratios, PDF pages and the
+attached conversation. Project URLs preserve the selected project on reload.
+See [Projects and ongoing work](projects.md) for the workflow and API contract.
+
 The Home route uses the persisted workbench tabs to show up to four recently
 open documents and up to four pinned documents. It removes stale and duplicate
 tabs before rendering either list. If no persisted tab is available, Home uses
@@ -130,7 +143,10 @@ The **Review changes** route lists pending and stale agent proposals. Each card
 shows the target revision, a contextual diff, and Apply or Dismiss actions. A
 recorded turn context can add a source document, source revision, selected
 passage, PDF page, and annotation link. The inbox shows recorded turn context
-only. Tool citation counts do not reconstruct every source read during a turn.
+separately from cited supporting passages. Each proposal run records up to 50
+retrieved source references, including reads after proposal creation, and shows
+when references were omitted. Up to 20 supporting citations are validated against
+exact authorized revisions. Retrieval alone does not establish claim support.
 Legacy proposals say that no source evidence was recorded. If a recorded
 source is deleted or no longer readable, the inbox says that the evidence is
 unavailable and hides the stored source details.

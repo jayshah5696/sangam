@@ -57,6 +57,9 @@ export function MarkdownPreview({ content, resolveAsset, readable = false }: Mar
       }),
     [content],
   )
+  // React compares this prop by identity. Replacing the object for unchanged
+  // content rewrites the DOM and destroys an in-progress native selection.
+  const markup = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 
   useEffect(() => {
     const host = previewRef.current
@@ -120,7 +123,7 @@ export function MarkdownPreview({ content, resolveAsset, readable = false }: Mar
     <article
       className={`markdown-preview${readable ? ' markdown-preview--readable' : ''}`}
       ref={previewRef}
-      dangerouslySetInnerHTML={{ __html: safeHtml }}
+      dangerouslySetInnerHTML={markup}
     />
   )
 }

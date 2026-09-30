@@ -673,6 +673,10 @@ export const chatProposalSchema = z.object({
   applied_revision_id: z.string().nullable(),
   created_at: z.string(),
   applied_at: z.string().nullable(),
+  applied_content: z.string().nullable().optional(),
+  run_id: z.string().nullable().optional(),
+  model_opinion: z.string().nullable().optional(),
+  sources_retrieved_truncated: z.boolean().optional(),
   evidence: z
     .object({
       context_id: z.string(),
@@ -684,7 +688,61 @@ export const chatProposalSchema = z.object({
     })
     .nullable(),
   evidence_status: z.enum(['not_recorded', 'recorded', 'unavailable']),
+  rationale: z.string().nullable().optional(),
+  judgment_needed: z.string().nullable().optional(),
+  citations: z
+    .array(
+      z.object({
+        document_id: z.string(),
+        revision_id: z.string().nullable().optional(),
+        title: z.string().nullable().optional(),
+        path: z.string().nullable().optional(),
+        page_number: z.number().int().positive().nullable().optional(),
+        annotation_id: z.string().nullable().optional(),
+        snippet: z.string().default(''),
+        location: z.string().nullable().optional(),
+        quote_start: z.number().int().nonnegative().nullable().optional(),
+        quote_end: z.number().int().nonnegative().nullable().optional(),
+        available: z.boolean().optional(),
+      }),
+    )
+    .default([]),
+  sources_retrieved: z
+    .array(
+      z.object({
+        document_id: z.string(),
+        revision_id: z.string().nullable().optional(),
+        title: z.string(),
+        path: z.string(),
+        page_number: z.number().int().positive().nullable().optional(),
+      }),
+    )
+    .default([]),
 })
+
+export const chatProposalCitationSchema = z.object({
+  document_id: z.string(),
+  revision_id: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  path: z.string().nullable().optional(),
+  page_number: z.number().int().positive().nullable().optional(),
+  annotation_id: z.string().nullable().optional(),
+  snippet: z.string().default(''),
+  location: z.string().nullable().optional(),
+  quote_start: z.number().int().nonnegative().nullable().optional(),
+  quote_end: z.number().int().nonnegative().nullable().optional(),
+  available: z.boolean().optional(),
+})
+export type ChatProposalCitation = z.infer<typeof chatProposalCitationSchema>
+
+export const chatProposalSourceSchema = z.object({
+  document_id: z.string(),
+  revision_id: z.string().nullable().optional(),
+  title: z.string(),
+  path: z.string(),
+  page_number: z.number().int().positive().nullable().optional(),
+})
+export type ChatProposalSource = z.infer<typeof chatProposalSourceSchema>
 
 export type ChatProposal = z.infer<typeof chatProposalSchema>
 
@@ -757,6 +815,74 @@ export const chatEffectsSummarySchema = z.object({
 })
 
 export type ChatEffectsSummary = z.infer<typeof chatEffectsSummarySchema>
+
+export const projectRoleSchema = z.enum(['source', 'draft', 'note', 'output', 'decision'])
+export type ProjectRole = z.infer<typeof projectRoleSchema>
+
+export const projectDocumentItemSchema = z.object({
+  project_id: z.string(),
+  document_id: z.string(),
+  document_title: z.string(),
+  document_path: z.string().nullable().optional(),
+  content_type: z.string(),
+  role: projectRoleSchema,
+  pinned_page: z.number().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  source_revision_id: z.string().nullable().optional(),
+  current_revision_id: z.string(),
+  source_updated: z.boolean().default(false),
+  excerpt: z.string().default(''),
+  updated_at: z.string(),
+  created_at: z.string(),
+})
+export type ProjectDocumentItem = z.infer<typeof projectDocumentItemSchema>
+
+export const projectThreadItemSchema = z.object({
+  project_id: z.string(),
+  thread_id: z.string(),
+  title: z.string().nullable().optional(),
+  created_at: z.string(),
+})
+export type ProjectThreadItem = z.infer<typeof projectThreadItemSchema>
+
+export const projectAnnotationItemSchema = z.object({
+  project_id: z.string(),
+  annotation_id: z.string(),
+  document_id: z.string(),
+  page_number: z.number(),
+  annotation_type: z.string(),
+  selected_text: z.string().nullable().optional(),
+  note: z.string().nullable().optional(),
+  created_at: z.string(),
+})
+export type ProjectAnnotationItem = z.infer<typeof projectAnnotationItemSchema>
+
+export const projectSummarySchema = z.object({
+  project_id: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  brief_document_id: z.string().nullable().optional(),
+  brief_document_title: z.string().nullable().optional(),
+  active_thread_id: z.string().nullable().optional(),
+  active_document_id: z.string().nullable().optional(),
+  version: z.number().int().positive(),
+  last_worked_at: z.string().nullable().optional(),
+  document_count: z.number(),
+  thread_count: z.number(),
+  annotation_count: z.number(),
+  created_by: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type ProjectSummary = z.infer<typeof projectSummarySchema>
+
+export const projectDetailSchema = projectSummarySchema.extend({
+  workbench_state_json: z.string().nullable().optional(),
+  documents: z.array(projectDocumentItemSchema),
+  threads: z.array(projectThreadItemSchema),
+  annotations: z.array(projectAnnotationItemSchema),
+})
+export type ProjectDetail = z.infer<typeof projectDetailSchema>
 
 export const backupVerificationSchema = z.object({
   backup_id: z.string(),
@@ -893,12 +1019,15 @@ export const api = {
     if (threadId) params.set('thread_id', threadId)
     return z.array(chatProposalSchema).parse(await request(`/chat/proposals?${params.toString()}`))
   },
-  async applyChatProposal(proposal: ChatProposal): Promise<ChatProposal> {
+  async applyChatProposal(proposal: ChatProposal, content?: string): Promise<ChatProposal> {
     return chatProposalSchema.parse(
       await request(`/chat/proposals/${proposal.proposal_id}/apply`, {
         method: 'POST',
         headers: { 'Idempotency-Key': `chat-proposal:${proposal.proposal_id}` },
-        body: JSON.stringify({ expected_revision_id: proposal.expected_revision_id }),
+        body: JSON.stringify({
+          expected_revision_id: proposal.expected_revision_id,
+          content: content !== undefined ? content : null,
+        }),
       }),
     )
   },
@@ -1497,6 +1626,113 @@ export const api = {
   },
   async deleteBackup(backupId: string): Promise<void> {
     await request(`/backups/${backupId}`, { method: 'DELETE' })
+  },
+  async listProjects(): Promise<ProjectSummary[]> {
+    return z.array(projectSummarySchema).parse(await request('/projects'))
+  },
+  async getProject(projectId: string): Promise<ProjectDetail> {
+    return projectDetailSchema.parse(await request(`/projects/${projectId}`))
+  },
+  async createProject(
+    input: {
+      name: string
+      description?: string | null
+      brief_document_id?: string | null
+      create_brief?: boolean
+    },
+    idempotencyKey = crypto.randomUUID(),
+  ): Promise<ProjectDetail> {
+    return projectDetailSchema.parse(
+      await request('/projects', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async updateProject(
+    projectId: string,
+    input: {
+      name?: string | null
+      expected_version?: number
+      active_document_id?: string | null
+      description?: string | null
+      brief_document_id?: string | null
+      workbench_state_json?: string | null
+      active_thread_id?: string | null
+    },
+  ): Promise<ProjectDetail> {
+    return projectDetailSchema.parse(
+      await request(`/projects/${projectId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async deleteProject(projectId: string): Promise<void> {
+    await request(`/projects/${projectId}`, { method: 'DELETE' })
+  },
+  async addProjectDocument(
+    projectId: string,
+    input: {
+      document_id: string
+      role?: ProjectRole
+      pinned_page?: number | null
+      notes?: string | null
+    },
+  ): Promise<ProjectDocumentItem> {
+    return projectDocumentItemSchema.parse(
+      await request(`/projects/${projectId}/documents`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async updateProjectDocument(
+    projectId: string,
+    documentId: string,
+    input: {
+      role?: ProjectRole
+      expected_version?: number
+      source_revision_id?: string | null
+      pinned_page?: number | null
+      notes?: string | null
+    },
+  ): Promise<ProjectDocumentItem> {
+    return projectDocumentItemSchema.parse(
+      await request(`/projects/${projectId}/documents/${documentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async removeProjectDocument(projectId: string, documentId: string): Promise<void> {
+    await request(`/projects/${projectId}/documents/${documentId}`, { method: 'DELETE' })
+  },
+  async addProjectThread(projectId: string, threadId: string): Promise<ProjectThreadItem> {
+    return projectThreadItemSchema.parse(
+      await request(`/projects/${projectId}/threads`, {
+        method: 'POST',
+        body: JSON.stringify({ thread_id: threadId }),
+      }),
+    )
+  },
+  async listProjectThreads(): Promise<ProjectThreadItem[]> {
+    return z.array(projectThreadItemSchema).parse(await request('/projects/available-threads'))
+  },
+  async removeProjectThread(projectId: string, threadId: string): Promise<void> {
+    await request(`/projects/${projectId}/threads/${threadId}`, { method: 'DELETE' })
+  },
+  async addProjectAnnotation(projectId: string, annotationId: string): Promise<ProjectAnnotationItem> {
+    return projectAnnotationItemSchema.parse(
+      await request(`/projects/${projectId}/annotations`, {
+        method: 'POST',
+        body: JSON.stringify({ annotation_id: annotationId }),
+      }),
+    )
+  },
+  async removeProjectAnnotation(projectId: string, annotationId: string): Promise<void> {
+    await request(`/projects/${projectId}/annotations/${annotationId}`, { method: 'DELETE' })
   },
   async health(): Promise<{ status: string; version: string; karakeep_configured?: boolean }> {
     return z

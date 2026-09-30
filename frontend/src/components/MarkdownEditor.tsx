@@ -20,7 +20,7 @@ export type EditorViewState = {
 
 export type MarkdownEditorHandle = {
   focus: () => void
-  insertText: (text: string) => void
+  insertText: (text: string, expectedContent?: string) => boolean
   scrollToLine: (lineNumber: number) => void
 }
 
@@ -31,10 +31,23 @@ type MarkdownEditorProps = {
   initialViewState?: EditorViewState
   onViewStateChange?: (viewState: EditorViewState) => void
   contentType?: 'text/markdown' | 'text/html'
+  focusOnOpen?: boolean
+  onFocused?: () => void
+  onReady?: () => () => void
 }
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, onSelectionChange, initialViewState, onViewStateChange, contentType = 'text/markdown' },
+  {
+    value,
+    onChange,
+    onSelectionChange,
+    initialViewState,
+    onViewStateChange,
+    contentType = 'text/markdown',
+    focusOnOpen,
+    onFocused,
+    onReady,
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -55,9 +68,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     ref,
     () => ({
       focus: () => viewRef.current?.focus(),
-      insertText: (text: string) => {
+      insertText: (text: string, expectedContent?: string) => {
         const view = viewRef.current
-        if (!view) return
+        if (!view) return false
+        if (expectedContent !== undefined && view.state.doc.toString() !== expectedContent) return false
         const selection = view.state.selection.main
         view.dispatch({
           changes: { from: selection.from, to: selection.to, insert: text },
@@ -65,6 +79,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           scrollIntoView: true,
         })
         view.focus()
+        return true
       },
       scrollToLine: (lineNumber: number) => {
         const view = viewRef.current
@@ -121,6 +136,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       }),
     })
     viewRef.current = view
+    const initialSelection = view.state.selection.main
+    const initialLine = view.state.doc.lineAt(initialSelection.head)
+    onSelectionChangeRef.current?.({
+      line: initialLine.number,
+      column: initialSelection.head - initialLine.from + 1,
+      selectedCharacters: initialSelection.to - initialSelection.from,
+    })
     const reportScroll = () => {
       const selection = view.state.selection.main
       onViewStateChangeRef.current?.({
@@ -144,10 +166,19 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   }, [contentType])
 
   useEffect(() => {
+    if (!focusOnOpen || !viewRef.current) return
+    viewRef.current.focus()
+    onFocused?.()
+  }, [focusOnOpen, onFocused])
+
+  useEffect(() => {
     const view = viewRef.current
     if (!view || view.state.doc.toString() === value) return
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } })
   }, [value])
+
+  // Queued cursor transactions run after the mount's controlled value effect.
+  useEffect(() => onReady?.(), [onReady, value])
 
   return <div className="editor" ref={hostRef} />
 })

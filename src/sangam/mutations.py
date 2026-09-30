@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 
 class MutationCoordinator:
@@ -16,6 +16,7 @@ class MutationCoordinator:
 
     def __init__(self) -> None:
         self._condition = threading.Condition()
+        self._local = threading.local()
         self._active_mutations = 0
         self._backup_active = False
         self._waiting_backups = 0
@@ -52,21 +53,46 @@ class MutationCoordinator:
     def document(self, document_id: str) -> Iterator[None]:
         lock = self._retain_document_lock(document_id)
         try:
-            with lock, self.mutation():
+            # Never hold a document lock while waiting for a generation. An
+            # active pipeline may need that lock to finish before the backup.
+            with self.mutation(), lock:
                 yield
         finally:
             self._release_document_lock(document_id)
 
     @contextmanager
+    def documents(self, *document_ids: str) -> Iterator[None]:
+        """Acquire a known set together so replay cannot invert document locks."""
+        retained = [
+            (document_id, self._retain_document_lock(document_id))
+            for document_id in sorted(set(document_ids))
+        ]
+        try:
+            with self.mutation(), ExitStack() as stack:
+                for _, lock in retained:
+                    stack.enter_context(lock)
+                yield
+        finally:
+            for document_id, _ in reversed(retained):
+                self._release_document_lock(document_id)
+
+    @contextmanager
     def mutation(self) -> Iterator[None]:
         """Enter a mutation generation without requiring a document identity."""
+        if getattr(self._local, "mutating", False):
+            # This pipeline already owns a generation. Waiting again would
+            # deadlock a nested storage call against a queued backup.
+            yield
+            return
         with self._condition:
             while self._backup_active or self._waiting_backups:
                 self._condition.wait()
             self._active_mutations += 1
+        self._local.mutating = True
         try:
             yield
         finally:
+            self._local.mutating = False
             with self._condition:
                 self._active_mutations -= 1
                 if self._active_mutations == 0:

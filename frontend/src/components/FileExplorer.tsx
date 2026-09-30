@@ -36,6 +36,7 @@ import {
   type OrganizationOperation,
   type Tag,
 } from '../api'
+import { useDocumentSessions } from '../documentSessions'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
@@ -77,6 +78,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
+  const sessions = useDocumentSessions()
   const workbenchActions = useWorkbenchActions()
   const activeDocumentId = findGroup(workbench.root, workbench.activeGroupId)?.activeTabId
   const documents = useInfiniteQuery({
@@ -145,6 +147,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       setError(null)
       await refresh()
       if (result.document) {
+        sessions.openForWriting(result.document)
         workbench.ensureDocumentOpen(
           result.document.document_id,
           result.document.title,

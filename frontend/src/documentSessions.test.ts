@@ -214,4 +214,55 @@ describe('document session autosave', () => {
     expect(saveDocument).toHaveBeenCalledTimes(2)
     store.dispose()
   })
+
+  it('delegates text insertion to the active editor handle when mounted', async () => {
+    const { storage } = memoryStorage()
+    const store = new DocumentSessionStore({ storage, saveDocument: async (doc) => doc })
+    await store.initializeDocument(documentAt('rev-1', 'Initial text'))
+
+    const insertedText: string[] = []
+    const unregister = store.registerEditor(
+      'doc-1',
+      () => {},
+      () => {},
+      (text) => {
+        insertedText.push(text)
+        return true
+      },
+    )
+
+    const success = store.insertText('doc-1', '\n\n> Quoted evidence')
+    expect(success).toBe(true)
+    expect(insertedText).toEqual(['\n\n> Quoted evidence'])
+
+    unregister()
+    store.dispose()
+  })
+
+  it('refuses cursor insertion without a mounted writable editor', async () => {
+    const { storage } = memoryStorage()
+    const store = new DocumentSessionStore({ storage, saveDocument: async (doc) => doc })
+    await store.initializeDocument(documentAt('rev-1', 'Draft paragraph.'))
+
+    const success = store.insertText('doc-1', '\n\n> Quoted evidence')
+    expect(success).toBe(false)
+    expect(store.getSession('doc-1').content).toBe('Draft paragraph.')
+    expect(store.getSession('doc-1').saveState).toBe('saved')
+
+    store.dispose()
+  })
+  it('does not fabricate an unopened destination or report a preview no-op as success', () => {
+    const { storage } = memoryStorage()
+    const store = new DocumentSessionStore({ storage, saveDocument: async (doc) => doc })
+    expect(store.insertText('unopened', 'evidence')).toBe(false)
+    expect(store.getSession('unopened').content).toBeUndefined()
+    store.registerEditor(
+      'unopened',
+      () => {},
+      undefined,
+      () => false,
+    )
+    expect(store.insertText('unopened', 'evidence')).toBe(false)
+    store.dispose()
+  })
 })
