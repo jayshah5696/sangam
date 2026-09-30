@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
 from sangam.db import Database, utc_now
-from sangam.errors import ConflictError, NotFoundError, ValidationError
+from sangam.errors import ConflictError, NotFoundError, ValidationError, validate_metadata_text
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.schemas import (
     AddProjectAnnotation,
@@ -404,6 +404,8 @@ class ProjectService:
 
     @atomic
     def create_project(self, principal: Principal, request: CreateProject) -> ProjectDetail:
+        validate_metadata_text(request.name, "Project name")
+        validate_metadata_text(request.description, "Project description")
         if not request.name.strip():
             raise ValidationError("Project name cannot be empty")
         project_id, now = f"proj_{uuid.uuid4().hex[:16]}", utc_now()
@@ -458,6 +460,10 @@ class ProjectService:
         self, principal: Principal, project_id: str, request: UpdateProject
     ) -> ProjectDetail:
         row = self._project(project_id, request.expected_version)
+        if request.name is not None:
+            validate_metadata_text(request.name, "Project name")
+        if request.description is not None:
+            validate_metadata_text(request.description, "Project description")
         fields = request.model_dump(exclude_unset=True, exclude={"expected_version"})
         with self.database.connection() as conn:
             if request.brief_document_id:
@@ -550,6 +556,7 @@ class ProjectService:
     ) -> ProjectDocumentItem:
         project = self._project(project_id)
         doc = self.documents.get_document(request.document_id)
+        validate_metadata_text(request.notes, "Document notes")
         with self.database.connection() as conn:
             conn.execute(
                 """INSERT INTO project_documents
@@ -596,6 +603,8 @@ class ProjectService:
             d.document_id == document_id for d in self.get_project(project_id, principal).documents
         ):
             raise NotFoundError("Document is not a project member")
+        if request.notes is not None:
+            validate_metadata_text(request.notes, "Document notes")
         fields = request.model_dump(exclude_unset=True, exclude={"expected_version"})
         if "role" in fields and fields["role"] is None:
             raise ValidationError("Role cannot be cleared")
