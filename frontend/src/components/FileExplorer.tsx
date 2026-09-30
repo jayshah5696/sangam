@@ -652,7 +652,10 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
 
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'F2') {
-      const path = model.getFocusedPath()
+      const path =
+        model.getFocusedPath() ??
+        model.getSelectedPaths()[0] ??
+        (effectiveSelectedTreePaths.length === 1 ? effectiveSelectedTreePaths[0] : null)
       if (path) {
         event.preventDefault()
         model.startRenaming(path)
