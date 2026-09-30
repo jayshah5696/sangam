@@ -35,6 +35,7 @@ See the generated notes attached to each GitHub Release.
 
 - Resolved dependency advisory for `undici` by updating override to `8.11.2` (#347).
 - Upgraded `brace-expansion` to `5.0.12` (#348).
+- Upgraded `urllib3` to `2.8.0` to resolve runtime dependency security advisories.
 
 
 ## [0.13.0] - 2026-09-27
