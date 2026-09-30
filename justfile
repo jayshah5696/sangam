@@ -124,9 +124,13 @@ generate-api:
 benchmark-concurrency workers="20" ops="15":
     uv run python scripts/benchmark_concurrency.py --workers "{{ workers }}" --ops-per-worker "{{ ops }}" 
 
-# Measure cold-process startup with a healthy index and a full repair backlog.
-benchmark-search-startup count="250":
-    uv run python scripts/benchmark_search_startup.py --count "{{ count }}"
+# Measure cold startup against a repair backlog or an optional baseline checkout.
+benchmark-search-startup count="250" baseline_source="":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    args=(--count "{{ count }}")
+    if [[ -n "{{ baseline_source }}" ]]; then args+=(--baseline-source "{{ baseline_source }}"); fi
+    uv run python scripts/benchmark_search_startup.py "${args[@]}"
 
 # Type-check the provider and chat boundary introduced by the architecture foundation.
 typecheck:

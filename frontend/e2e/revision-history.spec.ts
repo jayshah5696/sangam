@@ -77,7 +77,10 @@ test('older summary pages support exact preview and comparison', async ({ page, 
   await expect(page.getByRole('button', { name: 'Close comparison', exact: true })).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await testInfo.attach('paged-history', {
-    body: await page.screenshot({ animations: 'disabled' }),
+    body: await page.screenshot({
+      path: testInfo.outputPath('paged-history.png'),
+      animations: 'disabled',
+    }),
     contentType: 'image/png',
   })
   await page.getByRole('button', { name: 'Close comparison', exact: true }).click()
