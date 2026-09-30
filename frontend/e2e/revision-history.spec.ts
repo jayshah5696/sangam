@@ -72,9 +72,14 @@ test('older summary pages support exact preview and comparison', async ({ page, 
   await expect(page.getByRole('button', { name: 'Load older revisions' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Preview', exact: true }).last().click()
   await expect(page.locator('.revision-render-preview')).toContainText('Original oldest body')
+  await page.locator('.revision-render-preview').scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('historical-preview.png'), animations: 'disabled' })
   await page.getByRole('button', { name: 'Compare', exact: true }).last().click()
   await expect(page.locator('.revision-render-preview')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Close comparison', exact: true })).toBeVisible()
+  const comparison = page.locator('.revision-merge-view')
+  await expect(comparison.locator('[data-line]')).toContainText(['Original oldest body', 'New body 20'])
+  await page.getByRole('button', { name: 'Close comparison', exact: true }).scrollIntoViewIfNeeded()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await testInfo.attach('paged-history', {
     body: await page.screenshot({
