@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -219,6 +220,22 @@ def test_canonical_path_alias_cannot_bypass_storage_ownership(tmp_path: Path) ->
         alias_database.symlink_to(database)
         contender = _try_create_app(alias_database, workspace / ".." / "workspace", backup)
 
+        assert contender.returncode != 0
+        assert "already in use" in contender.stderr.lower()
+    finally:
+        owner.terminate()
+        owner.wait(timeout=10)
+
+
+def test_hardlinked_database_cannot_bypass_storage_ownership(tmp_path: Path) -> None:
+    database = tmp_path / "database" / "sangam.sqlite3"
+    workspace = tmp_path / "workspace"
+    backup = tmp_path / "backups"
+    alias = tmp_path / "hardlink.sqlite3"
+    owner = _start_owner(database, workspace, backup)
+    try:
+        os.link(database, alias)
+        contender = _try_create_app(alias, tmp_path / "other-workspace", tmp_path / "other-backups")
         assert contender.returncode != 0
         assert "already in use" in contender.stderr.lower()
     finally:

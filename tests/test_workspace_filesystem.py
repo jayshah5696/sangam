@@ -112,14 +112,9 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     destination_path = workspace.root / "corrupted.md"
 
     # Simulate hash failure on temporary staging file before replace
-    original_read_bytes = Path.read_bytes
-
-    def mocked_read_bytes(self: Path) -> bytes:
-        if ".sangam-" in self.name:
-            return b"corrupted content"
-        return original_read_bytes(self)
-
-    monkeypatch.setattr(Path, "read_bytes", mocked_read_bytes)
+    monkeypatch.setattr(
+        hashlib, "file_digest", lambda _file, _algorithm: hashlib.sha256(b"corrupted content")
+    )
 
     with pytest.raises(OSError, match="Materialized file hash does not match"):
         workspace.write_atomic("corrupted.md", "expected content")

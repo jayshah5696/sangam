@@ -149,7 +149,14 @@ def create_chat_router(
             message=f"Connected and discovered {len(models)} models.",
         )
 
-    @router.post("/chatkit")
+    @router.post(
+        "/chatkit",
+        description="ChatKit transport with streaming byte limits and bounded admission. "
+        "A 422 rejects invalid or oversized input. A 503 with Retry-After rejects overload "
+        "before context preparation or inference; retry after the indicated delay. "
+        "Admission remains held until the response stream and storage work finish.",
+        responses={503: {"description": "Chat capacity exhausted or waiting deadline expired"}},
+    )
     async def chatkit_endpoint(
         request: Request,
         document_id: str | None = Header(default=None, alias="X-Sangam-Document-ID"),

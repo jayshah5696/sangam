@@ -28,3 +28,35 @@ just update-openapi-baseline "#123: describe the reviewed API change"
 ```
 
 This command regenerates `docs/api/openapi-baseline.json` and `frontend/src/generated/openapi.sha256`. The baseline records the acceptance date and reason. Include both generated changes in the same reviewed PR as the API change. Run `just verify-openapi` afterward; it should report a match. Do not update the baseline to silence an unexplained failure.
+
+## Resource limits and revision history
+
+`POST /api/v1/chatkit` checks declared and streamed bytes against `SANGAM_CHAT_MAX_REQUEST_BYTES`.
+Invalid or oversized bodies return 422, and an oversized stream stops being consumed immediately.
+Bodies must arrive within 30 seconds. Admission precedes body buffering and context preparation.
+The server admits at most `SANGAM_CHAT_MAX_CONCURRENT_RUNS` requests and queues at most
+`SANGAM_CHAT_MAX_WAITING_RUNS` requests. Waiting expires after
+`SANGAM_CHAT_QUEUE_WAIT_TIMEOUT_SECONDS`. Queue overflow and waiting expiry return 503 with
+`Retry-After: 1`. Retry after that delay. Rejected requests do not start inference or a persisted run.
+Cancellation retains capacity until synchronous storage work finishes. Existing mutation
+idempotency rules still apply.
+
+PDF uploads stream to temporary disk files, allow two concurrent uploads, and must arrive within
+60 seconds. Excess uploads return 503; oversized input returns 422. Temporary files close on every
+exit path. Imports, retries, and recovered jobs share a SQLite queue drained by
+`SANGAM_PDF_EXTRACTION_WORKERS`. Extraction runs in disposable processes with limits of 1,000
+pages, 10 MB of extracted UTF-8 text, and 30 seconds of parser execution. Limits produce a durable
+failed status without partial page writes. Shutdown terminates parsers and returns claimed work
+to pending for restart. The imported immutable bytes remain available after extraction failure.
+
+`GET /documents/{document_id}/revisions` returns `{items, next_cursor}` with metadata only.
+The default page size is 20 and the maximum is 100. Pass `next_cursor` as `cursor` to continue.
+Pages order by creation time and revision ID descending. Cursors belong to one document and
+hold the older-page boundary stable when new revisions arrive. Exact content comes from
+`GET /documents/{document_id}/revisions/{revision_id}`. Both routes use existing history
+authorization, including permitted deleted-document access. Diff and restore retain their contracts.
+
+The full-content `/history` route is deprecated but retains its response shape for older callers.
+The browser and agent paths now fetch summaries or exact content. `sangam history` prints one
+summary page; use `--limit`, `--cursor`, and `sangam revision DOCUMENT_ID REVISION_ID`.
+Scripts needing the old CLI list can use `sangam history --legacy` during migration.

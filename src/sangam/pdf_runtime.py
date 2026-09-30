@@ -42,13 +42,17 @@ async def spooled_pdf_body(request: Request, *, max_bytes: int) -> AsyncIterator
         if length < 0:
             raise ValidationError("Content-Length must be a non-negative integer")
         if length > max_bytes:
-            raise ValidationError("PDF exceeds the configured size limit")
+            raise ValidationError(
+                "PDF exceeds the configured size limit", details={"max_pdf_bytes": max_bytes}
+            )
     with tempfile.TemporaryFile(mode="w+b") as content:
         received = 0
         async for chunk in request.stream():
             received += len(chunk)
             if received > max_bytes:
-                raise ValidationError("PDF exceeds the configured size limit")
+                raise ValidationError(
+                    "PDF exceeds the configured size limit", details={"max_pdf_bytes": max_bytes}
+                )
             # Wait for disk writes before closing the file on cancellation.
             await run_pdf_io(partial(content.write, chunk))
         await run_pdf_io(lambda: content.seek(0))

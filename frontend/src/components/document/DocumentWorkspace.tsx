@@ -171,9 +171,7 @@ export function DocumentWorkspace({
     const occurrence = surface ? preceding.toString().split(text).length - 1 : 0
     const revisionId = container.closest<HTMLElement>('[data-source-revision]')?.dataset.sourceRevision
     const historical = revisionId
-      ? queryClient
-          .getQueryData<Revision[]>(['history', documentId])
-          ?.find((revision) => revision.revision_id === revisionId)
+      ? queryClient.getQueryData<Revision>(['revision', documentId, revisionId])
       : undefined
     const rect = range.getBoundingClientRect()
     if (revisionId && !historical) return

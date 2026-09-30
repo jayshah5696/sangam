@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -108,23 +109,12 @@ export function PdfViewer({
       const viewport = firstPage.getViewport({ scale: 1 })
       setPageSize({ width: viewport.width, height: viewport.height })
       setPdf(loaded)
-      requestAnimationFrame(() => {
-        // A citation received while the worker was loading wins over restoration.
-        const initialState = initialStateRef.current
-        const boundedPage = Math.min(Math.max(initialState.pageNumber, 1), loaded.numPages)
-        if (boundedPage !== initialState.pageNumber) setPageNumber(boundedPage)
-        const host = scrollRef.current
-        if (!host) return
-        if (initialState.scrollTop > 0) host.scrollTop = initialState.scrollTop
-        else if (boundedPage > 1) pageElement(document.document_id, boundedPage)?.scrollIntoView()
-      })
     })
     return () => {
       active = false
       void task.destroy()
     }
     // Loading owns the PDF.js worker and must only follow document identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [document.document_id])
 
   useEffect(() => {
@@ -139,6 +129,17 @@ export function PdfViewer({
 
   const fitScale = Math.max(0.4, Math.min(2.4, (availableWidth - 32) / pageSize.width))
   const effectiveScale = pdfState.zoomMode === 'fit-width' && availableWidth ? fitScale : pdfState.scale
+
+  useLayoutEffect(() => {
+    const host = scrollRef.current
+    if (!pdf || !host || host.clientHeight === 0) return
+    // Restore after page placeholders commit and again when a hidden tab is
+    // revealed. Hidden scroll notifications must not overwrite saved position.
+    const state = initialStateRef.current
+    const boundedPage = Math.min(Math.max(state.pageNumber, 1), pdf.numPages)
+    if (state.scrollTop > 0) host.scrollTop = state.scrollTop
+    else if (boundedPage > 1) pageElement(document.document_id, boundedPage)?.scrollIntoView()
+  }, [pdf, availableWidth, effectiveScale, document.document_id])
 
   const scrollToPage = (next: number) => {
     const bounded = Math.min(Math.max(next, 1), pdf?.numPages ?? 1)
@@ -285,6 +286,7 @@ export function PdfViewer({
         ref={scrollRef}
         onScroll={(event) => {
           const host = event.currentTarget
+          if (host.clientHeight === 0) return
           // A queued scroll notification can arrive after selection finished at
           // this same position. Only actual movement invalidates its geometry.
           if (selectionScrollTop.current !== null && host.scrollTop !== selectionScrollTop.current)

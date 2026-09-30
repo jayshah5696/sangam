@@ -130,6 +130,7 @@ export function DocumentInspector({
     mutationFn: ({ revisionId, action }: { revisionId: string; action: 'preview' | 'copy' }) =>
       api.revision(documentId, revisionId).then((revision) => ({ revision, action })),
     onSuccess: ({ revision, action }) => {
+      queryClient.setQueryData(['revision', documentId, revision.revision_id], revision)
       if (action === 'preview') setPreviewRevision(revision)
       else {
         sessions.updateSession(documentId, {

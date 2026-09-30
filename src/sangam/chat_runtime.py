@@ -85,7 +85,16 @@ class BoundedChatAdmission:
 
     async def run_sync(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         call = partial(func, *args, **kwargs)
-        return await self._workers.run(call)
+        task = asyncio.create_task(self._workers.run(call))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # The request still owns its slot and transaction until the worker
+            # finishes. A cancelled await cannot cancel a committing thread.
+            try:
+                await task
+            finally:
+                raise
 
     async def close(self, timeout: float = 35.0) -> None:
         async with self._condition:

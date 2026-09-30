@@ -5,11 +5,86 @@ import threading
 
 import pytest
 from starlette.requests import Request
+from test_phase_seven_chat import create_thread, install_fake_model
 
 from sangam.api_chat import _LeasedStreamingResponse
+from sangam.chat_context import ChatRequestContext
 from sangam.chat_runtime import BoundedChatAdmission, read_limited_body
 from sangam.errors import ServiceUnavailableError, ValidationError
 from sangam.security import Principal
+
+
+def test_cancelled_sync_operation_retains_its_request_slot_until_worker_finishes() -> None:
+    async def scenario() -> None:
+        admission = BoundedChatAdmission(max_active=1, max_waiting=0, wait_timeout=1)
+        started = threading.Event()
+        finish = threading.Event()
+
+        def operation() -> None:
+            started.set()
+            finish.wait(5)
+
+        async def request() -> None:
+            lease = await admission.acquire()
+            try:
+                await admission.run_sync(operation)
+            finally:
+                await lease.release()
+
+        task = asyncio.create_task(request())
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            task.cancel()
+            await asyncio.sleep(0.02)
+            with pytest.raises(ServiceUnavailableError, match="queue is full"):
+                await admission.acquire()
+        finally:
+            finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await admission.close()
+
+    asyncio.run(scenario())
+
+
+def test_cancellation_during_run_creation_leaves_cancelled_evidence(client, monkeypatch) -> None:
+    thread_id = create_thread(client)
+    install_fake_model(client, ["No inference should start"])
+    chat = client.app.state.services.chat
+    started = threading.Event()
+    finish = threading.Event()
+    original = chat.evidence.begin_run
+
+    def held_begin_run(*args, **kwargs):
+        run_id = original(*args, **kwargs)
+        started.set()
+        finish.wait(5)
+        return run_id
+
+    monkeypatch.setattr(chat.evidence, "begin_run", held_begin_run)
+
+    async def scenario() -> None:
+        context = ChatRequestContext(
+            principal=Principal.trusted_human(
+                actor_id="human:jay", display_name="Jay", operation_id="cancel-begin-run"
+            )
+        )
+        thread = await chat.store.load_thread(thread_id, context)
+        stream = chat.respond(thread, None, context)
+        task = asyncio.create_task(anext(stream))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            task.cancel()
+        finally:
+            finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await stream.aclose()
+        with chat.evidence.database.connection() as connection:
+            statuses = [row[0] for row in connection.execute("SELECT status FROM chat_runs")]
+        assert statuses == ["cancelled"]
+
+    client.portal.call(scenario)
 
 
 def test_chat_context_preparation_under_sqlite_lock_does_not_block_event_loop(client) -> None:

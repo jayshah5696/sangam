@@ -27,6 +27,10 @@ class StorageOwnership:
         try:
             for identity in identities:
                 self._lock(identity)
+            # Path locks cover first boot; an inode lock also rejects hard-link
+            # aliases of an existing SQLite file, even with different roots.
+            database = resources[0].expanduser().resolve()
+            self._lock_descriptor(database, os.open(database, os.O_CREAT | os.O_RDWR, 0o600))
         except Exception:
             self.close()
             raise
@@ -36,10 +40,11 @@ class StorageOwnership:
         digest = hashlib.sha256(os.fsencode(identity)).hexdigest()
         lock_path = identity.parent / f".sangam-owner-{digest}.lock"
         descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        self._lock_descriptor(identity, descriptor)
+
+    def _lock_descriptor(self, identity: Path, descriptor: int) -> None:
         try:
             if os.name == "nt":
-                if os.fstat(descriptor).st_size == 0:
-                    os.write(descriptor, b"\0")
                 os.lseek(descriptor, 0, os.SEEK_SET)
                 msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
             else:

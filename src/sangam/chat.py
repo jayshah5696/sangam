@@ -126,21 +126,22 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             workspace=workspace,
             evidence=self.evidence,
         )
+        self.admission = BoundedChatAdmission(
+            max_active=config.max_concurrent_runs,
+            max_waiting=config.max_waiting_runs,
+            wait_timeout=config.queue_wait_timeout_seconds,
+        )
         self.toolset = ChatToolset(
             workspace=workspace,
             proposals=self.proposals,
             registry=self.capabilities,
             effects=self.effects,
             evidence=self.evidence,
+            runtime=self.admission,
             max_result_bytes=config.max_tool_result_bytes,
         )
         self.tools = self.toolset.as_agent_tools()
         self.item_converter = SangamThreadItemConverter()
-        self.admission = BoundedChatAdmission(
-            max_active=config.max_concurrent_runs,
-            max_waiting=config.max_waiting_runs,
-            wait_timeout=config.queue_wait_timeout_seconds,
-        )
 
     async def close(self, timeout: float = 35.0) -> None:
         try:
@@ -366,16 +367,24 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         reasoning: Reasoning | None = None
         if self.config.reasoning_effort != "none" and selected_model.supports_reasoning is True:
             reasoning = Reasoning(effort=self.config.reasoning_effort)
-        run_id = await self.admission.run_sync(
-            self.evidence.begin_run,
-            context.principal,
-            thread_id=thread.id,
-            user_item_id=item_id,
-            context_id=turn_record.context_id,
-            connection_id=connection.connection_id,
-            model_ref=selected_model.id,
-            capability_manifest=manifest,
+        begin_task = asyncio.create_task(
+            self.admission.run_sync(
+                self.evidence.begin_run,
+                context.principal,
+                thread_id=thread.id,
+                user_item_id=item_id,
+                context_id=turn_record.context_id,
+                connection_id=connection.connection_id,
+                model_ref=selected_model.id,
+                capability_manifest=manifest,
+            )
         )
+        try:
+            run_id = await asyncio.shield(begin_task)
+        except asyncio.CancelledError:
+            run_id = await begin_task
+            await self.admission.run_sync(self.evidence.complete_run, run_id, status="cancelled")
+            raise
         request_context = replace(request_context, run_id=run_id)
         agent_context = AgentContext(
             thread=thread,
@@ -384,6 +393,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         )
         try:
             stream_failed = False
+            result = None
             result = Runner.run_streamed(
                 agent,
                 input=input_items,
@@ -411,7 +421,13 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                 if getattr(event, "type", None) == "error":
                     stream_failed = True
                 yield event
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
+            if result is not None:
+                result.cancel()
+                # Agents SDK requires draining after cancellation to settle its
+                # provider tasks before the HTTP request releases admission.
+                async for _event in result.stream_events():
+                    pass
             await asyncio.shield(
                 self.admission.run_sync(self.evidence.complete_run, run_id, status="cancelled")
             )

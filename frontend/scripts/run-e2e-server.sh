@@ -21,4 +21,7 @@ export SANGAM_TRUSTED_PREVIEW_PARENT_ORIGINS="[\"http://127.0.0.1:$port\"]"
 
 cd "$repository_root"
 export SANGAM_CHATKIT_DOMAIN_KEY="editorial-e2e"
+# Browser fixtures prove persistence and UI behavior without remote inference.
+export SANGAM_OPENROUTER_API_KEY=""
+export OPENROUTER_API_KEY=""
 uv run uvicorn scripts.e2e_editorial:app --host 127.0.0.1 --port "$port" --no-access-log

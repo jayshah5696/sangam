@@ -301,8 +301,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Prefer this route when content should be saved to disk instead of model context."
             ),
             ("/api/v1/documents/{document_id}/history", "get"): (
-                "List immutable revisions newest first. Use before restoring content or explaining "
-                "how a document changed."
+                "Deprecated full-content history for existing clients. Prefer /revisions for "
+                "bounded summary pages and /revisions/{revision_id} for exact content."
             ),
             ("/api/v1/documents/{document_id}/diff", "get"): (
                 "Compare two immutable revisions and return a unified diff with addition and "
@@ -1680,7 +1680,9 @@ else fetch('/api/v1/trusted-previews/content', {
         response.headers["ETag"] = document_etag(result)
         return result
 
-    @app.get("/api/v1/documents/{document_id}/history", response_model=list[Revision])
+    @app.get(
+        "/api/v1/documents/{document_id}/history", response_model=list[Revision], deprecated=True
+    )
     def history(document_id: str, principal: Principal = principal_dependency) -> list[Revision]:
         return workspace.history(principal, document_id)
 
