@@ -12,6 +12,7 @@ from sangam.chat import SangamChatServer
 from sangam.chat_models import ChatModelCatalog, ChatModelSettingsRepository
 from sangam.config import Settings
 from sangam.db import Database, utc_now
+from sangam.document_assets import DocumentAssetService
 from sangam.html_javascript import HtmlJavascriptSettingsService
 from sangam.idempotency import IdempotencyStore
 from sangam.karakeep import KarakeepService
@@ -193,6 +194,9 @@ def build_application_services(
         activity=activity,
         publications=publications,
         pdf_research=pdf_research,
+        assets=DocumentAssetService(
+            workspace=workspace, max_bytes=settings.max_publication_asset_bytes
+        ),
     )
     chat_config = settings.chat_server_config()
     provider_connections = ProviderConnectionService(

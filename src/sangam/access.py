@@ -20,6 +20,7 @@ from sangam.conditions import (
     document_etag,
 )
 from sangam.db import utc_now
+from sangam.document_assets import DocumentAssetService, StoredAsset
 from sangam.errors import (
     AuthorizationError,
     ConflictError,
@@ -37,6 +38,7 @@ from sangam.schemas import (
     AnnotationType,
     ApplyOrganizationPlan,
     Document,
+    DocumentAsset,
     DocumentSummary,
     Folder,
     IssuedPublication,
@@ -411,6 +413,7 @@ class WorkspaceAccessService:
         activity: ActivityService,
         publications: PublicationService,
         pdf_research: PdfResearchService,
+        assets: DocumentAssetService,
     ) -> None:
         self.documents = documents
         self.organization = organization
@@ -418,6 +421,7 @@ class WorkspaceAccessService:
         self.activity = activity
         self.publications = publications
         self.pdf_research = pdf_research
+        self.assets = assets
 
     def validate_proposed_update(
         self,
@@ -708,6 +712,7 @@ class WorkspaceAccessService:
         category: str | None,
         actor_id: str | None,
         sort: str,
+        content_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[DocumentSummary]:
@@ -717,6 +722,7 @@ class WorkspaceAccessService:
                 tag_id=tag_id,
                 category=category,
                 actor_id=actor_id,
+                content_type=content_type,
                 sort=sort,
                 path_prefixes=self.policy.allowed_prefixes(
                     principal, Capability.READ, Capability.SEARCH
@@ -796,6 +802,40 @@ class WorkspaceAccessService:
         }
         return self._run(principal, "create", "document", operation, path=path, details=details)
 
+    def attach_document_asset(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        filename: str,
+        media_type: str,
+        content: bytes,
+    ) -> DocumentAsset:
+        """Store an image beside a document the principal may update."""
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.UPDATE,
+            action="attach_asset",
+            current=current,
+            operation=lambda: self.assets.store(
+                document=current, filename=filename, media_type=media_type, content=content
+            ),
+            details={"filename": filename, "media_type": media_type, "size_bytes": len(content)},
+        )
+
+    def read_document_asset(
+        self, principal: Principal, *, document_id: str, reference: str
+    ) -> StoredAsset:
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action="read",
+            current=current,
+            operation=lambda: self.assets.read(document=current, reference=reference),
+        )
+
     def create_publication(
         self,
         principal: Principal,
@@ -804,6 +844,7 @@ class WorkspaceAccessService:
         slug: str,
         access_policy: str,
         idempotency_key: str,
+        revision_id: str | None = None,
     ) -> IssuedPublication:
         current = self.documents.get_document(document_id)
 
@@ -815,9 +856,14 @@ class WorkspaceAccessService:
                 access_policy=access_policy,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
+                revision_id=revision_id,
             )
 
-        details: dict[str, object] = {"slug": slug, "access_policy": access_policy}
+        details: dict[str, object] = {
+            "slug": slug,
+            "access_policy": access_policy,
+            "revision_id": revision_id or current.current_revision_id,
+        }
         return self._run(
             principal,
             "publish",
@@ -889,6 +935,7 @@ class WorkspaceAccessService:
         slug: str,
         access_policy: str,
         idempotency_key: str,
+        revision_id: str | None = None,
     ) -> IssuedPublication:
         publication = self.publications.get_publication(publication_id)
         current = self.documents.get_document(publication.document_id)
@@ -902,12 +949,14 @@ class WorkspaceAccessService:
                 access_policy=access_policy,
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
+                revision_id=revision_id,
             )
 
         details: dict[str, object] = {
             "expected_metadata_version": expected_version,
             "slug": slug,
             "access_policy": access_policy,
+            "revision_id": revision_id or publication.revision_id,
         }
         return self._run(
             principal,

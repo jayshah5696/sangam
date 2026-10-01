@@ -4,6 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 import {
   BookmarkCheck,
   Columns2,
+  ImagePlus,
   MessageSquare,
   MoreHorizontal,
   PanelRightClose,
@@ -20,7 +21,8 @@ import {
 import { StateMessage } from '../ui/StateMessage'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 import { TextSelectionToolbar, type TextSelectionAnchor } from './TextSelectionToolbar'
-import { api, type Document, type Revision } from '../../api'
+import { api, SUPPORTED_IMAGE_TYPES, type Document, type Revision } from '../../api'
+import { chatNavigationState } from '../../chatNavigation'
 import {
   CITATION_NAVIGATION_EVENT,
   citationTargetFromLocation,
@@ -40,7 +42,8 @@ import { canSplitActiveGroup } from '../../splitPolicy'
 import { initialDocumentMode, saveLabel } from '../../documentWorkspaceState'
 import { DocumentLocationControl } from './DocumentLocationControl'
 import { ActionDialog } from '../ActionMenu'
-import type { MarkdownEditorHandle } from '../MarkdownEditor'
+import type { EditorSelectionAnchor, MarkdownEditorHandle } from '../MarkdownEditor'
+import { PublicationStatusBadge } from './PublicationStatusBadge'
 import { ConflictRecoveryNotice } from './ConflictRecoveryNotice'
 import { DraftRecoveryNotice, offlineRecoveryMessage } from './DraftRecoveryNotice'
 
@@ -106,6 +109,60 @@ export function DocumentWorkspace({
     occurrence: number
   } | null>(null)
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [editorSelection, setEditorSelection] = useState<EditorSelectionAnchor | null>(null)
+  const [imageUpload, setImageUpload] = useState<{ pending: number; error: string | null }>({
+    pending: 0,
+    error: null,
+  })
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const navigate = useNavigate()
+  const resolveAsset = useCallback(
+    async (reference: string) => api.documentAssetUrl(documentId, reference),
+    [documentId],
+  )
+
+  // Images are stored beside the document and inserted at the cursor as portable Markdown.
+  const uploadImages = async (files: File[]) => {
+    const images = files.filter((file) => SUPPORTED_IMAGE_TYPES.includes(file.type))
+    if (!images.length) {
+      setImageUpload((state) => ({ ...state, error: 'Images must be PNG, JPEG, GIF, or WebP.' }))
+      return
+    }
+    setImageUpload((state) => ({ pending: state.pending + images.length, error: null }))
+    for (const file of images) {
+      try {
+        const extension = file.type.split('/')[1] ?? 'png'
+        const asset = await api.attachDocumentAsset(
+          documentId,
+          file,
+          file.name || `pasted-image.${extension}`,
+        )
+        editorRef.current?.insertText(`${asset.markdown}\n`)
+      } catch (error) {
+        setImageUpload((state) => ({
+          ...state,
+          error: error instanceof Error ? error.message : 'The image could not be added.',
+        }))
+      } finally {
+        setImageUpload((state) => ({ ...state, pending: Math.max(0, state.pending - 1) }))
+      }
+    }
+  }
+
+  // Asking saves the draft first so chat reads exactly the passage the user selected.
+  const askAbout = async (selectedText: string) => {
+    const current = sessions.getSession(documentId).content ?? document.content
+    const saved = current === document.content ? document : await sessions.flushSnapshot(documentId, current)
+    await navigate({
+      to: '/chat',
+      search: {
+        document: documentId,
+        revision: saved.current_revision_id,
+        returnTo: `/documents/${documentId}`,
+      },
+      state: chatNavigationState(selectedText),
+    })
+  }
 
   const keepSelection = async (
     selectedText: string,
@@ -245,6 +302,41 @@ export function DocumentWorkspace({
       ),
     [documentId, sessions],
   )
+  // Search results open the current revision at a line; reveal it once the surface exists.
+  const revealedPassage = useRef<CitationTarget | null>(null)
+  useEffect(() => {
+    const target = citationTarget
+    const passage = target?.passage
+    if (!target || !passage || target.revisionId || revealedPassage.current === target) return
+    let frames = 0
+    let handle = 0
+    const reveal = () => {
+      if (mode !== 'preview' && editorRef.current) {
+        revealedPassage.current = target
+        editorRef.current.revealPassage(passage.line, passage.exact)
+        return
+      }
+      if (mode === 'preview') {
+        const blocks = [
+          ...(workspaceRef.current?.querySelectorAll<HTMLElement>('.markdown-preview [data-line]') ?? []),
+        ]
+        const nearest = blocks.filter((block) => Number(block.dataset.line) <= passage.line).at(-1)
+        if (nearest) {
+          revealedPassage.current = target
+          for (const previous of workspaceRef.current?.querySelectorAll('[data-search-target]') ?? [])
+            previous.removeAttribute('data-search-target')
+          nearest.setAttribute('data-search-target', '')
+          nearest.scrollIntoView({ block: 'center' })
+          return
+        }
+      }
+      frames += 1
+      if (frames < 120) handle = requestAnimationFrame(reveal)
+    }
+    handle = requestAnimationFrame(reveal)
+    return () => cancelAnimationFrame(handle)
+  }, [citationTarget, mode])
+
   useEffect(() => {
     const receiveCitation = (event: Event) => {
       // SAFETY: CITATION_NAVIGATION_EVENT dispatches CustomEvent with detail: CitationTarget
@@ -334,11 +426,14 @@ export function DocumentWorkspace({
             ) : (
               <p className="eyebrow">{document.path ?? 'Saved draft'}</p>
             )}
-            <span className={`save-state ${saveState}`} role="status" aria-live="polite" aria-atomic="true">
-              {document.content_type === 'application/pdf'
-                ? 'Immutable source'
-                : saveLabel(saveState, Boolean(document.path))}
-            </span>
+            <div className="document-header-status">
+              {document.content_type !== 'application/pdf' && <PublicationStatusBadge document={document} />}
+              <span className={`save-state ${saveState}`} role="status" aria-live="polite" aria-atomic="true">
+                {document.content_type === 'application/pdf'
+                  ? 'Immutable source'
+                  : saveLabel(saveState, Boolean(document.path))}
+              </span>
+            </div>
           </div>
 
           <div className="document-header-row">
@@ -437,6 +532,19 @@ export function DocumentWorkspace({
       {captureError && (
         <StateMessage compact kind="error" title="Evidence could not be kept" description={captureError} />
       )}
+      {imageUpload.error && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Image not added"
+          description={imageUpload.error}
+          action={
+            <button type="button" onClick={() => setImageUpload((state) => ({ ...state, error: null }))}>
+              Dismiss
+            </button>
+          }
+        />
+      )}
       {citationTarget?.revisionId && (
         <CitedRevisionEvidence
           document={document}
@@ -509,12 +617,14 @@ export function DocumentWorkspace({
               focusOnOpen={session.focusOnOpen}
               onFocused={() => sessions.updateSession(documentId, { focusOnOpen: false })}
               onReady={registerReadyEditor}
+              onImageFiles={(files) => void uploadImages(files)}
+              onSelectionSettled={setEditorSelection}
             />
           </Suspense>
         )}
         {mode !== 'edit' && document.content_type === 'text/markdown' && (
           <Suspense fallback={<div className="markdown-preview muted">Preparing preview…</div>}>
-            <MarkdownPreview content={content} readable />
+            <MarkdownPreview content={content} readable resolveAsset={resolveAsset} />
           </Suspense>
         )}
         {mode !== 'edit' && document.content_type === 'text/html' && (
@@ -550,6 +660,36 @@ export function DocumentWorkspace({
           <button type="button" disabled={!linkTarget} onClick={insertLink}>
             Insert link
           </button>
+          {document.content_type === 'text/markdown' && (
+            <>
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={imageUpload.pending > 0}
+                title={
+                  document.path
+                    ? 'Add an image beside this document'
+                    : 'Choose a location for this draft before adding images'
+                }
+                onClick={() => imageInputRef.current?.click()}
+              >
+                <ImagePlus size="var(--icon-inline)" /> {imageUpload.pending ? 'Adding image…' : 'Image'}
+              </button>
+              <input
+                ref={imageInputRef}
+                type="file"
+                hidden
+                multiple
+                accept={SUPPORTED_IMAGE_TYPES.join(',')}
+                aria-label="Add image"
+                onChange={(event) => {
+                  const files = [...(event.currentTarget.files ?? [])]
+                  event.currentTarget.value = ''
+                  if (files.length) void uploadImages(files)
+                }}
+              />
+            </>
+          )}
           {Boolean(selection.selectedCharacters && selection.selectedCharacters > 0) && (
             <button
               type="button"
@@ -599,8 +739,40 @@ export function DocumentWorkspace({
               activeSelection.occurrence,
             )
           }
+          onAsk={() => void askAbout(activeSelection.selectedText)}
         />
       )}
+      {editorSelection &&
+        !activeSelection &&
+        mode !== 'preview' &&
+        document.content_type !== 'application/pdf' && (
+          <TextSelectionToolbar
+            key={`editor:${editorSelection.rect.left}:${editorSelection.rect.top}:${editorSelection.text.length}`}
+            documentId={document.document_id}
+            documentTitle={document.title}
+            documentPath={document.path}
+            contentType={document.content_type}
+            selectedText={editorSelection.text}
+            anchor={editorSelection.rect}
+            onDismiss={() => setEditorSelection(null)}
+            onFormat={
+              document.content_type === 'text/markdown'
+                ? (format) => editorRef.current?.applyFormat(format)
+                : undefined
+            }
+            onKeep={() => {
+              const captured = editorSelectionSnapshot.current
+              if (!captured?.selectedText) return Promise.reject(new Error('Select the passage again.'))
+              return keepSelection(
+                captured.selectedText,
+                captured.content,
+                captured.revisionId,
+                captured.occurrence,
+              )
+            }}
+            onAsk={() => void askAbout(editorSelection.text)}
+          />
+        )}
     </section>
   )
 }

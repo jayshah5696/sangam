@@ -38,6 +38,18 @@ markdown.renderer.rules.heading_open = (tokens, index, options, environment, sel
   return defaultHeadingOpen(tokens, index, options, environment, self)
 }
 
+// Source lines on blocks let search results and the outline scroll the preview to a passage.
+for (const rule of ['paragraph_open', 'list_item_open', 'blockquote_open'] as const) {
+  const fallback =
+    markdown.renderer.rules[rule] ??
+    ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options))
+  markdown.renderer.rules[rule] = (tokens, index, options, environment, self) => {
+    const token = tokens[index]!
+    if (token.map && !token.hidden) token.attrSet('data-line', String(token.map[0] + 1))
+    return fallback(tokens, index, options, environment, self)
+  }
+}
+
 const defaultValidateLink = markdown.validateLink.bind(markdown)
 markdown.validateLink = (url) => internalDocumentHref(url) !== null || defaultValidateLink(url)
 

@@ -93,7 +93,7 @@ describe('bounded document pages', () => {
       ),
     )
 
-    const result = await api.searchDocumentsPage('first', undefined, 'relevance', 20, 1)
+    const result = await api.searchDocumentsPage({ query: 'first', sort: 'relevance' }, 20, 1)
     expect(result).toEqual({ items: expect.any(Array), hasMore: true })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/search?q=first&sort=relevance&limit=1&offset=20',

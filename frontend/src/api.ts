@@ -1,5 +1,17 @@
 import { z } from 'zod'
 
+export const searchMatchSchema = z.object({
+  source: z.enum(['content', 'pdf_page', 'annotation', 'title', 'path', 'metadata']),
+  snippet: z.string(),
+  exact: z.string().nullable(),
+  line: z.number().int().positive().nullable(),
+  heading: z.string().nullable(),
+  page_number: z.number().int().positive().nullable(),
+  annotation_id: z.string().nullable(),
+})
+
+export type SearchMatch = z.infer<typeof searchMatchSchema>
+
 export const documentSchema = z.object({
   document_id: z.string(),
   title: z.string(),
@@ -24,6 +36,7 @@ export const documentSchema = z.object({
   trust_version: z.number(),
   tags: z.array(z.lazy(() => tagSchema)),
   search_snippet: z.string().nullable().optional(),
+  search_matches: z.array(searchMatchSchema).nullable().optional(),
   pdf_page_count: z.number().nullable(),
   pdf_extraction_status: z.enum(['pending', 'processing', 'ready', 'failed']).nullable(),
   pdf_extraction_error: z.string().nullable(),
@@ -495,9 +508,32 @@ export const publicationSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   url: z.string(),
+  revision_id: z.string(),
+  document_revision_id: z.string(),
 })
 
 export type Publication = z.infer<typeof publicationSchema>
+
+export const documentAssetSchema = z.object({
+  reference: z.string(),
+  markdown: z.string(),
+  media_type: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+  size_bytes: z.number(),
+})
+
+export type DocumentAsset = z.infer<typeof documentAssetSchema>
+
+export const SUPPORTED_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+export type SearchSort = 'relevance' | 'updated' | 'title' | 'path'
+
+/** Filters the server applies to a workspace search; also the shape a saved view stores. */
+export type SearchFilters = {
+  query: string
+  sort: SearchSort
+  tagId?: string
+  contentType?: Document['content_type']
+}
 
 export const htmlJavascriptSettingsSchema = z.object({
   enabled: z.boolean(),
@@ -1327,23 +1363,18 @@ export const api = {
   async searchDocuments(
     query = '',
     tagId?: string,
-    sort: 'relevance' | 'updated' | 'title' | 'path' = 'relevance',
+    sort: SearchSort = 'relevance',
   ): Promise<DocumentSummary[]> {
     return collectPages(async (offset, limit) => {
-      return (await this.searchDocumentsPage(query, tagId, sort, offset, limit)).items
+      return (await this.searchDocumentsPage({ query, tagId, sort }, offset, limit)).items
     })
   },
-  async searchDocumentsPage(
-    query = '',
-    tagId?: string,
-    sort: 'relevance' | 'updated' | 'title' | 'path' = 'relevance',
-    offset = 0,
-    limit = PAGE_SIZE,
-  ): Promise<DocumentPage> {
+  async searchDocumentsPage(filters: SearchFilters, offset = 0, limit = PAGE_SIZE): Promise<DocumentPage> {
     const params = new URLSearchParams()
-    if (query.trim()) params.set('q', query.trim())
-    if (tagId) params.set('tag_id', tagId)
-    params.set('sort', sort)
+    if (filters.query.trim()) params.set('q', filters.query.trim())
+    if (filters.tagId) params.set('tag_id', filters.tagId)
+    if (filters.contentType) params.set('content_type', filters.contentType)
+    params.set('sort', filters.sort)
     params.set('limit', String(limit))
     params.set('offset', String(offset))
     const page = z.array(documentSummarySchema).parse(await request(`/search?${params.toString()}`))
@@ -1424,6 +1455,20 @@ export const api = {
         body: file,
       }),
     )
+  },
+  async attachDocumentAsset(documentId: string, file: Blob, filename: string): Promise<DocumentAsset> {
+    const params = new URLSearchParams({ filename })
+    return documentAssetSchema.parse(
+      await request(`/documents/${encodeURIComponent(documentId)}/assets?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      }),
+    )
+  },
+  documentAssetUrl(documentId: string, reference: string): string {
+    const params = new URLSearchParams({ path: reference })
+    return `/api/v1/documents/${encodeURIComponent(documentId)}/assets?${params.toString()}`
   },
   pdfContentUrl(documentId: string): string {
     return `/api/v1/pdfs/${encodeURIComponent(documentId)}/content`
@@ -1529,18 +1574,26 @@ export const api = {
     documentId: string,
     slug: string,
     accessPolicy: Publication['access_policy'],
+    revisionId?: string,
   ): Promise<IssuedPublication> {
     return issuedPublicationSchema.parse(
       await request('/publications', {
         method: 'POST',
-        body: JSON.stringify({ document_id: documentId, slug, access_policy: accessPolicy }),
+        body: JSON.stringify({
+          document_id: documentId,
+          slug,
+          access_policy: accessPolicy,
+          revision_id: revisionId ?? null,
+        }),
       }),
     )
   },
+  /** Omit `revisionId` to keep the published revision; pass one to publish it. */
   async updatePublication(
     publication: Publication,
     slug: string,
     accessPolicy: Publication['access_policy'],
+    revisionId?: string,
   ): Promise<IssuedPublication> {
     return issuedPublicationSchema.parse(
       await request(`/publications/${publication.publication_id}`, {
@@ -1549,6 +1602,7 @@ export const api = {
           expected_version: publication.version,
           slug,
           access_policy: accessPolicy,
+          revision_id: revisionId ?? null,
         }),
       }),
     )

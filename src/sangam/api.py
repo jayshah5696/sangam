@@ -6,6 +6,7 @@ import uuid
 import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from typing import Literal
 from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, Query, Request
@@ -14,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from sangam import __version__
 from sangam.agent_docs import agent_skill, llms_txt
@@ -56,6 +58,7 @@ from sangam.schemas import (
     CreateTag,
     DeleteDocument,
     Document,
+    DocumentAsset,
     DocumentSummary,
     DuplicateDocument,
     ErrorResponse,
@@ -92,6 +95,23 @@ from sangam.security import Principal, PublicationAccess, sanitize_headers
 from sangam.storage_ownership import StorageOwnership
 
 logger = logging.getLogger(__name__)
+
+
+async def read_bounded_body(request: Request, *, max_bytes: int, noun: str) -> bytes:
+    """Read a request body in chunks, rejecting it as soon as it passes the limit."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+        raise ValidationError(
+            f"{noun} exceeds the configured size limit", details={"max_bytes": max_bytes}
+        )
+    content = bytearray()
+    async for chunk in request.stream():
+        content.extend(chunk)
+        if len(content) > max_bytes:
+            raise ValidationError(
+                f"{noun} exceeds the configured size limit", details={"max_bytes": max_bytes}
+            )
+    return bytes(content)
 
 
 def _camel_case(value: str) -> str:
@@ -290,8 +310,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "bounded by limit and offset and exclude full content."
             ),
             ("/api/v1/search", "get"): (
-                "Search visible document titles, paths, content, tags, and categories. Prefer this "
-                "to listing or reading the whole workspace."
+                "Search visible document titles, paths, content, PDF text, annotations, tags, and "
+                "categories. Each result carries search_matches: located passages with a line, "
+                "heading, PDF page, or annotation. Prefer this to listing or reading the whole "
+                "workspace."
+            ),
+            ("/api/v1/documents/{document_id}/assets", "post"): (
+                "Store a PNG, JPEG, GIF, or WebP image beside a Markdown or HTML document that has "
+                "a workspace path. Send the raw image with its Content-Type. Returns a relative "
+                "reference and ready-to-insert Markdown; the same bytes return the same reference."
+            ),
+            ("/api/v1/documents/{document_id}/assets", "get"): (
+                "Read an image referenced relative to the document's folder."
             ),
             ("/api/v1/documents", "post"): (
                 "Create a Markdown or HTML document. A path-scoped token must provide a "
@@ -940,6 +970,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tag_id: str | None = Query(default=None),
         category: str | None = Query(default=None, max_length=120),
         actor_id: str | None = Query(default=None, max_length=120),
+        content_type: Literal["text/markdown", "text/html", "application/pdf"] | None = Query(
+            default=None
+        ),
         sort: str = Query(default="relevance", pattern="^(relevance|updated|title|path)$"),
         limit: int = Query(default=50, ge=1, le=200),
         offset: int = Query(default=0, ge=0),
@@ -951,6 +984,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             tag_id=tag_id,
             category=category,
             actor_id=actor_id,
+            content_type=content_type,
             sort=sort,
             limit=limit,
             offset=offset,
@@ -1194,6 +1228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             slug=body.slug,
             access_policy=body.access_policy,
             idempotency_key=idempotency_key,
+            revision_id=body.revision_id,
         )
 
     @app.patch("/api/v1/publications/{publication_id}", response_model=IssuedPublication)
@@ -1210,6 +1245,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             slug=body.slug,
             access_policy=body.access_policy,
             idempotency_key=idempotency_key,
+            revision_id=body.revision_id,
         )
 
     @app.delete("/api/v1/publications/{publication_id}", response_model=Publication)
@@ -1434,6 +1470,55 @@ else fetch('/api/v1/trusted-previews/content', {
             content=asset.content,
             media_type=asset.media_type,
             headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    @app.post(
+        "/api/v1/documents/{document_id}/assets",
+        response_model=DocumentAsset,
+        status_code=201,
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    media_type: {"schema": {"type": "string", "format": "binary"}}
+                    for media_type in ("image/png", "image/jpeg", "image/gif", "image/webp")
+                },
+            }
+        },
+    )
+    async def attach_document_asset(
+        document_id: str,
+        request: Request,
+        filename: str = Query(min_length=1, max_length=240),
+        principal: Principal = principal_dependency,
+    ) -> DocumentAsset:
+        media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+        content = await read_bounded_body(
+            request, max_bytes=resolved_settings.max_publication_asset_bytes, noun="Image"
+        )
+        return await run_in_threadpool(
+            workspace.attach_document_asset,
+            principal,
+            document_id=document_id,
+            filename=filename,
+            media_type=media_type,
+            content=content,
+        )
+
+    @app.get("/api/v1/documents/{document_id}/assets")
+    def read_document_asset(
+        document_id: str,
+        path: str = Query(min_length=1, max_length=1000),
+        principal: Principal = principal_dependency,
+    ) -> Response:
+        asset = workspace.read_document_asset(principal, document_id=document_id, reference=path)
+        return Response(
+            content=asset.content,
+            media_type=asset.media_type,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+                "Content-Security-Policy": "default-src 'none'",
+            },
         )
 
     @app.get("/api/v1/documents/{document_id}/raw")

@@ -3195,6 +3195,17 @@
             "title": "Document Id",
             "type": "string"
           },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
           "slug": {
             "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
             "title": "Slug",
@@ -3415,6 +3426,20 @@
             ],
             "title": "Revision Summary"
           },
+          "search_matches": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SearchMatch"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Matches"
+          },
           "search_snippet": {
             "anyOf": [
               {
@@ -3501,6 +3526,41 @@
           "content"
         ],
         "title": "Document",
+        "type": "object"
+      },
+      "DocumentAsset": {
+        "description": "An image stored beside its document; `reference` is relative to the document.",
+        "properties": {
+          "markdown": {
+            "title": "Markdown",
+            "type": "string"
+          },
+          "media_type": {
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/gif",
+              "image/webp"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reference",
+          "markdown",
+          "media_type",
+          "size_bytes"
+        ],
+        "title": "DocumentAsset",
         "type": "object"
       },
       "DocumentSummary": {
@@ -3634,6 +3694,20 @@
               }
             ],
             "title": "Revision Summary"
+          },
+          "search_matches": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SearchMatch"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Matches"
           },
           "search_snippet": {
             "anyOf": [
@@ -4109,6 +4183,10 @@
             ],
             "title": "Document Path"
           },
+          "document_revision_id": {
+            "title": "Document Revision Id",
+            "type": "string"
+          },
           "document_title": {
             "title": "Document Title",
             "type": "string"
@@ -4119,6 +4197,10 @@
           },
           "publication_id": {
             "title": "Publication Id",
+            "type": "string"
+          },
+          "revision_id": {
+            "title": "Revision Id",
             "type": "string"
           },
           "slug": {
@@ -4167,7 +4249,9 @@
           "updated_by",
           "created_at",
           "updated_at",
-          "url"
+          "url",
+          "revision_id",
+          "document_revision_id"
         ],
         "title": "IssuedPublication",
         "type": "object"
@@ -6363,6 +6447,10 @@
             ],
             "title": "Document Path"
           },
+          "document_revision_id": {
+            "title": "Document Revision Id",
+            "type": "string"
+          },
           "document_title": {
             "title": "Document Title",
             "type": "string"
@@ -6373,6 +6461,10 @@
           },
           "publication_id": {
             "title": "Publication Id",
+            "type": "string"
+          },
+          "revision_id": {
+            "title": "Revision Id",
             "type": "string"
           },
           "slug": {
@@ -6410,7 +6502,9 @@
           "updated_by",
           "created_at",
           "updated_at",
-          "url"
+          "url",
+          "revision_id",
+          "document_revision_id"
         ],
         "title": "Publication",
         "type": "object"
@@ -7059,6 +7153,88 @@
         "title": "RevisionSummary",
         "type": "object"
       },
+      "SearchMatch": {
+        "description": "One located passage behind a search hit; `snippet` marks terms with [[ ]].",
+        "properties": {
+          "annotation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotation Id"
+          },
+          "exact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exact"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "page_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Number"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "content",
+              "pdf_page",
+              "annotation",
+              "title",
+              "path",
+              "metadata"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "snippet"
+        ],
+        "title": "SearchMatch",
+        "type": "object"
+      },
       "Source": {
         "additionalProperties": false,
         "properties": {
@@ -7676,6 +7852,17 @@
             "minimum": 0.0,
             "title": "Expected Version",
             "type": "integer"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
           },
           "slug": {
             "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
@@ -17631,6 +17818,423 @@
           }
         ],
         "summary": "Update Document"
+      }
+    },
+    "/api/v1/documents/{document_id}/assets": {
+      "get": {
+        "description": "Read an image referenced relative to the document's folder.",
+        "operationId": "readDocumentAsset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Read Document Asset"
+      },
+      "post": {
+        "description": "Store a PNG, JPEG, GIF, or WebP image beside a Markdown or HTML document that has a workspace path. Send the raw image with its Content-Type. Returns a relative reference and ready-to-insert Markdown; the same bytes return the same reference.",
+        "operationId": "attachDocumentAsset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "maxLength": 240,
+              "minLength": 1,
+              "title": "Filename",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "image/gif": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentAsset"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Attach Document Asset"
       }
     },
     "/api/v1/documents/{document_id}/backlinks": {
@@ -31486,7 +32090,7 @@
     },
     "/api/v1/search": {
       "get": {
-        "description": "Search visible document titles, paths, content, tags, and categories. Prefer this to listing or reading the whole workspace.",
+        "description": "Search visible document titles, paths, content, PDF text, annotations, tags, and categories. Each result carries search_matches: located passages with a line, heading, PDF page, or annotation. Prefer this to listing or reading the whole workspace.",
         "operationId": "searchDocuments",
         "parameters": [
           {
@@ -31548,6 +32152,27 @@
                 }
               ],
               "title": "Actor Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "content_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "text/markdown",
+                    "text/html",
+                    "application/pdf"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Content Type"
             }
           },
           {
@@ -32669,7 +33294,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-09-30",
-    "reason": "Add document backlinks endpoint (issues #308, #317, #319)"
+    "date": "2026-10-01",
+    "reason": "#311 #318 #320 #321 #322: pinned publication revisions, located search passages with content_type filter, and document image assets"
   }
 }

@@ -145,6 +145,40 @@ presets:
 - **Research** selects Split mode and opens the Research tab.
 - **Review** selects Preview mode and opens revision history.
 
+## Search, saved views, and capture
+
+Sidebar search shows each result's located passages: where the match is (heading
+and line, PDF page, or annotation), why it matched, and the snippet with matched
+words marked. Selecting a passage opens the editor on the matched word, the
+preview on the matching block, or the PDF on the page. Type, sort, and tag
+filters sit under the query. **Save view** stores the query and filters in this
+browser; saved views re-run the search when opened and appear in the search
+panel and on Home.
+
+**Capture** (Home or the command palette) is the one intake flow for pasted
+text, Markdown, links, PDFs, images, and Markdown or HTML files. Every capture
+becomes an ordinary file in the `inbox/` folder; choosing a project also adds it
+as a source. Links are saved with their source and capture date and are not
+fetched. The Home **Inbox** lists those files with their import state and a
+retry for failed PDF text extraction. Organize later with the location control.
+
+## Publication status
+
+The document header shows **Published** when readers see the saved draft and
+**Published version differs** when they see an earlier revision. The latter opens
+the exact comparison in History. The inspector's **Publish saved draft** is the
+only way to change what readers see; slug and access changes keep the pinned
+revision.
+
+## Editor formatting and selection
+
+In Markdown, Mod+B, Mod+I, and Mod+E toggle bold, italic, and inline code. Mod+K
+stays the command palette. Selecting text in the editor shows the selection
+toolbar with formatting, link, Keep as evidence, Ask, and copy actions; Ask
+saves the draft first so chat reads the selected passage. Pasting, dropping, or
+choosing an image stores it beside the document and inserts a relative Markdown
+image. A draft without a location must choose one before adding images.
+
 ## Review and document organization
 
 The **Review changes** route lists pending and stale agent proposals. Each card
@@ -270,9 +304,11 @@ adds a second adjacent rail.
 - On narrow and touch screens, Settings uses the existing sidebar drawer. The
   content remains free of page-level horizontal scrolling.
 
-The workspace sidebar footer contains five compact primary destinations: Chat,
-Review changes, Publications, Trash, and Settings. Operational tools belong
-under Settings:
+The workspace sidebar footer contains six labeled destinations in a two-column
+grid: Projects, Chat, Review, Publications, Trash, and Settings. Each shows its
+icon and a visible label; the accessible name contains the visible label (for
+example "Workspace chat" for Chat). Do not return to icon-only destinations or
+hover-only tooltips. Operational tools belong under Settings:
 Agent activity under Agents & access; Reconciliation, Backups, and configured
 Karakeep imports under Operations. Their direct URLs remain valid and the
 command palette keeps them discoverable.

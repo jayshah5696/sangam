@@ -1,11 +1,13 @@
 import { useDeferredValue, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { z } from 'zod'
 import {
+  Bookmark,
   FilePlus2,
   FileText,
-  FileUp,
   FolderKanban,
+  Inbox,
   MessageSquareText,
   Pin,
   Search,
@@ -18,8 +20,14 @@ import { selectHomeDocuments } from '../workspaceHome'
 import { StateMessage } from '../components/ui/StateMessage'
 import { ProjectHome } from '../components/projects/ProjectHome'
 import { HOME_PROJECT_KEY } from '../projectResume'
+import { CaptureDialog } from '../components/capture/CaptureDialog'
+import { InboxSection } from '../components/capture/InboxSection'
+import { openSearch, useSavedViews } from '../savedViews'
 
-export const Route = createFileRoute('/')({ component: Welcome })
+// `?capture=1` lets the command palette open the capture dialog from anywhere.
+const homeSearch = z.object({ capture: z.coerce.boolean().optional() })
+
+export const Route = createFileRoute('/')({ component: Welcome, validateSearch: homeSearch })
 
 type HomeSelection = { id: string | null; error: Error | null }
 
@@ -33,6 +41,14 @@ function readHomeSelection(): HomeSelection {
 
 function Welcome() {
   const navigate = useNavigate()
+  const { capture: captureRequested } = Route.useSearch()
+  const [captureOpen, setCaptureOpen] = useState(false)
+  const savedViews = useSavedViews()
+  const showCapture = captureOpen || Boolean(captureRequested)
+  const closeCapture = () => {
+    setCaptureOpen(false)
+    if (captureRequested) void navigate({ to: '/', search: {}, replace: true })
+  }
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
   const sessions = useDocumentSessions()
@@ -65,7 +81,8 @@ function Welcome() {
   const searchResults = useInfiniteQuery({
     queryKey: ['documents', 'welcome-search', deferredSearch],
     initialPageParam: 0,
-    queryFn: ({ pageParam }) => api.searchDocumentsPage(deferredSearch, undefined, 'relevance', pageParam),
+    queryFn: ({ pageParam }) =>
+      api.searchDocumentsPage({ query: deferredSearch, sort: 'relevance' }, pageParam),
     getNextPageParam: (lastPage, pages) => (lastPage.hasMore ? pages.length * DOCUMENT_PAGE_SIZE : undefined),
     enabled: deferredSearch.trim().length > 0,
   })
@@ -82,28 +99,6 @@ function Welcome() {
         await api.addProjectDocument(selected.project_id, {
           document_id: document.document_id,
           role: 'draft',
-        })
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['documents'] }),
-        queryClient.invalidateQueries({ queryKey: ['projects'] }),
-        queryClient.invalidateQueries({ queryKey: ['project'] }),
-      ])
-      workbench.ensureDocumentOpen(document.document_id, document.title)
-      await navigate({ to: '/documents/$documentId', params: { documentId: document.document_id } })
-    },
-  })
-  const importPdf = useMutation({
-    mutationFn: (file: File) =>
-      api.importPdf(
-        file,
-        file.name.replace(/\.pdf$/i, '') || 'Imported PDF',
-        `research/${file.name.toLowerCase().endsWith('.pdf') ? file.name : `${file.name}.pdf`}`,
-      ),
-    onSuccess: async (document) => {
-      if (selected)
-        await api.addProjectDocument(selected.project_id, {
-          document_id: document.document_id,
-          role: 'source',
         })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['documents'] }),
@@ -139,7 +134,7 @@ function Welcome() {
         {selected
           ? selected.description
           : isEmpty
-            ? 'Create a Markdown document or import a PDF to begin.'
+            ? 'Create a Markdown document or capture material to begin.'
             : 'Open a document, continue a pinned thread, or check the changes waiting for your review.'}
       </p>
       {projectsQuery.isError && (
@@ -276,19 +271,9 @@ function Welcome() {
         <Link className="secondary-action" to="/projects">
           <FolderKanban size="var(--icon-control)" /> Projects
         </Link>
-        <label className="pdf-import-control">
-          <FileUp size="var(--icon-control)" />
-          <span>{importPdf.isPending ? 'Importing PDF…' : 'Import PDF'}</span>
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            disabled={importPdf.isPending}
-            onChange={(event) => {
-              const file = event.target.files?.[0] ?? null
-              if (file) importPdf.mutate(file)
-            }}
-          />
-        </label>
+        <button type="button" className="secondary-action" onClick={() => setCaptureOpen(true)}>
+          <Inbox size="var(--icon-control)" /> Capture
+        </button>
       </div>
       <div className="welcome-shortcuts">
         <span className="desktop-shortcut">
@@ -331,12 +316,32 @@ function Welcome() {
           ))}
         </div>
       )}
-      {(createDocument.isError || importPdf.isError) && (
+      <InboxSection onCapture={() => setCaptureOpen(true)} />
+      {savedViews.length > 0 && (
+        <div className="welcome-recent welcome-saved-views">
+          <strong>
+            <Bookmark size="var(--icon-inline)" /> Saved views
+          </strong>
+          {savedViews.slice(0, 6).map((view) => (
+            <button key={view.id} type="button" onClick={() => openSearch(view.filters)}>
+              <span>{view.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {createDocument.isError && (
         <StateMessage
           compact
           kind="error"
-          title="The document could not be created, imported or attached"
-          description={(createDocument.error ?? importPdf.error)?.message}
+          title="The document could not be created or attached"
+          description={createDocument.error.message}
+        />
+      )}
+      {showCapture && (
+        <CaptureDialog
+          projects={projectsQuery.data ?? []}
+          defaultProjectId={selected?.project_id}
+          onClose={closeCapture}
         />
       )}
     </section>
