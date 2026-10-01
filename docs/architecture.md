@@ -50,7 +50,11 @@ Backups are paired artifacts: one SQLite dump plus one workspace tarball taken f
 
 ## Search
 
-Full-text search runs on SQLite FTS5 across documents and PDF page text. Query results link back to exact documents (and page numbers for PDFs).
+Full-text search runs on SQLite FTS5 across documents, PDF page text, and annotations. FTS chooses and ranks the documents; Sangam then rescans only the returned page to locate up to three passages per result (`search_matches`): the source (document text, PDF page, annotation, title, path, or metadata), a highlighted snippet, and the exact location (line and nearest heading, PDF page, or annotation). Search results open the editor on that line or the PDF on that page.
+
+Images added to a document are stored once in the workspace's shared `attachments/` folder as `<name>-<sha16>.<ext>` and referenced root-relative (`/attachments/...`). The reference never depends on the document's location, so moving a document or renaming its folder cannot break it, and drafts without a location can hold images. Root-relative links render in GitHub, VS Code, and static-site tools that treat the workspace as their root. Only PNG, JPEG, GIF, and WebP are accepted; SVG is refused.
+
+Saved views (`/api/v1/saved-views`) store a named search query and filters on the server for the workspace owner, so they follow the owner across devices.
 
 SQLite triggers record changed document IDs in `search_dirty_documents` in the
 same transaction as searchable source changes. Index synchronization reads the
@@ -86,7 +90,7 @@ PDFs are imported immutably (SHA-256 tracked), page text is extracted into FTS5 
 
 ## Publishing
 
-Any revision can be published as private, unlisted, or public with a custom slug at `SANGAM_PUBLICATION_BASE_URL`. Published pages render sanitized HTML. Trusted interactive previews use the separate `/trusted-preview` zone described above.
+A publication is pinned to one exact revision (`publications.revision_id`) and is private, unlisted, or public with a custom slug at `SANGAM_PUBLICATION_BASE_URL`. Saving the draft does not change what readers see; the editor shows when the published revision differs from the saved draft and links to that comparison. Publishing a newer revision is a deliberate `PATCH /api/v1/publications/{id}` with `revision_id`. Older revisions are readable only after an explicit exposure. Published pages render sanitized HTML. Trusted interactive previews use the separate `/trusted-preview` zone described above.
 
 ## Chat runtime
 

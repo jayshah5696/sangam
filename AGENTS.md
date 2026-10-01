@@ -29,3 +29,8 @@
   - Parse and validate external or untrusted payloads at I/O boundaries (e.g. using Zod schemas) rather than using unconstrained dictionary types (`Record<string, unknown>`), loose runtime `typeof` branches, or functions exposing `unknown` parameters/returns.
   - Do not use conditional empty object spread (`...(condition ? { key: value } : {})`) or module mocking in application code.
 - Run `just anti-slop` (or `just lint`) to verify all TypeScript and JavaScript files comply with the anti-slop Oxlint rules.
+
+## Asset and documentation hygiene
+
+- Do not commit ad-hoc PR screenshots, issue evidence folders, or prototype HTML files into `docs/` or `assets/`; write ephemeral test captures to Playwright artifact directories (`test.info().outputPath(...)`).
+- Keep only canonical documentation and verified UI reference assets (`docs/assets/crisp-*.png`, lifecycle diagrams, demo media) tracked in git.

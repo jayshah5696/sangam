@@ -11,6 +11,7 @@ import {
   FilePlus2,
   Files,
   FolderInput,
+  Inbox,
   Globe2,
   MessageSquareText,
   Pencil,
@@ -156,6 +157,14 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         icon: RotateCcw,
         group: 'Actions',
         run: workbench.resetLayout,
+      },
+      {
+        id: 'capture.inbox',
+        label: 'Capture to Inbox',
+        detail: 'Save text, links, PDFs, images, and files to organize later',
+        icon: Inbox,
+        group: 'Actions',
+        run: () => void navigate({ to: '/', search: { capture: true } }),
       },
       {
         id: 'view.chat',

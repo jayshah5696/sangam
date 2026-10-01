@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookmarkCheck, Check, Copy, FileText } from 'lucide-react'
+import { Bold, BookmarkCheck, Check, Code, Copy, FileText, Italic, Link2, MessageSquare } from 'lucide-react'
+import type { MarkdownFormat } from '../MarkdownEditor'
 import { evidenceCitationMarkdown } from '../../evidenceCitation'
 import { floatingPosition } from '../../pdfAnnotationUi'
 import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
@@ -24,6 +25,8 @@ export function TextSelectionToolbar({
   anchor,
   onDismiss,
   onKeep,
+  onFormat,
+  onAsk,
 }: {
   documentId: string
   documentTitle: string
@@ -34,6 +37,10 @@ export function TextSelectionToolbar({
   anchor: TextSelectionAnchor
   onDismiss: () => void
   onKeep?: () => Promise<void>
+  /** Present for editable Markdown selections. */
+  onFormat?: (format: MarkdownFormat) => void
+  /** Ask workspace chat about the selection. */
+  onAsk?: () => void
 }) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: anchor.left, top: anchor.top })
@@ -119,6 +126,34 @@ export function TextSelectionToolbar({
       aria-label="Selected text actions"
       style={{ left: position.left, top: position.top }}
     >
+      {onFormat && (
+        <>
+          {(
+            [
+              ['bold', 'Bold', Bold],
+              ['italic', 'Italic', Italic],
+              ['code', 'Inline code', Code],
+              ['link', 'Link', Link2],
+            ] as const
+          ).map(([format, label, Icon]) => (
+            <button
+              key={format}
+              type="button"
+              aria-label={label}
+              title={label}
+              // Keep the editor's selection: a pressed button must not take focus first.
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onFormat(format)
+                onDismiss()
+              }}
+            >
+              <Icon size="var(--icon-inline)" />
+            </button>
+          ))}
+          <span className="pdf-selection-divider" />
+        </>
+      )}
       <button
         type="button"
         aria-label="Keep as evidence"
@@ -128,6 +163,11 @@ export function TextSelectionToolbar({
         {kept ? <Check size="var(--icon-inline)" /> : <BookmarkCheck size="var(--icon-inline)" />}
         {kept ? 'Kept' : 'Keep as evidence'}
       </button>
+      {onAsk && (
+        <button type="button" aria-label="Ask about selection" title="Ask workspace chat" onClick={onAsk}>
+          <MessageSquare size="var(--icon-inline)" /> Ask
+        </button>
+      )}
       {error && <StateMessage compact kind="error" title="Evidence storage failed" description={error} />}
       <span className="pdf-selection-divider" />
       <button

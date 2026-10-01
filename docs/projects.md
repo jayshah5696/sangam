@@ -115,5 +115,4 @@ fast tests and browser checks pass, capture review artifacts explicitly:
 SANGAM_CAPTURE_PROJECTS=1 SANGAM_E2E_PORT=8871 just test-e2e 'e2e/capture-projects-screenshots.spec.ts'
 ```
 
-Capture output goes to Playwright's artifact directory. The older `docs/assets/pr-331`
-images show the original candidate and are not evidence for the corrected contract.
+Capture output goes to Playwright's artifact directory.

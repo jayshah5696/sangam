@@ -34,7 +34,7 @@ export default defineConfig({
     {
       name: 'chromium-touch-mobile',
       testMatch:
-        /(?:project-assignments|projects|capture-projects-screenshots|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence|review-inbox|revision-history)\.spec\.ts/,
+        /(?:project-assignments|projects|capture-projects-screenshots|everyday-workflow|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence|review-inbox|revision-history)\.spec\.ts/,
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
     },
     {
