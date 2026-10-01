@@ -17,7 +17,7 @@ dependencies = [
   "pyjwt[crypto]>=2.14.0,<3",
   "pypdf>=6.19.0,<7",
   "typer>=0.16,<1",
-  "uvicorn[standard]>=0.53.0,<1",
+  "uvicorn[standard]>=0.54.0,<1",
 ]
 
 [project.urls]

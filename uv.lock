@@ -1374,7 +1374,7 @@ requires-dist = [
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.14.0,<3" },
     { name = "pypdf", specifier = ">=6.19.0,<7" },
     { name = "typer", specifier = ">=0.16,<1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.53.0,<1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0,<1" },
 ]
 
 [package.metadata.requires-dev]
