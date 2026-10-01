@@ -168,6 +168,20 @@ class MutationCoordinator:
         finally:
             self._release_path_lock(normalized_path)
 
+    @contextmanager
+    def paths(self, *normalized_paths: str | None) -> Iterator[None]:
+        """Coordinate file operations targeting multiple workspace paths in lock-order."""
+        unique_paths = sorted({p for p in normalized_paths if p})
+        retained = [(p, self._retain_path_lock(p)) for p in unique_paths]
+        try:
+            with ExitStack() as stack:
+                for _, lock in retained:
+                    stack.enter_context(lock)
+                yield
+        finally:
+            for p, _ in reversed(retained):
+                self._release_path_lock(p)
+
     def _retain_path_lock(self, path: str) -> threading.RLock:
         with self._condition:
             lock = self._path_locks.setdefault(path, threading.RLock())

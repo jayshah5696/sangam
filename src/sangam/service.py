@@ -561,12 +561,16 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key):
+        normalized_path = self._normalize_path(path) if path is not None else None
+        with (
+            self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key),
+            self.mutations.paths(normalized_path),
+        ):
             fingerprint = request_hash(
                 {
                     "title": title,
                     "content": content,
-                    "path": self._normalize_path(path) if path is not None else None,
+                    "path": normalized_path,
                     "content_type": content_type,
                 }
             )
@@ -715,7 +719,12 @@ class DocumentService:
         idempotency_key: str,
         deleted: bool | None = None,
     ) -> tuple[Document, str | None]:
-        with self.mutations.document(document_id):
+        current = self.get_document(document_id, include_deleted=True)
+        target_path = self._normalize_path(path) if path is not None else None
+        with (
+            self.mutations.paths(current.path, target_path),
+            self.mutations.document(document_id),
+        ):
             return self._append_revision_locked(
                 document_id=document_id,
                 expected_revision_id=expected_revision_id,
@@ -944,31 +953,33 @@ class DocumentService:
     ) -> Document:
         validate_metadata_text(title, "Document title")
         source = self.get_document(document_id)
-        if source.current_revision_id != expected_revision_id:
-            raise ConflictError(
-                "The source document changed since it was read",
-                details={
-                    "document_id": document_id,
-                    "expected_revision_id": expected_revision_id,
-                    "current_revision_id": source.current_revision_id,
-                },
-            )
-        if source.content_type == "application/pdf":
-            return self._duplicate_pdf_document(
-                source=source,
-                title=title,
+        target_path = self._normalize_path(path) if path is not None else None
+        with self.mutations.paths(source.path, target_path):
+            if source.current_revision_id != expected_revision_id:
+                raise ConflictError(
+                    "The source document changed since it was read",
+                    details={
+                        "document_id": document_id,
+                        "expected_revision_id": expected_revision_id,
+                        "current_revision_id": source.current_revision_id,
+                    },
+                )
+            if source.content_type == "application/pdf":
+                return self._duplicate_pdf_document(
+                    source=source,
+                    title=title,
+                    path=path,
+                    actor_id=actor_id,
+                    idempotency_key=idempotency_key,
+                )
+            return self.create_document(
+                title=title or f"{source.title} copy",
+                content=source.content,
                 path=path,
+                content_type=source.content_type,
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
             )
-        return self.create_document(
-            title=title or f"{source.title} copy",
-            content=source.content,
-            path=path,
-            content_type=source.content_type,
-            actor_id=actor_id,
-            idempotency_key=idempotency_key,
-        )
 
     def _duplicate_pdf_document(
         self,
@@ -1105,7 +1116,11 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.document(document_id):
+        current = self.get_document(document_id, include_deleted=True)
+        with (
+            self.mutations.paths(current.path, path),
+            self.mutations.document(document_id),
+        ):
             payload = {
                 "document_id": document_id,
                 "expected_revision_id": expected_revision_id,
@@ -1283,7 +1298,11 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.document(document_id):
+        current = self.get_document(document_id, include_deleted=True)
+        with (
+            self.mutations.paths(current.path),
+            self.mutations.document(document_id),
+        ):
             payload = {
                 "document_id": document_id,
                 "expected_revision_id": expected_revision_id,
@@ -1593,7 +1612,11 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        with self.mutations.document(document_id):
+        current = self.get_document(document_id, include_deleted=True)
+        with (
+            self.mutations.paths(current.path),
+            self.mutations.document(document_id),
+        ):
             payload = {
                 "document_id": document_id,
                 "expected_revision_id": expected_revision_id,
@@ -1774,8 +1797,11 @@ class DocumentService:
 
     def rematerialize_document(self, document_id: str) -> Document:
         """Rewrite a materialized document from the canonical database head."""
-        with self.mutations.document(document_id):
-            document = self.get_document(document_id)
+        document = self.get_document(document_id)
+        with (
+            self.mutations.paths(document.path),
+            self.mutations.document(document_id),
+        ):
             if document.content_type == "application/pdf":
                 raise ValidationError(
                     "Missing PDF bytes must be restored from backup; they are not stored in SQLite"

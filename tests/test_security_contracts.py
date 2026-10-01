@@ -633,3 +633,54 @@ def test_nested_cross_document_pipeline_does_not_wait_on_a_backup_blocked_owner(
     assert other_finished.wait(timeout=10)
     for thread in threads:
         thread.join(timeout=10)
+
+
+@pytest.mark.parametrize(
+    "invalid_path",
+    [
+        "docs /item.md",
+        "docs/ item.md",
+        "docs./item.md",
+        "docs/item.md.",
+        "CON/item.md",
+        "docs/NUL.md",
+        "COM1.html",
+        "aux.md",
+    ],
+)
+def test_path_sanitization_rejects_whitespace_trailing_dots_and_reserved_names(
+    client: TestClient, invalid_path
+):
+    response = client.post(
+        "/api/v1/documents",
+        json=dict(
+            title="Invalid Path", path=invalid_path, content="test", content_type="text/markdown"
+        ),
+        headers=headers(f"create-invalid-{invalid_path}"),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "invalid_scope",
+    [
+        "docs /sub",
+        "docs/ sub",
+        "docs.",
+        "NUL",
+        "CON/*",
+    ],
+)
+def test_token_scope_normalization_rejects_whitespace_dots_and_reserved_names(
+    client: TestClient, invalid_scope
+):
+    response = client.post(
+        "/api/v1/agent-tokens",
+        json=dict(
+            actor_id="agent:invalidscope",
+            display_name="Invalid Scope",
+            label="Invalid Scope",
+            scopes=[dict(capability="read", path_prefix=invalid_scope)],
+        ),
+    )
+    assert response.status_code == 422

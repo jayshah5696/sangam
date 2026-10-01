@@ -55,6 +55,8 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-client-cert",
     "ssl-client-cert",
     "x-tls-client-cert",
+    "x-amz-security-token",
+    "x-oauth-basic",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -116,6 +118,10 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "oauth_token",
     "env_var",
     "env_val",
+    "secret_val",
+    "api_secret",
+    "account_key",
+    "id_token",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -143,6 +149,31 @@ _SAFE_HEADER_EXCEPTIONS: set[str] = {
 _TOKEN_PATTERN = re.compile(
     r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{22,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,})\b"
 )
+
+_RESERVED_NAMES: set[str] = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+}
 
 _PRIVATE_PEM = re.compile(
     r"-----BEGIN (?P<kind>(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY)-----"
@@ -292,6 +323,19 @@ def normalize_scope_prefix(value: str | None) -> str | None:
         or any(part.strip() in {"", ".", ".."} for part in raw_parts)
     ):
         raise ValidationError("Token path scope must be a workspace-relative prefix")
+    if any(part != part.strip() for part in raw_parts):
+        raise ValidationError(
+            "Token path scope prefix components cannot contain leading or trailing whitespace"
+        )
+    if any(part.endswith(".") for part in raw_parts):
+        raise ValidationError("Token path scope prefix components cannot end with a dot")
+    if any(
+        part.upper() in _RESERVED_NAMES or part.split(".", 1)[0].upper() in _RESERVED_NAMES
+        for part in raw_parts
+    ):
+        raise ValidationError(
+            "Token path scope prefix cannot access reserved system or device names"
+        )
     if any(part.strip().startswith(".") or ".sangam-" in part for part in raw_parts):
         raise ValidationError(
             "Token path scope prefix cannot access hidden or reserved system locations"
