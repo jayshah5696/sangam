@@ -1,7 +1,16 @@
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Check, ExternalLink, FileCode, MessageSquareQuote, Pencil, RotateCcw, X } from 'lucide-react'
+import {
+  Check,
+  ExternalLink,
+  FileCode,
+  GitCompare,
+  MessageSquareQuote,
+  Pencil,
+  RotateCcw,
+  X,
+} from 'lucide-react'
 import {
   api,
   type ChatProposal,
@@ -13,6 +22,7 @@ import { citationHref } from './citationNavigation'
 import { RevisionMergeView } from './components/RevisionMergeView'
 import { StateMessage } from './components/ui/StateMessage'
 import { useWorkbench } from './workbench'
+import { AssignmentStatus } from './components/projects/ProjectAssignments'
 
 type ProposalStatus = Pick<ChatProposal, 'status'>
 type ReviewQueryClient = {
@@ -103,6 +113,33 @@ function ProposalCard({
   const [revisionInstruction, setRevisionInstruction] = useState('')
   const [handoffError, setHandoffError] = useState(false)
   const revisionTrigger = useRef<HTMLButtonElement>(null)
+  const [showIntervening, setShowIntervening] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(() => crypto.randomUUID())
+  const fresh = useQuery({
+    queryKey: ['assignment', proposal.proposal_id],
+    queryFn: async () => {
+      const assignments = await api.proposalAssignments(proposal.proposal_id)
+      if (assignments.some((assignment) => assignment.status === 'completed')) {
+        await queryClient.invalidateQueries({ queryKey: ['chat-proposals', 'workspace-review'] })
+      }
+      return assignments
+    },
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (assignment) => assignment.status === 'running' || assignment.status === 'queued',
+      )
+        ? 1500
+        : false,
+  })
+  const refresh = useMutation({
+    mutationFn: () =>
+      api.refreshProposal(proposal.proposal_id, revisionInstruction, editedContent, refreshKey),
+    onSuccess: async () => {
+      setRefreshKey(crypto.randomUUID())
+      setShowRevisionPrompt(false)
+      await queryClient.invalidateQueries({ queryKey: ['assignment', proposal.proposal_id] })
+    },
+  })
 
   const documentQuery = useQuery({
     queryKey: ['document', proposal.document_id, 'review'],
@@ -130,7 +167,7 @@ function ProposalCard({
   const expectedRevision = historyQuery.data
   const original = expectedRevision?.content
   const current = document?.current_revision_id === proposal.expected_revision_id
-  const busy = apply.isPending || dismiss.isPending
+  const busy = apply.isPending || dismiss.isPending || refresh.isPending
   const isEdited = editedContent !== proposal.content
 
   const openDocument = () => {
@@ -173,9 +210,99 @@ function ProposalCard({
 
   const citations: ChatProposalCitation[] = proposal.citations ?? []
   const sourcesRetrieved: ChatProposalSource[] = proposal.sources_retrieved ?? []
+  // Stale only once the document has loaded; a loading card is not yet known to be stale.
+  const stale = Boolean(document) && !current
+
+  // Stale cards put recovery in the warning banner; current cards keep it in the action row.
+  const revisionButton = (
+    <button
+      type="button"
+      className="secondary-action"
+      disabled={busy}
+      onClick={() => setShowRevisionPrompt((prev) => !prev)}
+      aria-expanded={showRevisionPrompt}
+      ref={revisionTrigger}
+    >
+      <MessageSquareQuote size="var(--icon-inline)" /> Request a revision
+    </button>
+  )
+  const revisionPrompt = showRevisionPrompt && (
+    <div
+      className="review-revision-prompt"
+      role="region"
+      aria-label="Request a revision"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          closeRevisionPrompt()
+        }
+      }}
+    >
+      <label className="review-reason">
+        <span>What should be revised?</span>
+        <input
+          value={revisionInstruction}
+          maxLength={500}
+          onChange={(event) => setRevisionInstruction(event.target.value)}
+          placeholder="e.g. Tighten the second paragraph and include the metrics from the roadmap"
+          autoFocus
+        />
+      </label>
+      <p className="small-muted">
+        A fresh candidate is generated on the server against the current document. The original proposal stays
+        available.
+      </p>
+      <div className="review-revision-actions">
+        <button
+          type="button"
+          className="primary-button"
+          disabled={!revisionInstruction.trim() || busy}
+          onClick={() => refresh.mutate()}
+        >
+          Generate fresh candidate
+        </button>
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={!revisionInstruction.trim() || busy}
+          onClick={handleRequestRevision}
+        >
+          Prepare revision request in chat
+        </button>
+        <button type="button" className="secondary-action" disabled={busy} onClick={closeRevisionPrompt}>
+          Cancel
+        </button>
+      </div>
+      {refresh.isError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Fresh candidate was not confirmed"
+          description={refresh.error.message}
+        />
+      )}
+    </div>
+  )
+  const freshCandidate = (Boolean(fresh.data?.length) || fresh.isError) && (
+    <div className="review-fresh-candidate" role="region" aria-label="Fresh candidate">
+      <span className="eyebrow">Fresh candidate</span>
+      {fresh.data?.map((assignment) => (
+        <AssignmentStatus key={assignment.assignment_id} assignment={assignment} />
+      ))}
+      {fresh.isError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Could not load fresh candidate"
+          description={fresh.error.message}
+        />
+      )}
+    </div>
+  )
 
   return (
-    <article className="review-card editorial-review-card">
+    <article id={`proposal-${proposal.proposal_id}`} className="review-card editorial-review-card">
       <header className="review-card-header">
         <div>
           <p className="eyebrow">{document?.title ?? documentSummary?.title ?? 'Document proposal'}</p>
@@ -192,6 +319,41 @@ function ProposalCard({
         <span>Revision {proposal.expected_revision_id.slice(0, 8)}</span>
         <time dateTime={proposal.created_at}>{new Date(proposal.created_at).toLocaleString()}</time>
       </div>
+
+      {stale && (
+        <section className="review-stale-recovery" aria-label="Document changed since this proposal">
+          <div className="review-stale-recovery-header">
+            <div>
+              <strong>The document changed after this proposal</strong>
+              <p>
+                Compare the edits, then request a fresh candidate against the current revision. This proposal
+                and your reviewed wording stay available.
+              </p>
+            </div>
+            <div className="review-revision-actions">
+              {original !== undefined && (
+                <button
+                  type="button"
+                  className="secondary-action"
+                  aria-expanded={showIntervening}
+                  onClick={() => setShowIntervening(!showIntervening)}
+                >
+                  <GitCompare size="var(--icon-inline)" /> Compare edits
+                </button>
+              )}
+              {revisionButton}
+            </div>
+          </div>
+          {showIntervening && document && original !== undefined && (
+            <div className="review-stale-diff" role="region" aria-label="Edits since this proposal">
+              <span className="eyebrow">Edits since this proposal</span>
+              <RevisionMergeView original={original} modified={document.content} />
+            </div>
+          )}
+          {revisionPrompt}
+          {freshCandidate}
+        </section>
+      )}
 
       <div className="review-editorial-grid">
         <div className="review-editorial-left">
@@ -418,15 +580,6 @@ function ProposalCard({
         </div>
       </div>
 
-      {!current && (
-        <StateMessage
-          compact
-          kind="error"
-          title="This proposal was based on an older revision"
-          description="Request a fresh proposal before applying it. Your reviewed wording is preserved."
-        />
-      )}
-
       <div className="review-card-actions">
         <button
           type="button"
@@ -437,16 +590,7 @@ function ProposalCard({
           <Check size="var(--icon-inline)" />{' '}
           {apply.isPending ? 'Applying…' : isEdited ? 'Apply edited change' : 'Apply change'}
         </button>
-        <button
-          type="button"
-          className="secondary-action"
-          disabled={busy}
-          onClick={() => setShowRevisionPrompt((prev) => !prev)}
-          aria-expanded={showRevisionPrompt}
-          ref={revisionTrigger}
-        >
-          <MessageSquareQuote size="var(--icon-inline)" /> Request a revision
-        </button>
+        {!stale && revisionButton}
         <button
           type="button"
           className="secondary-action"
@@ -460,50 +604,8 @@ function ProposalCard({
         </button>
       </div>
 
-      {showRevisionPrompt && (
-        <div
-          className="review-revision-prompt"
-          role="region"
-          aria-label="Request a revision"
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              event.stopPropagation()
-              closeRevisionPrompt()
-            }
-          }}
-        >
-          <StateMessage
-            compact
-            kind="empty"
-            title="Prepare feedback in the source conversation"
-            description="Chat will open with this proposal, its exact reviewed wording, and your feedback in the composer. Review it and choose Send. This proposal stays available."
-          />
-          <label className="review-reason">
-            <span>What should be revised?</span>
-            <input
-              value={revisionInstruction}
-              maxLength={500}
-              onChange={(event) => setRevisionInstruction(event.target.value)}
-              placeholder="e.g. Tighten the second paragraph and include the metrics from the roadmap"
-              autoFocus
-            />
-          </label>
-          <div className="review-revision-actions">
-            <button
-              type="button"
-              className="primary-button"
-              disabled={!revisionInstruction.trim() || busy}
-              onClick={handleRequestRevision}
-            >
-              Prepare revision request in chat
-            </button>
-            <button type="button" className="secondary-action" disabled={busy} onClick={closeRevisionPrompt}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      {!stale && revisionPrompt}
+      {!stale && freshCandidate}
 
       <label className="review-reason">
         <span>

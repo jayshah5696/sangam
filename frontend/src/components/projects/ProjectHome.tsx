@@ -5,6 +5,7 @@ import { api, type ProjectSummary } from '../../api'
 import { StateMessage } from '../ui/StateMessage'
 import { projectDraft, useProjectResume } from '../../projectResume'
 import { CreateProjectDialog } from '../../routes/projects'
+import { ProjectBriefing, ProjectReviews } from './ProjectAssignments'
 
 export function ProjectHome({
   projects,
@@ -134,16 +135,17 @@ export function ProjectHome({
           action={<button onClick={() => void proposals.refetch()}>Retry</button>}
         />
       )}
-      {(projectReviews.length > 0 || sources.length > 0) && (
-        <section className="project-home-attention" aria-label="Project attention">
-          <h2>Project attention</h2>
-          {projectReviews.length > 0 && <Link to="/review">{attention(projectReviews)}</Link>}
-          {sources.map((d) => (
-            <button key={d.document_id} onClick={() => void openDocument(d, undefined, selectedId)}>
-              {d.document_title}: source has a newer revision
-            </button>
-          ))}
-        </section>
+      {detail && (
+        <ProjectBriefing
+          key={`briefing-${detail.project_id}`}
+          project={detail}
+          reviews={{
+            pending: projectReviews.filter((p) => p.status === 'pending').length,
+            stale: projectReviews.filter((p) => p.status === 'stale').length,
+          }}
+          updatedSources={sources}
+          onOpenDocument={(d) => void openDocument(d, undefined, selectedId)}
+        />
       )}
       {workspaceReviews.length > 0 && (
         <section className="project-home-attention" aria-label="Workspace attention">
@@ -183,6 +185,7 @@ export function ProjectHome({
           })}
         </div>
       )}
+      {detail && <ProjectReviews key={`reviews-${detail.project_id}`} project={detail} />}
       {creating && (
         <CreateProjectDialog
           onClose={() => setCreating(false)}

@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "live provider: project skeptic persisted findings after HTTP detached",
+    "real process restart reconciled the original document operation without duplicates",
+    "stale refresh preserved the original, human edit, exact revision and human apply",
+    "briefing reported changes, proposals and applied edits without advancing on reads",
+    "pause, steering and stop survived process restarts without restarting work"
+  ],
+  "model": "openrouter::openai/gpt-5.6-luna",
+  "assignment_id": "assignment_331f7ed6b2fd4d96a32345604e1291cd",
+  "artifact_id": "19516a75-a1c8-4319-b47d-518a833d83b1",
+  "input_tokens": 639,
+  "output_tokens": 967
+}

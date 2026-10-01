@@ -17,11 +17,13 @@ from fastapi.staticfiles import StaticFiles
 
 from sangam import __version__
 from sangam.agent_docs import agent_skill, llms_txt
+from sangam.api_assignments import create_assignments_router
 from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
 from sangam.api_projects import create_projects_router
 from sangam.application import build_application_services, initialize_application_state
+from sangam.assignments import AssignmentService
 from sangam.conditions import document_etag
 from sangam.config import Settings
 from sangam.errors import (
@@ -127,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     chat = services.chat
     readiness = services.readiness
     projects = services.projects
+    assignments = AssignmentService(chat, projects)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -144,6 +147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             application.state.pdf_scheduler = pdf_scheduler
             pdf_scheduler.start()
+            await assignments.start()
 
             backup_stop = asyncio.Event()
 
@@ -163,6 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if resolved_settings.backups_enabled:
                 backup_task = asyncio.create_task(maintain_backups())
         except BaseException:
+            await assignments.close()
             ownership_is_safe = True
             if pdf_scheduler is not None:
                 try:
@@ -182,6 +187,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             shutdown_error: Exception | None = None
             unsafe_shutdown = False
+            try:
+                await assignments.close()
+            except Exception as error:
+                shutdown_error = error
+                unsafe_shutdown = True
             if backup_task:
                 backup_stop.set()
                 try:
@@ -246,6 +256,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     app.state.services = services
+    app.state.assignments = assignments
     app.state.storage_ownership = storage_ownership
     app.state.storage_ownership_finalizer = weakref.finalize(app, storage_ownership.close)
 
@@ -1080,6 +1091,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             resolve_principal=resolve_principal,
         )
     )
+    app.include_router(create_assignments_router(assignments, resolve_principal))
     app.include_router(
         create_karakeep_router(
             karakeep=karakeep,

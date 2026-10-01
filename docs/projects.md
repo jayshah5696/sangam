@@ -1,5 +1,8 @@
 # Projects and ongoing work
 
+Project Home also supports [persistent project reviews](project-assignments.md),
+recorded return briefings and controls for server-owned assignments.
+
 A project has a purpose brief and references to existing documents, conversations
 and PDF annotations. A document can belong to several projects without a copy or
 a path change. Deleting a project keeps its documents and conversations.
@@ -39,7 +42,7 @@ The purpose brief is not listed as a working draft. Empty categories are hidden.
 The default project is chosen by the latest document work, rather than by a
 project name or description edit. An explicit project selection takes precedence.
 
-Project attention includes proposals targeting member documents or attached
+The **Since your last visit** panel includes proposals targeting member documents or attached
 conversations. Workspace attention shows the other reviewable proposals, including
 when no project is selected. Pending proposals and stale proposals have separate
 labels. A stale proposal needs a fresh target revision before it can be applied.
