@@ -176,7 +176,7 @@ class WorkspaceOrganizationService:
                 "tag_ids": sorted(set(tag_ids)),
             }
         )
-        with self.database.transaction() as connection:
+        with self.mutations.path(normalized_path), self.database.transaction() as connection:
             self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
@@ -260,7 +260,15 @@ class WorkspaceOrganizationService:
                 "tag_ids": sorted(set(tag_ids)),
             }
         )
-        with self.database.transaction() as connection:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT path FROM folders WHERE folder_id = ?", (folder_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Folder not found: {folder_id}")
+            folder_path = row["path"]
+
+        with self.mutations.path(folder_path), self.database.transaction() as connection:
             self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
