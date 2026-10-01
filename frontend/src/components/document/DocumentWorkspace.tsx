@@ -121,7 +121,8 @@ export function DocumentWorkspace({
     [documentId],
   )
 
-  // Images are stored beside the document and inserted at the cursor as portable Markdown.
+  // Images go to the shared attachments folder and are inserted as root-relative Markdown,
+  // so moving this document never breaks them.
   const uploadImages = async (files: File[]) => {
     const images = files.filter((file) => SUPPORTED_IMAGE_TYPES.includes(file.type))
     if (!images.length) {
@@ -666,11 +667,7 @@ export function DocumentWorkspace({
                 type="button"
                 className="secondary-action"
                 disabled={imageUpload.pending > 0}
-                title={
-                  document.path
-                    ? 'Add an image beside this document'
-                    : 'Choose a location for this draft before adding images'
-                }
+                title="Add an image to the workspace attachments folder"
                 onClick={() => imageInputRef.current?.click()}
               >
                 <ImagePlus size="var(--icon-inline)" /> {imageUpload.pending ? 'Adding image…' : 'Image'}

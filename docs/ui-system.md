@@ -151,9 +151,9 @@ Sidebar search shows each result's located passages: where the match is (heading
 and line, PDF page, or annotation), why it matched, and the snippet with matched
 words marked. Selecting a passage opens the editor on the matched word, the
 preview on the matching block, or the PDF on the page. Type, sort, and tag
-filters sit under the query. **Save view** stores the query and filters in this
-browser; saved views re-run the search when opened and appear in the search
-panel and on Home.
+filters sit under the query. **Save view** stores the query and filters on the
+server, so saved views follow you across devices; they re-run the search when
+opened and appear in the search panel and on Home.
 
 **Capture** (Home or the command palette) is the one intake flow for pasted
 text, Markdown, links, PDFs, images, and Markdown or HTML files. Every capture
@@ -176,8 +176,9 @@ In Markdown, Mod+B, Mod+I, and Mod+E toggle bold, italic, and inline code. Mod+K
 stays the command palette. Selecting text in the editor shows the selection
 toolbar with formatting, link, Keep as evidence, Ask, and copy actions; Ask
 saves the draft first so chat reads the selected passage. Pasting, dropping, or
-choosing an image stores it beside the document and inserts a relative Markdown
-image. A draft without a location must choose one before adding images.
+choosing an image stores it in the shared `attachments/` folder and inserts a
+root-relative Markdown image (`/attachments/...`) that survives moving the
+document.
 
 ## Review and document organization
 

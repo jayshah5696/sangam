@@ -127,3 +127,16 @@ def test_snippet_is_the_best_passage_and_metadata_matches_keep_an_fts_snippet(
     assert match["source"] == "metadata"
     assert "[[zebrafinch]]" in match["snippet"]
     assert result["search_snippet"] == match["snippet"]
+
+
+def test_snippet_stays_inside_the_matching_paragraph(client: TestClient) -> None:
+    create(
+        client,
+        "snippet-paragraph",
+        title="Paragraph",
+        content=(
+            "# Title\n\nWhich model?\n\n## Hardware\n\nPeak memory reached 6.2 GB.\n\nNext part.\n"
+        ),
+    )
+    [result] = search(client, "memory")
+    assert result["search_matches"][0]["snippet"] == "Peak [[memory]] reached 6.2 GB."

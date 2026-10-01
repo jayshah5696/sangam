@@ -75,12 +75,17 @@ def _hits(text: str, terms: Sequence[Term]) -> list[_Hit]:
 
 
 def _snippet(text: str, hits: Sequence[_Hit], anchor: _Hit) -> str:
-    start = max(0, anchor.start - CONTEXT_BEFORE)
-    end = min(len(text), anchor.start + WINDOW)
-    if start > 0:
+    # Stay inside the passage's paragraph; its heading is reported separately.
+    paragraph_start = text.rfind("\n\n", 0, anchor.start)
+    paragraph_start = 0 if paragraph_start < 0 else paragraph_start + 2
+    paragraph_end = text.find("\n\n", anchor.end)
+    paragraph_end = len(text) if paragraph_end < 0 else paragraph_end
+    start = max(paragraph_start, anchor.start - CONTEXT_BEFORE)
+    end = min(paragraph_end, anchor.start + WINDOW)
+    if start > paragraph_start:
         boundary = text.find(" ", start, anchor.start)
         start = boundary + 1 if boundary >= 0 else start
-    if end < len(text):
+    if end < paragraph_end:
         boundary = text.rfind(" ", anchor.end, end)
         end = boundary if boundary >= 0 else end
     pieces: list[str] = []
@@ -93,7 +98,7 @@ def _snippet(text: str, hits: Sequence[_Hit], anchor: _Hit) -> str:
         cursor = hit.end
     pieces.append(_plain(text[cursor:end]))
     body = re.sub(r"\s+", " ", "".join(pieces)).strip()
-    return f"{'… ' if start > 0 else ''}{body}{' …' if end < len(text) else ''}"
+    return f"{'… ' if start > paragraph_start else ''}{body}{' …' if end < paragraph_end else ''}"
 
 
 def _plain(value: str) -> str:

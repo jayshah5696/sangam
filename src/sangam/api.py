@@ -24,6 +24,7 @@ from sangam.api_chat import create_chat_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
 from sangam.api_projects import create_projects_router
+from sangam.api_saved_views import create_saved_views_router
 from sangam.application import build_application_services, initialize_application_state
 from sangam.assignments import AssignmentService
 from sangam.conditions import document_etag
@@ -316,12 +317,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "workspace."
             ),
             ("/api/v1/documents/{document_id}/assets", "post"): (
-                "Store a PNG, JPEG, GIF, or WebP image beside a Markdown or HTML document that has "
-                "a workspace path. Send the raw image with its Content-Type. Returns a relative "
-                "reference and ready-to-insert Markdown; the same bytes return the same reference."
+                "Store a PNG, JPEG, GIF, or WebP image for a Markdown or HTML document in the "
+                "shared attachments folder. Send the raw image with its Content-Type. Returns a "
+                "root-relative /attachments/ reference and ready-to-insert Markdown that survive "
+                "moving the document; the same bytes return the same reference."
             ),
             ("/api/v1/documents/{document_id}/assets", "get"): (
-                "Read an image referenced relative to the document's folder."
+                "Read an image the document references: /attachments/<file> or a path relative to "
+                "the document's folder."
             ),
             ("/api/v1/documents", "post"): (
                 "Create a Markdown or HTML document. A path-scoped token must provide a "
@@ -1130,6 +1133,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
     )
     app.include_router(create_assignments_router(assignments, resolve_principal))
+    app.include_router(
+        create_saved_views_router(
+            saved_views=services.saved_views, resolve_principal=resolve_principal
+        )
+    )
     app.include_router(
         create_karakeep_router(
             karakeep=karakeep,

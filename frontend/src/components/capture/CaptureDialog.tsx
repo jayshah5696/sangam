@@ -185,6 +185,14 @@ export function CaptureDialog({
             description={`${unsupported.map((file) => file.name).join(', ')} will be skipped. Sangam keeps PDFs, PNG, JPEG, GIF, and WebP images, Markdown, text, and HTML.`}
           />
         )}
+        {health.data?.karakeep_configured && (
+          <p className="small-muted">
+            Bookmarks already in Karakeep?{' '}
+            <Link to="/karakeep" onClick={onClose}>
+              Import from Karakeep
+            </Link>
+          </p>
+        )}
         <label className="project-modal-field">
           <span>Also add to project</span>
           <select
@@ -213,11 +221,6 @@ export function CaptureDialog({
           </ul>
         )}
         <footer className="project-detail-actions capture-actions">
-          {health.data?.karakeep_configured && (
-            <Link className="secondary-action" to="/karakeep" onClick={onClose}>
-              Import from Karakeep
-            </Link>
-          )}
           <button type="button" className="secondary-action" onClick={onClose}>
             Close
           </button>
@@ -354,7 +357,7 @@ async function saveToInbox(item: CaptureItem): Promise<Document> {
         await item.file.text(),
       )
     case 'image': {
-      // An image is captured as a note that shows it, with the file stored beside the note.
+      // An image is captured as a note that shows it, with the file in the shared attachments folder.
       const note = await api.createDocument(
         title,
         inboxPath(title, 'md', now, suffix),

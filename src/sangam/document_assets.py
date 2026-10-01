@@ -1,10 +1,14 @@
-"""Image files that live beside the document that references them.
+"""Images stored once for the whole workspace and referenced from the workspace root.
 
-An uploaded image is stored at `<document folder>/assets/<name>-<sha>.<ext>`
-and referenced from Markdown with a relative path, so the document stays
-portable: the same reference works in the editor preview, a publication, and
-any other Markdown tool that opens the workspace folder. Names are content
-addressed, which makes repeated uploads of the same image harmless.
+An uploaded image is written to `attachments/<name>-<sha16>.<ext>` and referenced
+as `/attachments/<name>-<sha16>.<ext>`. The reference never depends on where
+the document lives, so moving a document or renaming its folder cannot break
+it, and drafts without a location can hold images too. Root-relative links
+render in GitHub, VS Code, and static-site tools that open the workspace folder
+as their root. Names are content addressed, which makes repeated uploads harmless.
+
+Relative references (`diagram.png` beside a document) are still resolved for
+hand-written Markdown, but Sangam never creates them.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from sangam.errors import NotFoundError, ValidationError
 from sangam.schemas import Document, DocumentAsset
 from sangam.workspace import WorkspaceFilesystem
 
-ASSET_FOLDER = "assets"
+ATTACHMENTS_FOLDER = "attachments"
 
 # SVG is excluded on purpose: it is a script-capable document, not a picture.
 _SIGNATURES: dict[str, tuple[str, tuple[bytes, ...]]] = {
@@ -38,16 +42,28 @@ class StoredAsset:
     media_type: str
 
 
-def resolve_sibling_asset(document_path: str | None, reference: str) -> str:
-    """Resolve a relative reference to a workspace path inside the document's folder.
+def resolve_asset_reference(document_path: str | None, reference: str) -> str:
+    """Resolve an image reference to a workspace path.
 
-    Raises NotFoundError for anything absolute, schemed, or escaping the folder,
-    so callers cannot tell a forbidden path from a missing one.
+    `/attachments/<file>` resolves to the shared attachments folder; a relative
+    reference resolves inside the document's own folder. Anything else, including
+    other root paths, schemes, and `..` escapes, raises NotFoundError so callers
+    cannot tell a forbidden path from a missing one.
     """
-    if document_path is None:
-        raise NotFoundError("Document asset not found")
     parsed = urlsplit(unquote(reference))
-    if parsed.scheme or parsed.netloc or parsed.path.startswith("/"):
+    if parsed.scheme or parsed.netloc:
+        raise NotFoundError("Document asset not found")
+    if parsed.path.startswith("/"):
+        parts = parsed.path.split("/")
+        if (
+            len(parts) != 3
+            or parts[1] != ATTACHMENTS_FOLDER
+            or parts[2] in {"", ".", ".."}
+            or parts[2].startswith(".")
+        ):
+            raise NotFoundError("Document asset not found")
+        return f"{ATTACHMENTS_FOLDER}/{parts[2]}"
+    if document_path is None:
         raise NotFoundError("Document asset not found")
     document_parent = PurePosixPath(document_path).parent
     parent_parts = [part for part in document_parent.parts if part not in {"", "."}]
@@ -97,11 +113,6 @@ class DocumentAssetService:
     ) -> DocumentAsset:
         if document.content_type == "application/pdf":
             raise ValidationError("Images can be added to Markdown and HTML documents only")
-        if document.path is None:
-            raise ValidationError(
-                "Choose a location for this draft before adding images; "
-                "images are saved beside the document file"
-            )
         if media_type not in _SIGNATURES:
             raise ValidationError("Images must be PNG, JPEG, GIF, or WebP")
         if len(content) > self.max_bytes:
@@ -111,10 +122,11 @@ class DocumentAssetService:
         if not _matches_signature(media_type, content):
             raise ValidationError("The uploaded bytes are not a valid image of the declared type")
         extension = _SIGNATURES[media_type][0]
-        digest = hashlib.sha256(content).hexdigest()[:12]
-        reference = f"{ASSET_FOLDER}/{_stem(filename)}-{digest}{extension}"
-        workspace_path = resolve_sibling_asset(document.path, reference)
-        self.workspace.write_asset(workspace_path, content)
+        # 16 hex digits keep names unguessable without the image itself.
+        digest = hashlib.sha256(content).hexdigest()[:16]
+        name = f"{_stem(filename)}-{digest}{extension}"
+        self.workspace.write_asset(f"{ATTACHMENTS_FOLDER}/{name}", content)
+        reference = f"/{ATTACHMENTS_FOLDER}/{name}"
         return DocumentAsset(
             reference=reference,
             markdown=f"![{_alt_text(filename)}]({reference})",
@@ -124,7 +136,7 @@ class DocumentAssetService:
 
     def read(self, *, document: Document, reference: str) -> StoredAsset:
         """Serve images only; sibling documents stay behind their own read checks."""
-        workspace_path = resolve_sibling_asset(document.path, reference)
+        workspace_path = resolve_asset_reference(document.path, reference)
         if PurePosixPath(workspace_path).suffix.lower() not in IMAGE_EXTENSIONS:
             raise NotFoundError("Document asset not found")
         try:

@@ -323,7 +323,7 @@ function Welcome() {
             <Bookmark size="var(--icon-inline)" /> Saved views
           </strong>
           {savedViews.slice(0, 6).map((view) => (
-            <button key={view.id} type="button" onClick={() => openSearch(view.filters)}>
+            <button key={view.view_id} type="button" onClick={() => openSearch(view.filters)}>
               <span>{view.name}</span>
             </button>
           ))}

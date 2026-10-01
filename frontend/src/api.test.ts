@@ -329,3 +329,36 @@ describe('projects api', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/documents/doc-target/backlinks', expect.anything())
   })
 })
+
+describe('saved view requests', () => {
+  it('sends snake_case filters and reads them back as client filters', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          view_id: 'view-1',
+          name: 'PDFs',
+          filters: { query: 'memory', sort: 'updated', tag_id: null, content_type: 'application/pdf' },
+          created_by: 'human:jay',
+          created_at: '2026-10-01T00:00:00Z',
+          updated_at: '2026-10-01T00:00:00Z',
+        }),
+        { status: 200 },
+      ),
+    )
+    const view = await api.saveView('PDFs', {
+      query: 'memory',
+      sort: 'updated',
+      contentType: 'application/pdf',
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      name: 'PDFs',
+      filters: { query: 'memory', sort: 'updated', tag_id: null, content_type: 'application/pdf' },
+    })
+    expect(view.filters).toEqual({
+      query: 'memory',
+      sort: 'updated',
+      tagId: undefined,
+      contentType: 'application/pdf',
+    })
+  })
+})

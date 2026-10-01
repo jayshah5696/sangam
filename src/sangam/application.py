@@ -30,6 +30,7 @@ from sangam.provider_connections import (
 from sangam.publication import PreviewTokenService, PublicationService
 from sangam.readiness import ReadinessService
 from sangam.reconciliation import ReconciliationPlanner, ReconciliationService
+from sangam.saved_views import SavedViewService
 from sangam.search import SearchIndex
 from sangam.security import AuthenticationService, CloudflareAccessVerifier, IdentityService
 from sangam.service import DocumentService
@@ -57,6 +58,7 @@ class ApplicationServices:
     provider_connections: ProviderConnectionService
     readiness: ReadinessService
     projects: ProjectService
+    saved_views: SavedViewService
 
 
 def initialize_application_state(settings: Settings) -> Database:
@@ -247,6 +249,7 @@ def build_application_services(
         provider_connections=provider_connections,
         readiness=readiness,
         projects=projects,
+        saved_views=SavedViewService(database=database, activity=activity),
     )
 
 

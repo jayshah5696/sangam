@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import { useEffect, useMemo, useRef } from 'react'
 import { internalDocumentHref } from '../internalLinks'
+import { isWorkspaceAssetReference } from '../assetReferences'
 
 const markdown = new MarkdownIt({
   html: false,
@@ -82,7 +83,7 @@ export function MarkdownPreview({ content, resolveAsset, readable = false }: Mar
     void Promise.all(
       images.map(async (element) => {
         const reference = element.getAttribute('src') ?? ''
-        if (!reference || /^(?:[a-z]+:|\/|#)/i.test(reference)) return
+        if (!isWorkspaceAssetReference(reference)) return
         const objectUrl = await resolveAsset(reference)
         objectUrls.push(objectUrl)
         if (!cancelled) element.src = objectUrl

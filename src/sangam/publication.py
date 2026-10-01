@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from sangam.db import Database, utc_now
-from sangam.document_assets import resolve_sibling_asset
+from sangam.document_assets import ATTACHMENTS_FOLDER, resolve_asset_reference
 from sangam.errors import ConflictError, IdempotencyError, NotFoundError, ValidationError
 from sangam.html_javascript import HtmlJavascriptSettingsService
 from sangam.idempotency import IdempotencyStore, request_hash
@@ -647,7 +647,7 @@ class PublicationService:
 
     def _read_document_asset(self, *, document: Document, asset_reference: str) -> PublicationAsset:
         try:
-            workspace_path = resolve_sibling_asset(document.path, asset_reference)
+            workspace_path = resolve_asset_reference(document.path, asset_reference)
             content, media_type = self.workspace.read_asset(
                 workspace_path, max_bytes=self.max_asset_bytes
             )
@@ -672,7 +672,8 @@ class PublicationService:
             if reference
             and not urlsplit(reference).scheme
             and not urlsplit(reference).netloc
-            and not reference.startswith(("/", "#"))
+            and not reference.startswith("#")
+            and (not reference.startswith("/") or reference.startswith(f"/{ATTACHMENTS_FOLDER}/"))
         }
 
     def _revision_content(self, *, document_id: str, revision_id: str) -> sqlite3.Row:

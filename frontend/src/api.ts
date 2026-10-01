@@ -535,6 +535,31 @@ export type SearchFilters = {
   contentType?: Document['content_type']
 }
 
+const searchFiltersSchema = z
+  .object({
+    query: z.string(),
+    sort: z.enum(['relevance', 'updated', 'title', 'path']),
+    tag_id: z.string().nullable(),
+    content_type: z.enum(['text/markdown', 'text/html', 'application/pdf']).nullable(),
+  })
+  .transform((filters): SearchFilters => ({
+    query: filters.query,
+    sort: filters.sort,
+    tagId: filters.tag_id ?? undefined,
+    contentType: filters.content_type ?? undefined,
+  }))
+
+export const savedViewSchema = z.object({
+  view_id: z.string(),
+  name: z.string(),
+  filters: searchFiltersSchema,
+  created_by: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+
+export type SavedView = z.infer<typeof savedViewSchema>
+
 export const htmlJavascriptSettingsSchema = z.object({
   enabled: z.boolean(),
   version: z.number().int().positive(),
@@ -1379,6 +1404,29 @@ export const api = {
     params.set('offset', String(offset))
     const page = z.array(documentSummarySchema).parse(await request(`/search?${params.toString()}`))
     return { items: page, hasMore: page.length === limit }
+  },
+  async listSavedViews(): Promise<SavedView[]> {
+    return z.array(savedViewSchema).parse(await request('/saved-views'))
+  },
+  /** Saving an existing name replaces that view's filters. */
+  async saveView(name: string, filters: SearchFilters): Promise<SavedView> {
+    return savedViewSchema.parse(
+      await request('/saved-views', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          filters: {
+            query: filters.query,
+            sort: filters.sort,
+            tag_id: filters.tagId ?? null,
+            content_type: filters.contentType ?? null,
+          },
+        }),
+      }),
+    )
+  },
+  async deleteSavedView(viewId: string): Promise<void> {
+    await request(`/saved-views/${encodeURIComponent(viewId)}`, { method: 'DELETE' })
   },
   async listTags(): Promise<Tag[]> {
     return z.array(tagSchema).parse(await request('/tags'))

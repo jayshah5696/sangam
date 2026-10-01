@@ -97,7 +97,11 @@ test('a search result names the passage and opens the editor on it', async ({ pa
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(term)
 })
 
-test('a saved view keeps its query and filters and reopens from Home', async ({ page, request }) => {
+test('a saved view keeps its query and filters and reopens from Home on another device', async ({
+  page,
+  request,
+  browser,
+}) => {
   const term = `walrus${randomUUID().slice(0, 6)}`
   await create(request, { title: `Notes ${term}`, content: `${term} appears here.\n` })
   await page.goto('/')
@@ -126,6 +130,15 @@ test('a saved view keeps its query and filters and reopens from Home', async ({ 
     .click()
   await expect(page.getByRole('searchbox', { name: 'Search documents', exact: true })).toHaveValue(term)
   await expect(page.getByRole('article', { name: `Notes ${term}` })).toBeVisible()
+
+  // A fresh browser profile sees the same view: views live on the server.
+  const otherDevice = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+  const otherPage = await otherDevice.newPage()
+  await otherPage.goto('/')
+  await expect(
+    otherPage.locator('.welcome-saved-views').getByRole('button', { name: `Walrus ${term}` }),
+  ).toBeVisible()
+  await otherDevice.close()
 
   await page.getByRole('button', { name: `Remove saved view Walrus ${term}` }).click()
   await expect(views.getByRole('button', { name: `Walrus ${term}`, exact: true })).toHaveCount(0)
@@ -200,7 +213,7 @@ test('formatting shortcuts and the selection toolbar edit the selected words', a
   expect(saved.content).toBe('_make_ word **bold**\n')
 })
 
-test('an added image is stored beside the document and shown in the preview', async ({ page, request }) => {
+test('an added image survives moving its document and renders in the preview', async ({ page, request }) => {
   const suffix = randomUUID().slice(0, 8)
   const document = await create(request, {
     title: `Images ${suffix}`,
@@ -215,11 +228,23 @@ test('an added image is stored beside the document and shown in the preview', as
   await page
     .getByLabel('Add image')
     .setInputFiles({ name: 'Diagram One.png', mimeType: 'image/png', buffer: PNG })
-  await expect(page.locator('.cm-content')).toContainText('![Diagram One](assets/diagram-one-')
+  await expect(page.locator('.cm-content')).toContainText('![Diagram One](/attachments/diagram-one-')
   await waitForSaved(page)
   await page.getByRole('radio', { name: 'preview' }).click()
   const image = page.locator('.editing-surface .markdown-preview img')
   await expect(image).toHaveAttribute('src', new RegExp(`/api/v1/documents/${document.document_id}/assets`))
+  await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1)
+
+  // Moving the document to another folder keeps the root-relative reference valid.
+  const current = documentSchema.parse(
+    await (await request.get(`/api/v1/documents/${document.document_id}`)).json(),
+  )
+  const moved = await request.post(`/api/v1/documents/${document.document_id}/move`, {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { expected_revision_id: current.current_revision_id, path: `moved-${suffix}/deeper/note.md` },
+  })
+  expect(moved.ok(), await moved.text()).toBeTruthy()
+  await page.reload()
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1)
 })
 

@@ -35,6 +35,31 @@ class SearchMatch(BaseModel):
     annotation_id: str | None = None
 
 
+class SearchFilters(BaseModel):
+    """The filters `GET /search` supports; a saved view stores exactly these."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(default="", max_length=500)
+    sort: Literal["relevance", "updated", "title", "path"] = "relevance"
+    tag_id: str | None = Field(default=None, max_length=200)
+    content_type: Literal["text/markdown", "text/html", "application/pdf"] | None = None
+
+
+class SaveView(MutationRequest):
+    name: str = Field(min_length=1, max_length=120)
+    filters: SearchFilters
+
+
+class SavedView(BaseModel):
+    view_id: str
+    name: str
+    filters: SearchFilters
+    created_by: str
+    created_at: str
+    updated_at: str
+
+
 class DocumentSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

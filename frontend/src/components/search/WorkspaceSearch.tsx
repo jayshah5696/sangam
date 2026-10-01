@@ -10,14 +10,14 @@ import {
   type SearchMatch,
 } from '../../api'
 import { announceCitationNavigation, citationHref, type CitationTarget } from '../../citationNavigation'
+import { type SavedView } from '../../api'
 import {
   activeSearch,
   describeFilters,
   hasActiveFilters,
-  savedViewStore,
   useActiveSearch,
+  useSavedViewMutations,
   useSavedViews,
-  type SavedView,
 } from '../../savedViews'
 import { matchLocationLabel, matchSourceLabel, matchTarget, snippetParts } from '../../searchResults'
 import { workspaceBasename } from '../../workspaceTree'
@@ -44,6 +44,7 @@ export function WorkspaceSearch() {
   const views = useSavedViews()
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
   const [naming, setNaming] = useState<string | null>(null)
+  const { save, remove } = useSavedViewMutations()
   const results = useInfiniteQuery({
     queryKey: ['documents', 'search-panel', deferredFilters],
     initialPageParam: 0,
@@ -118,7 +119,7 @@ export function WorkspaceSearch() {
           </label>
         )}
       </div>
-      <SavedViews views={views} activeId={activeView?.id} />
+      <SavedViews views={views} activeId={activeView?.view_id} onRemove={(id) => remove.mutate(id)} />
       <div className="sidebar-section-title">
         <span>Results</span>
         <small>{documents.length}</small>
@@ -138,8 +139,8 @@ export function WorkspaceSearch() {
           aria-label="Save this search as a view"
           onSubmit={(event) => {
             event.preventDefault()
-            savedViewStore().save(naming, filters, tagName)
-            setNaming(null)
+            const name = naming.trim() || describeFilters(filters, tagName)
+            save.mutate({ name, filters }, { onSuccess: () => setNaming(null) })
           }}
         >
           <input
@@ -155,11 +156,21 @@ export function WorkspaceSearch() {
               }
             }}
           />
-          <button type="submit">Save</button>
+          <button type="submit" disabled={save.isPending}>
+            Save
+          </button>
           <button type="button" onClick={() => setNaming(null)}>
             Cancel
           </button>
         </form>
+      )}
+      {(save.isError || remove.isError) && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Saved view not updated"
+          description={(save.error ?? remove.error)?.message}
+        />
       )}
       <div className="search-results">
         {results.isError && (
@@ -197,7 +208,15 @@ export function WorkspaceSearch() {
   )
 }
 
-function SavedViews({ views, activeId }: { views: SavedView[]; activeId?: string }) {
+function SavedViews({
+  views,
+  activeId,
+  onRemove,
+}: {
+  views: SavedView[]
+  activeId?: string
+  onRemove: (viewId: string) => void
+}) {
   if (views.length === 0) return null
   return (
     <section className="saved-views" aria-label="Saved views">
@@ -206,11 +225,11 @@ function SavedViews({ views, activeId }: { views: SavedView[]; activeId?: string
       </div>
       <ul>
         {views.map((view) => (
-          <li key={view.id}>
+          <li key={view.view_id}>
             <button
               type="button"
-              className={view.id === activeId ? 'active' : undefined}
-              aria-pressed={view.id === activeId}
+              className={view.view_id === activeId ? 'active' : undefined}
+              aria-pressed={view.view_id === activeId}
               onClick={() => activeSearch.set(view.filters)}
             >
               <Bookmark size="var(--icon-inline)" />
@@ -221,7 +240,7 @@ function SavedViews({ views, activeId }: { views: SavedView[]; activeId?: string
               className="quiet-icon"
               aria-label={`Remove saved view ${view.name}`}
               title="Remove saved view"
-              onClick={() => savedViewStore().remove(view.id)}
+              onClick={() => onRemove(view.view_id)}
             >
               <X size="var(--icon-inline)" />
             </button>
