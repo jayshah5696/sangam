@@ -11,6 +11,31 @@ from typing import BinaryIO, Protocol
 
 from sangam.errors import ConflictError, InvalidPathError, NotFoundError
 
+_RESERVED_NAMES: set[str] = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+}
+
 
 def canonicalize_document_path(raw_path: str) -> str:
     """Validate document-path syntax without consulting the filesystem."""
@@ -34,10 +59,15 @@ def _canonicalize_relative_path(
         raise InvalidPathError(f"{kind} paths must use forward slashes")
     if kind == "Folder" and raw_path.strip().startswith("/"):
         raise InvalidPathError("Folder path must stay inside the workspace")
+    path_to_split = raw_path.strip("/") if strip_outer_slashes else raw_path
+    raw_parts = path_to_split.split("/")
+    if any(part != part.strip() for part in raw_parts):
+        raise InvalidPathError(
+            f"{kind} path components cannot contain leading or trailing whitespace"
+        )
     stripped_path = raw_path.strip()
     if strip_outer_slashes:
         stripped_path = stripped_path.strip("/")
-    raw_parts = stripped_path.split("/")
     path = PurePosixPath(stripped_path)
     if (
         not stripped_path
@@ -50,6 +80,13 @@ def _canonicalize_relative_path(
             else "Folder path must stay inside the workspace"
         )
         raise InvalidPathError(message)
+    if any(part.endswith(".") for part in raw_parts):
+        raise InvalidPathError(f"{kind} path components cannot end with a dot")
+    if any(
+        part.upper() in _RESERVED_NAMES or part.split(".", 1)[0].upper() in _RESERVED_NAMES
+        for part in raw_parts
+    ):
+        raise InvalidPathError(f"{kind} path cannot access reserved system or device names")
     if any(part.strip().startswith(".") or ".sangam-" in part for part in raw_parts):
         raise InvalidPathError(f"{kind} path cannot access hidden or reserved system locations")
     return path.as_posix()
