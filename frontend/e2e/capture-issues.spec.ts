@@ -171,6 +171,7 @@ test.describe('Issue Verification Real Screenshots', () => {
     await expect(renameInput).toBeFocused()
     await renameInput.fill(renamedFolder)
     await renameInput.press('Enter')
+    await expect(renameInput).toBeHidden()
 
     await expect(
       page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedFolder }),
@@ -179,20 +180,24 @@ test.describe('Issue Verification Real Screenshots', () => {
     // Issue #100: F2 rename on file item must show visible inline input and update path
     const docItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: initialDoc })
     await expect(docItem).toBeVisible()
-    await docItem.click()
-    await page.keyboard.press('F2')
+    await docItem.focus()
+    await expect(docItem).toBeFocused()
+    await docItem.press('F2')
 
     await expect(renameInput).toBeVisible()
     await expect(renameInput).toBeFocused()
     await renameInput.fill(renamedDoc)
     await renameInput.press('Enter')
+    await expect(renameInput).toBeHidden()
 
     await expect(page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })).toBeVisible()
 
     // Issue #100: Escape cancels rename mode without modifying path
     const renamedDocItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })
-    await renamedDocItem.click()
-    await page.keyboard.press('F2')
+    await expect(renamedDocItem).toBeVisible()
+    await renamedDocItem.focus()
+    await expect(renamedDocItem).toBeFocused()
+    await renamedDocItem.press('F2')
     await expect(renameInput).toBeVisible()
     await renameInput.fill(discardedDoc)
     await renameInput.press('Escape')
