@@ -55,6 +55,8 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-client-cert",
     "ssl-client-cert",
     "x-tls-client-cert",
+    "x-amz-security-token",
+    "x-oauth-basic",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -116,6 +118,10 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "oauth_token",
     "env_var",
     "env_val",
+    "secret_val",
+    "api_secret",
+    "account_key",
+    "id_token",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {

@@ -449,3 +449,118 @@ def test_extended_sensitive_header_and_data_sanitization() -> None:
     assert isinstance(sanitized_data, dict)
     for key in sensitive_payload:
         assert sanitized_data[key] == "[REDACTED]"
+
+
+def test_folder_mutation_audit_provenance(client: TestClient) -> None:
+    # 1. Create a folder
+    create_resp = client.post(
+        "/api/v1/folders",
+        json={"path": "projects/audit_folder", "category": "engineering"},
+        headers=headers("idemp_folder_create"),
+    )
+    assert create_resp.status_code == 201
+    folder = create_resp.json()
+    folder_id = folder["folder_id"]
+
+    # 2. Update folder metadata
+    update_resp = client.patch(
+        f"/api/v1/folders/{folder_id}",
+        json={
+            "expected_metadata_version": folder["metadata_version"],
+            "category": "research",
+            "tag_ids": [],
+        },
+        headers=headers("idemp_folder_update"),
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["category"] == "research"
+
+    # 3. Move folder
+    move_resp = client.post(
+        f"/api/v1/folders/{folder_id}/move",
+        json={"path": "projects/moved_audit_folder"},
+        headers=headers("idemp_folder_move"),
+    )
+    assert move_resp.status_code == 200
+
+    # Query activity logs for human actor
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    folder_events = [e for e in events if e["resource_id"] == folder_id]
+    actions = {e["action"]: e for e in folder_events}
+
+    assert "create" in actions
+    assert actions["create"]["resource_type"] == "folder"
+    assert actions["create"]["path"] == "projects/audit_folder"
+    assert actions["create"]["actor_kind"] == "human"
+    assert actions["create"]["outcome"] == "accepted"
+
+    assert "tag" in actions
+    assert actions["tag"]["resource_type"] == "folder"
+    assert actions["tag"]["actor_kind"] == "human"
+    assert actions["tag"]["details"]["category"] == "research"
+
+    assert "move" in actions
+    assert actions["move"]["resource_type"] == "folder"
+    assert actions["move"]["path"] == "projects/moved_audit_folder"
+    assert actions["move"]["actor_kind"] == "human"
+
+
+def test_organization_plan_audit_provenance(client: TestClient) -> None:
+    # 1. Create a document to be moved in plan
+    create_doc_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Org Plan Doc",
+            "content": "# Organization Plan Content",
+            "path": "docs/plan_test_doc.md",
+        },
+        headers=headers("idemp_plan_doc_create"),
+    )
+    assert create_doc_resp.status_code == 201
+    doc = create_doc_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # 2. Apply organization plan with folder creation and document move
+    plan_resp = client.post(
+        "/api/v1/organization/plans",
+        json={
+            "operations": [
+                {
+                    "kind": "create_folder",
+                    "path": "archive",
+                    "category": None,
+                    "tag_ids": [],
+                },
+                {
+                    "kind": "move_document",
+                    "document_id": doc_id,
+                    "expected_revision_id": rev1,
+                    "expected_source_path": "docs/plan_test_doc.md",
+                    "destination_path": "archive/plan_test_doc.md",
+                },
+            ]
+        },
+        headers=headers("idemp_org_plan_apply"),
+    )
+    assert plan_resp.status_code == 200
+    plan_result = plan_resp.json()
+    assert plan_result["status"] == "completed"
+
+    # Query activity logs
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    doc_events = [e for e in events if e["resource_id"] == doc_id and e["action"] == "move"]
+    assert len(doc_events) == 1
+    move_event = doc_events[0]
+    assert move_event["resource_type"] == "document"
+    assert move_event["path"] == "archive/plan_test_doc.md"
+    assert move_event["actor_kind"] == "human"
+    assert move_event["outcome"] == "accepted"
+    assert move_event["details"]["source_path"] == "docs/plan_test_doc.md"
+    assert move_event["details"]["destination_path"] == "archive/plan_test_doc.md"
