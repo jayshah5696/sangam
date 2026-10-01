@@ -275,14 +275,12 @@ test('A newer source is project attention and can be acknowledged after inspecti
     ).toBeTruthy()
     await page.goto('/')
     await page.getByLabel('Switch project').selectOption(project.project_id)
-    await expect(page.getByRole('region', { name: 'Project attention' })).toContainText(
-      'source has a newer revision',
-    )
+    await expect(page.getByRole('region', { name: 'Since your last visit' })).toContainText('Source updated')
     await page.goto(`/projects?project=${project.project_id}`)
     await page.getByRole('button', { name: 'Mark source reviewed' }).click()
     await expect(page.getByText('Source has a newer revision', { exact: true })).not.toBeVisible()
     await page.goto('/')
-    await expect(page.getByRole('region', { name: 'Project attention' })).not.toBeVisible()
+    await expect(page.getByRole('region', { name: 'Since your last visit' })).not.toBeVisible()
   } finally {
     await request.delete(`/api/v1/projects/${project.project_id}`)
   }

@@ -1,8 +1,9 @@
 # Persistent project reviews
 
-On Home, select a project and choose **Review project claims**. Select the sources
-and drafts, enter the review instructions, set a time limit, and choose whether
-interrupted work should resume after restart. Starting the assignment authorizes
+On Home, select a project and choose **Start review** in the **Reviews** section.
+In the dialog, select the sources and drafts, enter what the review should look
+for and choose a time limit. Interrupted work resumes after a server restart.
+Starting the review authorizes
 bounded reads of those documents and creation of a private findings document.
 It does not authorize publication or applying edits.
 
@@ -35,9 +36,10 @@ applies to queued work left across a restart.
 
 ## Recover a stale proposal
 
-In **Review changes**, choose **Compare intervening edits** to compare the proposal's
-base revision with the current document. **Request a revision** then offers
-**Generate fresh candidate**. This starts a durable assignment with the current
+In **Review changes**, a stale proposal shows a warning panel. Choose
+**Compare edits** to compare the proposal's base revision with the current
+document. **Request a revision** then offers **Generate fresh candidate**. This
+starts a durable assignment with the current
 target revision, exact reviewed wording, feedback and original cited sources.
 
 The original proposal stays available. The fresh candidate appears as a separate
@@ -48,12 +50,16 @@ the original proposal after reload.
 
 ## Return to a project
 
-**Since you last worked here** reports recorded source and document revisions,
-applied proposals and unresolved proposals. Links open the pinned document revision
-or review item. **Mark this visit** records the boundary for the next briefing.
-Reading or refreshing the briefing does not move it. The initial visit has no
-historical boundary and still shows unresolved proposals. The latest 100 items are
-shown, with an explicit truncation notice.
+**Since your last visit** lists unresolved proposals, sources with newer
+revisions, and recorded document revisions and applied proposals since the last
+marked visit. Each item appears once. Rows open the pinned document revision or
+review item; **Previous version** opens the revision seen at the last visit.
+**Mark as seen** records the boundary for the next briefing. Reading or
+refreshing the briefing does not move it. The first visit records a baseline
+automatically, because there is no earlier boundary to compare against. Unresolved
+proposals and updated sources stay listed until they are resolved. The latest 100
+items are shown, with an explicit truncation notice. The panel is hidden when
+nothing needs attention.
 
 **Resume draft** uses the project's saved workbench layout, source pages and
 conversation. Save the current workbench from the project view to update that

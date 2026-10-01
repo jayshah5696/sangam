@@ -4,14 +4,17 @@ These are screenshots of running Sangam instances with API-seeded fixtures.
 They are PR evidence, not screenshot regression baselines.
 
 The before version is commit `c2e3ce5`, immediately after PR 342 merged.
-The after version is PR 353, including the briefing link target-size fix.
+The after version is PR 353 with the consolidated layout: one **Since your last
+visit** panel, a **Reviews** section with a start dialog, and a stale-proposal
+warning panel that owns compare, revise and fresh-candidate status.
 Both use the same titles, source content, document updates, and stale-proposal
 fixture. IDs and timestamps differ because each run has isolated storage.
 
 Desktop captures use Chromium at 1440 by 900. Touch-mobile captures use the
 configured Pixel 7 profile at 390 by 844 with mobile and touch enabled.
 Screenshots of Home and review show the viewport of the application's scrolling
-content. Separate region captures show the full briefing and assignment form.
+content. A separate region capture shows the full briefing; the review form is
+captured with its dialog open.
 
 ## Before and after
 

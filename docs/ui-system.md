@@ -114,8 +114,8 @@ Open-document tabs in an editor group use equal-width fluid distribution:
 Home gives the selected project a compact ongoing-work area. It shows the active
 draft's body excerpt, saved source context, categorized references and the next
 action. The project picker remains reachable for empty projects and the selected
-project is remembered in the browser. Project attention is separate from workspace
-attention. Stale proposals are labeled separately from pending changes. Source
+project is remembered in the browser. Project items in **Since your last visit**
+are separate from workspace attention. Stale proposals are labeled separately from pending changes. Source
 updates compare the membership's pinned revision with the current head.
 
 Projects use the same quiet rows, controls and state messages as the rest of the
@@ -124,11 +124,13 @@ Saved layouts restore the selected group and tab, split ratios, PDF pages and th
 attached conversation. Project URLs preserve the selected project on reload.
 See [Projects and ongoing work](projects.md) for the workflow and API contract.
 
-Project Home includes recorded return briefings and bounded project review
-assignments. The controls and source selectors reuse project fields and rows.
+Project Home shows one **Since your last visit** panel and a **Reviews** section.
+Both use a header row followed by bordered list rows with a `scope-badge` for the
+item kind or status. Starting a review uses the shared project dialog. Do not add
+a second attention section for the same items.
 See [Persistent project reviews](project-assignments.md) for control and recovery
-semantics. The review inbox compares intervening edits and can start a durable
-fresh-candidate assignment without dismissing its original proposal.
+semantics. In the review inbox, a stale proposal owns its recovery in one warning
+panel: compare edits, request a revision and fresh-candidate status.
 
 The Home route uses the persisted workbench tabs to show up to four recently
 open documents and up to four pinned documents. It removes stale and duplicate

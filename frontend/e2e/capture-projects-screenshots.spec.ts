@@ -158,18 +158,24 @@ test('capture project review before and after explicitly', async ({ page, reques
   await expect(page.getByRole('button', { name: 'Resume draft' })).toBeVisible()
   await capture('home')
   if (!before) {
-    await page.getByRole('region', { name: 'Since you last worked here' }).screenshot({
+    await page.getByRole('region', { name: 'Since your last visit' }).screenshot({
       path: testInfo.outputPath('briefing.png'),
       animations: 'disabled',
       scale: 'css',
     })
-    await page.getByRole('button', { name: 'Review project claims' }).click()
-    await expect(page.getByRole('button', { name: 'Start project review', exact: true })).toBeVisible()
-    await page.getByRole('region', { name: 'Project assignments' }).screenshot({
+    await page
+      .getByRole('region', { name: 'Project reviews' })
+      .getByRole('button', { name: 'Start review' })
+      .click()
+    const dialog = page.getByRole('dialog', { name: 'Start review' })
+    await expect(dialog.getByRole('button', { name: 'Start review', exact: true })).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
+    await page.screenshot({
       path: testInfo.outputPath('review-assignment.png'),
       animations: 'disabled',
       scale: 'css',
     })
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
   }
   await page.goto('/review')
   const card = page.locator('.review-card').filter({ hasText: draft.title })
@@ -180,8 +186,8 @@ test('capture project review before and after explicitly', async ({ page, reques
     .fill('Preserve the human CPU constraint and use the latest evidence.')
   await capture('stale-proposal')
   if (!before) {
-    await card.getByRole('button', { name: 'Compare intervening edits' }).click()
-    await expect(card.getByRole('region', { name: 'Changes since this proposal' })).toBeVisible()
+    await card.getByRole('button', { name: 'Compare edits' }).click()
+    await expect(card.getByRole('region', { name: 'Edits since this proposal' })).toBeVisible()
     await capture('intervening-edits')
   }
   await request.post(`/api/v1/chat/proposals/${fixture.proposal.proposal_id}/dismiss`, {

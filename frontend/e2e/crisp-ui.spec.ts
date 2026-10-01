@@ -723,7 +723,9 @@ test('home page searches documents inline and opens the top result', async ({ pa
   const quickSearch = page.getByRole('searchbox', { name: 'Quick search documents' })
   await expect(quickSearch).toBeVisible()
   await quickSearch.fill(seededWorkspace.documentTitle)
-  await expect(page.getByRole('listitem').first()).toContainText(seededWorkspace.documentTitle)
+  await expect(
+    page.getByRole('list', { name: 'Matching documents' }).getByRole('listitem').first(),
+  ).toContainText(seededWorkspace.documentTitle)
   await quickSearch.press('Enter')
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
 })

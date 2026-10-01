@@ -7,20 +7,6 @@
   font-family: var(--font-ui);
 }
 
-.project-assignment-source {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: var(--control-height);
-  overflow-wrap: anywhere;
-}
-
-@media (pointer: coarse) {
-  .project-assignment-source {
-    min-height: var(--control-touch);
-  }
-}
-
 .projects-page h1,
 .welcome-work h1 {
   margin: 0;
@@ -110,7 +96,12 @@
 
 .projects-page a,
 .project-home a {
+  color: var(--accent);
+}
+
+.project-home a.secondary-action {
   color: var(--text);
+  text-decoration: none;
 }
 
 .project-home a.primary-button {
@@ -192,22 +183,175 @@
   font-size: var(--text-control);
 }
 
-.project-briefing-change {
+/* Briefing and reviews share one panel anatomy: header row, then bordered list rows. */
+.project-briefing,
+.project-reviews {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.project-briefing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.project-briefing-header h2,
+.project-briefing-header p {
+  margin: 0;
+}
+
+.project-briefing-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.project-briefing-row,
+.assignment-row {
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.project-briefing-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-height);
+  padding: var(--space-1) 0;
+  font-size: var(--text-control);
+}
+
+.project-briefing-row .scope-badge {
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.project-home .project-briefing-title {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.project-home .project-briefing-title:hover,
+.project-home .project-briefing-aside:hover {
+  text-decoration: underline;
+}
+
+.project-home .project-briefing-aside {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
+  color: var(--muted);
+  font-size: var(--text-meta);
+  text-decoration: none;
+}
+
+.assignment-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) 0;
+}
+
+.project-reviews > .assignment-row:first-of-type {
+  border-top: 1px solid var(--line);
+}
+
+.assignment-row-main {
+  display: grid;
+  gap: var(--space-1);
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.assignment-row .assignment-row-title,
+.assignment-row .assignment-row-meta {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.assignment-row .assignment-row-title {
+  font-size: var(--text-control);
+}
+
+.assignment-row .assignment-row-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-meta);
 }
 
-.project-briefing-change a {
-  display: inline-flex;
+.assignment-status.running,
+.assignment-status.queued,
+.assignment-status.completed {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  color: var(--accent);
+}
+
+.assignment-status.failed,
+.assignment-status.exhausted {
+  border-color: color-mix(in srgb, var(--warning) 46%, var(--line));
+  color: var(--warning);
+}
+
+.assignment-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.assignment-row > .ui-state,
+.assignment-steer {
+  flex-basis: 100%;
+}
+
+.assignment-steer {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.project-assignment-sources {
+  display: grid;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.project-assignment-source {
+  display: flex;
   align-items: center;
+  gap: var(--space-2);
   min-height: var(--control-height);
+  font-size: var(--text-control);
   overflow-wrap: anywhere;
 }
 
 @media (pointer: coarse) {
-  .project-briefing-change a {
+  .project-assignment-source,
+  .project-briefing-row,
+  .project-home .project-briefing-title,
+  .project-home .project-briefing-aside {
     min-height: var(--control-touch);
   }
 }
