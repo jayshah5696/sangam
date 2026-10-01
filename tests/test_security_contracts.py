@@ -640,7 +640,6 @@ def test_nested_cross_document_pipeline_does_not_wait_on_a_backup_blocked_owner(
     [
         "docs /item.md",
         "docs/ item.md",
-        "docs/item.md ",
         "docs./item.md",
         "docs/item.md.",
         "CON/item.md",

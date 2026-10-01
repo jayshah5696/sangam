@@ -59,15 +59,14 @@ def _canonicalize_relative_path(
         raise InvalidPathError(f"{kind} paths must use forward slashes")
     if kind == "Folder" and raw_path.strip().startswith("/"):
         raise InvalidPathError("Folder path must stay inside the workspace")
-    path_to_split = raw_path.strip("/") if strip_outer_slashes else raw_path
-    raw_parts = path_to_split.split("/")
+    stripped_path = raw_path.strip()
+    if strip_outer_slashes:
+        stripped_path = stripped_path.strip("/")
+    raw_parts = stripped_path.split("/")
     if any(part != part.strip() for part in raw_parts):
         raise InvalidPathError(
             f"{kind} path components cannot contain leading or trailing whitespace"
         )
-    stripped_path = raw_path.strip()
-    if strip_outer_slashes:
-        stripped_path = stripped_path.strip("/")
     path = PurePosixPath(stripped_path)
     if (
         not stripped_path
