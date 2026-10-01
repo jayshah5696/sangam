@@ -84,9 +84,13 @@ _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
 _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "secret",
     "password",
+    "passwd",
     "token",
     "credential",
+    "credentials",
     "api_key",
+    "api_credentials",
+    "db_pass",
     "auth",
     "authorization",
     "auth_header",
@@ -150,6 +154,18 @@ _TOKEN_PATTERN = re.compile(
     r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{22,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,})\b"
 )
 
+_URI_CREDENTIAL_PATTERN = re.compile(
+    r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\s\"']+)(@)"
+)
+
+_BEARER_PATTERN = re.compile(
+    r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+"
+)
+
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)\b(api_key|api_token|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
+)
+
 _RESERVED_NAMES: set[str] = {
     "CON",
     "PRN",
@@ -184,7 +200,11 @@ _PRIVATE_PEM = re.compile(
 
 def sanitize_sensitive_text(value: str) -> str:
     # Diff lines include +/- prefixes, so redact the complete block across them.
-    return _TOKEN_PATTERN.sub("[REDACTED]", _PRIVATE_PEM.sub("[REDACTED]", value))
+    redacted_pem = _PRIVATE_PEM.sub("[REDACTED]", value)
+    redacted_tokens = _TOKEN_PATTERN.sub("[REDACTED]", redacted_pem)
+    redacted_uris = _URI_CREDENTIAL_PATTERN.sub(r"\1[REDACTED]:[REDACTED]\4", redacted_tokens)
+    redacted_bearer = _BEARER_PATTERN.sub("Bearer [REDACTED]", redacted_uris)
+    return _SECRET_ASSIGNMENT_PATTERN.sub(r"\1=[REDACTED]", redacted_bearer)
 
 
 def sanitize_headers(headers: object) -> dict[str, str]:
