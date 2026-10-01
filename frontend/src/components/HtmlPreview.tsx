@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import { useEffect, useMemo, useState } from 'react'
+import { isWorkspaceAssetReference } from '../assetReferences'
 
 interface HtmlPreviewProps {
   content: string
@@ -54,7 +55,7 @@ export function HtmlPreview({ content, resolveAsset }: HtmlPreviewProps) {
       await Promise.all(
         elements.map(async (element) => {
           const reference = element.getAttribute('src') ?? ''
-          if (!reference || /^(?:[a-z]+:|\/|#)/i.test(reference)) return
+          if (!isWorkspaceAssetReference(reference)) return
           const objectUrl = await resolveAsset(reference)
           objectUrls.push(objectUrl)
           element.setAttribute('src', objectUrl)

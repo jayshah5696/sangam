@@ -12,6 +12,7 @@ from sangam.chat import SangamChatServer
 from sangam.chat_models import ChatModelCatalog, ChatModelSettingsRepository
 from sangam.config import Settings
 from sangam.db import Database, utc_now
+from sangam.document_assets import DocumentAssetService
 from sangam.html_javascript import HtmlJavascriptSettingsService
 from sangam.idempotency import IdempotencyStore
 from sangam.karakeep import KarakeepService
@@ -29,6 +30,7 @@ from sangam.provider_connections import (
 from sangam.publication import PreviewTokenService, PublicationService
 from sangam.readiness import ReadinessService
 from sangam.reconciliation import ReconciliationPlanner, ReconciliationService
+from sangam.saved_views import SavedViewService
 from sangam.search import SearchIndex
 from sangam.security import AuthenticationService, CloudflareAccessVerifier, IdentityService
 from sangam.service import DocumentService
@@ -56,6 +58,7 @@ class ApplicationServices:
     provider_connections: ProviderConnectionService
     readiness: ReadinessService
     projects: ProjectService
+    saved_views: SavedViewService
 
 
 def initialize_application_state(settings: Settings) -> Database:
@@ -193,6 +196,9 @@ def build_application_services(
         activity=activity,
         publications=publications,
         pdf_research=pdf_research,
+        assets=DocumentAssetService(
+            workspace=workspace, max_bytes=settings.max_publication_asset_bytes
+        ),
     )
     chat_config = settings.chat_server_config()
     provider_connections = ProviderConnectionService(
@@ -243,6 +249,7 @@ def build_application_services(
         provider_connections=provider_connections,
         readiness=readiness,
         projects=projects,
+        saved_views=SavedViewService(database=database, activity=activity),
     )
 
 

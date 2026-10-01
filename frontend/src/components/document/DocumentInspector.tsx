@@ -13,6 +13,7 @@ import {
 import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSession, useDocumentSessions } from '../../documentSessions'
 import { extractMarkdownHeadings } from '../../markdownHeadings'
+import { publicationStatus } from '../../publicationStatus'
 import { useTheme, type InspectorTab } from '../../theme'
 import { useMediaQuery } from '../../useMediaQuery'
 import { useWorkbench } from '../../workbench'
@@ -269,7 +270,15 @@ export function DocumentInspector({
             />
             {pdf && <PdfReplacementControl document={document} />}
             {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
-              <PublicationEditor document={document} publication={publicationQuery.data ?? null} />
+              <PublicationEditor
+                document={document}
+                publication={publicationQuery.data ?? null}
+                draftSaved={session.saveState === 'saved'}
+                onCompare={(from, to) => {
+                  setComparison(from, to)
+                  updatePreferences({ rightTab: 'history' })
+                }}
+              />
             )}
             <DocumentBacklinks document={document} enabled={tab === 'properties'} />
           </>
@@ -600,9 +609,14 @@ function slugify(value: string) {
 function PublicationEditor({
   document,
   publication,
+  draftSaved,
+  onCompare,
 }: {
   document: Document
   publication: Publication | null
+  /** False while local edits have not reached the server; they cannot be published yet. */
+  draftSaved: boolean
+  onCompare: (fromRevisionId: string, toRevisionId: string) => void
 }) {
   const queryClient = useQueryClient()
   const [slug, setSlug] = useState(publication?.slug ?? slugify(document.title))
@@ -614,11 +628,19 @@ function PublicationEditor({
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['publication', document.document_id] })
   }
+  const status = publicationStatus(publication, document.current_revision_id)
+  // Settings changes keep the published revision. Publishing for the first time,
+  // republishing, or "Publish saved draft" names the exact revision readers get.
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (publishDraft: boolean) =>
       publication
-        ? api.updatePublication(publication, slug, accessPolicy)
-        : api.createPublication(document.document_id, slug, accessPolicy),
+        ? api.updatePublication(
+            publication,
+            slug,
+            accessPolicy,
+            publishDraft || !publication.active ? document.current_revision_id : undefined,
+          )
+        : api.createPublication(document.document_id, slug, accessPolicy, document.current_revision_id),
     onSuccess: async (result) => {
       setOneTimeToken(result.token)
       await refresh()
@@ -656,9 +678,42 @@ function PublicationEditor({
           <strong>Rendering & access</strong>
         </div>
         <span className={`scope-badge ${publication?.active ? 'workspace' : ''}`}>
-          {publication?.active ? 'Live' : 'Draft'}
+          {publication?.active ? 'Live' : 'Not live'}
         </span>
       </header>
+      {status.kind !== 'private' && (
+        <div className={`publication-revision ${status.kind}`} role="status">
+          <p>
+            {status.kind === 'current'
+              ? 'Readers see the saved draft.'
+              : 'Readers see an earlier revision. The saved draft has changes that are not published.'}
+          </p>
+          <small>
+            Published {shortRevision(status.publication.revision_id)}
+            {status.kind === 'behind' && <> · draft {shortRevision(status.draftRevisionId)}</>}
+          </small>
+          {status.kind === 'behind' && (
+            <div className="publication-actions">
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => onCompare(status.publishedRevisionId, status.draftRevisionId)}
+              >
+                Compare with published
+              </button>
+              <button
+                type="button"
+                className="panel-button"
+                disabled={save.isPending || !draftSaved}
+                title={draftSaved ? undefined : 'Wait for the draft to finish saving'}
+                onClick={() => save.mutate(true)}
+              >
+                Publish saved draft
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <label>
         <span>Stable slug</span>
         <input value={slug} onChange={(event) => setSlug(event.target.value)} />
@@ -682,10 +737,16 @@ function PublicationEditor({
       <button
         type="button"
         className="panel-button publication-save"
-        disabled={save.isPending || !slug}
-        onClick={() => save.mutate()}
+        disabled={save.isPending || !slug || (!publication?.active && !draftSaved)}
+        onClick={() => save.mutate(false)}
       >
-        {save.isPending ? 'Saving…' : publication ? 'Update publication' : 'Publish document'}
+        {save.isPending
+          ? 'Saving…'
+          : publication?.active
+            ? 'Update settings'
+            : publication
+              ? 'Publish saved draft'
+              : 'Publish document'}
       </button>
       {publication?.active && (
         <div className="publication-actions">
@@ -848,4 +909,8 @@ function MetadataEditor({
       {(mutation.isError || createTag.isError) && <p className="error-text">The tags could not be saved.</p>}
     </section>
   )
+}
+
+function shortRevision(value: string) {
+  return value.length > 12 ? `${value.slice(0, 8)}…` : value
 }

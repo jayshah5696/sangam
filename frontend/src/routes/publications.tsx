@@ -214,6 +214,11 @@ function PublicationCard({
           <span className={`scope-badge ${publication.active ? 'publication-live' : ''}`}>
             {publication.active ? 'Live' : 'Unpublished'}
           </span>
+          {publication.active && publication.revision_id !== publication.document_revision_id && (
+            <span className="scope-badge publication-behind" title="Readers see an earlier revision">
+              Draft has unpublished changes
+            </span>
+          )}
           {publication.access_policy === 'unlisted' && (
             <span className="scope-badge">
               <KeyRound size="var(--icon-inline)" />{' '}
