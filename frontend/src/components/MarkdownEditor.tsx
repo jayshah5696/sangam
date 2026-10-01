@@ -7,8 +7,9 @@ import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 
-import type { DocumentSummary } from '../api'
+import { SUPPORTED_IMAGE_TYPES, type DocumentSummary } from '../api'
 import { internalDocumentMarkdown } from '../internalLinks'
+import { linkSelection, toggleInlineMarker, type TextEdit } from '../markdownFormatting'
 
 export type EditorSelection = {
   line: number
@@ -22,10 +23,21 @@ export type EditorViewState = {
   scrollTop: number
 }
 
+export type MarkdownFormat = 'bold' | 'italic' | 'code' | 'link'
+
+/** A settled, non-empty editor selection and where it sits on screen. */
+export type EditorSelectionAnchor = {
+  text: string
+  rect: { left: number; right: number; top: number; bottom: number; width: number }
+}
+
 export type MarkdownEditorHandle = {
   focus: () => void
   insertText: (text: string, expectedContent?: string) => boolean
   scrollToLine: (lineNumber: number) => void
+  /** Select `exact` within the 1-based line (or the line start) and centre it. */
+  revealPassage: (lineNumber: number, exact?: string) => void
+  applyFormat: (format: MarkdownFormat) => void
 }
 
 type MarkdownEditorProps = {
@@ -40,6 +52,51 @@ type MarkdownEditorProps = {
   onReady?: () => () => void
   availableDocuments?: DocumentSummary[]
   currentDocumentId?: string
+  /** Called with pasted or dropped image files; the caller uploads and inserts them. */
+  onImageFiles?: (files: File[]) => void
+  onSelectionSettled?: (selection: EditorSelectionAnchor | null) => void
+}
+
+function formatEdit(view: EditorView, format: MarkdownFormat): TextEdit {
+  const { from, to } = view.state.selection.main
+  const doc = view.state.doc.toString()
+  if (format === 'link') return linkSelection(doc, from, to)
+  return toggleInlineMarker(doc, from, to, format === 'bold' ? '**' : format === 'italic' ? '_' : '`')
+}
+
+function applyEdit(view: EditorView, edit: TextEdit) {
+  view.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: edit.selection,
+    scrollIntoView: true,
+    userEvent: 'input.format',
+  })
+  view.focus()
+}
+
+function imageFiles(data: DataTransfer | null): File[] {
+  return [...(data?.files ?? [])].filter((file) => SUPPORTED_IMAGE_TYPES.includes(file.type))
+}
+
+function settledSelection(view: EditorView): EditorSelectionAnchor | null {
+  const { from, to } = view.state.selection.main
+  const text = view.state.sliceDoc(from, to)
+  if (!text.trim()) return null
+  const start = view.coordsAtPos(from)
+  const end = view.coordsAtPos(to, -1)
+  if (!start || !end) return null
+  const left = Math.min(start.left, end.left)
+  const right = Math.max(start.right, end.right)
+  return {
+    text,
+    rect: {
+      left,
+      right,
+      top: Math.min(start.top, end.top),
+      bottom: Math.max(start.bottom, end.bottom),
+      width: right - left,
+    },
+  }
 }
 
 function createDocumentLinkCompletionSource(
@@ -94,6 +151,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     onReady,
     availableDocuments,
     currentDocumentId,
+    onImageFiles,
+    onSelectionSettled,
   },
   ref,
 ) {
@@ -106,6 +165,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const initialViewStateRef = useRef(initialViewState)
   const availableDocumentsRef = useRef(availableDocuments)
   const currentDocumentIdRef = useRef(currentDocumentId)
+  const onImageFilesRef = useRef(onImageFiles)
+  const onSelectionSettledRef = useRef(onSelectionSettled)
+
+  useEffect(() => {
+    onImageFilesRef.current = onImageFiles
+    onSelectionSettledRef.current = onSelectionSettled
+  }, [onImageFiles, onSelectionSettled])
 
   useEffect(() => {
     availableDocumentsRef.current = availableDocuments
@@ -146,6 +212,23 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         })
         view.focus()
       },
+      revealPassage: (lineNumber: number, exact?: string) => {
+        const view = viewRef.current
+        if (!view) return
+        const line = view.state.doc.line(Math.max(1, Math.min(lineNumber, view.state.doc.lines)))
+        const column = exact ? line.text.toLowerCase().indexOf(exact.toLowerCase()) : -1
+        const anchor = column >= 0 ? line.from + column : line.from
+        const head = column >= 0 && exact ? anchor + exact.length : anchor
+        view.dispatch({
+          selection: { anchor, head },
+          effects: EditorView.scrollIntoView(anchor, { y: 'center' }),
+        })
+        view.focus()
+      },
+      applyFormat: (format: MarkdownFormat) => {
+        const view = viewRef.current
+        if (view) applyEdit(view, formatEdit(view, format))
+      },
     }),
     [],
   )
@@ -172,10 +255,64 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
               })
             : [],
           highlightSelectionMatches(),
+          contentType === 'text/markdown'
+            ? [
+                keymap.of(
+                  (
+                    [
+                      ['Mod-b', 'bold'],
+                      ['Mod-i', 'italic'],
+                      ['Mod-e', 'code'],
+                      // Mod-k stays the global command palette; links come from the selection toolbar.
+                    ] as const
+                  ).map(([key, format]) => ({
+                    key,
+                    preventDefault: true,
+                    run: (view: EditorView) => {
+                      applyEdit(view, formatEdit(view, format))
+                      return true
+                    },
+                  })),
+                ),
+                EditorView.domEventHandlers({
+                  paste: (event) => {
+                    const files = imageFiles(event.clipboardData)
+                    if (!files.length || !onImageFilesRef.current) return false
+                    event.preventDefault()
+                    onImageFilesRef.current(files)
+                    return true
+                  },
+                  drop: (event, view) => {
+                    const files = imageFiles(event.dataTransfer)
+                    if (!files.length || !onImageFilesRef.current) return false
+                    event.preventDefault()
+                    const position = view.posAtCoords({ x: event.clientX, y: event.clientY })
+                    if (position !== null) view.dispatch({ selection: { anchor: position } })
+                    onImageFilesRef.current(files)
+                    return true
+                  },
+                }),
+              ]
+            : [],
+          EditorView.domEventHandlers({
+            mouseup: (_event, view) => {
+              requestAnimationFrame(() => onSelectionSettledRef.current?.(settledSelection(view)))
+            },
+            keyup: (event, view) => {
+              if (
+                event.shiftKey ||
+                event.key === 'Shift' ||
+                (event.key === 'a' && (event.metaKey || event.ctrlKey))
+              )
+                onSelectionSettledRef.current?.(settledSelection(view))
+            },
+          }),
           keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           EditorView.lineWrapping,
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+            if (update.selectionSet && update.state.selection.main.empty)
+              onSelectionSettledRef.current?.(null)
             if (update.docChanged || update.selectionSet) {
               const selection = update.state.selection.main
               const line = update.state.doc.lineAt(selection.head)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { useInfiniteQuery, useIsFetching, useQuery } from '@tanstack/react-query'
+import { useIsFetching, useQuery } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import {
@@ -17,13 +17,14 @@ import {
   Trash2,
   RefreshCw,
 } from 'lucide-react'
-import { api, DOCUMENT_PAGE_SIZE, type DocumentSummary } from '../api'
+import { api } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
 import { SettingsRouteSidebar, SettingsSidebar } from '../components/SettingsSidebar'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { activateTabFromKeyboard } from '../components/tabKeyboard'
-import { workspaceBasename } from '../workspaceTree'
+import { WorkspaceSearch } from '../components/search/WorkspaceSearch'
+import { OPEN_SEARCH_EVENT } from '../savedViews'
 import { useTheme } from '../theme'
 import { useWorkbenchRecovery } from '../workbench'
 import { useMediaQuery } from '../useMediaQuery'
@@ -77,6 +78,16 @@ function RootLayout() {
     window.addEventListener('keydown', exitSettings)
     return () => window.removeEventListener('keydown', exitSettings)
   }, [returnFromSettings, usesSettingsRail])
+
+  useEffect(() => {
+    const open = () => {
+      setSidebarMode('search')
+      if (narrowSidebar) setMobileSidebarLocationKey(locationKey)
+      else updatePreferences({ leftVisible: true })
+    }
+    window.addEventListener(OPEN_SEARCH_EVENT, open)
+    return () => window.removeEventListener(OPEN_SEARCH_EVENT, open)
+  }, [locationKey, narrowSidebar, updatePreferences])
 
   if (location.pathname.startsWith('/p/')) return <Outlet />
 
@@ -307,7 +318,7 @@ function PrimarySidebar({
               role="tabpanel"
               aria-labelledby="workspace-tab-search"
             >
-              <SearchPanel />
+              <WorkspaceSearch />
             </div>
           )}
           <SidebarLinks onNavigate={modal ? onCollapse : undefined} />
@@ -317,28 +328,31 @@ function PrimarySidebar({
   )
 }
 
+// Visible labels keep destinations recognizable without hovering. Each
+// accessible name contains its visible label so voice control matches both.
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   const links = [
-    { to: '/projects' as const, label: 'Projects', icon: FolderKanban },
-    { to: '/chat' as const, label: 'Workspace chat', icon: MessageSquareText },
-    { to: '/review' as const, label: 'Review changes', icon: ShieldAlert },
-    { to: '/publications' as const, label: 'Publications', icon: Globe2 },
-    { to: '/trash' as const, label: 'Trash', icon: Trash2 },
-    { to: '/settings' as const, label: 'Settings', icon: Settings },
+    { to: '/projects' as const, label: 'Projects', short: 'Projects', icon: FolderKanban },
+    { to: '/chat' as const, label: 'Workspace chat', short: 'Chat', icon: MessageSquareText },
+    { to: '/review' as const, label: 'Review changes', short: 'Review', icon: ShieldAlert },
+    { to: '/publications' as const, label: 'Publications', short: 'Publications', icon: Globe2 },
+    { to: '/trash' as const, label: 'Trash', short: 'Trash', icon: Trash2 },
+    { to: '/settings' as const, label: 'Settings', short: 'Settings', icon: Settings },
   ]
   return (
     <div className="sidebar-footer">
       <nav className="sidebar-footer-nav" aria-label="Workspace tools">
-        {links.map(({ to, label, icon: Icon }) => (
+        {links.map(({ to, label, short, icon: Icon }) => (
           <Link
             key={to}
             to={to}
-            aria-label={label}
-            data-tooltip={label}
-            activeProps={{ className: 'active' }}
+            aria-label={label === short ? undefined : label}
+            title={label === short ? undefined : label}
+            activeProps={{ className: 'active', 'aria-current': 'page' }}
             onClick={onNavigate}
           >
-            <Icon size="var(--icon-control)" />
+            <Icon size="var(--icon-inline)" aria-hidden="true" />
+            <span>{short}</span>
           </Link>
         ))}
       </nav>
@@ -405,94 +419,4 @@ function WorkspaceFreshness() {
       )}
     </div>
   )
-}
-
-function SearchPanel() {
-  const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<'relevance' | 'updated' | 'title' | 'path'>('relevance')
-  const results = useInfiniteQuery({
-    queryKey: ['documents', 'search-panel', query, sort],
-    initialPageParam: 0,
-    queryFn: ({ pageParam }) => api.searchDocumentsPage(query, undefined, sort, pageParam),
-    getNextPageParam: (lastPage, pages) => (lastPage.hasMore ? pages.length * DOCUMENT_PAGE_SIZE : undefined),
-  })
-  const documents = results.data?.pages.flatMap((page) => page.items) ?? []
-  return (
-    <div className="sidebar-content search-panel">
-      <label className="sidebar-search-input">
-        <Search size="var(--icon-control)" />
-        <input
-          autoFocus
-          type="search"
-          aria-label="Search documents"
-          placeholder="Title, text, path, actor…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
-      <label className="sidebar-sort">
-        Sort
-        <select
-          value={sort}
-          onChange={(event) => {
-            const val = event.target.value
-            if (val === 'relevance' || val === 'updated' || val === 'title' || val === 'path') {
-              setSort(val)
-            }
-          }}
-        >
-          <option value="relevance">Relevance</option>
-          <option value="updated">Updated</option>
-          <option value="title">Title</option>
-          <option value="path">Path</option>
-        </select>
-      </label>
-      <div className="sidebar-section-title">
-        <span>Results</span>
-        <small>{documents.length}</small>
-      </div>
-      <div className="search-results">
-        {documents.map((document) => (
-          <DocumentLink key={document.document_id} document={document} showPath />
-        ))}
-        {results.isFetchingNextPage && <p className="sidebar-message">Loading more results…</p>}
-        {results.hasNextPage && (
-          <button
-            className="secondary-action search-load-more"
-            type="button"
-            disabled={results.isFetchingNextPage}
-            onClick={() => void results.fetchNextPage()}
-          >
-            Load more results
-          </button>
-        )}
-        {!results.isFetching && documents.length === 0 && (
-          <p className="sidebar-message">No matching documents.</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function DocumentLink({ document, showPath = false }: { document: DocumentSummary; showPath?: boolean }) {
-  const label = document.path ? workspaceBasename(document.path) : document.title
-  return (
-    <Link
-      to="/documents/$documentId"
-      params={{ documentId: document.document_id }}
-      className="file-link"
-      activeProps={{ className: 'file-link active' }}
-    >
-      <FileText size="var(--icon-inline)" />
-      <span>{label}</span>
-      {showPath && <small>{document.path ?? 'Draft'}</small>}
-      {document.search_snippet && (
-        <span className="search-snippet">{plainSnippet(document.search_snippet)}</span>
-      )}
-    </Link>
-  )
-}
-
-function plainSnippet(value: string) {
-  return value.replaceAll('[[', '').replaceAll(']]', '')
 }

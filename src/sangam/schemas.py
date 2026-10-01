@@ -20,6 +20,46 @@ class Tag(BaseModel):
     created_at: str
 
 
+class SearchMatch(BaseModel):
+    """One located passage behind a search hit; `snippet` marks terms with [[ ]]."""
+
+    source: Literal["content", "pdf_page", "annotation", "title", "path", "metadata"]
+    snippet: str
+    # The matched word as written, for locating it within `line`.
+    exact: str | None = None
+    # 1-based line in the current revision (content matches).
+    line: int | None = None
+    # Nearest Markdown heading above the passage.
+    heading: str | None = None
+    page_number: int | None = None
+    annotation_id: str | None = None
+
+
+class SearchFilters(BaseModel):
+    """The filters `GET /search` supports; a saved view stores exactly these."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(default="", max_length=500)
+    sort: Literal["relevance", "updated", "title", "path"] = "relevance"
+    tag_id: str | None = Field(default=None, max_length=200)
+    content_type: Literal["text/markdown", "text/html", "application/pdf"] | None = None
+
+
+class SaveView(MutationRequest):
+    name: str = Field(min_length=1, max_length=120)
+    filters: SearchFilters
+
+
+class SavedView(BaseModel):
+    view_id: str
+    name: str
+    filters: SearchFilters
+    created_by: str
+    created_at: str
+    updated_at: str
+
+
 class DocumentSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,6 +85,8 @@ class DocumentSummary(BaseModel):
     trust_version: int
     tags: list[Tag] = Field(default_factory=list)
     search_snippet: str | None = None
+    # Only search results carry located passages (best first); null elsewhere.
+    search_matches: list[SearchMatch] | None = None
     pdf_page_count: int | None = None
     pdf_extraction_status: Literal["pending", "processing", "ready", "failed"] | None = None
     pdf_extraction_error: str | None = None
@@ -53,6 +95,15 @@ class DocumentSummary(BaseModel):
 
 class Document(DocumentSummary):
     content: str
+
+
+class DocumentAsset(BaseModel):
+    """An image stored beside its document; `reference` is relative to the document."""
+
+    reference: str
+    markdown: str
+    media_type: Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+    size_bytes: int
 
 
 class KarakeepAsset(BaseModel):
@@ -666,6 +717,10 @@ class Publication(BaseModel):
     created_at: str
     updated_at: str
     url: str
+    # Readers see exactly this revision until the publication is updated deliberately.
+    revision_id: str
+    # The document's current head, so clients can tell whether the draft moved on.
+    document_revision_id: str
 
 
 class IssuedPublication(Publication):
@@ -676,12 +731,16 @@ class CreatePublication(MutationRequest):
     document_id: str
     slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
     access_policy: Literal["private", "public", "unlisted"] = "private"
+    # Defaults to the document's current revision.
+    revision_id: str | None = None
 
 
 class UpdatePublication(MutationRequest):
     expected_version: int = Field(ge=0)
     slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
     access_policy: Literal["private", "public", "unlisted"]
+    # Omit to keep the published revision; pass a revision to publish it.
+    revision_id: str | None = None
 
 
 class PublicationRevision(BaseModel):

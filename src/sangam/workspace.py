@@ -142,6 +142,8 @@ class WorkspaceFilesystem(Protocol):
 
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]: ...
 
+    def write_asset(self, path: str, content: bytes) -> None: ...
+
 
 class DiskWorkspaceFilesystem:
     def __init__(self, root: Path) -> None:
@@ -179,7 +181,23 @@ class DiskWorkspaceFilesystem:
         return self.write_atomic_stream(path, io.BytesIO(content), overwrite=overwrite)
 
     def write_atomic_stream(self, path: str, content: BinaryIO, *, overwrite: bool = False) -> str:
-        destination = self._document_path(path)
+        return self._write_stream_to(self._document_path(path), content, overwrite=overwrite)
+
+    def write_asset(self, path: str, content: bytes) -> None:
+        """Write a content-addressed asset once; an identical existing file is kept."""
+        normalized = _canonicalize_relative_path(path, kind="Asset")
+        self._require_inside_workspace(normalized, noun="Asset path")
+        destination = self.root.resolve() / normalized
+        if destination.is_file() and destination.read_bytes() == content:
+            return
+        try:
+            self._write_stream_to(destination, io.BytesIO(content), overwrite=False)
+        except InvalidPathError:
+            if destination.is_file() and destination.read_bytes() == content:
+                return
+            raise
+
+    def _write_stream_to(self, destination: Path, content: BinaryIO, *, overwrite: bool) -> str:
         if destination.exists() and not overwrite:
             raise InvalidPathError("A workspace file already exists at that path")
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -418,6 +436,7 @@ class DiskWorkspaceFilesystem:
             self._fsync_directory(source.parent)
 
     def read_asset(self, path: str, *, max_bytes: int) -> tuple[bytes, str]:
+        """Read a referenced file of any type; callers decide which types they expose."""
         normalized = _canonicalize_relative_path(path, kind="Asset")
         self._require_inside_workspace(normalized, noun="Asset path")
         candidate = self.root.resolve() / normalized
