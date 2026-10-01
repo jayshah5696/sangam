@@ -92,7 +92,10 @@ test('a search result names the passage and opens the editor on it', async ({ pa
     .locator('.search-passage')
     .first()
     .click()
-  await closeInspectorSheet(page)
+  // The app closes the drawer and inspector itself; clicking them here would move focus.
+  await expect(page.getByRole('dialog', { name: 'Workspace sidebar' })).toBeHidden()
+  await expect(page.getByRole('dialog', { name: 'Document inspector' })).toBeHidden()
+  await expect(page.locator('.cm-content')).toBeFocused()
   await expect(page.locator('.cm-line', { hasText: `Peak memory for ${term}` })).toBeInViewport()
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(term)
 })

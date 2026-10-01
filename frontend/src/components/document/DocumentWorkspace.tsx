@@ -312,6 +312,15 @@ export function DocumentWorkspace({
     let frames = 0
     let handle = 0
     const reveal = () => {
+      // On narrow screens the sidebar drawer and inspector sheet close after navigation
+      // and hand focus back to their triggers. Reveal only once they are gone so the
+      // selection and focus land in the editor.
+      const overlayOpen = window.document.querySelector('[role="dialog"][aria-modal="true"]')
+      if (overlayOpen && frames < 60) {
+        frames += 1
+        handle = requestAnimationFrame(reveal)
+        return
+      }
       if (mode !== 'preview' && editorRef.current) {
         revealedPassage.current = target
         editorRef.current.revealPassage(passage.line, passage.exact)
