@@ -298,6 +298,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "destination inside its allowed prefix. Requires a fresh Idempotency-Key for "
                 "the intended create."
             ),
+            ("/api/v1/documents/{document_id}/backlinks", "get"): (
+                "List visible documents that link to this document via internal links, "
+                "including context snippets."
+            ),
             ("/api/v1/documents/{document_id}", "get"): (
                 "Read current document metadata and content by stable ID. Use current_revision_id "
                 "from this response as expected_revision_id for a subsequent content mutation."
@@ -1491,6 +1495,13 @@ else fetch('/api/v1/trusted-previews/content', {
                 "ETag": etag,
             },
         )
+
+    @app.get("/api/v1/documents/{document_id}/backlinks", response_model=list[DocumentSummary])
+    def get_document_backlinks(
+        document_id: str,
+        principal: Principal = principal_dependency,
+    ) -> list[DocumentSummary]:
+        return workspace.get_document_backlinks(principal, document_id=document_id)
 
     @app.get("/api/v1/documents/{document_id}", response_model=Document)
     def get_document(

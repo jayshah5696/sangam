@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Document } from './api'
-import { initialDocumentMode, materializePath, saveLabel } from './documentWorkspaceState'
+import { defaultFilename, initialDocumentMode, materializePath, saveLabel } from './documentWorkspaceState'
 
 const documentFixture = (overrides: Partial<Document> = {}): Document => ({
   document_id: 'document-1',
@@ -52,5 +52,12 @@ describe('document workspace state', () => {
   it('joins a selected folder and filename into a workspace path', () => {
     expect(materializePath('research', 'paper.md')).toBe('research/paper.md')
     expect(materializePath('', 'paper.md')).toBe('paper.md')
+  })
+
+  it('computes default filename from title and content type', () => {
+    expect(defaultFilename('My First Note', 'text/markdown')).toBe('my-first-note.md')
+    expect(defaultFilename('Custom Dashboard.html', 'text/html')).toBe('custom-dashboard.html')
+    expect(defaultFilename('', 'text/markdown')).toBe('first-document.md')
+    expect(defaultFilename('', 'text/html')).toBe('interactive.html')
   })
 })

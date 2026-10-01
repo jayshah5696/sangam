@@ -288,4 +288,44 @@ describe('projects api', () => {
       }),
     )
   })
+
+  it('requests and parses document backlinks', async () => {
+    const mockSummary = {
+      document_id: 'doc-source',
+      title: 'Referring Note',
+      content_type: 'text/markdown',
+      path: 'notes/referring.md',
+      current_revision_id: 'rev-1',
+      content_hash: 'hash-1',
+      size_bytes: 42,
+      materialization_state: 'clean',
+      file_hash: null,
+      deleted: false,
+      created_by: 'user-1',
+      created_at: '2026-09-30T00:00:00Z',
+      updated_at: '2026-09-30T00:00:00Z',
+      updated_by: 'user-1',
+      updated_by_name: 'User One',
+      revision_summary: null,
+      category: null,
+      metadata_version: 1,
+      trust_level: 'untrusted',
+      trust_version: 1,
+      tags: [],
+      search_snippet: '… links to [Target](sangam://document/doc-target) …',
+      pdf_page_count: null,
+      pdf_extraction_status: null,
+      pdf_extraction_error: null,
+      supersedes_document_id: null,
+    }
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify([mockSummary]), { status: 200 }))
+
+    const result = await api.getBacklinks('doc-target')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.document_id).toBe('doc-source')
+    expect(result[0]?.search_snippet).toContain('links to [Target]')
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/documents/doc-target/backlinks', expect.anything())
+  })
 })

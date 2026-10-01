@@ -1392,6 +1392,10 @@ export const api = {
   async getDocument(documentId: string): Promise<Document> {
     return documentSchema.parse(await request(`/documents/${documentId}`))
   },
+  async getBacklinks(documentId: string): Promise<DocumentSummary[]> {
+    return z.array(documentSummarySchema).parse(await request(`/documents/${documentId}/backlinks`))
+  },
+
   async createDocument(
     title: string,
     path?: string,

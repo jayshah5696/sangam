@@ -1,3 +1,4 @@
+import { autocompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { html } from '@codemirror/lang-html'
@@ -5,6 +6,9 @@ import { EditorState } from '@codemirror/state'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+
+import type { DocumentSummary } from '../api'
+import { internalDocumentMarkdown } from '../internalLinks'
 
 export type EditorSelection = {
   line: number
@@ -34,6 +38,47 @@ type MarkdownEditorProps = {
   focusOnOpen?: boolean
   onFocused?: () => void
   onReady?: () => () => void
+  availableDocuments?: DocumentSummary[]
+  currentDocumentId?: string
+}
+
+function createDocumentLinkCompletionSource(
+  availableDocumentsRef: React.MutableRefObject<DocumentSummary[] | undefined>,
+  currentDocumentIdRef: React.MutableRefObject<string | undefined>,
+) {
+  return (context: CompletionContext): CompletionResult | null => {
+    const word = context.matchBefore(/\[\[([^\]]*)$/)
+    if (!word) return null
+    if (word.from === word.to && !context.explicit) return null
+
+    const query = word.text.slice(2).trim().toLowerCase()
+    const docs = availableDocumentsRef.current ?? []
+    const currentId = currentDocumentIdRef.current
+    const candidates = currentId ? docs.filter((doc) => doc.document_id !== currentId) : docs
+
+    const matches = query
+      ? candidates.filter(
+          (doc) =>
+            doc.title.toLowerCase().includes(query) || (doc.path && doc.path.toLowerCase().includes(query)),
+        )
+      : candidates
+
+    return {
+      from: word.from,
+      options: matches.slice(0, 25).map((doc) => ({
+        label: doc.title || (doc.path ?? 'Untitled'),
+        detail: doc.path ?? 'Saved draft',
+        type: 'text',
+        apply: (view, _completion, from) => {
+          const markdown = internalDocumentMarkdown(doc)
+          view.dispatch({
+            changes: { from, to: context.pos, insert: markdown },
+            selection: { anchor: from + markdown.length },
+          })
+        },
+      })),
+    }
+  }
 }
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
@@ -47,6 +92,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     focusOnOpen,
     onFocused,
     onReady,
+    availableDocuments,
+    currentDocumentId,
   },
   ref,
 ) {
@@ -57,6 +104,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const onViewStateChangeRef = useRef(onViewStateChange)
   const initialValueRef = useRef(value)
   const initialViewStateRef = useRef(initialViewState)
+  const availableDocumentsRef = useRef(availableDocuments)
+  const currentDocumentIdRef = useRef(currentDocumentId)
+
+  useEffect(() => {
+    availableDocumentsRef.current = availableDocuments
+    currentDocumentIdRef.current = currentDocumentId
+  }, [availableDocuments, currentDocumentId])
 
   useEffect(() => {
     onChangeRef.current = onChange
@@ -112,6 +166,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           lineNumbers(),
           history(),
           contentType === 'text/html' ? html() : markdown(),
+          contentType === 'text/markdown'
+            ? autocompletion({
+                override: [createDocumentLinkCompletionSource(availableDocumentsRef, currentDocumentIdRef)],
+              })
+            : [],
           highlightSelectionMatches(),
           keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           EditorView.lineWrapping,
