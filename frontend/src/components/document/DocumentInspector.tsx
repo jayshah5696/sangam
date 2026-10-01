@@ -27,6 +27,7 @@ import { ActionMenu } from '../ActionMenu'
 import { workspaceLayoutPatch, workspaceLayoutPresets } from '../../workspaceLayout'
 
 import { WorkspaceEvidenceRail } from '../evidence/WorkspaceEvidenceRail'
+import { DocumentBacklinks } from './DocumentBacklinks'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
@@ -270,6 +271,7 @@ export function DocumentInspector({
             {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
               <PublicationEditor document={document} publication={publicationQuery.data ?? null} />
             )}
+            <DocumentBacklinks document={document} enabled={tab === 'properties'} />
           </>
         )}
         {tab === 'research' && (

@@ -727,6 +727,24 @@ class WorkspaceAccessService:
 
         return self._run(principal, "search", "document", operation)
 
+    def get_document_backlinks(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        limit: int = 50,
+    ) -> list[DocumentSummary]:
+        def operation() -> list[DocumentSummary]:
+            target = self.documents.get_document(document_id)
+            self.policy.require(principal, Capability.READ, target.path)
+            return self.documents.get_backlinks(
+                document_id,
+                path_prefixes=self.policy.allowed_prefixes(principal, Capability.READ),
+                limit=limit,
+            )
+
+        return self._run(principal, "read", "document", operation, resource_id=document_id)
+
     def get_document(
         self, principal: Principal, document_id: str, *, include_deleted: bool = False
     ) -> Document:

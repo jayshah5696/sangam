@@ -350,6 +350,71 @@ class DocumentService:
         return [self._document_summary_from_row(row) for row in rows]
 
     @staticmethod
+    def _extract_backlink_snippet(content: str, document_id: str, window: int = 50) -> str | None:
+        patterns = (f"sangam://document/{document_id}", f"/documents/{document_id}")
+        pos = -1
+        matched_pat = ""
+        for pat in patterns:
+            idx = content.find(pat)
+            if idx != -1:
+                pos = idx
+                matched_pat = pat
+                break
+        if pos == -1:
+            return None
+        link_start = content.rfind("[", max(0, pos - 100), pos)
+        start = max(0, link_start - window) if link_start != -1 else max(0, pos - window)
+        link_end = content.find(")", pos)
+        if link_end != -1 and link_end < pos + len(matched_pat) + 100:
+            end = min(len(content), link_end + 1 + window)
+        else:
+            end = min(len(content), pos + len(matched_pat) + window)
+        prefix = "… " if start > 0 else ""
+        suffix = " …" if end < len(content) else ""
+        raw_snippet = content[start:end].replace("\r", "").replace("\n", " ").strip()
+        return f"{prefix}{raw_snippet}{suffix}"
+
+    def get_backlinks(
+        self,
+        document_id: str,
+        *,
+        path_prefixes: tuple[str, ...] | None = None,
+        limit: int = 50,
+    ) -> list[DocumentSummary]:
+        if path_prefixes == ():
+            return []
+        self.get_document(document_id, include_deleted=True)
+        conditions = [
+            "d.deleted = 0",
+            "d.document_id != ?",
+            "(r.content LIKE ? OR r.content LIKE ?)",
+        ]
+        parameters: list[object] = [
+            document_id,
+            f"%sangam://document/{document_id}%",
+            f"%/documents/{document_id}%",
+        ]
+        self._add_path_filter(conditions, parameters, path_prefixes)
+        where = f" WHERE {' AND '.join(conditions)}"
+        parameters.append(limit)
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                self._document_query(include_content=True)
+                + where
+                + " ORDER BY d.updated_at DESC, d.document_id LIMIT ?",
+                parameters,
+            ).fetchall()
+        summaries: list[DocumentSummary] = []
+        for row in rows:
+            content = row["content"]
+            snippet = self._extract_backlink_snippet(content, document_id)
+            summary = self._document_summary_from_row(row)
+            if snippet:
+                summary.search_snippet = snippet
+            summaries.append(summary)
+        return summaries
+
+    @staticmethod
     def _add_path_filter(
         conditions: list[str],
         parameters: list[object],

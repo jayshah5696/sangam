@@ -37,7 +37,8 @@ import { internalDocumentMarkdown } from '../../internalLinks'
 import { useTheme } from '../../theme'
 import { useWorkbenchActions } from '../../workbench'
 import { canSplitActiveGroup } from '../../splitPolicy'
-import { initialDocumentMode, materializePath, saveLabel } from '../../documentWorkspaceState'
+import { initialDocumentMode, saveLabel } from '../../documentWorkspaceState'
+import { DocumentLocationControl } from './DocumentLocationControl'
 import { ActionDialog } from '../ActionMenu'
 import type { MarkdownEditorHandle } from '../MarkdownEditor'
 import { ConflictRecoveryNotice } from './ConflictRecoveryNotice'
@@ -91,16 +92,11 @@ export function DocumentWorkspace({
   // Keep the complete document index in its own cache entry. The paged explorer
   // and search queries use different shapes and must never share this key.
   const documentsQuery = useQuery({ queryKey: ['documents', 'all'], queryFn: api.listDocuments })
-  const foldersQuery = useQuery({ queryKey: ['folders'], queryFn: api.listFolders, enabled: !document.path })
   const htmlJavascript = useQuery({
     queryKey: ['html-javascript-settings'],
     queryFn: api.getHtmlJavascriptSettings,
     enabled: document.content_type === 'text/html',
   })
-  const [materializeFolder, setMaterializeFolder] = useState('')
-  const [materializeFilename, setMaterializeFilename] = useState(
-    document.content_type === 'text/html' ? 'interactive.html' : 'first-document.md',
-  )
   const [linkTarget, setLinkTarget] = useState('')
   const [activeSelection, setActiveSelection] = useState<{
     selectedText: string
@@ -215,13 +211,6 @@ export function DocumentWorkspace({
     if (citationTarget && matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
   }, [citationTarget, updatePreferences])
   const [draftTitle, setDraftTitle] = useState(document.title)
-  const selectedMaterializePath = materializePath(materializeFolder, materializeFilename)
-
-  useEffect(() => {
-    if (materializeFolder || !foldersQuery.data?.some((folder) => folder.path === 'projects')) return
-    const frame = requestAnimationFrame(() => setMaterializeFolder('projects'))
-    return () => cancelAnimationFrame(frame)
-  }, [foldersQuery.data, materializeFolder])
 
   useEffect(() => {
     void sessions.initializeDocument(initialDocument)
@@ -289,10 +278,6 @@ export function DocumentWorkspace({
     return () => window.removeEventListener('beforeunload', warn)
   }, [content, document.content])
 
-  const materialize = useMutation({
-    mutationFn: ({ base, path }: { base: Document; path: string }) => api.materializeDocument(base, path),
-    onSuccess: (nextDocument) => updateCachedDocument(nextDocument),
-  })
   const conflictHeadQuery = useQuery({
     queryKey: ['document-conflict-head', documentId],
     queryFn: () => api.getDocument(documentId),
@@ -339,60 +324,78 @@ export function DocumentWorkspace({
     >
       <header className="document-header">
         <div className="document-header-main">
-          <p className="eyebrow">{document.path ?? 'Saved draft'}</p>
-          <h1 aria-label={draftTitle || 'Untitled document'}>
-            <span className="document-title-accessible" aria-hidden="true">
-              {draftTitle}
+          <div className="document-header-meta">
+            {document.content_type !== 'application/pdf' ? (
+              <DocumentLocationControl
+                document={document}
+                saveState={saveState}
+                onUpdated={(updated) => updateCachedDocument(updated)}
+              />
+            ) : (
+              <p className="eyebrow">{document.path ?? 'Saved draft'}</p>
+            )}
+            <span className={`save-state ${saveState}`} role="status" aria-live="polite" aria-atomic="true">
+              {document.content_type === 'application/pdf'
+                ? 'Immutable source'
+                : saveLabel(saveState, Boolean(document.path))}
             </span>
-            <input
-              className="document-title-input"
-              aria-label="Document title"
-              value={draftTitle}
-              disabled={titleMutation.isPending}
-              onChange={(event) => setDraftTitle(event.target.value)}
-              onBlur={(event) => {
-                const title = event.currentTarget.value.trim()
-                if (title && title !== document.title) titleMutation.mutate(title)
-                else if (!title) setDraftTitle(document.title)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  event.currentTarget.blur()
-                }
-                if (event.key === 'Escape') {
-                  setDraftTitle(document.title)
-                  event.currentTarget.blur()
-                }
-              }}
-            />
-          </h1>
-          {titleMutation.isError && <small className="error-text">Title could not be saved.</small>}
+          </div>
+
+          <div className="document-header-row">
+            <div className="document-header-title-wrap">
+              <h1 aria-label={draftTitle || 'Untitled document'}>
+                <span className="document-title-accessible" aria-hidden="true">
+                  {draftTitle}
+                </span>
+                <input
+                  className="document-title-input"
+                  aria-label="Document title"
+                  value={draftTitle}
+                  disabled={titleMutation.isPending}
+                  onChange={(event) => setDraftTitle(event.target.value)}
+                  onBlur={(event) => {
+                    const title = event.currentTarget.value.trim()
+                    if (title && title !== document.title) titleMutation.mutate(title)
+                    else if (!title) setDraftTitle(document.title)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      event.currentTarget.blur()
+                    }
+                    if (event.key === 'Escape') {
+                      setDraftTitle(document.title)
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+              </h1>
+              {titleMutation.isError && <small className="error-text">Title could not be saved.</small>}
+            </div>
+
+            {document.content_type !== 'application/pdf' && (
+              <div className="document-header-toolbar">
+                <DocumentToolbar
+                  document={document}
+                  content={content}
+                  saveState={saveState}
+                  mode={mode}
+                  onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
+                  canCloseGroup={canCloseGroup}
+                  onSplit={onSplit}
+                  onCloseGroup={onCloseGroup}
+                  onUpdated={(updated) => updateCachedDocument(updated)}
+                  onDeleted={async () => {
+                    await queryClient.invalidateQueries({ queryKey: ['documents'] })
+                    onDeleted()
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
-        <span className={`save-state ${saveState}`} role="status" aria-live="polite" aria-atomic="true">
-          {document.content_type === 'application/pdf'
-            ? 'Immutable source'
-            : saveLabel(saveState, Boolean(document.path))}
-        </span>
       </header>
       {document.content_type === 'application/pdf' && <MobileInspectorToggle />}
-      {document.content_type !== 'application/pdf' && (
-        <DocumentToolbar
-          document={document}
-          content={content}
-          saveState={saveState}
-          mode={mode}
-          onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
-          canCloseGroup={canCloseGroup}
-          onSplit={onSplit}
-          onCloseGroup={onCloseGroup}
-          onUpdated={(updated) => updateCachedDocument(updated)}
-          onDeleted={async () => {
-            await queryClient.invalidateQueries({ queryKey: ['documents'] })
-            onDeleted()
-          }}
-        />
-      )}
       {document.content_type !== 'application/pdf' && saveState === 'conflict' && (
         <ConflictRecoveryNotice
           document={document}
@@ -434,39 +437,6 @@ export function DocumentWorkspace({
       {captureError && (
         <StateMessage compact kind="error" title="Evidence could not be kept" description={captureError} />
       )}
-      {document.content_type !== 'application/pdf' && !document.path && (
-        <form
-          className="materialize-bar"
-          onSubmit={(event) => {
-            event.preventDefault()
-            materialize.mutate({ base: document, path: selectedMaterializePath })
-          }}
-        >
-          <p className="materialize-copy">
-            This document is a saved draft. Choose a workspace path when you want it to become a file.
-          </p>
-          <select
-            aria-label="Workspace folder"
-            value={materializeFolder}
-            onChange={(event) => setMaterializeFolder(event.target.value)}
-          >
-            <option value="">Workspace root</option>
-            {(foldersQuery.data ?? []).map((folder) => (
-              <option key={folder.folder_id} value={folder.path}>
-                {folder.path}
-              </option>
-            ))}
-          </select>
-          <input
-            aria-label="Workspace filename"
-            value={materializeFilename}
-            onChange={(event) => setMaterializeFilename(event.target.value)}
-          />
-          <button disabled={materialize.isPending || saveState !== 'saved' || !materializeFilename.trim()}>
-            {materialize.isPending ? 'Moving…' : 'Move to folder'}
-          </button>
-        </form>
-      )}
       {citationTarget?.revisionId && (
         <CitedRevisionEvidence
           document={document}
@@ -493,54 +463,6 @@ export function DocumentWorkspace({
           }}
         />
       )}
-      {document.content_type !== 'application/pdf' && mode !== 'preview' && (
-        <div className="editor-tools">
-          <label>
-            Internal link
-            <select value={linkTarget} onChange={(event) => setLinkTarget(event.target.value)}>
-              <option value="">Choose a document…</option>
-              {documentsQuery.data
-                ?.filter((candidate) => candidate.document_id !== documentId)
-                .map((candidate) => (
-                  <option key={candidate.document_id} value={candidate.document_id}>
-                    {candidate.path ?? candidate.title}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <button type="button" disabled={!linkTarget} onClick={insertLink}>
-            Insert link
-          </button>
-          {Boolean(selection.selectedCharacters && selection.selectedCharacters > 0) && (
-            <button
-              type="button"
-              className="secondary-action"
-              onClick={() => {
-                const captured = editorSelectionSnapshot.current
-                const snapshot = captured?.content ?? ''
-                const sel = captured?.selectedText ?? ''
-                if (!sel) return
-                void keepSelection(sel, snapshot, captured?.revisionId, captured?.occurrence ?? 0).catch(
-                  () => {
-                    /* The capture error is displayed above. */
-                  },
-                )
-              }}
-              title="Keep selected text as evidence"
-            >
-              <BookmarkCheck size="var(--icon-inline)" /> Keep evidence
-            </button>
-          )}
-          <span>
-            Ln {selection.line}, Col {selection.column}
-            {selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}
-          </span>
-          <span className="desktop-shortcut">
-            <kbd>⌘F</kbd>
-            <small>find/replace</small>
-          </span>
-        </div>
-      )}
       <div className={`editing-surface mode-${mode}`}>
         {document.content_type === 'application/pdf' && (
           <Suspense fallback={<div className="center-message">Preparing PDF reader…</div>}>
@@ -553,6 +475,8 @@ export function DocumentWorkspace({
               ref={editorRef}
               value={content}
               contentType={document.content_type}
+              availableDocuments={documentsQuery.data}
+              currentDocumentId={documentId}
               onChange={handleEditorChange}
               onSelectionChange={(nextSelection) =>
                 sessions.updateSession(documentId, { selection: nextSelection })
@@ -604,6 +528,58 @@ export function DocumentWorkspace({
         )}
         {mode !== 'edit' && document.content_type === 'text/html' && <SelectableHtmlText content={content} />}
       </div>
+      {document.content_type !== 'application/pdf' && mode !== 'preview' && (
+        <div className="editor-tools">
+          <label>
+            Internal link
+            <select
+              aria-label="Internal link"
+              value={linkTarget}
+              onChange={(event) => setLinkTarget(event.target.value)}
+            >
+              <option value="">Choose a document…</option>
+              {documentsQuery.data
+                ?.filter((candidate) => candidate.document_id !== documentId)
+                .map((candidate) => (
+                  <option key={candidate.document_id} value={candidate.document_id}>
+                    {candidate.path ?? candidate.title}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <button type="button" disabled={!linkTarget} onClick={insertLink}>
+            Insert link
+          </button>
+          {Boolean(selection.selectedCharacters && selection.selectedCharacters > 0) && (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => {
+                const captured = editorSelectionSnapshot.current
+                const snapshot = captured?.content ?? ''
+                const sel = captured?.selectedText ?? ''
+                if (!sel) return
+                void keepSelection(sel, snapshot, captured?.revisionId, captured?.occurrence ?? 0).catch(
+                  () => {
+                    /* The capture error is displayed above. */
+                  },
+                )
+              }}
+              title="Keep selected text as evidence"
+            >
+              <BookmarkCheck size="var(--icon-inline)" /> Keep evidence
+            </button>
+          )}
+          <span>
+            Ln {selection.line}, Col {selection.column}
+            {selection.selectedCharacters ? ` · ${selection.selectedCharacters} selected` : ''}
+          </span>
+          <span className="desktop-shortcut">
+            <kbd>⌘F</kbd>
+            <small>find/replace</small>
+          </span>
+        </div>
+      )}
       {activeSelection && (
         <TextSelectionToolbar
           key={`${documentId}:${activeSelection.revisionId ?? 'draft'}:${activeSelection.occurrence}:${activeSelection.selectedText}`}

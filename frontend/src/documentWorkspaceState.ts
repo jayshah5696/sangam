@@ -21,3 +21,20 @@ export function materializePath(folder: string, filename: string): string {
   const normalizedFilename = filename.trim().replace(/^\/+/, '')
   return normalizedFolder ? `${normalizedFolder}/${normalizedFilename}` : normalizedFilename
 }
+
+export function defaultFilename(title: string, contentType: string): string {
+  const ext = contentType === 'text/html' ? '.html' : '.md'
+  let trimmed = title.trim()
+  if (trimmed.toLowerCase().endsWith(ext)) {
+    trimmed = trimmed.slice(0, -ext.length)
+  }
+  const slug = trimmed
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+  if (!slug) {
+    return contentType === 'text/html' ? 'interactive.html' : 'first-document.md'
+  }
+  return `${slug}${ext}`
+}
