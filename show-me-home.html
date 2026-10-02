@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sangam Home · before and after</title>
+<style>
+  :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #08090a; color: #f4f4f5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { max-width: 1600px; margin: auto; padding: clamp(20px, 4vw, 56px); }
+  .eyebrow { color: #949aa4; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: clamp(28px, 4vw, 44px); margin: 12px 0; }
+  p { color: #b4b8c0; line-height: 1.6; max-width: 70ch; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 28px 0 20px; }
+  button { min-height: 44px; padding: 10px 18px; border: 1px solid #34353a; border-radius: 6px; background: #191a1b; color: inherit; font: inherit; cursor: pointer; }
+  button[aria-pressed="true"] { background: #6255db; border-color: #6255db; }
+  button:focus-visible, a:focus-visible { outline: 2px solid #a69bff; outline-offset: 3px; }
+  .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  figure { margin: 0; min-width: 0; }
+  figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  figcaption span { color: #949aa4; font-size: 12px; }
+  .screen { display: block; border: 1px solid #292a2f; border-radius: 6px; overflow: hidden; background: #08090a; }
+  img { display: block; width: 100%; height: auto; }
+  .comparison[data-device="mobile"] { max-width: 800px; }
+  .note { margin-top: 12px; font-size: 14px; }
+  .change { margin-top: 28px; padding-top: 20px; border-top: 1px solid #292a2f; }
+  a { color: #ada4ff; }
+  footer { color: #949aa4; font-size: 12px; line-height: 1.7; margin-top: 28px; }
+  @media (max-width: 700px) { .comparison { grid-template-columns: 1fr; gap: 28px; } }
+</style>
+<main>
+  <div class="eyebrow">Sangam · issue #375</div>
+  <h1>Return to your work.</h1>
+  <p>Home now puts recent documents below project context. One New document menu offers Markdown and HTML, and Capture stays with Inbox.</p>
+  <div class="toolbar" aria-label="Screenshot device">
+    <button type="button" aria-pressed="true" data-device="desktop">Desktop · 1440 × 900</button>
+    <button type="button" aria-pressed="false" data-device="mobile">Touch mobile · 390 × 844</button>
+  </div>
+  <div class="comparison" data-device="desktop">
+    <figure>
+      <figcaption><strong>Before</strong><span>main · bbe647d</span></figcaption>
+      <a class="screen" href="before-desktop.png"><img src="before-desktop.png" alt="Before: Home with search, format controls and repeated navigation above recent documents."></a>
+      <p class="note">Quick search and several action rows push recent documents down.</p>
+    </figure>
+    <figure>
+      <figcaption><strong>After</strong><span>PR #394 · be6e67e</span></figcaption>
+      <a class="screen" href="after-desktop.png"><img src="after-desktop.png" alt="After: Home with one New document action and recent documents immediately below project context."></a>
+      <p class="note">Recent documents appear sooner. On mobile, all four documents and Inbox fit in this viewport.</p>
+    </figure>
+  </div>
+  <p class="change">Search, Chat, Projects and Review remain available in the workspace sidebar. Document creation still opens the editor with focus ready for writing.</p>
+  <p><a href="https://github.com/jayshah5696/sangam/pull/394">Review PR #394</a></p>
+  <footer>Both versions use the same four recent documents, one project and an empty Inbox. Captured from isolated live instances with Chromium. Mobile uses the Pixel 7 profile with touch and mobile enabled. Images are original browser captures.</footer>
+</main>
+<script>
+  const comparison = document.querySelector('.comparison');
+  const controls = document.querySelectorAll('button[data-device]');
+  controls.forEach(button => button.addEventListener('click', () => {
+    const device = button.dataset.device;
+    controls.forEach(control => control.setAttribute('aria-pressed', String(control === button)));
+    comparison.dataset.device = device;
+    comparison.querySelectorAll('figure').forEach((figure, index) => {
+      const source = (index === 0 ? 'before-' : 'after-') + device + '.png';
+      figure.querySelector('img').src = source;
+      figure.querySelector('a').href = source;
+    });
+  }));
+</script>
+</html>
