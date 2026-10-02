@@ -57,6 +57,11 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-tls-client-cert",
     "x-amz-security-token",
     "x-oauth-basic",
+    "x-sangam-trusted-identity",
+    "sangam-trusted-identity",
+    "x-refresh-token",
+    "x-auth-secret",
+    "x-api-secret",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -126,6 +131,9 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "api_secret",
     "account_key",
     "id_token",
+    "signing_key",
+    "encryption_key",
+    "user_key",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -159,7 +167,7 @@ _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+")
 
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(api_key|api_token|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
+    r"(?i)\b(api_key|api_token|api_secret|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass|signing_key|encryption_key|account_key|id_token)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
 )
 
 _RESERVED_NAMES: set[str] = {
