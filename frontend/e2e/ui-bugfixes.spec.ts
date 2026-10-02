@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Page, TestInfo } from '@playwright/test'
 import { z } from 'zod'
 
-import { expect, test as base } from './fixtures'
+import { expect, openIfClosed, test as base } from './fixtures'
 
 const documentIdentity = z.object({ document_id: z.string() })
 const htmlPolicy = z.object({ enabled: z.boolean(), version: z.number().int() })
@@ -42,8 +42,10 @@ ${Array.from({ length: 12 }, (_, index) => `<section><h2>Note ${index + 1}</h2><
 </body></html>`
 
 async function revealSidebar(page: Page) {
-  const reveal = page.getByRole('button', { name: /^Show (workspace|settings) sidebar$/ })
-  if (await reveal.isVisible()) await reveal.click()
+  await openIfClosed(
+    page.getByRole('button', { name: /^Show (workspace|settings) sidebar$/ }),
+    page.getByRole('link', { name: 'Sangam home', exact: true }),
+  )
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {
