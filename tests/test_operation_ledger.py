@@ -99,3 +99,31 @@ def test_project_brief_creation_is_recorded_as_a_document_create(client: TestCli
         ("create", "document")
     ]
     assert events[0]["revision_id"] is not None
+
+
+def test_project_and_saved_view_writes_follow_the_same_contract(client: TestClient) -> None:
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": "Ledger contract", "create_brief": False},
+        headers=headers("contract-project"),
+    ).json()
+    stale = client.patch(
+        f"/api/v1/projects/{project['project_id']}",
+        json={"expected_version": 99, "name": "Never applied"},
+        headers=headers("contract-stale"),
+    )
+    assert stale.status_code == 409
+    saved = client.post(
+        "/api/v1/saved-views",
+        json={"name": "Contract view", "filters": {"query": "contract"}},
+        headers=headers("contract-view"),
+    )
+    assert saved.status_code in {200, 201}
+
+    project_events = human_events(client, resource_id=project["project_id"])
+    assert [(e["action"], e["outcome"]) for e in project_events] == [
+        ("update", "conflict"),
+        ("create", "accepted"),
+    ]
+    [view_event] = human_events(client, resource_type="saved_view")
+    assert (view_event["action"], view_event["outcome"]) == ("save_view", "accepted")

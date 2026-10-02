@@ -302,6 +302,10 @@ class Principal:
     token_id: str | None = None
     scopes: tuple[ScopeGrant, ...] = ()
     administrator: bool = False
+    # Where a write came from when it is not a direct request, for example
+    # "chat-effect:eff_123", and who approved it. The activity ledger records both.
+    via: str | None = None
+    approved_by: str | None = None
 
     @classmethod
     def trusted_human(cls, *, actor_id: str, display_name: str, operation_id: str) -> Principal:

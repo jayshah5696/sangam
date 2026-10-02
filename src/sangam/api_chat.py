@@ -156,6 +156,7 @@ def create_chat_router(
         workspace_context: str | None = Header(default=None, alias="X-Sangam-Workspace-Context"),
         context_id: str | None = Header(default=None, alias="X-Sangam-Context-ID"),
         entry_point: str = Header(default="workspace", alias="X-Sangam-Chat-Entry"),
+        project_id: str | None = Header(default=None, alias="X-Sangam-Project-ID", max_length=200),
         principal: Principal = principal_dependency,
     ) -> Response:
         try:
@@ -176,6 +177,7 @@ def create_chat_router(
                     requested_revision_id=revision_id,
                     workspace_context=workspace_context == "1",
                     context_snapshot_id=context_id,
+                    project_id=project_id,
                     entry_point="document" if entry_point == "document" else "workspace",
                 ),
             )
@@ -261,7 +263,7 @@ def create_chat_router(
         thread_id: str,
         principal: Principal = principal_dependency,
     ) -> dict[str, str | bool | None]:
-        run_id = chat.evidence.request_cancel(principal, thread_id=thread_id)
+        run_id = chat.cancel_run(principal, thread_id=thread_id)
         return {"cancelled": run_id is not None, "run_id": run_id}
 
     @router.get("/chat/effects/{effect_id}", response_model=ChatEffect)

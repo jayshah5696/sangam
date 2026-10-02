@@ -31,6 +31,8 @@ RECENT_DENIED_DAYS = 1
 
 
 ALLOWED_AUDIT_DETAIL_KEYS = {
+    "via",
+    "approved_by",
     "current_revision_id",
     "expected_revision_id",
     "revision_id",

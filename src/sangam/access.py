@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import BinaryIO, Literal, TypeVar
+from typing import BinaryIO, Literal, Protocol, TypeVar
 
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
@@ -46,6 +46,7 @@ from sangam.schemas import (
     Folder,
     IssuedPublication,
     OrganizationCreateFolder,
+    OrganizationCreateTag,
     OrganizationDocumentSnapshot,
     OrganizationDuplicateDocument,
     OrganizationFolderSnapshot,
@@ -99,6 +100,35 @@ def reads(name: str, resource_type: str) -> Action:
 def writes(name: str, resource_type: str) -> Action:
     """Declare an operation whose acceptance must reach the activity ledger."""
     return Action(name, resource_type, mutation=True)
+
+
+def _plan_resource_type(kind: str) -> Literal["document", "folder", "tag"]:
+    if kind == "create_tag":
+        return "tag"
+    return "document" if "document" in kind else "folder"
+
+
+def _plan_resource_id(result: Document | Folder | Tag) -> str:
+    if isinstance(result, Document):
+        return result.document_id
+    return result.tag_id if isinstance(result, Tag) else result.folder_id
+
+
+class Audited(Protocol):
+    """``WorkspaceAccessService.audited``, for services that run their own transactions."""
+
+    def __call__(
+        self,
+        principal: Principal,
+        action: Action,
+        operation: Callable[[], T],
+        *,
+        resource_id: str | None = None,
+        path: str | None = None,
+        details: dict[str, object] | None = None,
+        estimated_bytes: int | None = None,
+        subject: Callable[[T], str] | None = None,
+    ) -> T: ...
 
 
 DocumentWriteAction = Literal[
@@ -1039,6 +1069,31 @@ class WorkspaceAccessService:
             )
         self.publications._normalize_slug(slug)
 
+    def document_publication(self, principal: Principal, document_id: str) -> Publication | None:
+        """The publication of a document, for someone who may publish it."""
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.PUBLISH,
+            action=reads("read_publication", "publication"),
+            current=current,
+            operation=lambda: self.publications.get_document_publication(document_id),
+        )
+
+    def preflight_update_publication(
+        self, principal: Principal, *, publication_id: str, expected_version: int
+    ) -> Publication:
+        """Refuse an unpublish or update request that could not run as written."""
+        publication = self.publications.get_publication(publication_id)
+        current = self.documents.get_document(publication.document_id)
+        self.policy.require(principal, Capability.PUBLISH, current.path)
+        if publication.version != expected_version:
+            raise ConflictError(
+                "The publication changed since it was read",
+                details={"current_version": publication.version},
+            )
+        return publication
+
     def update_publication(
         self,
         principal: Principal,
@@ -1424,7 +1479,7 @@ class WorkspaceAccessService:
                         index=index,
                         kind=operation.kind,
                         status=status,
-                        resource_type=("document" if "document" in operation.kind else "folder"),
+                        resource_type=_plan_resource_type(operation.kind),
                         resource_id=getattr(
                             operation, "document_id", getattr(operation, "folder_id", None)
                         ),
@@ -1440,7 +1495,7 @@ class WorkspaceAccessService:
                             index=skipped_index,
                             kind=skipped.kind,
                             status="skipped",
-                            resource_type=("document" if "document" in skipped.kind else "folder"),
+                            resource_type=_plan_resource_type(skipped.kind),
                             resource_id=getattr(
                                 skipped,
                                 "document_id",
@@ -1456,11 +1511,9 @@ class WorkspaceAccessService:
                     index=index,
                     kind=operation.kind,
                     status="completed",
-                    resource_type="document" if "document" in operation.kind else "folder",
-                    resource_id=result.document_id
-                    if isinstance(result, Document)
-                    else result.folder_id,
-                    path=result.path,
+                    resource_type=_plan_resource_type(operation.kind),
+                    resource_id=_plan_resource_id(result),
+                    path=None if isinstance(result, Tag) else result.path,
                     operation_key=child_key,
                     message="Completed",
                 )
@@ -1854,6 +1907,22 @@ class WorkspaceAccessService:
                     )
                 self.policy.require(principal, Capability.DELETE, document.path)
                 destination = ""
+            elif isinstance(operation, OrganizationCreateTag):
+                self.policy.require_administrator(principal)
+                clash = next(
+                    (
+                        tag
+                        for tag in self.organization.list_tags()
+                        if tag.name.casefold() == " ".join(operation.name.split()).casefold()
+                    ),
+                    None,
+                )
+                if clash is not None:
+                    raise ConflictError(
+                        f"Tag already exists: {clash.name}",
+                        details={"tag_id": clash.tag_id},
+                    )
+                destination = ""
             elif isinstance(operation, OrganizationRestoreDocument):
                 try:
                     document = self.documents.get_document(
@@ -2011,11 +2080,12 @@ class WorkspaceAccessService:
         | OrganizationTrashDocument
         | OrganizationRestoreDocument
         | OrganizationDuplicateDocument
+        | OrganizationCreateTag
         | OrganizationMoveFolder
         | OrganizationUpdateDocumentMetadata
         | OrganizationUpdateFolderMetadata,
         idempotency_key: str,
-    ) -> Document | Folder:
+    ) -> Document | Folder | Tag:
         if isinstance(operation, OrganizationCreateFolder):
             return self.create_folder(
                 principal,
@@ -2057,6 +2127,13 @@ class WorkspaceAccessService:
                     expected_revision_id=operation.expected_revision_id,
                     summary="Moved to trash by workspace organization plan",
                 ),
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationCreateTag):
+            return self.create_tag(
+                principal,
+                name=operation.name,
+                color=operation.color,
                 idempotency_key=idempotency_key,
             )
         if isinstance(operation, OrganizationRestoreDocument):
@@ -2174,6 +2251,12 @@ class WorkspaceAccessService:
         name = action.name
         resource_type = action.resource_type
         is_mutation = action.mutation
+        if principal.via or principal.approved_by:
+            details = {
+                **(details or {}),
+                **({"via": principal.via} if principal.via else {}),
+                **({"approved_by": principal.approved_by} if principal.approved_by else {}),
+            }
         if estimated_bytes is None:
             estimated_bytes = 2048
             if details:

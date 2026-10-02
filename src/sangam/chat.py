@@ -36,10 +36,11 @@ from sangam.chat_store import SQLiteChatKitStore
 from sangam.chat_tools import ChatToolset
 from sangam.config import ChatServerConfig
 from sangam.db import Database
+from sangam.errors import NotFoundError
 from sangam.projects import ProjectService
 from sangam.provider_connections import ProviderConnectionService, ProviderStatus
 from sangam.schemas import ChatRuntimeConfig
-from sangam.security import IdentityService
+from sangam.security import IdentityService, Principal
 
 _MAX_TITLE_LENGTH = 48
 
@@ -110,6 +111,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         projects: ProjectService,
     ) -> None:
         self.workspace = workspace
+        self.projects = projects
         self.config = config
         self.model_catalog = model_catalog
         self.provider_connections = provider_connections
@@ -352,7 +354,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             pdf_page_number=turn_record.pdf_page_number,
             annotation_id=turn_record.annotation_id,
         )
-        app_context = await self._app_context(request_context)
+        app_context = await self.app_context(request_context, thread.id)
         page = await self.store.load_thread_items(
             thread.id,
             after=None,
@@ -471,9 +473,23 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                 error_class="stream_error" if stream_failed else None,
             )
 
-    async def _app_context(self, context: ChatRequestContext) -> str:
+    def cancel_run(self, principal: Principal, *, thread_id: str) -> str | None:
+        """Stop the thread's newest run and cancel its effects, in one transaction."""
+        with self.evidence.database.transaction():
+            run_id = self.evidence.request_cancel(principal, thread_id=thread_id)
+            if run_id is not None:
+                self.effects.cancel_pending(run_id)
+            return run_id
+
+    async def app_context(self, context: ChatRequestContext, thread_id: str) -> str:
+        """What the model is told about the open document and project."""
+        project_context = await self.admission.run_sync(self._project_context, context, thread_id)
+        project_context = self._access_context(context.principal) + project_context
         if not context.document_id:
-            return "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
+            return (
+                "<SANGAM_CONTEXT>\nNo current document is open.\n"
+                f"{project_context}</SANGAM_CONTEXT>"
+            )
         document = await self.admission.run_sync(
             self.workspace.get_document, context.principal, context.document_id
         )
@@ -492,7 +508,45 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             f"{pdf_context}"
             "Call read_document or read_pdf_page before making claims about its content. "
             "Call get_editor_selection when the user's request refers to selected text.\n"
+            f"{project_context}"
             "</SANGAM_CONTEXT>"
+        )
+
+    def _access_context(self, principal: Principal) -> str:
+        """Name the paths a path-limited token may create under, so the model picks one."""
+        prefixes = self.workspace.policy.allowed_prefixes(principal, Capability.CREATE)
+        if prefixes is None:
+            return ""
+        if not prefixes:
+            return "Your token cannot create documents.\n"
+        return "Your create access is limited to paths under: " + ", ".join(prefixes) + "\n"
+
+    def _project_context(self, context: ChatRequestContext, thread_id: str) -> str:
+        """Describe the project this conversation started from; empty when there is none.
+
+        Projects are administrator-only and may have been deleted since the page loaded,
+        so a project that cannot be read is left out rather than failing the turn.
+        """
+        if not context.project_id or not context.principal.administrator:
+            return ""
+        try:
+            project = self.projects.get_project(context.project_id, context.principal)
+        except NotFoundError:
+            return ""
+        members = "\n".join(
+            f"- {member.document_id} | {member.document_title} | {member.role}"
+            for member in project.documents[:25]
+        )
+        return (
+            f"Open project id: {project.project_id} (version {project.version})\n"
+            f"Project name: {project.name}\n"
+            f"Project purpose: {project.description or 'none recorded'}\n"
+            f"Project brief document id: {project.brief_document_id or 'none'}\n"
+            f"This conversation's thread id: {thread_id}\n"
+            f"Project documents ({len(project.documents)}, first 25 shown):\n"
+            f"{members or '- none'}\n"
+            'When the user says "this project", mean this one. Call inspect_projects for '
+            "its conversations and annotations before changing them.\n"
         )
 
 

@@ -301,6 +301,15 @@ class OrganizationDuplicateDocument(MutationRequest):
     destination_path: str | None = Field(default=None, max_length=500)
 
 
+class OrganizationCreateTag(MutationRequest):
+    """Create a tag. Later operations in the same plan cannot use it: tag IDs are assigned
+    on creation, so apply the tag in a second plan after inspecting the new ID."""
+
+    kind: Literal["create_tag"]
+    name: str = Field(min_length=1, max_length=60)
+    color: str = Field(default="#527ea3", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
 class OrganizationMoveFolder(MutationRequest):
     kind: Literal["move_folder"]
     folder_id: str = Field(min_length=1, max_length=200)
@@ -338,7 +347,8 @@ OrganizationOperation = Annotated[
     | OrganizationUpdateDocumentMetadata
     | OrganizationUpdateFolderMetadata
     | OrganizationRestoreDocument
-    | OrganizationDuplicateDocument,
+    | OrganizationDuplicateDocument
+    | OrganizationCreateTag,
     Field(discriminator="kind"),
 ]
 
@@ -352,6 +362,8 @@ class ApplyOrganizationPlan(MutationRequest):
         for operation in self.operations:
             if operation.kind == "create_folder":
                 key = (operation.kind, operation.path)
+            elif operation.kind == "create_tag":
+                key = ("tag", " ".join(operation.name.split()).casefold())
             elif operation.kind == "duplicate_document":
                 # A copy changes no existing resource; copies may not share a path, which
                 # preflight checks.
@@ -390,7 +402,7 @@ class OrganizationPlanItemResult(BaseModel):
     index: int = Field(ge=0)
     kind: str
     status: Literal["completed", "skipped", "conflicted", "failed"]
-    resource_type: Literal["document", "folder"]
+    resource_type: Literal["document", "folder", "tag"]
     resource_id: str | None = None
     path: str | None = None
     operation_key: str | None = None
@@ -1079,6 +1091,8 @@ class ChatEffect(BaseModel):
         "publish_document",
         "apply_workspace_organization_plan",
         "update_project",
+        "update_publication",
+        "annotate_pdf",
     ]
     capability_version: int
     argument_digest: str
