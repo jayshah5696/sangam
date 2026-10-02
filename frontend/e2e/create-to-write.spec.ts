@@ -29,10 +29,13 @@ test('Home resumes work and exposes one document creation menu', async ({
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height)
   if (testInfo.project.use.hasTouch) {
-    expect((await create.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-    expect(
-      (await menu.getByRole('menuitem', { name: 'Markdown', exact: true }).boundingBox())!.height,
-    ).toBeGreaterThanOrEqual(44)
+    await expect.poll(async () => (await create.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    await expect
+      .poll(
+        async () =>
+          (await menu.getByRole('menuitem', { name: 'Markdown', exact: true }).boundingBox())!.height,
+      )
+      .toBeGreaterThanOrEqual(44)
   }
   await page.keyboard.press('Escape')
   await expect(menu).toBeHidden()
