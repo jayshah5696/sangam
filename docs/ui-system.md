@@ -138,6 +138,12 @@ tabs before rendering either list. If no persisted tab is available, Home uses
 the server document list under **Recently active** and does not label that list
 as recently opened.
 
+Home keeps creation in one **New document** menu with Markdown and HTML choices.
+Capture belongs to the **Inbox** header. Search stays in the workspace sidebar
+and command palette, and global navigation stays in the sidebar. Keep these
+controls out of a second Home action strip so ongoing work and recent documents
+remain the focus.
+
 New documents open in Edit mode. The document inspector provides three layout
 presets:
 

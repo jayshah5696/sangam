@@ -56,7 +56,11 @@ async function createChatThread(request: import('@playwright/test').APIRequestCo
 
 test('workspace chat opens without a document and reports transport setup truthfully', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Ask workspace' }).click()
+  const chat = page.getByRole('link', { name: 'Workspace chat', exact: true })
+  const reveal = page.getByRole('button', { name: 'Show workspace sidebar', exact: true })
+  await expect(chat.or(reveal)).toBeVisible()
+  if (await reveal.isVisible()) await reveal.click()
+  await chat.click()
   await expect(page).toHaveURL(/\/chat$/)
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
   const runtime = await page.request.get('/api/v1/chat/config')

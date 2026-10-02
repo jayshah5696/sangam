@@ -132,7 +132,8 @@ test('Create from Home attaches the new draft to the selected project', async ({
   try {
     await page.goto('/')
     await page.getByLabel('Switch project').selectOption(project.project_id)
-    await page.getByRole('button', { name: 'Create Markdown', exact: true }).click()
+    await page.getByRole('button', { name: 'New document', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Markdown', exact: true }).click()
     await expect(page).toHaveURL(/\/documents\//)
     const detail = projectDetailSchema.parse(
       await (await request.get(`/api/v1/projects/${project.project_id}`)).json(),

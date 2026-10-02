@@ -64,12 +64,6 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
     }
     const dismissAll = () => closeMenu(false)
     place()
-    requestAnimationFrame(() => {
-      place()
-      menuRef.current
-        ?.querySelector<HTMLElement>('button:not(:disabled), [role="menuitem"]:not(:disabled)')
-        ?.focus()
-    })
     document.addEventListener('pointerdown', outside, true)
     window.addEventListener('keydown', escape)
     window.addEventListener('resize', dismissAll)
@@ -81,6 +75,19 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
       window.removeEventListener('scroll', dismissAll, true)
     }
   }, [open])
+
+  // Let the positioned menu paint before focusing; its initial hidden frame cannot take focus.
+  useLayoutEffect(() => {
+    if (!open || !position.visible) return
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        menuRef.current
+          ?.querySelector<HTMLElement>('button:not(:disabled), [role="menuitem"]:not(:disabled)')
+          ?.focus()
+      })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [open, position.visible])
 
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return

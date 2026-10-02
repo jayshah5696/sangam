@@ -43,31 +43,15 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .welcome { max-width: 760px; margin: 9dvh auto; padding: var(--space-5); }
 .welcome-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 .welcome-heading-row .eyebrow { margin-bottom: var(--space-1); }
-.review-home-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--control-height); padding: 0 var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--text); text-decoration: none; font-size: var(--text-control); }
-.review-home-link:hover, .review-home-link:focus-visible { border-color: var(--accent); background: var(--surface); }
 .welcome h1 { font-family: var(--font-display); font-weight: 400; line-height: var(--leading-tight); font-size: var(--text-display); margin: var(--space-2) 0 var(--space-4); color: var(--text); letter-spacing: -.035em; }
-.welcome-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 11px 17px; margin-top: 26px; }
-.welcome-actions label { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-label); }
-.welcome-actions select { border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); padding: 6px 10px; font-size: var(--text-control); min-height: var(--control-height); }
-.welcome-search { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); padding: 0 var(--space-4); min-height: var(--control-height); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--muted); }
-.welcome-search:focus-within { border-color: var(--accent); }
-.welcome-search input[type='search'] { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: var(--text-body); outline: none; }
-.welcome-search-hint { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; color: var(--muted); font-size: var(--text-meta); }
-.welcome-search-hint kbd, .welcome-shortcuts kbd { padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: var(--radius-control); background: var(--surface); }
-.welcome-search-results { display: grid; gap: 2px; margin-top: var(--space-3); padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
-.welcome-search-results a { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); color: var(--text); text-decoration: none; font-size: var(--text-label); }
-.welcome-search-results a:hover, .welcome-search-results a:focus-visible { background: var(--surface-soft); }
-.welcome-search-results a span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.welcome-shortcuts { display: flex; flex-wrap: wrap; gap: 11px 17px; margin-top: var(--space-4); color: var(--muted); font-size: var(--text-meta); }
-.welcome-shortcuts .desktop-shortcut { display: inline-flex; align-items: center; gap: 5px; }
-.welcome-actions .primary-button, .welcome-chat-action { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
-.welcome-actions > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--text-meta); }
-.welcome-actions kbd { padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: var(--radius-control); background: var(--surface); }
-.welcome-recent { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 36px; padding-top: 19px; border-top: 1px solid var(--line); }
+.welcome-create { display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0; min-height: var(--control-height); font-size: var(--text-control); white-space: nowrap; }
+.welcome-heading-row > div { min-width: 0; overflow-wrap: anywhere; }
+.welcome-description { margin: 0; color: var(--muted); font-size: var(--text-body); }
+.welcome-recent { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--line); }
 .welcome-recent > strong { grid-column: 1 / -1; font-size: var(--text-label); text-transform: uppercase; letter-spacing: .08em; }
 .welcome-recent a { min-width: 0; display: grid; gap: 4px; padding: var(--space-3); border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--text); text-decoration: none; }
 .welcome-recent a:hover, .welcome-recent a:focus-visible { border-color: var(--line); background: var(--surface); }
-.welcome-recent a span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-label); }
+.welcome-recent a span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-control); }
 .welcome-recent a small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: var(--text-meta); }
 
 .document-layout { display: flex; min-height: 100dvh; }
@@ -623,7 +607,7 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .capture-actions { justify-content: flex-end; }
 .capture-actions .primary-button { display: inline-flex; align-items: center; gap: var(--space-2); }
 
-.home-inbox { display: grid; gap: var(--space-2); margin-top: 36px; padding-top: 19px; border-top: 1px solid var(--line); }
+.home-inbox { display: grid; gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--line); }
 .home-inbox header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .home-inbox h2 { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; font-family: var(--font-ui); font-size: var(--text-label); letter-spacing: .08em; text-transform: uppercase; }
 .home-inbox h2 small { color: var(--muted); font-size: var(--text-meta); letter-spacing: normal; }
@@ -883,7 +867,6 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   .backup-card li small { grid-column: 1 / -1; }
   .welcome { margin: 7dvh auto; padding: 30px 20px; }
   .welcome-heading-row { flex-direction: column; align-items: flex-start; gap: var(--space-2); }
-  .review-home-link { align-self: flex-start; }
   .welcome-recent { grid-template-columns: 1fr; }
   .review-page { padding: var(--space-4) var(--space-3); }
   .review-page-header { flex-direction: column; gap: var(--space-2); }
