@@ -56,7 +56,11 @@ function ProjectsPage() {
           kind="error"
           title="Could not load projects"
           description={projects.error.message}
-          action={<button onClick={() => void projects.refetch()}>Retry</button>}
+          action={
+            <button className="secondary-action" onClick={() => void projects.refetch()}>
+              Retry
+            </button>
+          }
         />
       )}
       {projects.data?.length === 0 && (
@@ -235,7 +239,9 @@ function ProjectView({ projectId }: { projectId: string }) {
         description={detail.error.message}
         action={
           <>
-            <button onClick={() => void detail.refetch()}>Retry</button>
+            <button className="secondary-action" onClick={() => void detail.refetch()}>
+              Retry
+            </button>
             <Link to="/projects" search={{}}>
               Back to projects
             </Link>
@@ -458,7 +464,9 @@ function ProjectView({ projectId }: { projectId: string }) {
           >
             Attach conversation
           </button>
-          <Link to="/chat">Start a conversation</Link>
+          <Link to="/chat" search={{ project: project.project_id }}>
+            Start a conversation
+          </Link>
           {project.threads.map((t) => (
             <div className="project-doc-row" key={t.thread_id}>
               <button onClick={() => action.mutate(() => openConversation(t.thread_id))}>

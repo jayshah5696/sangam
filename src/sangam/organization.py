@@ -14,6 +14,7 @@ from sangam.errors import ConflictError, NotFoundError, ValidationError, validat
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.mutations import MutationCoordinator
 from sangam.schemas import Folder, Tag
+from sangam.search import SearchIndex
 from sangam.workspace import WorkspaceFilesystem
 
 
@@ -534,7 +535,7 @@ class WorkspaceOrganizationService:
                 """,
                 (new_path, revision_id, now, row["document_id"]),
             )
-            self._replace_document_search_row(connection, row["document_id"])
+            SearchIndex.replace(connection, row["document_id"])
         self.idempotency.record_mutation(
             connection,
             actor_id=actor_id,
@@ -551,69 +552,6 @@ class WorkspaceOrganizationService:
         if updated is None:
             raise RuntimeError("Moved folder could not be reloaded")
         return self._folder_from_row(connection, updated)
-
-    @staticmethod
-    def _replace_document_search_row(connection: sqlite3.Connection, document_id: str) -> None:
-        """Rebuild one FTS row inside the folder move transaction."""
-        row = connection.execute(
-            """
-            SELECT d.title, d.path, d.category, d.deleted, r.content,
-                COALESCE((
-                    SELECT group_concat(t.name, ' ')
-                    FROM tags t JOIN document_tags dt ON dt.tag_id = t.tag_id
-                    WHERE dt.document_id = d.document_id
-                ), '') AS tags,
-                COALESCE((
-                    SELECT group_concat(DISTINCT rev.actor_id || ' ' || a.display_name)
-                    FROM revisions rev JOIN actors a ON a.actor_id = rev.actor_id
-                    WHERE rev.document_id = d.document_id
-                ), '') AS authors,
-                COALESCE((
-                    SELECT group_concat(rev.summary, ' ')
-                    FROM revisions rev
-                    WHERE rev.document_id = d.document_id
-                ), '') AS summaries,
-                COALESCE((
-                    SELECT group_concat('Page ' || page_number || ' ' || text, ' ')
-                    FROM pdf_pages WHERE document_id = d.document_id
-                ), '') AS pages,
-                COALESCE((
-                    SELECT group_concat(
-                        COALESCE(selected_text, '') || ' ' || COALESCE(note, '') || ' '
-                        || tags_json, ' '
-                    ) FROM annotations
-                    WHERE document_id = d.document_id AND deleted = 0
-                ), '') AS annotations
-            FROM documents d
-            JOIN revisions r ON r.revision_id = d.current_revision_id
-            WHERE d.document_id = ?
-            """,
-            (document_id,),
-        ).fetchone()
-        if row is None:
-            raise RuntimeError("Moved document could not be reloaded for search indexing")
-        connection.execute("DELETE FROM document_search WHERE document_id = ?", (document_id,))
-        if row["deleted"]:
-            return
-        connection.execute(
-            """
-            INSERT INTO document_search(
-                document_id, title, path, content, tags, category, authors, revision_summaries
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                document_id,
-                row["title"],
-                row["path"] or "",
-                " ".join(
-                    value for value in (row["content"], row["pages"], row["annotations"]) if value
-                ),
-                row["tags"],
-                row["category"] or "",
-                row["authors"],
-                row["summaries"],
-            ),
-        )
 
     @staticmethod
     def _folder_event_state(

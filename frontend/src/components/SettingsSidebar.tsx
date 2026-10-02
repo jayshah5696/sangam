@@ -86,6 +86,13 @@ const settingsSearchIndex: Array<{
     keywords: 'appearance typography editor text size',
   },
   {
+    id: 'typography-reset',
+    category: 'appearance',
+    label: 'Reset typography',
+    description: 'Return fonts, density, and editor size to their defaults',
+    keywords: 'appearance typography reset defaults font density editor size',
+  },
+  {
     id: 'workspace-sidebar',
     category: 'workbench',
     label: 'Workspace sidebar',

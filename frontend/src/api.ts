@@ -163,6 +163,24 @@ export const organizationOperationSchema = z.discriminatedUnion('kind', [
     expected_source_path: z.string(),
   }),
   z.object({
+    kind: z.literal('create_tag'),
+    name: z.string(),
+    color: z.string(),
+  }),
+  z.object({
+    kind: z.literal('restore_document'),
+    document_id: z.string(),
+    expected_revision_id: z.string(),
+    revision_id: z.string(),
+  }),
+  z.object({
+    kind: z.literal('duplicate_document'),
+    document_id: z.string(),
+    expected_revision_id: z.string(),
+    title: z.string().nullable(),
+    destination_path: z.string().nullable(),
+  }),
+  z.object({
     kind: z.literal('move_folder'),
     folder_id: z.string(),
     expected_source_path: z.string(),
@@ -203,7 +221,7 @@ export const organizationPlanResultSchema = z.object({
       index: z.number(),
       kind: z.string(),
       status: z.enum(['completed', 'skipped', 'conflicted', 'failed']),
-      resource_type: z.enum(['document', 'folder']),
+      resource_type: z.enum(['document', 'folder', 'tag']),
       resource_id: z.string().nullable(),
       path: z.string().nullable(),
       operation_key: z.string().nullable(),
@@ -345,6 +363,9 @@ export const operationEventSchema = z.object({
     current_metadata_version: z.number().optional(),
     expected_metadata_version: z.number().optional(),
     capability: z.string().optional(),
+    // Set when the change came through chat, for example "chat-effect:eff_123".
+    via: z.string().optional(),
+    approved_by: z.string().optional(),
   }),
   created_at: z.string(),
 })
@@ -468,6 +489,7 @@ export type ActivityFilters = {
   path?: string
   errorCode?: string
   operationId?: string
+  via?: 'chat'
   attention?: boolean
   since?: string
   until?: string
@@ -485,6 +507,7 @@ function activityParams(filters: ActivityFilters): URLSearchParams {
     ['path', filters.path],
     ['error_code', filters.errorCode],
     ['operation_id', filters.operationId],
+    ['via', filters.via],
     ['since', filters.since],
     ['until', filters.until],
   ] as const
@@ -838,7 +861,14 @@ export const chatEffectSchema = z.object({
   effect_id: z.string(),
   thread_id: z.string(),
   requested_by: z.string(),
-  capability_id: z.enum(['create_document', 'publish_document', 'apply_workspace_organization_plan']),
+  capability_id: z.enum([
+    'create_document',
+    'publish_document',
+    'apply_workspace_organization_plan',
+    'update_project',
+    'update_publication',
+    'annotate_pdf',
+  ]),
   capability_version: z.number(),
   argument_digest: z.string(),
   preview: z.record(z.string(), z.json()),
@@ -1010,16 +1040,62 @@ const errorSchema = z.object({
   }),
 })
 
+/**
+ * What a failed request means for the person who made it:
+ * - `conflict`: the resource changed since it was read; reload before retrying.
+ * - `denied`: the session or token lacks authority.
+ * - `invalid`: the request cannot succeed as sent (bad input or missing resource).
+ * - `server`: Sangam or a proxy in front of it failed; the same request may succeed later.
+ * - `offline`: no response arrived at all.
+ */
+export type ApiErrorKind = 'conflict' | 'denied' | 'invalid' | 'server' | 'offline'
+
+function errorKind(status: number): ApiErrorKind {
+  if (status === 0) return 'offline'
+  if (status === 409 || status === 412) return 'conflict'
+  if (status === 401 || status === 403) return 'denied'
+  if (status >= 500) return 'server'
+  return 'invalid'
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly details: Record<string, JsonScalar>
+  readonly kind: ApiErrorKind
 
   constructor(status: number, code: string, message: string, details: Record<string, JsonScalar>) {
     super(message)
     this.status = status
     this.code = code
     this.details = details
+    this.kind = errorKind(status)
+  }
+}
+
+/**
+ * Explain a failed write in terms of what the person should do next.
+ * `fallback` names what failed, for example "The tags could not be saved."
+ */
+export function writeFailureMessage(error: Error | null, fallback: string): string {
+  if (!error) return fallback
+  if (!(error instanceof ApiError)) return `${fallback} ${error.message}`
+  if (error.kind === 'conflict')
+    return `${fallback} It changed somewhere else; reload to see the latest version.`
+  if (error.kind === 'offline') return `${fallback} Sangam could not be reached.`
+  if (error.kind === 'denied' || error.kind === 'invalid') return `${fallback} ${error.message}`
+  return fallback
+}
+
+async function readJson(response: Response): Promise<JsonPayload | undefined> {
+  if (response.status === 204) return null
+  const text = await response.text()
+  if (!text) return null
+  try {
+    // SAFETY: JSON.parse returns a JSON value; callers validate its shape with Zod schemas.
+    return JSON.parse(text) as JsonPayload
+  } catch {
+    return undefined
   }
 }
 
@@ -1029,9 +1105,14 @@ async function request(path: string, init?: RequestInit): Promise<JsonPayload> {
   if (init?.method && init.method !== 'GET' && !headers.has('Idempotency-Key')) {
     headers.set('Idempotency-Key', crypto.randomUUID())
   }
-  const response = await fetch(`/api/v1${path}`, { ...init, headers })
-  // SAFETY: response.json() produces valid parsed JSON or null for empty 204
-  const payload = (response.status === 204 ? null : await response.json()) as JsonPayload
+  let response: Response
+  try {
+    response = await fetch(`/api/v1${path}`, { ...init, headers })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiError(0, 'offline', 'Sangam could not be reached.', {})
+  }
+  const payload = await readJson(response)
   if (!response.ok) {
     const parsed = errorSchema.safeParse(payload)
     if (parsed.success) {
@@ -1043,6 +1124,9 @@ async function request(path: string, init?: RequestInit): Promise<JsonPayload> {
       )
     }
     throw new ApiError(response.status, 'request_failed', `Request failed (${response.status})`, {})
+  }
+  if (payload === undefined) {
+    throw new ApiError(response.status, 'invalid_response', 'Sangam returned an unreadable response.', {})
   }
   return payload
 }

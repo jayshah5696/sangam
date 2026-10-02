@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Document } from './api'
+import { ApiError, type Document } from './api'
 import { deriveSaveState, DocumentSessionStore, type DraftStorage } from './documentSessions'
 
 function documentAt(revision: string, content: string): Document {
@@ -54,6 +54,74 @@ function memoryStorage() {
 }
 
 afterEach(() => vi.useRealTimers())
+
+describe('document session renames', () => {
+  it('renames on top of an in-flight autosave instead of its stale base revision', async () => {
+    vi.useFakeTimers()
+    const { storage } = memoryStorage()
+    const pending: Array<{ base: string; content: string; title?: string; resolve: (d: Document) => void }> =
+      []
+    const saveDocument = vi.fn(
+      (base: Document, content: string, title?: string) =>
+        new Promise<Document>((resolve) => {
+          pending.push({ base: base.current_revision_id, content, title, resolve })
+        }),
+    )
+    const store = new DocumentSessionStore({ storage, saveDocument, saveDelay: 20, persistDelay: 5 })
+    await store.initializeDocument(documentAt('rev-1', 'original'))
+    store.updateSession('doc-1', { content: 'edited' })
+    await vi.advanceTimersByTimeAsync(20)
+    expect(pending).toHaveLength(1)
+
+    const renamed = store.rename('doc-1', 'Renamed')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pending).toHaveLength(1)
+    const [autosave] = pending
+    if (!autosave) throw new Error('The autosave was not sent')
+    autosave.resolve(documentAt('rev-2', 'edited'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    const rename = pending[1]
+    if (!rename) throw new Error('The rename was not sent after the autosave settled')
+    expect(rename).toMatchObject({ base: 'rev-2', content: 'edited', title: 'Renamed' })
+    rename.resolve({ ...documentAt('rev-3', 'edited'), title: 'Renamed' })
+    await expect(renamed).resolves.toMatchObject({ current_revision_id: 'rev-3', title: 'Renamed' })
+    expect(store.getSession('doc-1')).toMatchObject({ baseRevisionId: 'rev-3', saveState: 'saved' })
+  })
+
+  it('reports a rename conflict to the caller and to the session', async () => {
+    const { storage } = memoryStorage()
+    const conflict = new ApiError(409, 'conflict', 'The document changed since it was read', {})
+    const store = new DocumentSessionStore({ storage, saveDocument: vi.fn().mockRejectedValue(conflict) })
+    await store.initializeDocument(documentAt('rev-1', 'original'))
+
+    await expect(store.rename('doc-1', 'Renamed')).rejects.toBe(conflict)
+    expect(store.getSession('doc-1').saveState).toBe('conflict')
+  })
+
+  it('tells the cache about every server head it adopts', async () => {
+    const { storage } = memoryStorage()
+    const onServerDocument = vi.fn()
+    const store = new DocumentSessionStore({
+      storage,
+      saveDocument: vi.fn(async (_base: Document, content: string, title?: string) => ({
+        ...documentAt('rev-2', content),
+        title: title ?? 'Test',
+      })),
+      onServerDocument,
+    })
+    await store.initializeDocument(documentAt('rev-1', 'original'))
+
+    await store.rename('doc-1', 'Renamed')
+    store.acceptServerDocument(documentAt('rev-3', 'applied'), true)
+
+    expect(onServerDocument.mock.calls.map(([document]) => document.current_revision_id)).toEqual([
+      'rev-2',
+      'rev-3',
+    ])
+    expect(store.getSession('doc-1')).toMatchObject({ content: 'applied', baseRevisionId: 'rev-3' })
+  })
+})
 
 describe('document session autosave', () => {
   it('derives save state from content, conflict, and connectivity without branching drift', () => {

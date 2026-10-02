@@ -12,6 +12,8 @@ export const activitySearchSchema = z.object({
   path: z.string().optional(),
   error_code: z.string().optional(),
   operation_id: z.string().optional(),
+  // Only changes made through chat.
+  via: z.enum(['chat']).optional().catch(undefined),
   attention: z.boolean().catch(false).default(false),
   since: z.string().optional(),
   until: z.string().optional(),

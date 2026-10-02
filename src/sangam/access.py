@@ -6,8 +6,8 @@ import sqlite3
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import suppress
-from pathlib import PurePosixPath
-from typing import BinaryIO, TypeVar
+from dataclasses import dataclass
+from typing import BinaryIO, Literal, Protocol, TypeVar
 
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
@@ -25,6 +25,7 @@ from sangam.errors import (
     AuthorizationError,
     ConflictError,
     IdempotencyError,
+    NotFoundError,
     SangamError,
     ValidationError,
 )
@@ -37,39 +38,123 @@ from sangam.schemas import (
     AnnotationEvent,
     AnnotationType,
     ApplyOrganizationPlan,
+    DeleteDocument,
     Document,
     DocumentAsset,
     DocumentSummary,
+    DuplicateDocument,
     Folder,
     IssuedPublication,
     OrganizationCreateFolder,
+    OrganizationCreateTag,
     OrganizationDocumentSnapshot,
+    OrganizationDuplicateDocument,
     OrganizationFolderSnapshot,
     OrganizationMaterializeDocument,
     OrganizationMoveDocument,
     OrganizationMoveFolder,
     OrganizationPlanItemResult,
     OrganizationPlanResult,
+    OrganizationRestoreDocument,
     OrganizationSnapshotPage,
     OrganizationTagSnapshot,
     OrganizationTrashDocument,
     OrganizationUpdateDocumentMetadata,
     OrganizationUpdateFolderMetadata,
+    PathMutation,
     PdfPage,
     PdfRect,
     PdfSearchResult,
     Publication,
     PublicationRevision,
+    RestoreDocument,
     Revision,
     RevisionDiff,
     RevisionPage,
     Tag,
+    UpdateDocument,
+    UpdateDocumentMetadata,
+    UpdateDocumentTrust,
 )
 from sangam.security import Principal, path_matches, sanitize_sensitive_text
-from sangam.service import DocumentService
+from sangam.service import DocumentService, default_duplicate_path
 from sangam.workspace import canonicalize_document_path
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class Action:
+    """What the activity ledger calls an operation, and whether it changes state."""
+
+    name: str
+    resource_type: str
+    mutation: bool
+
+
+def reads(name: str, resource_type: str) -> Action:
+    """Declare an operation that never changes workspace state."""
+    return Action(name, resource_type, mutation=False)
+
+
+def writes(name: str, resource_type: str) -> Action:
+    """Declare an operation whose acceptance must reach the activity ledger."""
+    return Action(name, resource_type, mutation=True)
+
+
+def _plan_resource_type(kind: str) -> Literal["document", "folder", "tag"]:
+    if kind == "create_tag":
+        return "tag"
+    return "document" if "document" in kind else "folder"
+
+
+def _plan_resource_id(result: Document | Folder | Tag) -> str:
+    if isinstance(result, Document):
+        return result.document_id
+    return result.tag_id if isinstance(result, Tag) else result.folder_id
+
+
+class Audited(Protocol):
+    """``WorkspaceAccessService.audited``, for services that run their own transactions."""
+
+    def __call__(
+        self,
+        principal: Principal,
+        action: Action,
+        operation: Callable[[], T],
+        *,
+        resource_id: str | None = None,
+        path: str | None = None,
+        details: dict[str, object] | None = None,
+        estimated_bytes: int | None = None,
+        subject: Callable[[T], str] | None = None,
+    ) -> T: ...
+
+
+DocumentWriteAction = Literal[
+    "update", "duplicate", "tag", "materialize", "move", "delete", "restore", "trust"
+]
+DocumentWriteBody = (
+    UpdateDocument
+    | DuplicateDocument
+    | UpdateDocumentMetadata
+    | PathMutation
+    | DeleteDocument
+    | RestoreDocument
+    | UpdateDocumentTrust
+)
+# The capability each document write needs on the document's current path.
+# Trust changes are administrator-only and have no workspace capability.
+_DOCUMENT_WRITE_CAPABILITY: dict[DocumentWriteAction, Capability | None] = {
+    "update": Capability.UPDATE,
+    "duplicate": Capability.READ,
+    "tag": Capability.TAG,
+    "materialize": Capability.MOVE,
+    "move": Capability.MOVE,
+    "delete": Capability.DELETE,
+    "restore": Capability.RESTORE,
+    "trust": None,
+}
 
 
 def detect_line_ending(text: str) -> str:
@@ -215,57 +300,57 @@ class WorkspaceAccessService:
             changed = Preconditions.parse(if_match, if_none_match).evaluate(etag, read=True)
             return document, content, etag, changed
 
-        return self._run(principal, "read", "document", operation, resource_id=document_id)
+        return self.audited(
+            principal, reads("read", "document"), operation, resource_id=document_id
+        )
 
-    def http_document_mutation(
+    def write_document(
         self,
         principal: Principal,
         *,
         document_id: str,
-        action: str,
-        payload: dict[str, object],
-        if_match: str | None,
-        if_none_match: str | None,
+        action: DocumentWriteAction,
+        body: DocumentWriteBody,
         idempotency_key: str,
-        operation: Callable[[str], Document],
+        if_match: str | None = None,
+        if_none_match: str | None = None,
     ) -> Document:
-        """Authorize fresh paths, then evaluate HTTP conditions in storage transactions."""
-        details = dict(payload)
+        """Apply one revision-aware document write for HTTP, chat, and organization plans.
+
+        Authorizes the document's fresh path (and the destination of a move,
+        materialization, or duplicate), requires an expected revision unless HTTP
+        conditions are given, and ledgers the change with its diff. A replayed
+        idempotency key returns the committed result without running storage again.
+        """
+        payload = body.model_dump()
+        details = {key: value for key, value in payload.items() if value is not None}
         admitted_bound = self.activity.estimate_payload_bytes(details) + 2048
         locked_document_ids = {document_id}
+
+        def store(expected_revision_id: str) -> Document:
+            return self._store_document_write(
+                principal,
+                document_id=document_id,
+                action=action,
+                body=body,
+                expected_revision_id=expected_revision_id,
+                idempotency_key=idempotency_key,
+            )
 
         def authorized() -> Document:
             with self.documents.mutations.documents(*locked_document_ids):
                 current = self.documents.get_document(document_id, include_deleted=True)
-                capability = {
-                    "update": Capability.UPDATE,
-                    "duplicate": Capability.READ,
-                    "move": Capability.MOVE,
-                    "materialize": Capability.MOVE,
-                    "delete": Capability.DELETE,
-                    "restore": Capability.RESTORE,
-                    "tag": Capability.TAG,
-                }.get(action)
-                if action == "trust":
+                capability = _DOCUMENT_WRITE_CAPABILITY[action]
+                if capability is None:
                     if not principal.administrator:
                         raise AuthorizationError("Document trust requires administrator access")
-                elif capability is not None:
-                    self.policy.require(principal, capability, current.path)
                 else:
-                    raise ValidationError("Unsupported conditional document operation")
+                    self.policy.require(principal, capability, current.path)
                 if action in {"move", "materialize", "duplicate"}:
                     details["source_path"] = current.path
                     destination = payload.get("path")
-                    if (
-                        action == "duplicate"
-                        and destination is None
-                        and current.content_type == "application/pdf"
-                        and current.path
-                    ):
-                        source = PurePosixPath(current.path)
-                        destination = (
-                            source.parent / f"{source.stem} copy{source.suffix}"
-                        ).as_posix()
+                    if action == "duplicate" and destination is None:
+                        destination = default_duplicate_path(current)
                     self._authorize_destination_path(
                         principal,
                         capability=Capability.CREATE if action == "duplicate" else Capability.MOVE,
@@ -280,17 +365,14 @@ class WorkspaceAccessService:
                         "expected_revision_id in body or HTTP condition is required"
                     )
 
-                if action in {"update", "duplicate", "restore"}:
-                    content = payload.get("content", current.content)
-                    if action == "restore":
-                        details["current_revision_id"] = payload.get("revision_id")
-                        with self.documents.database.connection() as connection:
-                            row = connection.execute(
-                                "SELECT content FROM revisions "
-                                "WHERE document_id = ? AND revision_id = ?",
-                                (document_id, payload.get("revision_id")),
-                            ).fetchone()
-                            content = row["content"] if row else ""
+                if isinstance(body, (UpdateDocument, DuplicateDocument, RestoreDocument)):
+                    if isinstance(body, RestoreDocument):
+                        details["current_revision_id"] = body.revision_id
+                        content = self.documents.revision_content(document_id, body.revision_id)
+                    elif isinstance(body, UpdateDocument):
+                        content = body.content
+                    else:
+                        content = current.content
                     diff, added, removed, meta = compute_document_diff(
                         "" if action == "duplicate" else current.content,
                         content,
@@ -306,7 +388,7 @@ class WorkspaceAccessService:
                     raise _RetryHttpMutation(needed_bound + 2048)
 
                 if not has_conditions and action != "duplicate":
-                    return operation(expected or current.current_revision_id)
+                    return store(expected or current.current_revision_id)
                 fingerprint = request_hash(
                     {
                         "document_id": document_id,
@@ -318,67 +400,47 @@ class WorkspaceAccessService:
                 )
                 # Replay precedes precondition evaluation, but never authorization.
                 with self.documents.database.connection() as connection:
-                    replay = connection.execute(
-                        "SELECT request_hash, document_id AS resource_id, revision_id, operation "
-                        "FROM idempotency_keys "
-                        "WHERE actor_id = ? AND idempotency_key = ? UNION ALL "
-                        "SELECT request_hash, resource_id, NULL AS revision_id, operation "
-                        "FROM mutation_idempotency_keys "
-                        "WHERE actor_id = ? AND idempotency_key = ?",
-                        (principal.actor_id, idempotency_key, principal.actor_id, idempotency_key),
-                    ).fetchone()
+                    replay = self.documents.idempotency.lookup(
+                        connection, actor_id=principal.actor_id, key=idempotency_key
+                    )
                     if replay:
                         legacy_duplicate = (
                             action == "duplicate"
                             and not has_conditions
-                            and replay["request_hash"] != fingerprint
-                            and replay["operation"] == "create"
-                            and replay["revision_id"] is not None
+                            and replay.request_hash != fingerprint
+                            and replay.operation == "create"
+                            and replay.revision_id is not None
+                            and isinstance(body, DuplicateDocument)
                             and self.documents.legacy_duplicate_replay_matches(
                                 connection,
                                 actor_id=principal.actor_id,
                                 source_document_id=document_id,
-                                expected_revision_id=expected,
-                                title=payload.get("title"),
-                                path=payload.get("path"),
-                                result_document_id=replay["resource_id"],
-                                result_revision_id=replay["revision_id"],
-                                stored_request_hash=replay["request_hash"],
+                                expected_revision_id=body.expected_revision_id,
+                                title=body.title,
+                                path=body.path,
+                                result_document_id=replay.resource_id,
+                                result_revision_id=replay.revision_id,
+                                stored_request_hash=replay.request_hash,
                             )
                         )
-                        if replay["request_hash"] != fingerprint and not legacy_duplicate:
+                        if replay.request_hash != fingerprint and not legacy_duplicate:
                             raise IdempotencyError(
                                 "Idempotency key was already used for a different mutation"
                             )
-                        if replay["resource_id"] not in locked_document_ids:
+                        if replay.resource_id not in locked_document_ids:
                             # Re-enter with all locks in one order. Never acquire
                             # an arbitrary replay target while holding its source.
-                            raise _RetryHttpMutation(admitted_bound, replay["resource_id"])
-                        with self.documents.mutations.document(replay["resource_id"]):
+                            raise _RetryHttpMutation(admitted_bound, replay.resource_id)
+                        with self.documents.mutations.document(replay.resource_id):
                             result = self.documents.get_document(
-                                replay["resource_id"], include_deleted=True
+                                replay.resource_id, include_deleted=True
                             )
                             if action == "duplicate":
                                 self.policy.require(principal, Capability.CREATE, result.path)
-                            self.documents._finish_if_current(
-                                result.document_id, result.current_revision_id
-                            )
-                            result = self.documents.get_document(
-                                result.document_id, include_deleted=True
-                            )
-                            with self.documents.database.transaction():
-                                self.documents.database.set_audit_target(
-                                    resource_id=result.document_id,
-                                    revision_id=result.current_revision_id,
-                                    path=result.path,
-                                )
-                                self.documents.search_index.sync(result)
-                            return result
+                            return self.documents.finish_replayed_write(result.document_id)
 
                 def validate(connection: sqlite3.Connection) -> None:
-                    snapshot = self.documents._get_document_in_connection(
-                        connection, document_id, include_deleted=True
-                    )
+                    snapshot = self.documents.get_document_in_connection(connection, document_id)
                     conditions.evaluate(document_etag(snapshot))
 
                 # Validate before any filesystem side effect, then again in the
@@ -386,14 +448,13 @@ class WorkspaceAccessService:
                 with self.documents.database.connection() as connection:
                     validate(connection)
                 with conditional_mutation(ConditionalMutation(fingerprint, validate)):
-                    return operation(expected or current.current_revision_id)
+                    return store(expected or current.current_revision_id)
 
         while True:
             try:
-                return self._run(
+                return self.audited(
                     principal,
-                    action,
-                    "document",
+                    writes(action, "document"),
                     authorized,
                     resource_id=document_id,
                     details=details,
@@ -403,6 +464,84 @@ class WorkspaceAccessService:
                 admitted_bound = max(admitted_bound, retry.estimated_bytes)
                 if retry.replay_document_id is not None:
                     locked_document_ids.add(retry.replay_document_id)
+
+    def _store_document_write(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        action: DocumentWriteAction,
+        body: DocumentWriteBody,
+        expected_revision_id: str,
+        idempotency_key: str,
+    ) -> Document:
+        """Map one authorized document write onto its storage operation."""
+        documents = self.documents
+        actor_id = principal.actor_id
+        if action == "update" and isinstance(body, UpdateDocument):
+            return documents.update_document(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                content=body.content,
+                title=body.title,
+                summary=body.summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+        if action == "duplicate" and isinstance(body, DuplicateDocument):
+            return documents.duplicate_document(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                title=body.title,
+                path=body.path,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+        if action == "tag" and isinstance(body, UpdateDocumentMetadata):
+            return documents.update_document_metadata(
+                document_id=document_id,
+                expected_metadata_version=body.expected_metadata_version,
+                category=body.category,
+                tag_ids=body.tag_ids,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+        if action in {"move", "materialize"} and isinstance(body, PathMutation):
+            write = documents.move_document if action == "move" else documents.materialize_document
+            return write(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                path=body.path,
+                summary=body.summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+        if action == "delete" and isinstance(body, DeleteDocument):
+            return documents.delete_document(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                summary=body.summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+        if action == "restore" and isinstance(body, RestoreDocument):
+            return documents.restore_document(
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                revision_id=body.revision_id,
+                summary=body.summary,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+        if action == "trust" and isinstance(body, UpdateDocumentTrust):
+            return documents.update_trust(
+                document_id=document_id,
+                expected_trust_version=body.expected_trust_version,
+                trust_level=body.trust_level,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+            )
+        raise ValidationError("Unsupported conditional document operation")
 
     def __init__(
         self,
@@ -475,14 +614,16 @@ class WorkspaceAccessService:
         details: dict[str, object] = {"title": title, "content_type": "application/pdf"}
         if supersedes_document_id:
             details["supersedes_document_id"] = supersedes_document_id
-        return self._run(principal, "import", "pdf_document", operation, path=path, details=details)
+        return self.audited(
+            principal, writes("import", "pdf_document"), operation, path=path, details=details
+        )
 
     def pdf_bytes(self, principal: Principal, document_id: str) -> tuple[Document, bytes]:
         current = self.documents.get_document(document_id)
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="read_pdf",
+            action=reads("read_pdf", "document"),
             current=current,
             operation=lambda: self.pdf_research.pdf_bytes(document_id),
         )
@@ -492,7 +633,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="read_pdf",
+            action=reads("read_pdf", "document"),
             current=current,
             operation=lambda: self.pdf_research.pdf_stream_info(document_id),
         )
@@ -514,7 +655,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="read_pdf_text",
+            action=reads("read_pdf_text", "document"),
             current=current,
             operation=lambda: self.pdf_research.pages(document_id),
         )
@@ -529,10 +670,9 @@ class WorkspaceAccessService:
             self.policy.require(principal, Capability.SEARCH, current.path)
             return self.pdf_research.search_pages(document_id, query)
 
-        return self._run(
+        return self.audited(
             principal,
-            "search_pdf",
-            "pdf_document",
+            reads("search_pdf", "pdf_document"),
             operation,
             resource_id=document_id,
             path=current.path,
@@ -551,7 +691,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="list_annotations",
+            action=reads("list_annotations", "document"),
             current=current,
             operation=lambda: self.pdf_research.list_annotations(
                 document_id,
@@ -587,7 +727,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
-            action="annotate",
+            action=writes("annotate", "document"),
             current=current,
             operation=lambda: self.pdf_research.create_annotation(
                 document_id=document_id,
@@ -630,7 +770,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
-            action="annotate",
+            action=writes("annotate", "document"),
             current=current,
             operation=lambda: self.pdf_research.update_annotation(
                 annotation_id=annotation_id,
@@ -663,7 +803,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
-            action="annotate",
+            action=writes("annotate", "document"),
             current=current,
             operation=lambda: self.pdf_research.delete_annotation(
                 annotation_id=annotation_id,
@@ -680,7 +820,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="annotation_history",
+            action=reads("annotation_history", "document"),
             current=current,
             operation=lambda: self.pdf_research.annotation_history(annotation_id),
         )
@@ -701,7 +841,7 @@ class WorkspaceAccessService:
                 offset=offset,
             )
 
-        return self._run(principal, "list", "document", operation)
+        return self.audited(principal, reads("list", "document"), operation)
 
     def search_documents(
         self,
@@ -731,7 +871,7 @@ class WorkspaceAccessService:
                 offset=offset,
             )
 
-        return self._run(principal, "search", "document", operation)
+        return self.audited(principal, reads("search", "document"), operation)
 
     def get_document_backlinks(
         self,
@@ -749,7 +889,9 @@ class WorkspaceAccessService:
                 limit=limit,
             )
 
-        return self._run(principal, "read", "document", operation, resource_id=document_id)
+        return self.audited(
+            principal, reads("read", "document"), operation, resource_id=document_id
+        )
 
     def get_document(
         self, principal: Principal, document_id: str, *, include_deleted: bool = False
@@ -758,7 +900,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="read",
+            action=reads("read", "document"),
             current=document,
             operation=lambda: document,
         )
@@ -800,7 +942,9 @@ class WorkspaceAccessService:
             "lines_removed": lines_removed,
             **meta,
         }
-        return self._run(principal, "create", "document", operation, path=path, details=details)
+        return self.audited(
+            principal, writes("create", "document"), operation, path=path, details=details
+        )
 
     def attach_document_asset(
         self,
@@ -816,7 +960,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
-            action="attach_asset",
+            action=writes("attach_asset", "document"),
             current=current,
             operation=lambda: self.assets.store(
                 document=current, filename=filename, media_type=media_type, content=content
@@ -831,7 +975,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="read",
+            action=reads("read", "document"),
             current=current,
             operation=lambda: self.assets.read(document=current, reference=reference),
         )
@@ -864,10 +1008,9 @@ class WorkspaceAccessService:
             "access_policy": access_policy,
             "revision_id": revision_id or current.current_revision_id,
         }
-        return self._run(
+        return self.audited(
             principal,
-            "publish",
-            "publication",
+            writes("publish", "publication"),
             operation,
             resource_id=document_id,
             path=current.path,
@@ -926,6 +1069,31 @@ class WorkspaceAccessService:
             )
         self.publications._normalize_slug(slug)
 
+    def document_publication(self, principal: Principal, document_id: str) -> Publication | None:
+        """The publication of a document, for someone who may publish it."""
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.PUBLISH,
+            action=reads("read_publication", "publication"),
+            current=current,
+            operation=lambda: self.publications.get_document_publication(document_id),
+        )
+
+    def preflight_update_publication(
+        self, principal: Principal, *, publication_id: str, expected_version: int
+    ) -> Publication:
+        """Refuse an unpublish or update request that could not run as written."""
+        publication = self.publications.get_publication(publication_id)
+        current = self.documents.get_document(publication.document_id)
+        self.policy.require(principal, Capability.PUBLISH, current.path)
+        if publication.version != expected_version:
+            raise ConflictError(
+                "The publication changed since it was read",
+                details={"current_version": publication.version},
+            )
+        return publication
+
     def update_publication(
         self,
         principal: Principal,
@@ -958,10 +1126,9 @@ class WorkspaceAccessService:
             "access_policy": access_policy,
             "revision_id": revision_id or publication.revision_id,
         }
-        return self._run(
+        return self.audited(
             principal,
-            "publish",
-            "publication",
+            writes("publish", "publication"),
             operation,
             resource_id=publication_id,
             path=current.path,
@@ -989,10 +1156,9 @@ class WorkspaceAccessService:
             )
 
         details: dict[str, object] = {"expected_metadata_version": expected_version}
-        return self._run(
+        return self.audited(
             principal,
-            "unpublish",
-            "publication",
+            writes("unpublish", "publication"),
             operation,
             resource_id=publication_id,
             path=current.path,
@@ -1020,10 +1186,9 @@ class WorkspaceAccessService:
             )
 
         details: dict[str, object] = {"revision_id": revision_id}
-        return self._run(
+        return self.audited(
             principal,
-            "expose_revision",
-            "publication",
+            writes("expose_revision", "publication"),
             operation,
             resource_id=publication_id,
             path=current.path,
@@ -1048,273 +1213,12 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(
+        return self.audited(
             principal,
-            "rotate_token",
-            "publication",
+            writes("rotate_token", "publication"),
             operation,
             resource_id=publication_id,
             path=current.path,
-        )
-
-    def update_document(
-        self,
-        principal: Principal,
-        *,
-        document_id: str,
-        expected_revision_id: str,
-        content: str,
-        title: str | None,
-        summary: str | None,
-        idempotency_key: str,
-    ) -> Document:
-        current = self.documents.get_document(document_id)
-        diff_text, lines_added, lines_removed, meta = compute_document_diff(
-            current.content,
-            content,
-            fromfile=current.current_revision_id or "before",
-            tofile="current",
-        )
-        details: dict[str, object] = {
-            "expected_revision_id": expected_revision_id,
-            "diff": diff_text,
-            "lines_added": lines_added,
-            "lines_removed": lines_removed,
-            **meta,
-        }
-        if title is not None:
-            details["title"] = title
-        if summary is not None:
-            details["summary"] = summary
-        return self._document_operation(
-            principal,
-            capability=Capability.UPDATE,
-            action="update",
-            current=current,
-            operation=lambda: self.documents.update_document(
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                content=content,
-                title=title,
-                summary=summary,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            ),
-            details=details,
-        )
-
-    def duplicate_document(
-        self,
-        principal: Principal,
-        *,
-        document_id: str,
-        expected_revision_id: str,
-        title: str | None,
-        path: str | None,
-        idempotency_key: str,
-    ) -> Document:
-        current = self.documents.get_document(document_id)
-
-        def operation() -> Document:
-            self.policy.require(principal, Capability.READ, current.path)
-            destination_path = path
-            if (
-                destination_path is None
-                and current.content_type == "application/pdf"
-                and current.path
-            ):
-                source_parts = PurePosixPath(current.path)
-                candidate_name = f"{source_parts.stem} copy{source_parts.suffix}"
-                destination_path = (
-                    (source_parts.parent / candidate_name).as_posix()
-                    if source_parts.parent != PurePosixPath(".")
-                    else candidate_name
-                )
-            authorized_path = self._authorize_destination_path(
-                principal, capability=Capability.CREATE, path=destination_path
-            )
-            return self.documents.duplicate_document(
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                title=title,
-                path=authorized_path,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            )
-
-        diff_text, lines_added, lines_removed, meta = compute_document_diff(
-            "",
-            current.content,
-            fromfile="empty",
-            tofile="current",
-        )
-        details: dict[str, object] = {
-            "expected_revision_id": expected_revision_id,
-            "source_path": current.path,
-            "diff": diff_text,
-            "lines_added": lines_added,
-            "lines_removed": lines_removed,
-            **meta,
-        }
-        if path:
-            details["destination_path"] = path
-        if title is not None:
-            details["title"] = title
-        return self._run(
-            principal,
-            "duplicate",
-            "document",
-            operation,
-            resource_id=document_id,
-            path=path,
-            details=details,
-        )
-
-    def update_document_metadata(
-        self,
-        principal: Principal,
-        *,
-        document_id: str,
-        expected_metadata_version: int,
-        category: str | None,
-        tag_ids: list[str],
-        idempotency_key: str,
-    ) -> Document:
-        current = self.documents.get_document(document_id)
-        details: dict[str, object] = {
-            "expected_metadata_version": expected_metadata_version,
-            "tag_ids": tag_ids,
-        }
-        if category is not None:
-            details["category"] = category
-        return self._document_operation(
-            principal,
-            capability=Capability.TAG,
-            action="tag",
-            current=current,
-            operation=lambda: self.documents.update_document_metadata(
-                document_id=document_id,
-                expected_metadata_version=expected_metadata_version,
-                category=category,
-                tag_ids=tag_ids,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            ),
-            details=details,
-        )
-
-    def materialize_document(
-        self,
-        principal: Principal,
-        *,
-        document_id: str,
-        expected_revision_id: str,
-        path: str,
-        summary: str | None,
-        idempotency_key: str,
-    ) -> Document:
-        current = self.documents.get_document(document_id)
-
-        def operation() -> Document:
-            self.policy.require(principal, Capability.MOVE, current.path)
-            authorized_path = self._authorize_destination_path(
-                principal, capability=Capability.MOVE, path=path
-            )
-            return self.documents.materialize_document(
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                path=authorized_path,
-                summary=summary,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            )
-
-        details: dict[str, object] = {
-            "expected_revision_id": expected_revision_id,
-            "source_path": current.path,
-            "destination_path": path,
-        }
-        if summary:
-            details["summary"] = summary
-        return self._run(
-            principal,
-            "materialize",
-            "document",
-            operation,
-            resource_id=document_id,
-            path=path,
-            details=details,
-        )
-
-    def move_document(
-        self,
-        principal: Principal,
-        *,
-        document_id: str,
-        expected_revision_id: str,
-        path: str,
-        summary: str | None,
-        idempotency_key: str,
-    ) -> Document:
-        current = self.documents.get_document(document_id)
-
-        def operation() -> Document:
-            self.policy.require(principal, Capability.MOVE, current.path)
-            authorized_path = self._authorize_destination_path(
-                principal, capability=Capability.MOVE, path=path
-            )
-            return self.documents.move_document(
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                path=authorized_path,
-                summary=summary,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            )
-
-        details: dict[str, object] = {
-            "expected_revision_id": expected_revision_id,
-            "source_path": current.path,
-            "destination_path": path,
-        }
-        if summary:
-            details["summary"] = summary
-        return self._run(
-            principal,
-            "move",
-            "document",
-            operation,
-            resource_id=document_id,
-            path=path,
-            details=details,
-        )
-
-    def delete_document(
-        self,
-        principal: Principal,
-        *,
-        document_id: str,
-        expected_revision_id: str,
-        summary: str | None,
-        idempotency_key: str,
-    ) -> Document:
-        current = self.documents.get_document(document_id)
-        details: dict[str, object] = {"expected_revision_id": expected_revision_id}
-        if summary:
-            details["summary"] = summary
-        return self._document_operation(
-            principal,
-            capability=Capability.DELETE,
-            action="delete",
-            current=current,
-            operation=lambda: self.documents.delete_document(
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                summary=summary,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            ),
-            details=details,
         )
 
     def history(self, principal: Principal, document_id: str) -> list[Revision]:
@@ -1323,7 +1227,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="history",
+            action=reads("history", "document"),
             current=current,
             operation=lambda: self.documents.history(document_id),
         )
@@ -1340,7 +1244,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="revision_page",
+            action=reads("revision_page", "document"),
             current=current,
             operation=lambda: self.documents.revision_page(document_id, limit=limit, cursor=cursor),
         )
@@ -1350,7 +1254,7 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="read_revision",
+            action=reads("read_revision", "document"),
             current=current,
             operation=lambda: self.documents.get_revision(document_id, revision_id),
         )
@@ -1368,64 +1272,13 @@ class WorkspaceAccessService:
         return self._document_operation(
             principal,
             capability=Capability.READ,
-            action="diff",
+            action=reads("diff", "document"),
             current=current,
             operation=lambda: self.documents.revision_diff(
                 document_id=document_id,
                 from_revision_id=from_revision_id,
                 to_revision_id=to_revision_id,
             ),
-        )
-
-    def restore_document(
-        self,
-        principal: Principal,
-        *,
-        document_id: str,
-        expected_revision_id: str,
-        revision_id: str,
-        summary: str | None,
-        idempotency_key: str,
-    ) -> Document:
-        current = self.documents.get_document(document_id, include_deleted=True)
-        target_content = ""
-        with self.documents.database.connection() as conn:
-            row = conn.execute(
-                "SELECT content FROM revisions WHERE revision_id = ? AND document_id = ?",
-                (revision_id, document_id),
-            ).fetchone()
-            if row:
-                target_content = row["content"]
-        diff_text, lines_added, lines_removed, meta = compute_document_diff(
-            current.content,
-            target_content,
-            fromfile=current.current_revision_id or "before",
-            tofile=revision_id,
-        )
-        details: dict[str, object] = {
-            "expected_revision_id": expected_revision_id,
-            "current_revision_id": revision_id,
-            "diff": diff_text,
-            "lines_added": lines_added,
-            "lines_removed": lines_removed,
-            **meta,
-        }
-        if summary:
-            details["summary"] = summary
-        return self._document_operation(
-            principal,
-            capability=Capability.RESTORE,
-            action="restore",
-            current=current,
-            operation=lambda: self.documents.restore_document(
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                revision_id=revision_id,
-                summary=summary,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            ),
-            details=details,
         )
 
     def inspect_workspace_organization(
@@ -1437,10 +1290,9 @@ class WorkspaceAccessService:
         offset: int,
         limit: int,
     ) -> OrganizationSnapshotPage:
-        return self._run(
+        return self.audited(
             principal,
-            "list_organization",
-            "workspace",
+            reads("list_organization", "workspace"),
             lambda: self._inspect_workspace_organization(
                 principal, item_type=item_type, path_prefix=path_prefix, offset=offset, limit=limit
             ),
@@ -1610,7 +1462,9 @@ class WorkspaceAccessService:
         ):
             child_key = f"{idempotency_key}:{index}"
             try:
-                if not self._organization_operation_recorded(principal.actor_id, child_key):
+                if not self.documents.idempotency.committed(
+                    actor_id=principal.actor_id, key=child_key
+                ):
                     self._preflight_organization_plan(
                         principal,
                         ApplyOrganizationPlan(operations=[operation]),
@@ -1625,7 +1479,7 @@ class WorkspaceAccessService:
                         index=index,
                         kind=operation.kind,
                         status=status,
-                        resource_type=("document" if "document" in operation.kind else "folder"),
+                        resource_type=_plan_resource_type(operation.kind),
                         resource_id=getattr(
                             operation, "document_id", getattr(operation, "folder_id", None)
                         ),
@@ -1641,7 +1495,7 @@ class WorkspaceAccessService:
                             index=skipped_index,
                             kind=skipped.kind,
                             status="skipped",
-                            resource_type=("document" if "document" in skipped.kind else "folder"),
+                            resource_type=_plan_resource_type(skipped.kind),
                             resource_id=getattr(
                                 skipped,
                                 "document_id",
@@ -1657,11 +1511,9 @@ class WorkspaceAccessService:
                     index=index,
                     kind=operation.kind,
                     status="completed",
-                    resource_type="document" if "document" in operation.kind else "folder",
-                    resource_id=result.document_id
-                    if isinstance(result, Document)
-                    else result.folder_id,
-                    path=result.path,
+                    resource_type=_plan_resource_type(operation.kind),
+                    resource_id=_plan_resource_id(result),
+                    path=None if isinstance(result, Tag) else result.path,
                     operation_key=child_key,
                     message="Completed",
                 )
@@ -1728,32 +1580,28 @@ class WorkspaceAccessService:
             )
         return response
 
-    def _organization_operation_recorded(self, actor_id: str, operation_key: str) -> bool:
-        """Detect a child commit before replaying after an interrupted response."""
+    def organization_plan_started(self, *, actor_id: str, idempotency_key: str) -> bool:
+        """Whether a plan under this key was admitted, so a retry resumes it."""
         with self.organization.database.connection() as connection:
-            document = connection.execute(
-                "SELECT 1 FROM idempotency_keys WHERE actor_id = ? AND idempotency_key = ?",
-                (actor_id, operation_key),
-            ).fetchone()
-            organization = connection.execute(
-                """
-                SELECT 1 FROM mutation_idempotency_keys
-                WHERE actor_id = ? AND idempotency_key = ? AND completed_at IS NOT NULL
-                """,
-                (actor_id, operation_key),
-            ).fetchone()
-        return document is not None or organization is not None
+            return (
+                connection.execute(
+                    "SELECT 1 FROM organization_plan_executions "
+                    "WHERE actor_id = ? AND idempotency_key = ?",
+                    (actor_id, idempotency_key),
+                ).fetchone()
+                is not None
+            )
 
     def list_tags(self, principal: Principal) -> list[Tag]:
         def operation() -> list[Tag]:
             self._require_global_read(principal)
             return self.organization.list_tags()
 
-        return self._run(principal, "list_tags", "tag", operation)
+        return self.audited(principal, reads("list_tags", "tag"), operation)
 
     def list_folders(self, principal: Principal) -> list[Folder]:
-        return self._run(
-            principal, "list_folders", "folder", lambda: self._visible_folders(principal)
+        return self.audited(
+            principal, reads("list_folders", "folder"), lambda: self._visible_folders(principal)
         )
 
     def _visible_folders(self, principal: Principal) -> list[Folder]:
@@ -1806,7 +1654,7 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "create", "tag", operation)
+        return self.audited(principal, writes("create", "tag"), operation)
 
     def create_folder(
         self,
@@ -1831,7 +1679,9 @@ class WorkspaceAccessService:
         details: dict[str, object] = {"tag_ids": tag_ids}
         if category:
             details["category"] = category
-        return self._run(principal, "create", "folder", operation, path=path, details=details)
+        return self.audited(
+            principal, writes("create", "folder"), operation, path=path, details=details
+        )
 
     def update_folder_metadata(
         self,
@@ -1866,8 +1716,8 @@ class WorkspaceAccessService:
         }
         if category:
             details["category"] = category
-        return self._run(
-            principal, "tag", "folder", operation, resource_id=folder_id, details=details
+        return self.audited(
+            principal, writes("tag", "folder"), operation, resource_id=folder_id, details=details
         )
 
     def move_folder(
@@ -1895,7 +1745,9 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        return self._run(principal, "move", "folder", operation, resource_id=folder_id, path=path)
+        return self.audited(
+            principal, writes("move", "folder"), operation, resource_id=folder_id, path=path
+        )
 
     def _normalize_organization_plan(self, plan: ApplyOrganizationPlan) -> ApplyOrganizationPlan:
         operations: list[dict[str, object]] = []
@@ -1921,6 +1773,8 @@ class WorkspaceAccessService:
                 data["expected_source_path"] = canonicalize_document_path(
                     operation.expected_source_path
                 )
+            if isinstance(operation, OrganizationDuplicateDocument) and operation.destination_path:
+                data["destination_path"] = canonicalize_document_path(operation.destination_path)
             if "tag_ids" in data:
                 data["tag_ids"] = sorted(set(data["tag_ids"]))
             if "expected_tag_ids" in data:
@@ -2053,6 +1907,78 @@ class WorkspaceAccessService:
                     )
                 self.policy.require(principal, Capability.DELETE, document.path)
                 destination = ""
+            elif isinstance(operation, OrganizationCreateTag):
+                self.policy.require_administrator(principal)
+                clash = next(
+                    (
+                        tag
+                        for tag in self.organization.list_tags()
+                        if tag.name.casefold() == " ".join(operation.name.split()).casefold()
+                    ),
+                    None,
+                )
+                if clash is not None:
+                    raise ConflictError(
+                        f"Tag already exists: {clash.name}",
+                        details={"tag_id": clash.tag_id},
+                    )
+                destination = ""
+            elif isinstance(operation, OrganizationRestoreDocument):
+                try:
+                    document = self.documents.get_document(
+                        operation.document_id, include_deleted=True
+                    )
+                except NotFoundError as error:
+                    raise ConflictError(
+                        f"Document no longer exists: {operation.document_id}"
+                    ) from error
+                if document.current_revision_id != operation.expected_revision_id:
+                    raise ConflictError(
+                        "Document revision changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_revision_id": document.current_revision_id,
+                        },
+                    )
+                self.policy.require(principal, Capability.RESTORE, document.path)
+                if document.content_type == "application/pdf":
+                    if not document.deleted:
+                        raise ValidationError(
+                            "Immutable PDF source bytes cannot be restored as text revisions"
+                        )
+                else:
+                    self.documents.revision_content(operation.document_id, operation.revision_id)
+                destination = ""
+                if document.deleted and document.path:
+                    owner = existing_document_paths.get(document.path)
+                    if owner is not None and owner != operation.document_id:
+                        raise ConflictError(f"Destination document already exists: {document.path}")
+                    if document.path in existing_folder_paths:
+                        raise ConflictError(f"Destination folder already exists: {document.path}")
+                    destination = document.path
+            elif isinstance(operation, OrganizationDuplicateDocument):
+                document = documents.get(operation.document_id)
+                if document is None or document.deleted:
+                    raise ConflictError(f"Document no longer exists: {operation.document_id}")
+                if document.current_revision_id != operation.expected_revision_id:
+                    raise ConflictError(
+                        "Document revision changed",
+                        details={
+                            "document_id": operation.document_id,
+                            "current_revision_id": document.current_revision_id,
+                        },
+                    )
+                self.policy.require(principal, Capability.READ, document.path)
+                target = operation.destination_path or default_duplicate_path(document)
+                destination = ""
+                if target:
+                    destination = self.documents.normalize_document_path(target)
+                    self.documents._validate_path_type(destination, document.content_type)
+                    if destination in existing_document_paths:
+                        raise ConflictError(f"Destination document already exists: {destination}")
+                    if destination in existing_folder_paths:
+                        raise ConflictError(f"Destination folder already exists: {destination}")
+                self.policy.require(principal, Capability.CREATE, destination or None)
             elif isinstance(operation, OrganizationMoveFolder):
                 folder = folders.get(operation.folder_id)
                 if folder is None:
@@ -2152,11 +2078,14 @@ class WorkspaceAccessService:
         | OrganizationMoveDocument
         | OrganizationMaterializeDocument
         | OrganizationTrashDocument
+        | OrganizationRestoreDocument
+        | OrganizationDuplicateDocument
+        | OrganizationCreateTag
         | OrganizationMoveFolder
         | OrganizationUpdateDocumentMetadata
         | OrganizationUpdateFolderMetadata,
         idempotency_key: str,
-    ) -> Document | Folder:
+    ) -> Document | Folder | Tag:
         if isinstance(operation, OrganizationCreateFolder):
             return self.create_folder(
                 principal,
@@ -2166,29 +2095,69 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
         if isinstance(operation, OrganizationMoveDocument):
-            return self.move_document(
+            return self.write_document(
                 principal,
                 document_id=operation.document_id,
-                expected_revision_id=operation.expected_revision_id,
-                path=operation.destination_path,
-                summary="Applied workspace organization plan",
+                action="move",
+                body=PathMutation(
+                    expected_revision_id=operation.expected_revision_id,
+                    path=operation.destination_path,
+                    summary="Applied workspace organization plan",
+                ),
                 idempotency_key=idempotency_key,
             )
         if isinstance(operation, OrganizationMaterializeDocument):
-            return self.materialize_document(
+            return self.write_document(
                 principal,
                 document_id=operation.document_id,
-                expected_revision_id=operation.expected_revision_id,
-                path=operation.destination_path,
-                summary="Saved draft through workspace organization plan",
+                action="materialize",
+                body=PathMutation(
+                    expected_revision_id=operation.expected_revision_id,
+                    path=operation.destination_path,
+                    summary="Saved draft through workspace organization plan",
+                ),
                 idempotency_key=idempotency_key,
             )
         if isinstance(operation, OrganizationTrashDocument):
-            return self.delete_document(
+            return self.write_document(
                 principal,
                 document_id=operation.document_id,
-                expected_revision_id=operation.expected_revision_id,
-                summary="Moved to trash by workspace organization plan",
+                action="delete",
+                body=DeleteDocument(
+                    expected_revision_id=operation.expected_revision_id,
+                    summary="Moved to trash by workspace organization plan",
+                ),
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationCreateTag):
+            return self.create_tag(
+                principal,
+                name=operation.name,
+                color=operation.color,
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationRestoreDocument):
+            return self.write_document(
+                principal,
+                document_id=operation.document_id,
+                action="restore",
+                body=RestoreDocument(
+                    expected_revision_id=operation.expected_revision_id,
+                    revision_id=operation.revision_id,
+                    summary="Restored by workspace organization plan",
+                ),
+                idempotency_key=idempotency_key,
+            )
+        if isinstance(operation, OrganizationDuplicateDocument):
+            return self.write_document(
+                principal,
+                document_id=operation.document_id,
+                action="duplicate",
+                body=DuplicateDocument(
+                    expected_revision_id=operation.expected_revision_id,
+                    title=operation.title,
+                    path=operation.destination_path,
+                ),
                 idempotency_key=idempotency_key,
             )
         if isinstance(operation, OrganizationMoveFolder):
@@ -2199,12 +2168,15 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
         if isinstance(operation, OrganizationUpdateDocumentMetadata):
-            return self.update_document_metadata(
+            return self.write_document(
                 principal,
                 document_id=operation.document_id,
-                expected_metadata_version=operation.expected_metadata_version,
-                category=operation.category,
-                tag_ids=operation.tag_ids,
+                action="tag",
+                body=UpdateDocumentMetadata(
+                    expected_metadata_version=operation.expected_metadata_version,
+                    category=operation.category,
+                    tag_ids=operation.tag_ids,
+                ),
                 idempotency_key=idempotency_key,
             )
         return self.update_folder_metadata(
@@ -2221,7 +2193,7 @@ class WorkspaceAccessService:
         principal: Principal,
         *,
         capability: Capability,
-        action: str,
+        action: Action,
         current: Document,
         operation: Callable[[], T],
         details: dict[str, object] | None = None,
@@ -2231,10 +2203,9 @@ class WorkspaceAccessService:
             self.policy.require(principal, capability, current.path)
             return operation()
 
-        return self._run(
+        return self.audited(
             principal,
             action,
-            "document",
             authorized,
             resource_id=current.document_id,
             path=current.path,
@@ -2256,28 +2227,36 @@ class WorkspaceAccessService:
         self.policy.require(principal, capability, normalized_path)
         return normalized_path
 
-    def _run(
+    def audited(
         self,
         principal: Principal,
-        action: str,
-        resource_type: str,
+        action: Action,
         operation: Callable[[], T],
         *,
         resource_id: str | None = None,
         path: str | None = None,
         details: dict[str, object] | None = None,
         estimated_bytes: int | None = None,
+        subject: Callable[[T], str] | None = None,
     ) -> T:
-        is_mutation = action not in {
-            "list",
-            "search",
-            "read",
-            "history",
-            "diff",
-            "list_tags",
-            "list_folders",
-            "list_organization",
-        }
+        """Run one operation under the activity-ledger contract.
+
+        A mutation writes exactly one ledger row: inside the first storage
+        transaction it commits (naming whatever that transaction passed to
+        ``Database.set_audit_target``), or after the operation returns when it
+        committed nothing. Denials, conflicts, and failures are recorded too.
+        Reads are recorded only for non-human principals. ``subject`` names the
+        resource of a returned value the ledger cannot otherwise identify.
+        """
+        name = action.name
+        resource_type = action.resource_type
+        is_mutation = action.mutation
+        if principal.via or principal.approved_by:
+            details = {
+                **(details or {}),
+                **({"via": principal.via} if principal.via else {}),
+                **({"approved_by": principal.approved_by} if principal.approved_by else {}),
+            }
         if estimated_bytes is None:
             estimated_bytes = 2048
             if details:
@@ -2313,7 +2292,7 @@ class WorkspaceAccessService:
                     reservation.record_with_connection(
                         connection,
                         principal=principal,
-                        action=action,
+                        action=name,
                         resource_type=resource_type,
                         resource_id=hook_resource_id,
                         path=hook_path,
@@ -2352,7 +2331,7 @@ class WorkspaceAccessService:
                     try:
                         self.activity.record(
                             principal=principal,
-                            action=action,
+                            action=name,
                             resource_type=resource_type,
                             resource_id=recorded_resource_id,
                             path=recorded_path,
@@ -2363,11 +2342,7 @@ class WorkspaceAccessService:
                         )
                     except Exception as ae:
                         audit_err = ae
-                elif (
-                    audit_inserted
-                    or getattr(reservation, "_used", False)
-                    or getattr(reservation, "_released", False)
-                ):
+                elif audit_inserted or reservation.spent:
                     outcome = (
                         "denied"
                         if isinstance(error, AuthorizationError)
@@ -2383,7 +2358,7 @@ class WorkspaceAccessService:
                     try:
                         self.activity.record(
                             principal=principal,
-                            action=action,
+                            action=name,
                             resource_type=resource_type,
                             resource_id=recorded_resource_id or resource_id,
                             path=recorded_path or path,
@@ -2407,7 +2382,7 @@ class WorkspaceAccessService:
                     try:
                         reservation.record(
                             principal=principal,
-                            action=action,
+                            action=name,
                             resource_type=resource_type,
                             resource_id=resource_id,
                             path=path,
@@ -2438,9 +2413,11 @@ class WorkspaceAccessService:
                     result_path = result.path if result.path is not None else path
                 elif isinstance(result, (Publication, IssuedPublication)):
                     result_resource_id = result.publication_id
+                elif subject is not None:
+                    result_resource_id = subject(result)
                 reservation.record(
                     principal=principal,
-                    action=action,
+                    action=name,
                     resource_type=resource_type,
                     resource_id=result_resource_id,
                     path=result_path,

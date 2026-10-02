@@ -12,17 +12,26 @@ from chatkit.agents import ClientToolCall
 from chatkit.types import CustomTask
 
 from sangam.access import WorkspaceAccessService
+from sangam.capabilities import Capability
 from sangam.chat_capabilities import (
+    AnnotatePdfInput,
+    AnnotationChange,
     ApplyWorkspaceOrganizationPlanInput,
     ChatCapability,
     ChatCapabilityRegistry,
     CreateDocumentInput,
+    InspectProjectsInput,
     InspectWorkspaceOrganizationInput,
+    ProjectChange,
     ProposalCitationInput,
     ProposeUpdateInput,
+    PublicationChange,
     PublishDocumentInput,
     ReadDocumentInput,
     ReadPdfPageInput,
+    ReadRevisionHistoryInput,
+    UpdateProjectInput,
+    UpdatePublicationInput,
     WorkspaceSearchInput,
 )
 from sangam.chat_context import ToolContext
@@ -31,8 +40,9 @@ from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_proposals import ChatProposalService
 from sangam.chat_runtime import BoundedChatAdmission
 from sangam.errors import NotFoundError, SangamError, ValidationError
-from sangam.schemas import OrganizationOperation
-from sangam.security import IdentityService
+from sangam.projects import ProjectService
+from sangam.schemas import OrganizationOperation, ProjectSummary
+from sangam.security import IdentityService, Principal
 
 
 class ChatToolset:
@@ -47,6 +57,8 @@ class ChatToolset:
         effects: ChatEffectService,
         evidence: ChatEvidenceRepository,
         runtime: BoundedChatAdmission,
+        identity: IdentityService,
+        projects: ProjectService,
         max_result_bytes: int,
     ) -> None:
         self.workspace = workspace
@@ -55,7 +67,8 @@ class ChatToolset:
         self.effects = effects
         self.evidence = evidence
         self.runtime = runtime
-        self.identity = IdentityService(evidence.database)
+        self.identity = identity
+        self.projects = projects
         self.max_result_bytes = max_result_bytes
         self.policies = registry.by_id
 
@@ -68,8 +81,23 @@ class ChatToolset:
             function_tool(
                 self.search_workspace,
                 description_override=(
-                    "Search authorized Sangam documents. Paginated: pass offset to "
-                    "page past the first limit results."
+                    "Search authorized Sangam documents, optionally filtered by tag_id, "
+                    "category, or content_type. Paginated: pass offset to page past the "
+                    "first limit results."
+                ),
+            ),
+            function_tool(
+                self.read_revision_history,
+                description_override=(
+                    "List a document's revisions (newest first), or pass from_revision_id "
+                    "to get a unified diff against to_revision_id (default: current)."
+                ),
+            ),
+            function_tool(
+                self.inspect_projects,
+                description_override=(
+                    "List projects, or pass project_id to open one with its member "
+                    "documents, roles, and pinned pages."
                 ),
             ),
             function_tool(
@@ -123,6 +151,34 @@ class ChatToolset:
                 ),
             ),
             function_tool(
+                self.update_project,
+                description_override=(
+                    "Request one exact project change: create or edit a project, its member "
+                    "documents, conversations, or annotations. Inspect projects first and use "
+                    "stable IDs. Sangam "
+                    "pauses it for exact review in Review mode and runs it without a prompt "
+                    "in YOLO mode."
+                ),
+            ),
+            function_tool(
+                self.annotate_pdf,
+                description_override=(
+                    "When the user explicitly asks, add a note, comment, bookmark, or citation "
+                    "marker to a PDF page, or edit or delete an annotation using the id and "
+                    "version from read_pdf_page. Sangam pauses it for exact review in Review "
+                    "mode and runs it without a prompt in YOLO mode."
+                ),
+            ),
+            function_tool(
+                self.update_publication,
+                description_override=(
+                    "When the user explicitly asks, withdraw a publication or change its slug, "
+                    "access policy, or published revision. Use the publication id and version "
+                    "from read_document. Sangam pauses it for exact review in Review mode and "
+                    "runs it without a prompt in YOLO mode."
+                ),
+            ),
+            function_tool(
                 self.publish_document,
                 description_override=(
                     "When the user explicitly requests publication, call this tool immediately. "
@@ -140,12 +196,9 @@ class ChatToolset:
     async def get_editor_selection(self, ctx: ToolContext) -> str:
         request_context = ctx.context.request_context
 
-        def operation() -> dict[str, Any]:
+        def operation(principal: Principal) -> dict[str, Any]:
             if request_context.run_id and request_context.document_id:
-                document = self.workspace.get_document(
-                    self.identity.reauthorize(request_context.principal),
-                    request_context.document_id,
-                )
+                document = self.workspace.get_document(principal, request_context.document_id)
                 self.evidence.record_run_source(
                     request_context.run_id,
                     document_id=document.document_id,
@@ -171,20 +224,37 @@ class ChatToolset:
         )
 
     async def search_workspace(
-        self, ctx: ToolContext, query: str, limit: int = 5, offset: int = 0
+        self,
+        ctx: ToolContext,
+        query: str,
+        limit: int = 5,
+        offset: int = 0,
+        tag_id: str | None = None,
+        category: str | None = None,
+        content_type: Literal["text/markdown", "text/html", "application/pdf"] | None = None,
+        sort: Literal["relevance", "updated", "title", "path"] = "relevance",
     ) -> str:
         validated = WorkspaceSearchInput.model_validate(
-            {"query": query, "limit": limit, "offset": offset}
+            {
+                "query": query,
+                "limit": limit,
+                "offset": offset,
+                "tag_id": tag_id,
+                "category": category,
+                "content_type": content_type,
+                "sort": sort,
+            }
         )
 
-        def operation() -> dict[str, Any]:
+        def operation(principal: Principal) -> dict[str, Any]:
             documents = self.workspace.search_documents(
-                self.identity.reauthorize(ctx.context.request_context.principal),
+                principal,
                 query=validated.query,
-                tag_id=None,
-                category=None,
+                tag_id=validated.tag_id,
+                category=validated.category,
                 actor_id=None,
-                sort="relevance",
+                content_type=validated.content_type,
+                sort=validated.sort,
                 limit=validated.limit,
                 offset=validated.offset,
             )
@@ -200,7 +270,19 @@ class ChatToolset:
                     )
             return {
                 "results": [
-                    self._document_source(document, snippet=document.search_snippet)
+                    self._document_source(
+                        document,
+                        snippet=document.search_snippet,
+                        # A hit inside a PDF names the page, so it can be cited there.
+                        page_number=next(
+                            (
+                                match.page_number
+                                for match in document.search_matches or []
+                                if match.page_number is not None
+                            ),
+                            None,
+                        ),
+                    )
                     for document in documents
                 ]
             }
@@ -226,9 +308,9 @@ class ChatToolset:
             }
         )
 
-        def operation() -> dict[str, Any]:
+        def operation(principal: Principal) -> dict[str, Any]:
             page = self.workspace.inspect_workspace_organization(
-                self.identity.reauthorize(ctx.context.request_context.principal),
+                principal,
                 item_type=validated.item_type,
                 path_prefix=validated.path_prefix,
                 offset=validated.offset,
@@ -251,8 +333,7 @@ class ChatToolset:
         )
         document_id = validated.document_id
 
-        def operation() -> dict[str, Any]:
-            principal = self.identity.reauthorize(ctx.context.request_context.principal)
+        def operation(principal: Principal) -> dict[str, Any]:
             document = self.workspace.get_document(principal, document_id)
             if document.content_type == "application/pdf":
                 raise ValidationError("Use read_pdf_page for PDF documents")
@@ -277,8 +358,31 @@ class ChatToolset:
                     title=document.title,
                     path=document.path or "",
                 )
+            backlinks = self.workspace.get_document_backlinks(
+                principal, document_id=document_id, limit=20
+            )
+            publication = (
+                self.workspace.document_publication(principal, document_id)
+                if self.workspace.policy.allows(principal, Capability.PUBLISH, document.path)
+                else None
+            )
             return {
-                "source": self._document_source(document, revision_id=revision_id),
+                "publication": None
+                if publication is None
+                else {
+                    "publication_id": publication.publication_id,
+                    "version": publication.version,
+                    "slug": publication.slug,
+                    "access_policy": publication.access_policy,
+                    "active": publication.active,
+                    "published_revision_id": publication.revision_id,
+                    "url": publication.url,
+                },
+                "source": self._document_source(document, revision_id=revision_id, detail=True),
+                "backlinks": [
+                    self._document_source(linking, snippet=linking.search_snippet)
+                    for linking in backlinks
+                ],
                 "content": content[validated.offset : validated.offset + validated.limit],
                 "offset": validated.offset,
                 "limit": validated.limit,
@@ -295,8 +399,7 @@ class ChatToolset:
         document_id = validated.document_id
         page_number = validated.page_number
 
-        def operation() -> dict[str, Any]:
-            principal = self.identity.reauthorize(ctx.context.request_context.principal)
+        def operation(principal: Principal) -> dict[str, Any]:
             document = self.workspace.get_document(principal, document_id)
             if document.content_type != "application/pdf":
                 raise ValidationError("The requested document is not a PDF")
@@ -322,11 +425,13 @@ class ChatToolset:
                 include_deleted=False,
             )
             return {
-                "source": self._document_source(document, page_number=page_number),
+                "source": self._document_source(document, page_number=page_number, detail=True),
                 "text": self._bounded_text(page.text),
                 "annotations": [
                     {
                         "annotation_id": annotation.annotation_id,
+                        "version": annotation.version,
+                        "color": annotation.color,
                         "type": annotation.annotation_type,
                         "selected_text": annotation.selected_text,
                         "note": annotation.note,
@@ -342,6 +447,162 @@ class ChatToolset:
             f"{document_id} page {page_number}",
             operation,
         )
+
+    async def read_revision_history(
+        self,
+        ctx: ToolContext,
+        document_id: str,
+        from_revision_id: str | None = None,
+        to_revision_id: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> str:
+        validated = ReadRevisionHistoryInput.model_validate(
+            {
+                "document_id": document_id,
+                "from_revision_id": from_revision_id,
+                "to_revision_id": to_revision_id,
+                "limit": limit,
+                "cursor": cursor,
+            }
+        )
+
+        def operation(principal: Principal) -> dict[str, Any]:
+            document = self.workspace.get_document(
+                principal, validated.document_id, include_deleted=True
+            )
+            result: dict[str, Any] = {"source": self._document_source(document, detail=True)}
+            if validated.from_revision_id:
+                diff = self.workspace.revision_diff(
+                    principal,
+                    document_id=validated.document_id,
+                    from_revision_id=validated.from_revision_id,
+                    to_revision_id=validated.to_revision_id,
+                )
+                text = diff.unified_diff
+                result["diff"] = {
+                    "from_revision_id": diff.from_revision_id,
+                    "to_revision_id": diff.to_revision_id,
+                    "unified_diff": self._bounded_text(text, 29_000),
+                    "additions": diff.additions,
+                    "deletions": diff.deletions,
+                    "truncated": len(text.encode("utf-8")) > 29_000,
+                }
+                return result
+            page = self.workspace.revision_page(
+                principal, validated.document_id, limit=validated.limit, cursor=validated.cursor
+            )
+            result["revisions"] = [
+                {
+                    "revision_id": item.revision_id,
+                    "parent_revision_id": item.parent_revision_id,
+                    "actor_id": item.actor_id,
+                    "operation": item.operation,
+                    "summary": item.summary,
+                    "created_at": item.created_at,
+                }
+                for item in page.items
+            ]
+            result["next_cursor"] = page.next_cursor
+            return result
+
+        return await self._run_tool(
+            ctx, self.policies["read_revision_history"], validated.document_id, operation
+        )
+
+    async def inspect_projects(self, ctx: ToolContext, project_id: str | None = None) -> str:
+        validated = InspectProjectsInput.model_validate({"project_id": project_id})
+
+        def operation(principal: Principal) -> dict[str, Any]:
+            if validated.project_id is None:
+                return {
+                    "projects": [
+                        self._project_summary(project)
+                        for project in self.projects.list_projects(principal)
+                    ]
+                }
+            detail = self.projects.get_project(validated.project_id, principal)
+            return {
+                "projects": [],
+                "project": {
+                    **self._project_summary(detail),
+                    "active_document_id": detail.active_document_id,
+                    "active_thread_id": detail.active_thread_id,
+                    "threads": [
+                        {"thread_id": thread.thread_id, "title": thread.title}
+                        for thread in detail.threads
+                    ],
+                    "annotations": [
+                        {
+                            "annotation_id": item.annotation_id,
+                            "document_id": item.document_id,
+                            "page_number": item.page_number,
+                            "annotation_type": item.annotation_type,
+                            "note": item.note,
+                        }
+                        for item in detail.annotations
+                    ],
+                    "documents": [
+                        {
+                            "document_id": member.document_id,
+                            "title": member.document_title,
+                            "path": member.document_path,
+                            "role": member.role,
+                            "pinned_page": member.pinned_page,
+                            "notes": member.notes,
+                            "source_updated": member.source_updated,
+                        }
+                        for member in detail.documents
+                    ],
+                },
+            }
+
+        return await self._run_tool(
+            ctx,
+            self.policies["inspect_projects"],
+            validated.project_id or "all projects",
+            operation,
+        )
+
+    async def annotate_pdf(self, ctx: ToolContext, change: AnnotationChange) -> str | None:
+        arguments = AnnotatePdfInput.model_validate({"change": change}).model_dump(mode="json")
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["annotate_pdf"],
+            arguments=arguments,
+            preview=arguments,
+        )
+
+    async def update_publication(self, ctx: ToolContext, change: PublicationChange) -> str | None:
+        arguments = UpdatePublicationInput.model_validate({"change": change}).model_dump(
+            mode="json"
+        )
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["update_publication"],
+            arguments=arguments,
+            preview=arguments,
+        )
+
+    async def update_project(self, ctx: ToolContext, change: ProjectChange) -> str | None:
+        arguments = UpdateProjectInput.model_validate({"change": change}).model_dump(mode="json")
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["update_project"],
+            arguments=arguments,
+            preview=arguments,
+        )
+
+    @staticmethod
+    def _project_summary(project: ProjectSummary) -> dict[str, Any]:
+        return {
+            "project_id": project.project_id,
+            "name": project.name,
+            "description": project.description,
+            "brief_document_id": project.brief_document_id,
+            "version": project.version,
+            "document_count": project.document_count,
+        }
 
     async def propose_update(
         self,
@@ -374,7 +635,7 @@ class ChatToolset:
             }
         )
 
-        def operation() -> dict[str, Any]:
+        def operation(principal: Principal) -> dict[str, Any]:
             request_context = ctx.context.request_context
             context_id = (
                 request_context.context_snapshot_id
@@ -383,7 +644,7 @@ class ChatToolset:
                 else None
             )
             proposal = self.proposals.create(
-                request_context.principal,
+                principal,
                 thread_id=ctx.context.thread.id,
                 document_id=validated.document_id,
                 expected_revision_id=validated.expected_revision_id,
@@ -455,7 +716,9 @@ class ChatToolset:
         self, ctx: ToolContext, document_id: str, slug: str, access_policy: str
     ) -> str | None:
         document = await self.runtime.run_sync(
-            self.workspace.get_document, ctx.context.request_context.principal, document_id
+            lambda: self.workspace.get_document(
+                self.identity.reauthorize(ctx.context.request_context.principal), document_id
+            )
         )
         if document.content_type == "application/pdf":
             raise ValidationError("PDF documents cannot be published")
@@ -556,8 +819,9 @@ class ChatToolset:
         ctx: ToolContext,
         policy: ChatCapability,
         detail: str,
-        operation: Callable[[], dict[str, Any]],
+        operation: Callable[[Principal], dict[str, Any]],
     ) -> str:
+        """Run one tool against the run principal's current grants, bounded and traced."""
         task = CustomTask(
             title=policy.title,
             content=self._bounded_text(detail, 500),
@@ -571,12 +835,15 @@ class ChatToolset:
         started = time.monotonic()
         outcome = "accepted"
         try:
-            request_context = getattr(ctx.context, "request_context", None)
-            run_id = getattr(request_context, "run_id", None)
-            if run_id and await self.runtime.run_sync(self.evidence.cancel_requested, run_id):
-                raise ValidationError("The chat run was cancelled before this tool executed")
+            run_id = ctx.context.request_context.run_id
+            if run_id:
+                cancelled = await self.runtime.run_sync(self.evidence.cancel_requested, run_id)
+                if cancelled:
+                    raise ValidationError("The chat run was cancelled before this tool executed")
+            run_principal = ctx.context.request_context.principal
             payload = await asyncio.wait_for(
-                self.runtime.run_sync(operation), timeout=policy.timeout_seconds
+                self.runtime.run_sync(lambda: operation(self.identity.reauthorize(run_principal))),
+                timeout=policy.timeout_seconds,
             )
             payload = policy.result_schema.model_validate(payload).model_dump(mode="json")
         except TimeoutError:
@@ -620,8 +887,7 @@ class ChatToolset:
             json.dumps(payload, ensure_ascii=False),
             min(self.max_result_bytes, policy.max_result_bytes),
         )
-        request_context = getattr(ctx.context, "request_context", None)
-        run_id = getattr(request_context, "run_id", None)
+        run_id = ctx.context.request_context.run_id
         if run_id:
             await self.runtime.run_sync(
                 self.evidence.record_tool,
@@ -650,7 +916,9 @@ class ChatToolset:
         page_number: int | None = None,
         snippet: str | None = None,
         revision_id: str | None = None,
+        detail: bool = False,
     ) -> dict[str, Any]:
+        """A citable source. `detail` adds what the UI shows beside a document."""
         data = {
             "document_id": document.document_id,
             "title": document.title,
@@ -659,7 +927,22 @@ class ChatToolset:
         if page_number is not None:
             data["page_number"] = page_number
         deeplink = f"chatkit-link://document?{urlencode(data)}"
-        return {**data, "path": document.path, "snippet": snippet, "citation": deeplink}
+        source: dict[str, Any] = {
+            **data,
+            "path": document.path,
+            "snippet": snippet,
+            "citation": deeplink,
+        }
+        if detail:
+            source.update(
+                category=document.category,
+                tags=[tag.name for tag in document.tags],
+                trust_level=document.trust_level,
+                deleted=document.deleted,
+                pdf_extraction_status=document.pdf_extraction_status,
+                pdf_page_count=document.pdf_page_count,
+            )
+        return source
 
     @staticmethod
     def _bounded_text(value: str, limit: int = 40_000) -> str:

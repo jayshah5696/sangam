@@ -21,6 +21,7 @@ export function ActivityFilters({
     search.path,
     search.error_code,
     search.operation_id,
+    search.via,
     search.attention ? 'attention' : undefined,
     search.range !== '7d' ? search.range : undefined,
   ].filter(Boolean).length
@@ -178,6 +179,17 @@ export function ActivityFilters({
             onChange={(event) => onChange({ operation_id: event.target.value || undefined })}
           />
         </label>
+        <label>
+          <span>Made through</span>
+          <select
+            aria-label="Made through"
+            value={search.via ?? ''}
+            onChange={(event) => onChange({ via: event.target.value === 'chat' ? 'chat' : undefined })}
+          >
+            <option value="">Anywhere</option>
+            <option value="chat">Chat</option>
+          </select>
+        </label>
         {search.range === 'custom' && (
           <div className="activity-custom-range">
             <label>
@@ -212,6 +224,7 @@ export function ActivityFilters({
               path: undefined,
               error_code: undefined,
               operation_id: undefined,
+              via: undefined,
               attention: false,
               range: '7d',
               since: undefined,

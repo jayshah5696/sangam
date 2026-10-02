@@ -54,6 +54,7 @@ class BackupService:
                     resource_id=backup_id,
                     completed=False,
                 )
+            self.database.set_audit_target(resource_id=backup_id)
         try:
             backup = self.manager.get(backup_id)
         except NotFoundError:

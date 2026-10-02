@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { expect, test as base } from '@playwright/test'
+import { expect, test as base, type Locator } from '@playwright/test'
 
 type SeededWorkspace = {
   documentId: string
@@ -27,5 +27,15 @@ export const test = base.extend<{ seededWorkspace: SeededWorkspace }>({
     await provide({ documentId: payload.document_id, documentTitle })
   },
 })
+
+/**
+ * Open something that may already be open. Wait until either its opener or its opened state
+ * shows before deciding, so a slow first render is not mistaken for "already open".
+ */
+export async function openIfClosed(opener: Locator, opened: Locator) {
+  await expect(opener.or(opened)).toBeVisible()
+  if (await opener.isVisible()) await opener.click()
+  await expect(opened).toBeVisible()
+}
 
 export { expect } from '@playwright/test'

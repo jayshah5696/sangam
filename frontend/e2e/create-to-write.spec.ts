@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures'
+import { expect, openIfClosed, test } from './fixtures'
 import { documentSchema } from '../src/api'
 import type { Page, APIRequestContext } from '@playwright/test'
 
@@ -68,8 +68,10 @@ test('creating a draft from the command palette opens it ready to write', async 
 
 test('creating a workspace file opens it ready to write', async ({ page, request }) => {
   await page.goto('/')
-  const reveal = page.getByRole('button', { name: 'Show workspace sidebar' })
-  if (await reveal.isVisible()) await reveal.click()
+  await openIfClosed(
+    page.getByRole('button', { name: 'Show workspace sidebar' }),
+    page.locator('#workspace-tab-files'),
+  )
   await page.locator('#workspace-tab-files').click()
   await page.getByRole('button', { name: 'New file' }).click()
   await page.getByRole('textbox', { name: 'New file path' }).fill(`notes/new-${crypto.randomUUID()}.md`)
@@ -84,9 +86,10 @@ test('a warm open inspector does not steal new document writing focus', async ({
   await page.goto('/')
   await page.getByRole('button', { name: 'Create Markdown' }).click()
   await expect(page.locator('.cm-content')).toBeFocused()
-  const open = page.getByRole('button', { name: 'Open document inspector', exact: true })
-  if (await open.isVisible()) await open.click()
-  await expect(page.getByRole('tab', { name: 'properties', exact: true })).toBeVisible()
+  await openIfClosed(
+    page.getByRole('button', { name: 'Open document inspector', exact: true }),
+    page.getByRole('tab', { name: 'properties', exact: true }),
+  )
   await page.goto('/')
   await page.getByRole('button', { name: 'Create Markdown' }).click()
   await expect(page.locator('.cm-content')).toBeFocused()

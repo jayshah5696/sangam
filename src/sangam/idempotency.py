@@ -26,11 +26,109 @@ class MutationRecord:
     completed_at: str | None
 
 
+@dataclass(frozen=True)
+class KeyRecord:
+    """What one actor-scoped idempotency key already committed, in either table."""
+
+    operation: str
+    request_hash: str
+    resource_id: str
+    # Set for document revisions; resource mutations have no revision.
+    revision_id: str | None
+    completed: bool
+
+
 class IdempotencyStore:
     """Maintains one actor-scoped key namespace across document and resource mutations."""
 
     def __init__(self, database: Database) -> None:
         self.database = database
+
+    @staticmethod
+    def lookup(connection: sqlite3.Connection, *, actor_id: str, key: str) -> KeyRecord | None:
+        """Return the mutation this key already reserved or committed, if any."""
+        row = connection.execute(
+            """
+            SELECT operation, request_hash, document_id AS resource_id, revision_id,
+                1 AS completed
+            FROM idempotency_keys WHERE actor_id = ? AND idempotency_key = ?
+            UNION ALL
+            SELECT operation, request_hash, resource_id, NULL AS revision_id,
+                completed_at IS NOT NULL AS completed
+            FROM mutation_idempotency_keys WHERE actor_id = ? AND idempotency_key = ?
+            """,
+            (actor_id, key, actor_id, key),
+        ).fetchone()
+        if row is None:
+            return None
+        return KeyRecord(
+            operation=row["operation"],
+            request_hash=row["request_hash"],
+            resource_id=row["resource_id"],
+            revision_id=row["revision_id"],
+            completed=bool(row["completed"]),
+        )
+
+    def committed(self, *, actor_id: str, key: str, operation: str | None = None) -> bool:
+        """Whether this key's mutation committed, optionally for one operation only."""
+        with self.database.connection() as connection:
+            record = self.lookup(connection, actor_id=actor_id, key=key)
+        return (
+            record is not None
+            and record.completed
+            and (operation is None or record.operation == operation)
+        )
+
+    @staticmethod
+    def document_result(
+        connection: sqlite3.Connection,
+        *,
+        actor_id: str,
+        key: str,
+        operation: str,
+        request_hash: str,
+    ) -> tuple[str, str] | None:
+        """Return the (document, revision) a document write key already committed.
+
+        A key reused for a different request is refused. When the key is new,
+        any HTTP precondition bound to this request is evaluated on ``connection``.
+        """
+        IdempotencyStore.ensure_document_key_available(connection, actor_id=actor_id, key=key)
+        row = connection.execute(
+            """
+            SELECT operation, request_hash, document_id, revision_id
+            FROM idempotency_keys WHERE actor_id = ? AND idempotency_key = ?
+            """,
+            (actor_id, key),
+        ).fetchone()
+        if not row:
+            validate_storage_condition(connection)
+            return None
+        if row["operation"] != operation or row["request_hash"] != request_hash:
+            IdempotencyStore._raise_conflict(key)
+        return row["document_id"], row["revision_id"]
+
+    @staticmethod
+    def record_document(
+        connection: sqlite3.Connection,
+        *,
+        actor_id: str,
+        key: str,
+        operation: str,
+        request_hash: str,
+        document_id: str,
+        revision_id: str,
+    ) -> None:
+        """Bind a document write key to the revision it committed, in the same transaction."""
+        connection.execute(
+            """
+            INSERT INTO idempotency_keys(
+                actor_id, idempotency_key, operation, request_hash,
+                document_id, revision_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (actor_id, key, operation, request_hash, document_id, revision_id, utc_now()),
+        )
 
     @staticmethod
     def ensure_document_key_available(

@@ -222,6 +222,73 @@
         "answer_contains:docs/architecture-overview.md",
         "answer_matches_regex:(?i)(ruta|documento|está)"
       ]
+    },
+    {
+      "id": "organize_trash_release_notes",
+      "kind": "organization",
+      "document": null,
+      "question": "Move the Release Notes document to Trash.",
+      "expected_tools": ["inspect_workspace_organization", "apply_workspace_organization_plan"],
+      "checks": [
+        "tool_called:inspect_workspace_organization",
+        "tool_called:apply_workspace_organization_plan",
+        "effect_status_by_mode:apply_workspace_organization_plan",
+        "organization_kind:trash_document"
+      ]
+    },
+    {
+      "id": "organize_duplicate_release_notes",
+      "kind": "organization",
+      "document": null,
+      "question": "Make a copy of the Release Notes document at docs/release-notes-copy.md.",
+      "expected_tools": ["inspect_workspace_organization", "apply_workspace_organization_plan"],
+      "checks": [
+        "tool_called:inspect_workspace_organization",
+        "tool_called:apply_workspace_organization_plan",
+        "effect_status_by_mode:apply_workspace_organization_plan",
+        "organization_kind:duplicate_document",
+        "organization_path:docs/release-notes-copy.md"
+      ]
+    },
+    {
+      "id": "organize_create_tag",
+      "kind": "organization",
+      "document": null,
+      "question": "Create a new tag named Legal. Do not apply it to anything.",
+      "expected_tools": ["apply_workspace_organization_plan"],
+      "checks": [
+        "tool_called:apply_workspace_organization_plan",
+        "effect_status_by_mode:apply_workspace_organization_plan",
+        "organization_kind:create_tag"
+      ]
+    },
+    {
+      "id": "history_release_notes",
+      "kind": "history",
+      "document": null,
+      "question": "Show me the revision history of the Release Notes document.",
+      "expected_tools": ["search_workspace", "read_revision_history"],
+      "checks": ["tool_called:read_revision_history", "no_effect", "no_proposal"]
+    },
+    {
+      "id": "project_list",
+      "kind": "project",
+      "document": null,
+      "question": "Which projects do I have?",
+      "expected_tools": ["inspect_projects"],
+      "checks": ["tool_called:inspect_projects", "no_effect"]
+    },
+    {
+      "id": "project_create",
+      "kind": "project",
+      "document": null,
+      "question": "Create a project called Market sizing. I do not need a purpose brief.",
+      "expected_tools": ["update_project"],
+      "checks": [
+        "tool_called:update_project",
+        "effect_status_by_mode:update_project",
+        "effect_change_kind:update_project:create_project"
+      ]
     }
   ]
 }

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, FileText, Folder as FolderIcon, X } from 'lucide-react'
 
-import { api, type Document, type Folder } from '../../api'
+import { api, writeFailureMessage, type Document, type Folder } from '../../api'
 import { defaultFilename, materializePath } from '../../documentWorkspaceState'
+import { StateMessage } from '../ui/StateMessage'
 
 interface DocumentLocationControlProps {
   document: Document
@@ -41,9 +42,7 @@ function LocationPopoverForm({ document, saveState, onClose, onUpdated }: Locati
       onUpdated?.(updated)
       onClose()
     },
-    onError: (err) => {
-      setError(err instanceof Error ? err.message : 'Failed to move document')
-    },
+    onError: (err) => setError(writeFailureMessage(err, 'The draft could not be saved to that path.')),
   })
 
   const moveMutation = useMutation({
@@ -53,9 +52,7 @@ function LocationPopoverForm({ document, saveState, onClose, onUpdated }: Locati
       onUpdated?.(updated)
       onClose()
     },
-    onError: (err) => {
-      setError(err instanceof Error ? err.message : 'Failed to move document')
-    },
+    onError: (err) => setError(writeFailureMessage(err, 'The document could not be moved.')),
   })
 
   const isDraft = !document.path
@@ -131,7 +128,7 @@ function LocationPopoverForm({ document, saveState, onClose, onUpdated }: Locati
           />
         </div>
 
-        {error && <p className="location-control-error error-text">{error}</p>}
+        {error && <StateMessage compact kind="error" title={error} />}
 
         <div className="location-control-actions">
           <button type="button" className="secondary-action" onClick={onClose}>
@@ -139,7 +136,7 @@ function LocationPopoverForm({ document, saveState, onClose, onUpdated }: Locati
           </button>
           <button
             type="submit"
-            className="primary-action"
+            className="primary-button"
             disabled={isPending || !filename.trim() || !isSaveReady}
           >
             {isPending ? 'Moving…' : isDraft ? 'Move to folder' : 'Move file'}

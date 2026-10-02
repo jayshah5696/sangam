@@ -898,14 +898,12 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--muted);
-  font-size: var(--text-meta);
-  text-transform: uppercase;
-  letter-spacing: .08em;
+  font-size: var(--text-control);
   font-weight: 600;
   cursor: pointer;
   transition: border-color var(--motion-control) var(--ease-ui-out), color var(--motion-control) var(--ease-ui-out), background var(--motion-control) var(--ease-ui-out);
@@ -918,6 +916,10 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 }
 .location-control-pill.draft {
   border-style: dashed;
+}
+/* A workspace path is case-sensitive identity text, so it keeps its exact case in mono. */
+.location-control-pill.workspace-file .location-control-label {
+  font-family: var(--font-mono);
 }
 .location-control-label {
   max-width: 24rem;
@@ -987,10 +989,8 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   gap: var(--space-1);
 }
 .location-control-field-label {
-  font-size: var(--text-meta);
+  font-size: var(--text-label);
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: .06em;
 }
 .location-control-field input,
 .location-control-field select {
@@ -999,17 +999,13 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
-  padding: 7px 10px;
-  font-size: var(--text-label);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-control);
 }
 .location-control-field input:focus,
 .location-control-field select:focus {
   border-color: var(--accent);
   outline: 0;
-}
-.location-control-error {
-  margin: 0;
-  font-size: var(--text-meta);
 }
 .location-control-actions {
   display: flex;
@@ -1017,10 +1013,6 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   justify-content: flex-end;
   gap: var(--space-2);
   margin-top: var(--space-1);
-}
-.location-control-actions button {
-  font-size: var(--text-label);
-  padding: 6px 12px;
 }
 
 /* Document Backlinks */
