@@ -663,3 +663,48 @@ def test_audit_provenance_and_structured_change_events_detail(client: TestClient
     assert dupe_event["path"] == "docs/structured_audit_copy.md"
     assert dupe_event["details"]["source_path"] == "docs/structured_audit.md"
     assert dupe_event["details"]["destination_path"] == "docs/structured_audit_copy.md"
+
+
+def test_hardened_security_sanitization_patterns() -> None:
+    headers_dict = {
+        "x-sangam-trusted-identity": "secret_trusted_val",
+        "sangam-trusted-identity": "another_trusted_val",
+        "x-refresh-token": "secret_refresh_hdr",
+        "x-auth-secret": "secret_auth_hdr",
+        "x-api-secret": "secret_api_hdr",
+        "content-type": "application/json",
+    }
+    sanitized_hdrs = sanitize_headers(headers_dict)
+    assert sanitized_hdrs["x-sangam-trusted-identity"] == "[REDACTED]"
+    assert sanitized_hdrs["sangam-trusted-identity"] == "[REDACTED]"
+    assert sanitized_hdrs["x-refresh-token"] == "[REDACTED]"
+    assert sanitized_hdrs["x-auth-secret"] == "[REDACTED]"
+    assert sanitized_hdrs["x-api-secret"] == "[REDACTED]"
+    assert sanitized_hdrs["content-type"] == "application/json"
+
+    data_payload = {
+        "signing_key": "secret_signing_key_data",
+        "encryption_key": "secret_encryption_key_data",
+        "user_key": "secret_user_key_data",
+        "safe_item": "hello_world",
+    }
+    sanitized_payload = sanitize_sensitive_data(data_payload)
+    assert isinstance(sanitized_payload, dict)
+    assert sanitized_payload["signing_key"] == "[REDACTED]"
+    assert sanitized_payload["encryption_key"] == "[REDACTED]"
+    assert sanitized_payload["user_key"] == "[REDACTED]"
+    assert sanitized_payload["safe_item"] == "hello_world"
+
+    text_assignment = (
+        "Config: signing_key='secret_sign_123' and encryption_key=\"enc_456\" "
+        "and account_key: acc_789 and id_token=id_tok_000"
+    )
+    sanitized_text = sanitize_sensitive_text(text_assignment)
+    assert "secret_sign_123" not in sanitized_text
+    assert "enc_456" not in sanitized_text
+    assert "acc_789" not in sanitized_text
+    assert "id_tok_000" not in sanitized_text
+    assert "signing_key=[REDACTED]" in sanitized_text
+    assert "encryption_key=[REDACTED]" in sanitized_text
+    assert "account_key=[REDACTED]" in sanitized_text
+    assert "id_token=[REDACTED]" in sanitized_text
