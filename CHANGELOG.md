@@ -7,6 +7,35 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.2] - 2026-10-01
+
+### Added
+
+- Streamlined document canvas, location popover controls, and document backlinks inspector (#308, #317, #319, #355).
+- Located search passages with paragraph-level deep linking and overlay-dismissal focus coordination (#310, #369).
+- Audited server-backed saved views synchronized across devices (#311, #369).
+- Persistent project reviews, stale proposal recovery across document edits, and visit briefings (#353).
+- Capture Inbox with responsive single-row mobile actions and pinned publications support (#318, #320, #321, #369).
+- Root-relative image attachment storage (`/attachments/<name>-<sha16>.<ext>`) preserving image references across document moves and folder renames (#322, #369).
+- Database migrations: project assignments migration `027`, publication revision pinning migration `028`, and server-backed saved views migration `029` (#353, #369).
+
+### Security
+
+- Hardened sensitive data sanitization: expanded credential redaction for Bearer tokens, embedded URI credentials, key-value secret assignments, and credential payload keys (#367).
+- Hardened workspace path canonicalization and agent token scope prefix normalization against Windows/system reserved device names and invalid characters (#365).
+- Audit provenance hardening: captured resource IDs and paths for folder operations, moves, publications, and workspace organization plans (#365).
+
+### Fixed
+
+- Eliminated disk write race conditions in folder creation and metadata updates by acquiring path mutation locks on `.sangam-folder.json` (#368).
+- Coordinated workspace path locks across text document mutations, creations, updates, moves, deletions, duplicates, and restorations to prevent filesystem races and silent disk overwrites (#365).
+- Retained search passage highlighting by waiting for narrow/touch drawer and inspector overlays to close before revealing passage (#369).
+
+### Changed
+
+- Dependency updates: `@tanstack/react-query` to 5.104.0, `eslint` to 10.11.0, `eslint-plugin-react-refresh` to 0.5.7, `vite` to 8.3.1, `uvicorn[standard]` to 0.54.0, `pyjwt[crypto]` to 2.15.0, and `httpx2` to 2.13.1 (#365).
+- Documentation hygiene: cleaned up obsolete PR screenshots, unreferenced prototype HTML files, and duplicate documents; added asset hygiene rules in `AGENTS.md` (#366).
+
 ## [0.13.1] - 2026-09-30
 
 ### Added
@@ -460,7 +489,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/jayshah5696/sangam/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/jayshah5696/sangam/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/jayshah5696/sangam/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/jayshah5696/sangam/compare/v0.12.2...v0.12.3
