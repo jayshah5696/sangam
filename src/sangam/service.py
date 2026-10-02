@@ -34,6 +34,7 @@ from sangam.schemas import (
     Tag,
 )
 from sangam.search import SearchIndex
+from sangam.search_passages import attach_search_matches
 from sangam.workspace import WorkspaceFilesystem
 
 
@@ -120,11 +121,17 @@ class DocumentService:
                 "The workspace path extension must match the document content type"
             )
 
-    def _document_query(self, *, include_content: bool = True, include_search: bool = False) -> str:
+    def _document_query(
+        self,
+        *,
+        include_content: bool = True,
+        include_search: bool = False,
+        include_snippet: bool = True,
+    ) -> str:
         content_projection = ", r.content" if include_content else ""
         search_projection = (
             ", snippet(document_search, -1, '[[', ']]', ' … ', 24) AS search_snippet"
-            if include_search
+            if include_search and include_snippet
             else ", NULL AS search_snippet"
         )
         search_join = (
@@ -1945,6 +1952,7 @@ class DocumentService:
         category: str | None = None,
         sort: str = "relevance",
         actor_id: str | None = None,
+        content_type: str | None = None,
         path_prefixes: tuple[str, ...] | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -1966,6 +1974,9 @@ class DocumentService:
         if category:
             conditions.append("d.category = ? COLLATE NOCASE")
             parameters.append(category)
+        if content_type:
+            conditions.append("d.content_type = ?")
+            parameters.append(content_type)
         if actor_id:
             conditions.append(
                 "EXISTS (SELECT 1 FROM revisions ar "
@@ -1988,15 +1999,21 @@ class DocumentService:
         parameters.extend((limit, offset))
         with self.database.connection() as connection:
             rows = connection.execute(
+                # FTS snippet() would run for every match before LIMIT; passages
+                # are located afterwards for the returned page only.
                 self._document_query(
                     include_content=False,
                     include_search=expression is not None,
+                    include_snippet=False,
                 )
                 + f" WHERE {' AND '.join(conditions)}"
                 + f" ORDER BY {ordering} LIMIT ? OFFSET ?",
                 parameters,
             ).fetchall()
-        return [self._document_summary_from_row(row) for row in rows]
+            documents = [self._document_summary_from_row(row) for row in rows]
+            if expression is None:
+                return documents
+            return attach_search_matches(connection, documents, query, expression)
 
     def rebuild_search_index(self) -> int:
         count = 0

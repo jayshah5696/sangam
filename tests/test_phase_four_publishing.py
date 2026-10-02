@@ -220,6 +220,7 @@ def test_publication_latest_revision_and_explicit_exposure_are_non_enumerable(
     assert latest.status_code == 200
     assert latest.headers["Cache-Control"] == "no-store, max-age=0"
     assert latest.json()["revision_id"] == first_revision
+    assert publication["revision_id"] == first_revision
 
     updated = client.patch(
         f"/api/v1/documents/{document['document_id']}",
@@ -229,9 +230,35 @@ def test_publication_latest_revision_and_explicit_exposure_are_non_enumerable(
             "content": "# Second\n",
         },
     ).json()
+    second_revision = str(updated["current_revision_id"])
+    # Saving the draft does not change what readers see.
+    latest = client.get("/api/v1/publications/notes/content").json()
+    assert latest["content"] == "# First\n"
+    assert latest["revision_id"] == first_revision
+    assert latest["is_latest"] is True
+    unpublished_draft = client.get(
+        "/api/v1/publications/notes/content", params={"revision": second_revision}
+    )
+    assert unpublished_draft.status_code == 404
+    status = client.get(f"/api/v1/publications/by-document/{document['document_id']}").json()
+    assert status["revision_id"] == first_revision
+    assert status["document_revision_id"] == second_revision
+
+    republished = client.patch(
+        f"/api/v1/publications/{publication['publication_id']}",
+        headers=mutation_headers("publish-second"),
+        json={
+            "expected_version": publication["version"],
+            "slug": "notes",
+            "access_policy": "public",
+            "revision_id": second_revision,
+        },
+    )
+    assert republished.status_code == 200, republished.text
+    assert republished.json()["revision_id"] == second_revision
+    publication = republished.json()
     latest = client.get("/api/v1/publications/notes/content").json()
     assert latest["content"] == "# Second\n"
-    assert latest["revision_id"] == updated["current_revision_id"]
 
     hidden = client.get("/api/v1/publications/notes/content", params={"revision": first_revision})
     assert hidden.status_code == 404
@@ -249,6 +276,51 @@ def test_publication_latest_revision_and_explicit_exposure_are_non_enumerable(
     assert historical.status_code == 200
     assert historical.json()["content"] == "# First\n"
     assert historical.json()["is_latest"] is False
+
+
+def test_publication_update_keeps_the_pinned_revision_unless_one_is_chosen(
+    client: TestClient,
+) -> None:
+    document = create_document(
+        client, title="Pinned", content="# One\n", path="pinned/one.md", key="pin-source"
+    )
+    other = create_document(client, title="Other", content="# Other\n", key="pin-other")
+    publication = client.post(
+        "/api/v1/publications",
+        headers=mutation_headers("pin-publish"),
+        json={"document_id": document["document_id"], "slug": "pinned", "access_policy": "public"},
+    ).json()
+    client.patch(
+        f"/api/v1/documents/{document['document_id']}",
+        headers=mutation_headers("pin-edit"),
+        json={"expected_revision_id": document["current_revision_id"], "content": "# Two\n"},
+    )
+
+    renamed = client.patch(
+        f"/api/v1/publications/{publication['publication_id']}",
+        headers=mutation_headers("pin-rename"),
+        json={
+            "expected_version": publication["version"],
+            "slug": "pinned-2",
+            "access_policy": "public",
+        },
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["revision_id"] == document["current_revision_id"]
+    assert client.get("/api/v1/publications/pinned-2/content").json()["content"] == "# One\n"
+
+    foreign = client.patch(
+        f"/api/v1/publications/{publication['publication_id']}",
+        headers=mutation_headers("pin-foreign"),
+        json={
+            "expected_version": renamed.json()["version"],
+            "slug": "pinned-2",
+            "access_policy": "public",
+            "revision_id": other["current_revision_id"],
+        },
+    )
+    assert foreign.status_code == 404
+    assert client.get("/api/v1/publications/pinned-2/content").json()["content"] == "# One\n"
 
 
 def test_unlisted_token_rotation_and_unpublish_revoke_access(client: TestClient) -> None:

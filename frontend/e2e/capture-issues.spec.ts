@@ -3,10 +3,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test } from './fixtures'
 
-const repositoryRoot = path.resolve(import.meta.dirname, '../..')
-const outDir = path.join(repositoryRoot, 'docs/assets/walkthrough')
-if (!fs.existsSync(outDir)) {
-  fs.mkdirSync(outDir, { recursive: true })
+function getOutputPath(filename: string): string {
+  const customDir = process.env.SANGAM_WALKTHROUGH_DIR
+  if (customDir) {
+    if (!fs.existsSync(customDir)) {
+      fs.mkdirSync(customDir, { recursive: true })
+    }
+    return path.join(customDir, filename)
+  }
+  return test.info().outputPath(filename)
 }
 
 test.describe('Issue Verification Real Screenshots', () => {
@@ -65,7 +70,7 @@ test.describe('Issue Verification Real Screenshots', () => {
       scrollWidth: row.scrollWidth,
     }))
     expect(labelLayout.scrollWidth).toBeLessThanOrEqual(labelLayout.clientWidth)
-    await page.locator('.primary-sidebar').screenshot({ path: path.join(outDir, 'issue-60-file-tree.png') })
+    await page.locator('.primary-sidebar').screenshot({ path: getOutputPath('issue-60-file-tree.png') })
 
     // Issue #61: context menu is portaled beyond the sidebar clip and dismisses with Escape.
     await longDocument.click({ button: 'right' })
@@ -86,7 +91,7 @@ test.describe('Issue Verification Real Screenshots', () => {
     expect(sidebarBox).not.toBeNull()
     expect(menuBox).not.toBeNull()
     expect(menuBox!.x + menuBox!.width).toBeGreaterThan(sidebarBox!.x + sidebarBox!.width)
-    await page.screenshot({ path: path.join(outDir, 'issue-61-context-menu.png') })
+    await page.screenshot({ path: getOutputPath('issue-61-context-menu.png') })
     await page.keyboard.press('Escape')
     await expect(contextMenu).toBeHidden()
     await expect(longDocument).toBeFocused()
@@ -115,13 +120,13 @@ test.describe('Issue Verification Real Screenshots', () => {
     // Issue #62: Split panes with close tab and close split controls
     await page
       .locator('.workbench-center')
-      .screenshot({ path: path.join(outDir, 'issue-62-split-pane-close.png') })
+      .screenshot({ path: getOutputPath('issue-62-split-pane-close.png') })
 
     // Issue #70: 40px Tab actions trigger aligned with rail
     await page
       .locator('.editor-tabbar')
       .first()
-      .screenshot({ path: path.join(outDir, 'issue-70-tab-actions-align.png') })
+      .screenshot({ path: getOutputPath('issue-70-tab-actions-align.png') })
   })
 
   test('capture issue 63 and 67 (folder renaming and organization)', async ({ page, request }) => {
@@ -149,10 +154,8 @@ test.describe('Issue Verification Real Screenshots', () => {
     await page.waitForTimeout(500)
     await page
       .locator('.primary-sidebar')
-      .screenshot({ path: path.join(outDir, 'issue-67-folder-organization.png') })
-    await page
-      .locator('.pierre-tree-shell')
-      .screenshot({ path: path.join(outDir, 'issue-63-folder-rename.png') })
+      .screenshot({ path: getOutputPath('issue-67-folder-organization.png') })
+    await page.locator('.pierre-tree-shell').screenshot({ path: getOutputPath('issue-63-folder-rename.png') })
 
     // Issue #100: Context menu Rename on folder must show visible inline input and update path
     const folderItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: initialFolder })
@@ -168,6 +171,7 @@ test.describe('Issue Verification Real Screenshots', () => {
     await expect(renameInput).toBeFocused()
     await renameInput.fill(renamedFolder)
     await renameInput.press('Enter')
+    await expect(renameInput).toBeHidden()
 
     await expect(
       page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedFolder }),
@@ -176,20 +180,24 @@ test.describe('Issue Verification Real Screenshots', () => {
     // Issue #100: F2 rename on file item must show visible inline input and update path
     const docItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: initialDoc })
     await expect(docItem).toBeVisible()
-    await docItem.click()
-    await page.keyboard.press('F2')
+    await docItem.focus()
+    await expect(docItem).toBeFocused()
+    await docItem.press('F2')
 
     await expect(renameInput).toBeVisible()
     await expect(renameInput).toBeFocused()
     await renameInput.fill(renamedDoc)
     await renameInput.press('Enter')
+    await expect(renameInput).toBeHidden()
 
     await expect(page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })).toBeVisible()
 
     // Issue #100: Escape cancels rename mode without modifying path
     const renamedDocItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })
-    await renamedDocItem.click()
-    await page.keyboard.press('F2')
+    await expect(renamedDocItem).toBeVisible()
+    await renamedDocItem.focus()
+    await expect(renamedDocItem).toBeFocused()
+    await renamedDocItem.press('F2')
     await expect(renameInput).toBeVisible()
     await renameInput.fill(discardedDoc)
     await renameInput.press('Escape')
@@ -204,7 +212,7 @@ test.describe('Issue Verification Real Screenshots', () => {
     await page.waitForTimeout(400)
 
     // Issue #64 & #75 footer (Karakeep hidden)
-    await page.locator('.sidebar-footer').screenshot({ path: path.join(outDir, 'issue-64-sidebar-nav.png') })
+    await page.locator('.sidebar-footer').screenshot({ path: getOutputPath('issue-64-sidebar-nav.png') })
 
     // Issue #66: Search single focus ring
     await page.locator('#workspace-tab-search').click()
@@ -212,13 +220,13 @@ test.describe('Issue Verification Real Screenshots', () => {
     const searchInput = page.locator('.sidebar-search-input input')
     await searchInput.focus()
     await page.waitForTimeout(300)
-    await page.locator('.search-panel').screenshot({ path: path.join(outDir, 'issue-66-search-focus.png') })
+    await page.locator('.search-panel').screenshot({ path: getOutputPath('issue-66-search-focus.png') })
   })
 
   test('capture issue 69 (welcome screen format dropdown)', async ({ page }) => {
     await page.goto('/')
     await page.waitForTimeout(400)
-    await page.locator('.welcome').screenshot({ path: path.join(outDir, 'issue-69-welcome-format.png') })
+    await page.locator('.welcome').screenshot({ path: getOutputPath('issue-69-welcome-format.png') })
   })
 
   test('capture issue 71, 72, 73, and 74 (outline formatting, jump, bounded workspace, collapsed rail)', async ({
@@ -285,7 +293,7 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     ).toHaveCount(0)
     await page
       .locator('.document-inspector')
-      .screenshot({ path: path.join(outDir, 'issue-71-clean-outline.png') })
+      .screenshot({ path: getOutputPath('issue-71-clean-outline.png') })
 
     // Switch to Preview mode
     await page.getByRole('radio', { name: 'preview' }).click()
@@ -301,12 +309,12 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     // Issue #72: Outline jump in preview
     await page
       .locator('.document-workspace')
-      .screenshot({ path: path.join(outDir, 'issue-72-outline-preview.png') })
+      .screenshot({ path: getOutputPath('issue-72-outline-preview.png') })
 
     // Issue #73: Bounded workspace
     await page
       .locator('.workbench-main')
-      .screenshot({ path: path.join(outDir, 'issue-73-bounded-workspace.png') })
+      .screenshot({ path: getOutputPath('issue-73-bounded-workspace.png') })
 
     // Issue #74: Direct triggers on collapsed rail
     const collapseBtn = page.getByRole('button', { name: 'Collapse document inspector' })
@@ -316,7 +324,7 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     }
     await page
       .locator('.right-rail')
-      .screenshot({ path: path.join(outDir, 'issue-74-collapsed-rail-triggers.png') })
+      .screenshot({ path: getOutputPath('issue-74-collapsed-rail-triggers.png') })
   })
 
   test('capture issue 104 and 75 (route-aware settings sidebar and version card)', async ({ page }) => {
@@ -328,7 +336,7 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await expect(settingsSidebar).toBeVisible()
     await expect(page.getByRole('complementary', { name: 'Workspace sidebar' })).toHaveCount(0)
     await expect(settingsSidebar.getByRole('navigation', { name: 'Settings pages' })).toBeVisible()
-    await page.screenshot({ path: path.join(outDir, 'issue-104-settings-sidebar.png'), fullPage: false })
+    await page.screenshot({ path: getOutputPath('issue-104-settings-sidebar.png'), fullPage: false })
 
     // Issue #75: installed version and truthful server status in Operations.
     await page.getByRole('button', { name: /Operations/ }).click()
@@ -336,9 +344,7 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await expect(page.getByRole('button', { name: 'Refresh server status' })).toBeVisible()
     await expect(page.getByText(/Server is healthy/)).toBeVisible()
     await expect(page.getByText(/Up to date/)).toHaveCount(0)
-    await page
-      .locator('.settings-content')
-      .screenshot({ path: path.join(outDir, 'issue-75-version-card.png') })
+    await page.locator('.settings-content').screenshot({ path: getOutputPath('issue-75-version-card.png') })
   })
 
   test('capture issue 68 (backup management and deletion UI)', async ({ page, request }) => {
@@ -353,7 +359,7 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await expect(backupCard.getByRole('group', { name: 'Confirm backup deletion' })).toBeVisible()
     await expect(backupCard.getByRole('button', { name: 'Confirm delete' })).toBeVisible()
     await expect(backupCard.getByRole('button', { name: 'Cancel' })).toBeVisible()
-    await page.locator('.utility-page').screenshot({ path: path.join(outDir, 'issue-68-backup-delete.png') })
+    await page.locator('.utility-page').screenshot({ path: getOutputPath('issue-68-backup-delete.png') })
   })
 
   test('capture issue 133 (equal-width fluid tabs and compact inspector chat containment)', async ({
@@ -423,7 +429,7 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await page
       .locator('.editor-tabbar')
       .first()
-      .screenshot({ path: path.join(outDir, 'issue-133-equal-width-tabs.png') })
+      .screenshot({ path: getOutputPath('issue-133-equal-width-tabs.png') })
 
     // The inspector is closed by default; open its explicit tools before choosing chat.
     await page.getByRole('button', { name: 'Open document inspector' }).click()
@@ -443,6 +449,6 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await expect(chatSurface).toBeVisible()
     await page
       .locator('.document-inspector')
-      .screenshot({ path: path.join(outDir, 'issue-133-compact-chat-290px.png') })
+      .screenshot({ path: getOutputPath('issue-133-compact-chat-290px.png') })
   })
 })

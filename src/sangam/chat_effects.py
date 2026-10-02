@@ -540,6 +540,7 @@ class ChatEffectService:
                     slug=arguments["slug"],
                     access_policy=arguments["access_policy"],
                     idempotency_key=operation_key,
+                    revision_id=arguments["revision_id"],
                 )
                 client_result = {
                     **publication.model_dump(mode="json"),
