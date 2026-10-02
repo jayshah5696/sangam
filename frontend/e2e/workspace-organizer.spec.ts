@@ -384,6 +384,7 @@ test('renaming an open draft from the file tree keeps autosave on the renamed re
   await renameInput.fill(`${title} renamed`)
   await renameInput.press('Enter')
   await expect.poll(async () => (await server()).title).toBe(`${title} renamed`)
+  await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue(`${title} renamed`)
 
   await typeAtEnd(' after rename')
   await expect.poll(async () => (await server()).content).toContain('after rename')

@@ -266,6 +266,8 @@ export function DocumentWorkspace({
     if (citationTarget && matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
   }, [citationTarget, updatePreferences])
   const [draftTitle, setDraftTitle] = useState(document.title)
+  // A rename from the file tree, chat, or a restore changes the server title under the input.
+  useEffect(() => setDraftTitle(document.title), [document.title])
 
   useEffect(() => {
     void sessions.initializeDocument(initialDocument)
