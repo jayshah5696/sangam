@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import headers
+from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 from pydantic import ValidationError as PydanticValidationError
 from pypdf import PdfWriter
@@ -14,7 +14,7 @@ from test_phase_seven_chat import install_fake_model
 
 from sangam.capabilities import Capability
 from sangam.chat_capabilities import CreateDocumentInput, WorkspaceSearchInput
-from sangam.errors import AuthorizationError, NotFoundError, ValidationError
+from sangam.errors import AuthenticationError, AuthorizationError, NotFoundError, ValidationError
 from sangam.security import Principal, ScopeGrant
 
 
@@ -42,31 +42,27 @@ def create_chat_thread(client: TestClient, *, document_id: str | None = None) ->
     return next(event["thread"]["id"] for event in events if event["type"] == "thread.created")
 
 
-def prepare_effect(
+def prepare_run(
     client: TestClient,
     *,
     capability_id: str,
-    arguments: dict[str, object],
-    preview: dict[str, object] | None = None,
+    document_id: str | None = None,
     tool_call_id: str = "call_effect",
 ):
+    """Create a persisted thread, pinned turn, and run that may request one capability."""
     chat = client.app.state.services.chat
     principal = Principal.trusted_human(
         actor_id="human:jay", display_name="Jay", operation_id="effect-lifecycle"
     )
-    document_id = arguments.get("document_id")
-    thread_id = create_chat_thread(
-        client, document_id=document_id if isinstance(document_id, str) else None
-    )
+    thread_id = create_chat_thread(client, document_id=document_id)
     turn = chat.evidence.create_turn_context(
         principal,
         entry_point="document" if document_id else "workspace",
-        document_id=document_id if isinstance(document_id, str) else None,
+        document_id=document_id,
         revision_id=None,
         selected_text="",
     )
     capability = chat.capabilities.get(capability_id)
-    normalized_arguments = capability.input_schema.model_validate(arguments).model_dump(mode="json")
     manifest = (capability.manifest_item(),)
     turn = chat.evidence.attach_turn_context(
         principal,
@@ -85,23 +81,43 @@ def prepare_effect(
         model_ref="openrouter::openai/gpt-5.4-nano",
         capability_manifest=manifest,
     )
-    effect = chat.effects.propose(
-        principal,
-        run_id=run_id,
-        thread_id=thread_id,
-        tool_call_id=tool_call_id,
-        capability=capability,
-        arguments=arguments,
-        preview=preview or normalized_arguments,
-    )
     return SimpleNamespace(
         chat=chat,
         principal=principal,
         thread_id=thread_id,
         run_id=run_id,
-        effect=effect,
         capability=capability,
     )
+
+
+def prepare_effect(
+    client: TestClient,
+    *,
+    capability_id: str,
+    arguments: dict[str, object],
+    preview: dict[str, object] | None = None,
+    tool_call_id: str = "call_effect",
+):
+    document_id = arguments.get("document_id")
+    run = prepare_run(
+        client,
+        capability_id=capability_id,
+        document_id=document_id if isinstance(document_id, str) else None,
+        tool_call_id=tool_call_id,
+    )
+    normalized_arguments = run.capability.input_schema.model_validate(arguments).model_dump(
+        mode="json"
+    )
+    run.effect = run.chat.effects.propose(
+        run.principal,
+        run_id=run.run_id,
+        thread_id=run.thread_id,
+        tool_call_id=tool_call_id,
+        capability=run.capability,
+        arguments=arguments,
+        preview=preview or normalized_arguments,
+    )
+    return run
 
 
 def set_chat_autonomy(client: TestClient, mode: str) -> None:
@@ -248,6 +264,7 @@ def test_registry_filters_authority_and_rejects_extra_tool_arguments(client: Tes
         "search_workspace",
         "inspect_workspace_organization",
         "read_document",
+        "read_revision_history",
     }
     with pytest.raises(PydanticValidationError):
         WorkspaceSearchInput.model_validate({"query": "evidence", "unexpected": True})
@@ -458,6 +475,28 @@ def test_workspace_autonomy_executes_every_effect_without_review(client: TestCli
     assert {f"batch/folder-{index}" for index in range(26)} <= folder_paths
 
 
+def test_yolo_refuses_an_effect_from_a_token_revoked_mid_run(client: TestClient) -> None:
+    set_chat_autonomy(client, "workspace")
+    token = issue_agent_token(client, actor_id="agent:yolo", capabilities=("read", "create"))
+    services = client.app.state.services
+    principal = services.identity.authenticate(token, operation_id="revoked-yolo")
+    run = prepare_run(client, capability_id="create_document", tool_call_id="call_revoked")
+    assert client.delete(f"/api/v1/agent-tokens/{principal.token_id}").status_code == 200
+    arguments = {"title": "Late", "content": "# Late", "content_type": "text/markdown"}
+
+    with pytest.raises(AuthenticationError):
+        run.chat.effects.propose(
+            principal,
+            run_id=run.run_id,
+            thread_id=run.thread_id,
+            tool_call_id="call_revoked",
+            capability=run.capability,
+            arguments=arguments,
+            preview=CreateDocumentInput.model_validate(arguments).model_dump(mode="json"),
+        )
+    assert client.get("/api/v1/documents").json() == []
+
+
 def test_yolo_materializes_chat_created_document_at_requested_path(client: TestClient) -> None:
     set_chat_autonomy(client, "workspace")
     created = prepare_effect(
@@ -538,15 +577,16 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
 ) -> None:
     from sangam.schemas import TokenScope
 
-    # Ensure agent actors exist in the database for FK constraints
-    client.app.state.services.identity.issue_agent_token(
+    # Real agents authenticate with a token; the effect is later run with that token's grants.
+    identity = client.app.state.services.identity
+    issued = identity.issue_agent_token(
         actor_id="agent:researcher",
         display_name="Researcher",
         label="Test Agent",
         scopes=[TokenScope(capability=Capability.CREATE, path_prefix=None)],
         expires_at=None,
     )
-    client.app.state.services.identity.issue_agent_token(
+    identity.issue_agent_token(
         actor_id="agent:other",
         display_name="Other Agent",
         label="Test Other Agent",
@@ -555,14 +595,7 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
     )
 
     chat = client.app.state.services.chat
-    agent_principal = Principal(
-        actor_id="agent:researcher",
-        display_name="Researcher",
-        identity_kind="agent",
-        operation_id="agent-effect-op",
-        scopes=(ScopeGrant(Capability.CREATE, None),),
-        administrator=False,
-    )
+    agent_principal = identity.authenticate(issued.token, operation_id="agent-effect-op")
     admin_principal = Principal.trusted_human(
         actor_id="human:jay", display_name="Jay", operation_id="admin-review-op"
     )

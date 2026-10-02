@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
   Columns2,
@@ -228,7 +228,6 @@ function EditorGroupView({ group }: { group: GroupNode }) {
 }
 
 function GroupInspector({ documentId }: { documentId: string }) {
-  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const isNarrow = useMediaQuery('(max-width: 900px)')
   const { preferences, updatePreferences } = useTheme()
@@ -307,12 +306,8 @@ function GroupInspector({ documentId }: { documentId: string }) {
         )
       : ''
   const updateCachedDocument = (nextDocument: Document, replaceContent = false) => {
-    queryClient.setQueryData(['document', documentId], nextDocument)
     sessions.acceptServerDocument(nextDocument, replaceContent)
     updateDocumentTitle(documentId, nextDocument.title)
-    void queryClient.invalidateQueries({ queryKey: ['documents'] })
-    void queryClient.invalidateQueries({ queryKey: ['history', documentId] })
-    void queryClient.invalidateQueries({ queryKey: ['folders'] })
   }
   if (!preferences.rightVisible) {
     const openToTab = (tabName: InspectorTab) => {

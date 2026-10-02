@@ -8,7 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
-from sangam.access import WorkspaceAccessService
+from sangam.access import WorkspaceAccessService, writes
 from sangam.errors import ServiceUnavailableError, ValidationError
 from sangam.pdf_research import PdfResearchService
 from sangam.pdf_runtime import run_pdf_io, spooled_pdf_body
@@ -146,9 +146,12 @@ def create_pdf_router(
         document_id: str,
         principal: Principal = admin_dependency,
     ) -> Document:
-        del principal
-        document = pdf_research.retry_extraction(document_id)
-        return document
+        return workspace.audited(
+            principal,
+            writes("retry_extraction", "document"),
+            lambda: pdf_research.retry_extraction(document_id),
+            resource_id=document_id,
+        )
 
     @router.get("/pdfs/{document_id}/annotations", response_model=list[Annotation])
     def list_annotations(

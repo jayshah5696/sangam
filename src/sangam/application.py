@@ -223,6 +223,7 @@ def build_application_services(
         database=database,
         documents=documents,
         activity=activity,
+        audited=workspace_access.audited,
     )
     chat = SangamChatServer(
         database=database,
@@ -230,6 +231,7 @@ def build_application_services(
         config=chat_config,
         model_catalog=model_catalog,
         provider_connections=provider_connections,
+        projects=projects,
     )
     return ApplicationServices(
         documents=documents,
@@ -249,7 +251,7 @@ def build_application_services(
         provider_connections=provider_connections,
         readiness=readiness,
         projects=projects,
-        saved_views=SavedViewService(database=database, activity=activity),
+        saved_views=SavedViewService(database=database, audited=workspace_access.audited),
     )
 
 

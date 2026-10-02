@@ -4,10 +4,42 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   announceCitationNavigation,
   CITATION_NAVIGATION_EVENT,
+  CITATION_PARAM_KEYS,
   citationHref,
+  citationLink,
   citationTargetFromData,
   citationTargetFromLocation,
+  type CitationTarget,
 } from './citationNavigation'
+import { internalDocumentHref } from './internalLinks'
+
+const documentId = '0d10bbdc-e3c8-4c2b-afdd-06e263ada380'
+const everyField: CitationTarget = {
+  documentId,
+  revisionId: '8f2ac41d-9999-4a4b-8c8d-123456789abc',
+  pageNumber: 3,
+  annotationId: 'abc-123',
+  textLocator: { exact: 'evidence', start: 12, end: 20, prefix: '', suffix: '', representation: 'source' },
+  quoteStart: 4,
+  quoteEnd: 9,
+  passage: { line: 7, exact: 'claim' },
+}
+
+describe('citation link codec', () => {
+  it('opens a pasted sangam:// link at the same target as an in-app citation link', () => {
+    expect(internalDocumentHref(citationLink(everyField))).toBe(citationHref(everyField))
+  })
+
+  it('restores every encoded field when the citation URL is opened directly', () => {
+    window.history.replaceState(null, '', citationHref(everyField))
+    expect(citationTargetFromLocation(documentId)).toEqual(everyField)
+  })
+
+  it('names every parameter it writes, so closing a citation clears all of them', () => {
+    const written = [...new URL(citationHref(everyField), 'https://sangam.test').searchParams.keys()]
+    expect(new Set(written)).toEqual(new Set(CITATION_PARAM_KEYS))
+  })
+})
 
 describe('citation navigation', () => {
   it('keeps the exact revision, PDF page, and annotation in the workspace URL', () => {

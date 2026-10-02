@@ -4,6 +4,7 @@ import { createFileRoute, useLocation, useNavigate } from '@tanstack/react-route
 import { ArrowLeft, MessageSquareText } from 'lucide-react'
 import { z } from 'zod'
 import { api, type Document } from '../api'
+import { adoptDocumentInCache } from '../documentCache'
 import { StateMessage } from '../components/ui/StateMessage'
 
 const ChatPanel = lazy(() =>
@@ -17,6 +18,8 @@ const chatSearchSchema = z.object({
   prompt: z.string().max(2000).optional(),
   thread: z.string().max(200).optional(),
   proposal: z.string().max(200).optional(),
+  // The project the conversation starts from; chat is told about it.
+  project: z.string().max(200).optional(),
 })
 
 export const Route = createFileRoute('/chat')({
@@ -75,8 +78,7 @@ function WorkspaceChat() {
       replace: true,
     })
   const updateDocument = (nextDocument: Document) => {
-    queryClient.setQueryData(['document', nextDocument.document_id], nextDocument)
-    void queryClient.invalidateQueries({ queryKey: ['documents'] })
+    adoptDocumentInCache(queryClient, nextDocument)
     void navigate({
       search: (current) => ({ ...current, revision: nextDocument.current_revision_id }),
       replace: true,
@@ -139,9 +141,10 @@ function WorkspaceChat() {
         ) : (
           <Suspense fallback={<StateMessage kind="loading" title="Preparing workspace chat" />}>
             <ChatPanel
-              key={`${search.thread ?? ''}:${search.proposal ?? ''}`}
+              key={`${search.thread ?? ''}:${search.proposal ?? ''}:${search.project ?? ''}`}
               initialPrompt={initialPrompt}
               initialThreadId={search.thread}
+              projectId={search.project}
               document={contextDocument}
               selectedText={selectedText}
               pdfPageNumber={document?.content_type === 'application/pdf' ? pdfPageNumber : null}

@@ -78,7 +78,11 @@ export function ProjectHome({
           kind="error"
           title="Could not load selected project"
           description={project.error.message}
-          action={<button onClick={() => void project.refetch()}>Retry</button>}
+          action={
+            <button className="secondary-action" onClick={() => void project.refetch()}>
+              Retry
+            </button>
+          }
         />
       )}
       {detail && (
@@ -132,7 +136,11 @@ export function ProjectHome({
           kind="error"
           title="Could not load review attention"
           description={proposals.error.message}
-          action={<button onClick={() => void proposals.refetch()}>Retry</button>}
+          action={
+            <button className="secondary-action" onClick={() => void proposals.refetch()}>
+              Retry
+            </button>
+          }
         />
       )}
       {detail && (

@@ -24,13 +24,14 @@ import {
   FolderPlus,
   PanelRightOpen,
   Pencil,
-  Search,
   Tag as TagIcon,
   Trash2,
+  X,
 } from 'lucide-react'
 import {
   api,
   DOCUMENT_PAGE_SIZE,
+  writeFailureMessage,
   type DocumentSummary,
   type Folder,
   type OrganizationOperation,
@@ -74,7 +75,7 @@ function sortLabel(sort: ExplorerSort) {
   return 'Name Z-A'
 }
 
-export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
+export function FileExplorerPanel() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
@@ -157,7 +158,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         await navigate({ to: '/documents/$documentId', params: { documentId: result.document.document_id } })
       }
     },
-    onError: (cause) => setError(cause instanceof Error ? cause.message : 'The item could not be created.'),
+    onError: (cause) => setError(writeFailureMessage(cause, 'The item could not be created.')),
   })
 
   const rename = useMutation({
@@ -173,9 +174,11 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         const filename = ensureDocumentExtension(workspaceBasename(destinationPath), document.content_type)
         return api.moveDocument(document, joinWorkspacePath(parent, filename))
       }
-      const current = await api.getDocument(document.document_id)
-      const title = workspaceBasename(destinationPath).trim() || 'Untitled document'
-      return api.updateDocument(current, current.content, title)
+      // A draft has no path, so renaming it changes its title through the session store.
+      return sessions.rename(
+        document.document_id,
+        workspaceBasename(destinationPath).trim() || 'Untitled document',
+      )
     },
     onSuccess: async (document) => {
       pendingFocusDocumentIdRef.current = document.document_id
@@ -184,7 +187,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       await refresh()
     },
     onError: async (cause) => {
-      setError(cause instanceof Error ? cause.message : 'The document could not be renamed.')
+      setError(writeFailureMessage(cause, 'The document could not be renamed.'))
       await refresh()
     },
   })
@@ -197,7 +200,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       await refresh()
     },
     onError: async (cause) => {
-      setError(cause instanceof Error ? cause.message : 'The folder could not be renamed.')
+      setError(writeFailureMessage(cause, 'The folder could not be renamed.'))
       await refresh()
     },
   })
@@ -209,8 +212,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       workbench.ensureDocumentOpen(created.document_id, created.title, workbench.activeGroupId)
       await navigate({ to: '/documents/$documentId', params: { documentId: created.document_id } })
     },
-    onError: (cause) =>
-      setError(cause instanceof Error ? cause.message : 'The document could not be duplicated.'),
+    onError: (cause) => setError(writeFailureMessage(cause, 'The document could not be duplicated.')),
   })
 
   const movePlan = useMutation({
@@ -226,7 +228,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       await refresh()
     },
     onError: async (cause) => {
-      setError(cause instanceof Error ? cause.message : 'The selected items could not be moved.')
+      setError(writeFailureMessage(cause, 'The selected items could not be moved.'))
       await refresh()
     },
   })
@@ -244,7 +246,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       await refresh()
     },
     onError: async (cause) => {
-      setError(cause instanceof Error ? cause.message : 'The selected metadata could not be updated.')
+      setError(writeFailureMessage(cause, 'The selected metadata could not be updated.'))
       await refresh()
     },
   })
@@ -262,7 +264,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
       await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ['trash'] })])
     },
     onError: async (cause) => {
-      setError(cause instanceof Error ? cause.message : 'The selected documents could not be moved to Trash.')
+      setError(writeFailureMessage(cause, 'The selected documents could not be moved to Trash.'))
       await refresh()
     },
   })
@@ -733,10 +735,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           <button disabled={create.isPending}>Create</button>
         </form>
       )}
-      <button className="sidebar-search-trigger" onClick={onSearch}>
-        <Search size="var(--icon-control)" />
-        <span>Search workspace</span>
-      </button>
       <div className="sidebar-section-title">
         <span>Workspace</span>
         <span className="explorer-heading-actions">
@@ -763,7 +761,7 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
         <div className="explorer-error" role="alert">
           <span>{error}</span>
           <button aria-label="Dismiss error" onClick={() => setError(null)}>
-            ×
+            <X size="var(--icon-inline)" />
           </button>
         </div>
       )}
@@ -802,8 +800,16 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           )}
         </div>
       )}
-      {documents.isLoading && <p className="sidebar-message">Loading files…</p>}
-      {documents.isError && <p className="sidebar-message error-text">Files could not be loaded.</p>}
+      {documents.isLoading && (
+        <p className="sidebar-message" role="status">
+          Loading files…
+        </p>
+      )}
+      {documents.isError && (
+        <p className="sidebar-message error-text" role="alert">
+          Files could not be loaded.
+        </p>
+      )}
       <div className="pierre-tree-shell" ref={treeShellRef}>
         <PierreFileTree
           aria-label="Files"
@@ -1068,7 +1074,7 @@ function MetadataDialog({
             </h2>
           </div>
           <button type="button" aria-label="Close metadata dialog" onClick={onCancel}>
-            ×
+            <X size="var(--icon-control)" />
           </button>
         </header>
         <p className="metadata-dialog-note">Selected tags become the exact tag set for every item.</p>
@@ -1183,7 +1189,7 @@ function MoveDestinationDialog({
             </h2>
           </div>
           <button type="button" aria-label="Close move dialog" onClick={onCancel}>
-            ×
+            <X size="var(--icon-control)" />
           </button>
         </header>
         <label>

@@ -57,6 +57,11 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-tls-client-cert",
     "x-amz-security-token",
     "x-oauth-basic",
+    "x-sangam-trusted-identity",
+    "sangam-trusted-identity",
+    "x-refresh-token",
+    "x-auth-secret",
+    "x-api-secret",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -126,6 +131,9 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "api_secret",
     "account_key",
     "id_token",
+    "signing_key",
+    "encryption_key",
+    "user_key",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -159,7 +167,7 @@ _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+")
 
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(api_key|api_token|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
+    r"(?i)\b(api_key|api_token|api_secret|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass|signing_key|encryption_key|account_key|id_token)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
 )
 
 _RESERVED_NAMES: set[str] = {
@@ -302,6 +310,10 @@ class Principal:
     token_id: str | None = None
     scopes: tuple[ScopeGrant, ...] = ()
     administrator: bool = False
+    # Where a write came from when it is not a direct request, for example
+    # "chat-effect:eff_123", and who approved it. The activity ledger records both.
+    via: str | None = None
+    approved_by: str | None = None
 
     @classmethod
     def trusted_human(cls, *, actor_id: str, display_name: str, operation_id: str) -> Principal:
@@ -509,6 +521,7 @@ class IdentityService:
                 "INSERT INTO token_scopes(token_id, capability, path_prefix) VALUES (?, ?, ?)",
                 [(token_id, grant.capability.value, grant.path_prefix or "") for grant in grants],
             )
+            self.database.set_audit_target(resource_id=token_id)
             row = connection.execute(
                 """
                 SELECT t.*, a.display_name AS actor_display_name
@@ -626,6 +639,9 @@ class IdentityService:
             if updated_row is None:
                 raise RuntimeError("Updated token could not be reloaded")
             updated = self._token_from_row(connection, updated_row)
+            self.database.set_audit_target(
+                resource_id=token_id, details={"current_metadata_version": next_version}
+            )
             connection.execute(
                 """
                 INSERT INTO actor_token_events(
@@ -652,6 +668,7 @@ class IdentityService:
                 "UPDATE actor_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE token_id = ?",
                 (now, token_id),
             )
+            self.database.set_audit_target(resource_id=token_id)
             row = connection.execute(
                 """
                 SELECT t.*, a.display_name AS actor_display_name

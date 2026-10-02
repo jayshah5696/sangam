@@ -9,6 +9,7 @@ from typing import Concatenate, TypeVar
 from chatkit.types import ThreadMetadata
 from pydantic import BaseModel
 
+from sangam.access import Audited, writes
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
 from sangam.db import Database, utc_now
@@ -49,13 +50,23 @@ def atomic[T, **P](
     return run
 
 
+class DeletedProjectReference(BaseModel):
+    """The recorded result of a removal, so a replayed removal has something to return."""
+
+
 class ProjectService:
     """Small reference-based project model. Membership never grants resource access."""
 
     def __init__(
-        self, *, database: Database, documents: DocumentService, activity: ActivityService
+        self,
+        *,
+        database: Database,
+        documents: DocumentService,
+        activity: ActivityService,
+        audited: Audited,
     ) -> None:
         self.database, self.documents, self.activity = database, documents, activity
+        self._audited = audited
 
     def execute(
         self,
@@ -66,14 +77,42 @@ class ProjectService:
         payload: dict[str, object],
         response_type: type[M],
         mutation: Callable[[], M],
+        action: str,
+        project_id: str | None = None,
     ) -> M:
+        """Run one project change at most once per idempotency key, under the ledger contract."""
         AuthorizationPolicy.require_administrator(principal)
+        return self._audited(
+            principal,
+            writes(action, "project"),
+            lambda: self._execute_once(
+                principal,
+                key=key,
+                operation=operation,
+                payload=payload,
+                response_type=response_type,
+                mutation=mutation,
+            ),
+            resource_id=project_id,
+        )
+
+    def _execute_once(
+        self,
+        principal: Principal,
+        *,
+        key: str,
+        operation: str,
+        payload: dict[str, object],
+        response_type: type[M],
+        mutation: Callable[[], M],
+    ) -> M:
         with self.database.transaction() as conn:
             digest = request_hash(payload)
             record = IdempotencyStore.mutation_record(
                 conn, actor_id=principal.actor_id, key=key, operation=operation, request_hash=digest
             )
             if record:
+                self.database.set_audit_target(resource_id=record.resource_id)
                 row = conn.execute(
                     "SELECT response_json FROM project_mutation_results "
                     "WHERE actor_id=? AND idempotency_key=?",
@@ -104,6 +143,167 @@ class ProjectService:
                 (principal.actor_id, key, result.model_dump_json()),
             )
             return result
+
+    # The three changes below are exposed to both the HTTP API and chat. Each runs once
+    # per idempotency key under the operation name every caller shares.
+
+    def create_project_once(
+        self, principal: Principal, key: str, request: CreateProject
+    ) -> ProjectDetail:
+        return self.execute(
+            principal,
+            key=key,
+            operation="project:create",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectDetail,
+            mutation=lambda: self.create_project(principal, request),
+            action="create",
+        )
+
+    def add_document_once(
+        self, principal: Principal, key: str, project_id: str, request: AddProjectDocument
+    ) -> ProjectDocumentItem:
+        return self.execute(
+            principal,
+            key=key,
+            operation=f"project:add-document:{project_id}",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectDocumentItem,
+            mutation=lambda: self.add_document(principal, project_id, request),
+            action="add_document",
+            project_id=project_id,
+        )
+
+    def remove_document_once(
+        self, principal: Principal, key: str, project_id: str, document_id: str
+    ) -> None:
+        self._removal(
+            principal,
+            key,
+            f"project:remove-document:{project_id}:{document_id}",
+            "remove_document",
+            lambda: self.remove_document(principal, project_id, document_id),
+            project_id,
+        )
+
+    def update_project_once(
+        self, principal: Principal, key: str, project_id: str, request: UpdateProject
+    ) -> ProjectDetail:
+        return self.execute(
+            principal,
+            key=key,
+            operation=f"project:update:{project_id}",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectDetail,
+            mutation=lambda: self.update_project(principal, project_id, request),
+            action="update",
+            project_id=project_id,
+        )
+
+    def delete_project_once(self, principal: Principal, key: str, project_id: str) -> None:
+        self._removal(
+            principal,
+            key,
+            f"project:delete:{project_id}",
+            "delete",
+            lambda: self.delete_project(principal, project_id),
+            project_id,
+        )
+
+    def update_document_once(
+        self,
+        principal: Principal,
+        key: str,
+        project_id: str,
+        document_id: str,
+        request: UpdateProjectDocument,
+    ) -> ProjectDocumentItem:
+        return self.execute(
+            principal,
+            key=key,
+            operation=f"project:update-document:{project_id}:{document_id}",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectDocumentItem,
+            mutation=lambda: self.update_document(principal, project_id, document_id, request),
+            action="update_document",
+            project_id=project_id,
+        )
+
+    def add_thread_once(
+        self, principal: Principal, key: str, project_id: str, request: AddProjectThread
+    ) -> ProjectThreadItem:
+        return self.execute(
+            principal,
+            key=key,
+            operation=f"project:add-thread:{project_id}",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectThreadItem,
+            mutation=lambda: self.add_thread(principal, project_id, request),
+            action="add_thread",
+            project_id=project_id,
+        )
+
+    def remove_thread_once(
+        self, principal: Principal, key: str, project_id: str, thread_id: str
+    ) -> None:
+        self._removal(
+            principal,
+            key,
+            f"project:remove-thread:{project_id}:{thread_id}",
+            "remove_thread",
+            lambda: self.remove_thread(principal, project_id, thread_id),
+            project_id,
+        )
+
+    def add_annotation_once(
+        self, principal: Principal, key: str, project_id: str, request: AddProjectAnnotation
+    ) -> ProjectAnnotationItem:
+        return self.execute(
+            principal,
+            key=key,
+            operation=f"project:add-annotation:{project_id}",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectAnnotationItem,
+            mutation=lambda: self.add_annotation(principal, project_id, request),
+            action="add_annotation",
+            project_id=project_id,
+        )
+
+    def remove_annotation_once(
+        self, principal: Principal, key: str, project_id: str, annotation_id: str
+    ) -> None:
+        self._removal(
+            principal,
+            key,
+            f"project:remove-annotation:{project_id}:{annotation_id}",
+            "remove_annotation",
+            lambda: self.remove_annotation(principal, project_id, annotation_id),
+            project_id,
+        )
+
+    def _removal(
+        self,
+        principal: Principal,
+        key: str,
+        operation: str,
+        action: str,
+        remove: Callable[[], None],
+        project_id: str,
+    ) -> None:
+        def run() -> DeletedProjectReference:
+            remove()
+            return DeletedProjectReference()
+
+        self.execute(
+            principal,
+            key=key,
+            operation=operation,
+            payload={},
+            response_type=DeletedProjectReference,
+            mutation=run,
+            action=action,
+            project_id=project_id,
+        )
 
     def _readable_replay(self, principal: Principal, result: M) -> M:
         """A replay acknowledges the original write but cannot revive unavailable references."""
@@ -159,15 +359,11 @@ class ProjectService:
         return result
 
     def _audit(self, principal: Principal, action: str, project_id: str) -> None:
-        with self.database.connection() as conn:
-            self.activity.record_with_connection(
-                conn,
-                principal=principal,
-                action=action,
-                resource_type="project",
-                resource_id=project_id,
-                outcome="accepted",
-            )
+        """Name the project as the ledger target of the enclosing audited change."""
+        del principal, action
+        # A brief created in the same transaction may already have named its document.
+        self.database.clear_audit_target()
+        self.database.set_audit_target(resource_id=project_id)
 
     def _project(self, project_id: str, expected_version: int | None = None):
         with self.database.connection() as conn:
@@ -415,21 +611,28 @@ class ProjectService:
             if brief.content_type != "text/markdown":
                 raise ValidationError("Project brief must be Markdown")
         elif request.create_brief:
-            # This UUID is private until commit. The pathless brief has no filesystem pipeline.
-            brief = self.documents._create_document_locked(
-                document_id=str(uuid.uuid4()),
+            brief = self.documents.create_draft_in_transaction(
                 title=f"{request.name} Brief",
                 content=(
                     f"# {request.name}\n\n## Purpose\n\n"
                     f"{request.description or 'Describe the purpose of this work.'}\n\n"
                     "## Unresolved decisions\n\n- [ ] Choose the next question to answer\n"
                 ),
-                content_type="text/markdown",
-                path=None,
                 actor_id=principal.actor_id,
                 idempotency_key=f"project-brief:{project_id}",
             )
             brief_id = brief.document_id
+            with self.database.connection() as conn:
+                self.activity.record_with_connection(
+                    conn,
+                    principal=principal,
+                    action="create",
+                    resource_type="document",
+                    resource_id=brief_id,
+                    revision_id=brief.current_revision_id,
+                    outcome="accepted",
+                    details={"title": brief.title, "content_type": brief.content_type},
+                )
         with self.database.connection() as conn:
             conn.execute(
                 """INSERT INTO projects (project_id,name,description,brief_document_id,

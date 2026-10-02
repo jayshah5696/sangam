@@ -75,6 +75,11 @@ TOOL_NAMES = (
     "create_document",
     "apply_workspace_organization_plan",
     "publish_document",
+    "read_revision_history",
+    "inspect_projects",
+    "update_project",
+    "update_publication",
+    "annotate_pdf",
 )
 
 SEED_DOCS: tuple[dict[str, str], ...] = (
@@ -444,7 +449,7 @@ async def run_item(
     from chatkit.types import ThreadMetadata
     from openai.types.shared.reasoning import Reasoning
 
-    from sangam.chat import _AGENT_INSTRUCTIONS
+    from sangam.chat import agent_instructions
     from sangam.chat_context import ChatRequestContext
 
     server = env.services.chat
@@ -498,7 +503,7 @@ async def run_item(
 
     agent = Agent(
         name="Sangam workspace agent",
-        instructions=_AGENT_INSTRUCTIONS,
+        instructions=agent_instructions(server.capabilities.capabilities),
         tools=tools,
     )
     run_config = RunConfig(
@@ -677,6 +682,14 @@ def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
             _, capability, path = check.split(":", 2)
             passed = any(
                 effect["capability_id"] == capability and effect["preview"].get("path") == path
+                for effect in effects
+            )
+        elif check.startswith("effect_change_kind:"):
+            _, capability, kind = check.split(":", 2)
+            passed = any(
+                effect["capability_id"] == capability
+                and isinstance(effect["preview"].get("change"), dict)
+                and effect["preview"]["change"].get("kind") == kind
                 for effect in effects
             )
         elif check.startswith("organization_kind:"):

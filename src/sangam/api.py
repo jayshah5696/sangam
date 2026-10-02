@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from sangam import __version__
+from sangam.access import writes
 from sangam.agent_docs import agent_skill, llms_txt
 from sangam.api_assignments import create_assignments_router
 from sangam.api_chat import create_chat_router
@@ -739,23 +740,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: CreateAgentToken,
         principal: Principal = admin_dependency,
     ) -> IssuedAgentToken:
-        with identity.database.transaction() as connection:
-            issued = identity.issue_agent_token(
+        return workspace.audited(
+            principal,
+            writes("issue", "agent_token"),
+            lambda: identity.issue_agent_token(
                 actor_id=body.actor_id,
                 display_name=body.display_name,
                 label=body.label,
                 scopes=body.scopes,
                 expires_at=body.expires_at,
-            )
-            activity.record_with_connection(
-                connection,
-                principal=principal,
-                action="issue",
-                resource_type="agent_token",
-                resource_id=issued.token_id,
-                outcome="accepted",
-            )
-            return issued
+            ),
+        )
 
     @app.patch("/api/v1/agent-tokens/{token_id}", response_model=AgentToken)
     def update_agent_token(
@@ -763,59 +758,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: UpdateAgentToken,
         principal: Principal = admin_dependency,
     ) -> AgentToken:
-        with identity.database.transaction() as connection:
-            updated = identity.update_token(
+        return workspace.audited(
+            principal,
+            writes("update", "agent_token"),
+            lambda: identity.update_token(
                 token_id,
                 expected_version=body.expected_version,
                 label=body.label,
                 scopes=body.scopes,
                 expires_at=body.expires_at,
                 actor_id=principal.actor_id,
-            )
-            activity.record_with_connection(
-                connection,
-                principal=principal,
-                action="update",
-                resource_type="agent_token",
-                resource_id=token_id,
-                outcome="accepted",
-                details={"current_metadata_version": updated.version},
-            )
-            return updated
+            ),
+            resource_id=token_id,
+        )
 
     @app.post("/api/v1/agent-tokens/{token_id}/rotate", response_model=IssuedAgentToken)
     def rotate_agent_token(
         token_id: str,
         principal: Principal = admin_dependency,
     ) -> IssuedAgentToken:
-        with identity.database.transaction() as connection:
-            issued = identity.rotate_token(token_id)
-            activity.record_with_connection(
-                connection,
-                principal=principal,
-                action="rotate",
-                resource_type="agent_token",
-                resource_id=issued.token_id,
-                outcome="accepted",
-            )
-            return issued
+        return workspace.audited(
+            principal,
+            writes("rotate", "agent_token"),
+            lambda: identity.rotate_token(token_id),
+            resource_id=token_id,
+        )
 
     @app.delete("/api/v1/agent-tokens/{token_id}", response_model=AgentToken)
     def revoke_agent_token(
         token_id: str,
         principal: Principal = admin_dependency,
     ) -> AgentToken:
-        with identity.database.transaction() as connection:
-            revoked = identity.revoke_token(token_id)
-            activity.record_with_connection(
-                connection,
-                principal=principal,
-                action="revoke",
-                resource_type="agent_token",
-                resource_id=token_id,
-                outcome="accepted",
-            )
-            return revoked
+        return workspace.audited(
+            principal,
+            writes("revoke", "agent_token"),
+            lambda: identity.revoke_token(token_id),
+            resource_id=token_id,
+        )
 
     @app.get("/api/v1/activity/export.jsonl", response_class=PlainTextResponse)
     def export_activity_jsonl(
@@ -831,6 +810,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: str | None = Query(default=None, max_length=500),
         error_code: str | None = Query(default=None, max_length=120),
         operation_id: str | None = Query(default=None, max_length=160),
+        via: str | None = Query(default=None, pattern="^(chat)$"),
         attention: bool = Query(default=False),
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
@@ -849,6 +829,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path=path,
             error_code=error_code,
             operation_id=operation_id,
+            via=via,
             attention=attention,
             since=since,
             until=until,
@@ -875,6 +856,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: str | None = Query(default=None, max_length=500),
         error_code: str | None = Query(default=None, max_length=120),
         operation_id: str | None = Query(default=None, max_length=160),
+        via: str | None = Query(default=None, pattern="^(chat)$"),
         attention: bool = Query(default=False),
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
@@ -893,6 +875,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path=path,
             error_code=error_code,
             operation_id=operation_id,
+            via=via,
             attention=attention,
             since=since,
             until=until,
@@ -935,6 +918,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: str | None = Query(default=None, max_length=500),
         error_code: str | None = Query(default=None, max_length=120),
         operation_id: str | None = Query(default=None, max_length=160),
+        via: str | None = Query(default=None, pattern="^(chat)$"),
         attention: bool = Query(default=False),
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
@@ -951,6 +935,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path=path,
             error_code=error_code,
             operation_id=operation_id,
+            via=via,
             attention=attention,
             since=since,
             until=until,
@@ -998,7 +983,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         principal: Principal = principal_dependency,
     ) -> dict[str, int]:
         authorization.require_administrator(principal)
-        return {"indexed_documents": documents.rebuild_search_index()}
+        indexed = workspace.audited(
+            principal, writes("reindex", "search_index"), documents.rebuild_search_index
+        )
+        return {"indexed_documents": indexed}
 
     @app.get("/api/v1/tags", response_model=list[Tag])
     def list_tags(principal: Principal = principal_dependency) -> list[Tag]:
@@ -1141,6 +1129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(
         create_karakeep_router(
             karakeep=karakeep,
+            workspace=workspace,
             require_administrator=require_administrator,
         )
     )
@@ -1156,19 +1145,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: UpdateHtmlJavascriptSettings,
         principal: Principal = admin_dependency,
     ) -> HtmlJavascriptSettings:
-        result = html_javascript.update(
-            expected_version=body.expected_version,
-            enabled=body.enabled,
-            actor_id=principal.actor_id,
-        )
-        activity.record(
-            principal=principal,
-            action="update",
-            resource_type="html_javascript_settings",
+        return workspace.audited(
+            principal,
+            writes("update", "html_javascript_settings"),
+            lambda: html_javascript.update(
+                expected_version=body.expected_version,
+                enabled=body.enabled,
+                actor_id=principal.actor_id,
+            ),
             resource_id="workspace",
-            outcome="accepted",
         )
-        return result
 
     @app.patch("/api/v1/documents/{document_id}/trust", response_model=Document)
     def update_document_trust(
@@ -1180,21 +1166,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = admin_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="trust",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda _: documents.update_trust(
-                document_id=document_id,
-                expected_trust_version=body.expected_trust_version,
-                trust_level=body.trust_level,
-                actor_id=principal.actor_id,
-                idempotency_key=idempotency_key,
-            ),
         )
         response.headers["ETag"] = document_etag(result)
         return result
@@ -1621,23 +1600,14 @@ else fetch('/api/v1/trusted-previews/content', {
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="update",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda expected_rev: documents.update_document(
-                document_id=document_id,
-                expected_revision_id=expected_rev,
-                content=body.content,
-                title=body.title,
-                summary=body.summary,
-                idempotency_key=idempotency_key,
-                actor_id=principal.actor_id,
-            ),
         )
         response.headers["ETag"] = document_etag(result)
         return result
@@ -1653,22 +1623,14 @@ else fetch('/api/v1/trusted-previews/content', {
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="duplicate",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda expected_rev: documents.duplicate_document(
-                document_id=document_id,
-                expected_revision_id=expected_rev,
-                title=body.title,
-                path=body.path,
-                idempotency_key=idempotency_key,
-                actor_id=principal.actor_id,
-            ),
         )
         if result.content_type == "application/pdf":
             background_tasks.add_task(pdf_research.extract_text, result.document_id)
@@ -1685,22 +1647,14 @@ else fetch('/api/v1/trusted-previews/content', {
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="tag",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda _: documents.update_document_metadata(
-                document_id=document_id,
-                expected_metadata_version=body.expected_metadata_version,
-                category=body.category,
-                tag_ids=body.tag_ids,
-                idempotency_key=idempotency_key,
-                actor_id=principal.actor_id,
-            ),
         )
         response.headers["ETag"] = document_etag(result)
         return result
@@ -1715,22 +1669,14 @@ else fetch('/api/v1/trusted-previews/content', {
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="materialize",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda expected_rev: documents.materialize_document(
-                document_id=document_id,
-                expected_revision_id=expected_rev,
-                path=body.path,
-                summary=body.summary,
-                idempotency_key=idempotency_key,
-                actor_id=principal.actor_id,
-            ),
         )
         response.headers["ETag"] = document_etag(result)
         return result
@@ -1745,22 +1691,14 @@ else fetch('/api/v1/trusted-previews/content', {
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="move",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda expected_rev: documents.move_document(
-                document_id=document_id,
-                expected_revision_id=expected_rev,
-                path=body.path,
-                summary=body.summary,
-                idempotency_key=idempotency_key,
-                actor_id=principal.actor_id,
-            ),
         )
         response.headers["ETag"] = document_etag(result)
         return result
@@ -1775,21 +1713,14 @@ else fetch('/api/v1/trusted-previews/content', {
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="delete",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda expected_rev: documents.delete_document(
-                document_id=document_id,
-                expected_revision_id=expected_rev,
-                summary=body.summary,
-                idempotency_key=idempotency_key,
-                actor_id=principal.actor_id,
-            ),
         )
         response.headers["ETag"] = document_etag(result)
         return result
@@ -1844,22 +1775,14 @@ else fetch('/api/v1/trusted-previews/content', {
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         principal: Principal = principal_dependency,
     ) -> Document:
-        result = workspace.http_document_mutation(
+        result = workspace.write_document(
             principal,
             document_id=document_id,
             action="restore",
-            payload=body.model_dump(),
+            body=body,
             if_match=if_match,
             if_none_match=if_none_match,
             idempotency_key=idempotency_key,
-            operation=lambda expected_rev: documents.restore_document(
-                document_id=document_id,
-                expected_revision_id=expected_rev,
-                revision_id=body.revision_id,
-                summary=body.summary,
-                idempotency_key=idempotency_key,
-                actor_id=principal.actor_id,
-            ),
         )
         response.headers["ETag"] = document_etag(result)
         return result
@@ -1874,84 +1797,67 @@ else fetch('/api/v1/trusted-previews/content', {
 
     @app.post("/api/v1/reconciliation/scan", response_model=ReconciliationReport)
     def reconciliation_scan(
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> ReconciliationReport:
-        return reconciliation.scan()
+        return workspace.audited(
+            principal, writes("reconcile_scan", "workspace"), reconciliation.scan
+        )
 
     @app.post("/api/v1/reconciliation/reindex", response_model=Document, status_code=201)
     def reconciliation_reindex(
         body: ReindexPath,
         principal: Principal = admin_dependency,
     ) -> Document:
-        result = reconciliation.reindex_path(body.path)
-        activity.record(
-            principal=principal,
-            action="reconcile_reindex",
-            resource_type="document",
-            resource_id=result.document_id,
-            path=result.path,
-            outcome="accepted",
-            revision_id=result.current_revision_id,
+        return workspace.audited(
+            principal,
+            writes("reconcile_reindex", "document"),
+            lambda: reconciliation.reindex_path(body.path),
         )
-        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/accept-disk", response_model=Document)
     def reconciliation_accept_disk(
         conflict_id: str,
         principal: Principal = admin_dependency,
     ) -> Document:
-        result = reconciliation.accept_disk_content(conflict_id)
-        activity.record(
-            principal=principal,
-            action="reconcile_accept_disk",
-            resource_type="document",
-            resource_id=result.document_id,
-            path=result.path,
-            outcome="accepted",
-            revision_id=result.current_revision_id,
+        return workspace.audited(
+            principal,
+            writes("reconcile_accept_disk", "document"),
+            lambda: reconciliation.accept_disk_content(conflict_id),
         )
-        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/restore-database", response_model=Document)
     def reconciliation_restore_database(
         conflict_id: str,
         principal: Principal = admin_dependency,
     ) -> Document:
-        result = reconciliation.restore_database_content(conflict_id)
-        activity.record(
-            principal=principal,
-            action="reconcile_restore_database",
-            resource_type="document",
-            resource_id=result.document_id,
-            path=result.path,
-            outcome="accepted",
-            revision_id=result.current_revision_id,
+        return workspace.audited(
+            principal,
+            writes("reconcile_restore_database", "document"),
+            lambda: reconciliation.restore_database_content(conflict_id),
         )
-        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/recognize-move", response_model=Document)
     def reconciliation_recognize_move(
         conflict_id: str,
         principal: Principal = admin_dependency,
     ) -> Document:
-        result = reconciliation.recognize_move(conflict_id)
-        activity.record(
-            principal=principal,
-            action="reconcile_recognize_move",
-            resource_type="document",
-            resource_id=result.document_id,
-            path=result.path,
-            outcome="accepted",
-            revision_id=result.current_revision_id,
+        return workspace.audited(
+            principal,
+            writes("reconcile_recognize_move", "document"),
+            lambda: reconciliation.recognize_move(conflict_id),
         )
-        return result
 
     @app.post("/api/v1/reconciliation/{conflict_id}/ignore", response_model=ReconciliationReport)
     def reconciliation_ignore(
         conflict_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> ReconciliationReport:
-        return reconciliation.ignore_unknown_file(conflict_id)
+        return workspace.audited(
+            principal,
+            writes("reconcile_ignore", "reconciliation_conflict"),
+            lambda: reconciliation.ignore_unknown_file(conflict_id),
+            resource_id=conflict_id,
+        )
 
     @app.get("/api/v1/backups", response_model=list[BackupSet])
     def list_backups(
@@ -1964,7 +1870,12 @@ else fetch('/api/v1/trusted-previews/content', {
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = admin_dependency,
     ) -> BackupSet:
-        return backups.create(actor_id=principal.actor_id, idempotency_key=idempotency_key)
+        return workspace.audited(
+            principal,
+            writes("create", "backup"),
+            lambda: backups.create(actor_id=principal.actor_id, idempotency_key=idempotency_key),
+            subject=lambda backup: backup.backup_id,
+        )
 
     @app.post("/api/v1/backups/{backup_id}/verify", response_model=BackupVerification)
     def verify_backup(
@@ -1976,9 +1887,14 @@ else fetch('/api/v1/trusted-previews/content', {
     @app.delete("/api/v1/backups/{backup_id}", status_code=204)
     def delete_backup(
         backup_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> Response:
-        backups.delete(backup_id)
+        workspace.audited(
+            principal,
+            writes("delete", "backup"),
+            lambda: backups.delete(backup_id),
+            resource_id=backup_id,
+        )
         return Response(status_code=204)
 
     frontend_dist = resolved_settings.frontend_dist

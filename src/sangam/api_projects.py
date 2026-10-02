@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, Response, status
-from pydantic import BaseModel
 
 from sangam.authorization import AuthorizationPolicy
 from sangam.projects import ProjectService
@@ -25,11 +23,6 @@ from sangam.schemas import (
 from sangam.security import Principal
 
 PrincipalResolver = Callable[..., Principal]
-M = TypeVar("M", bound=BaseModel)
-
-
-class DeletedProjectReference(BaseModel):
-    pass
 
 
 def create_projects_router(
@@ -52,32 +45,6 @@ def create_projects_router(
     principal_dependency = Depends(administrator)
     key_dependency = Depends(mutation_key)
 
-    def mutate(
-        principal: Principal,
-        key: str,
-        operation: str,
-        body: BaseModel,
-        response_type: type[M],
-        mutation: Callable[[], M],
-    ) -> M:
-        return projects.execute(
-            principal,
-            key=key,
-            operation=operation,
-            payload=body.model_dump(exclude_unset=True),
-            response_type=response_type,
-            mutation=mutation,
-        )
-
-    def remove(
-        principal: Principal, key: str, operation: str, mutation: Callable[[], None]
-    ) -> None:
-        def run() -> DeletedProjectReference:
-            mutation()
-            return DeletedProjectReference()
-
-        mutate(principal, key, operation, DeletedProjectReference(), DeletedProjectReference, run)
-
     @router.get("", response_model=list[ProjectSummary])
     def list_projects(_principal: Principal = principal_dependency) -> list[ProjectSummary]:
         return projects.list_projects(_principal)
@@ -92,14 +59,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectDetail:
-        return mutate(
-            principal,
-            key,
-            "project:create",
-            body,
-            ProjectDetail,
-            lambda: projects.create_project(principal, body),
-        )
+        return projects.create_project_once(principal, key, body)
 
     @router.get("/{project_id}", response_model=ProjectDetail)
     def get_project(
@@ -115,14 +75,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectDetail:
-        return mutate(
-            principal,
-            key,
-            f"project:update:{project_id}",
-            body,
-            ProjectDetail,
-            lambda: projects.update_project(principal, project_id, body),
-        )
+        return projects.update_project_once(principal, key, project_id, body)
 
     @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_project(
@@ -130,12 +83,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> Response:
-        remove(
-            principal,
-            key,
-            f"project:delete:{project_id}",
-            lambda: projects.delete_project(principal, project_id),
-        )
+        projects.delete_project_once(principal, key, project_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post(
@@ -149,14 +97,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectDocumentItem:
-        return mutate(
-            principal,
-            key,
-            f"project:add-document:{project_id}",
-            body,
-            ProjectDocumentItem,
-            lambda: projects.add_document(principal, project_id, body),
-        )
+        return projects.add_document_once(principal, key, project_id, body)
 
     @router.patch("/{project_id}/documents/{document_id}", response_model=ProjectDocumentItem)
     def update_project_document(
@@ -166,14 +107,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectDocumentItem:
-        return mutate(
-            principal,
-            key,
-            f"project:update-document:{project_id}:{document_id}",
-            body,
-            ProjectDocumentItem,
-            lambda: projects.update_document(principal, project_id, document_id, body),
-        )
+        return projects.update_document_once(principal, key, project_id, document_id, body)
 
     @router.delete("/{project_id}/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
     def remove_project_document(
@@ -182,12 +116,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> Response:
-        remove(
-            principal,
-            key,
-            f"project:remove-document:{project_id}:{document_id}",
-            lambda: projects.remove_document(principal, project_id, document_id),
-        )
+        projects.remove_document_once(principal, key, project_id, document_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post(
@@ -201,14 +130,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectThreadItem:
-        return mutate(
-            principal,
-            key,
-            f"project:add-thread:{project_id}",
-            body,
-            ProjectThreadItem,
-            lambda: projects.add_thread(principal, project_id, body),
-        )
+        return projects.add_thread_once(principal, key, project_id, body)
 
     @router.delete("/{project_id}/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
     def remove_project_thread(
@@ -217,12 +139,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> Response:
-        remove(
-            principal,
-            key,
-            f"project:remove-thread:{project_id}:{thread_id}",
-            lambda: projects.remove_thread(principal, project_id, thread_id),
-        )
+        projects.remove_thread_once(principal, key, project_id, thread_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post(
@@ -236,14 +153,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectAnnotationItem:
-        return mutate(
-            principal,
-            key,
-            f"project:add-annotation:{project_id}",
-            body,
-            ProjectAnnotationItem,
-            lambda: projects.add_annotation(principal, project_id, body),
-        )
+        return projects.add_annotation_once(principal, key, project_id, body)
 
     @router.delete(
         "/{project_id}/annotations/{annotation_id}", status_code=status.HTTP_204_NO_CONTENT
@@ -254,12 +164,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> Response:
-        remove(
-            principal,
-            key,
-            f"project:remove-annotation:{project_id}:{annotation_id}",
-            lambda: projects.remove_annotation(principal, project_id, annotation_id),
-        )
+        projects.remove_annotation_once(principal, key, project_id, annotation_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return router

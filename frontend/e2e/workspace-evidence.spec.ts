@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Page, APIRequestContext, TestInfo } from '@playwright/test'
 import { annotationSchema, documentSchema } from '../src/api'
-import { expect, test } from './fixtures'
+import { expect, openIfClosed, test } from './fixtures'
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {
   const directory = process.env.SANGAM_EVIDENCE_DIR
@@ -35,8 +35,10 @@ async function openDraft(page: Page, title: string) {
   const sheet = page.getByRole('dialog', { name: 'Document inspector', exact: true })
   if (await sheet.isVisible())
     await sheet.getByRole('button', { name: 'Collapse document inspector' }).click()
-  const reveal = page.getByRole('button', { name: 'Show workspace sidebar', exact: true })
-  if (await reveal.isVisible()) await reveal.click()
+  await openIfClosed(
+    page.getByRole('button', { name: 'Show workspace sidebar', exact: true }),
+    page.locator('#workspace-tab-files'),
+  )
   await page.getByRole('treeitem', { name: title, exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Document title', exact: true })).toHaveValue(title)
 }

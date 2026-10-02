@@ -1,5 +1,17 @@
 import { z } from 'zod'
-import { textLocatorSchema, type TextLocator } from './evidenceCitation'
+
+/** An exact passage inside one immutable revision's text. */
+export const textLocatorSchema = z
+  .object({
+    exact: z.string().min(1),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+    prefix: z.string(),
+    suffix: z.string(),
+    representation: z.enum(['source', 'rendered']).optional(),
+  })
+  .refine((value) => value.end - value.start === value.exact.length, 'Invalid passage range')
+export type TextLocator = z.infer<typeof textLocatorSchema>
 
 export type CitationTarget = {
   documentId: string
@@ -56,10 +68,31 @@ export function citationTargetFromData(data: CitationDataPayload | undefined): C
 export function citationTargetFromLocation(documentId: string): CitationTarget | null {
   if (!window.location.pathname.endsWith(`/documents/${documentId}`))
     return pendingTargets.get(documentId) ?? null
-  const search = new URLSearchParams(window.location.search)
   const pending = pendingTargets.get(documentId)
   pendingTargets.delete(documentId)
   if (pending) return pending
+  return citationTargetFromParams(documentId, new URLSearchParams(window.location.search))
+}
+
+/**
+ * Every query parameter a citation link may carry. Encoding, decoding, and
+ * clearing a citation all use this one list, so they cannot drift apart.
+ */
+export const CITATION_PARAM_KEYS = [
+  'revision',
+  'page',
+  'annotation',
+  'text',
+  'start',
+  'representation',
+  'quoteStart',
+  'quoteEnd',
+  'line',
+  'match',
+] as const
+
+/** Decode a citation from link parameters; null when they name no location. */
+export function citationTargetFromParams(documentId: string, search: URLSearchParams): CitationTarget | null {
   const exact = search.get('text')
   const start = Number(search.get('start') ?? 0)
   const target = citationTargetFromData({
@@ -103,7 +136,17 @@ export function citationTargetFromLocation(documentId: string): CitationTarget |
     : null
 }
 
+/** The in-app route that opens a citation. */
 export function citationHref(target: CitationTarget): string {
+  return `/documents/${encodeURIComponent(target.documentId)}${citationQuery(target)}`
+}
+
+/** The portable `sangam://` link stored in Markdown; it opens at the same target. */
+export function citationLink(target: CitationTarget): string {
+  return `sangam://document/${encodeURIComponent(target.documentId)}${citationQuery(target)}`
+}
+
+function citationQuery(target: CitationTarget): string {
   const search = new URLSearchParams()
   if (target.revisionId) search.set('revision', target.revisionId)
   if (target.pageNumber) search.set('page', String(target.pageNumber))
@@ -119,8 +162,7 @@ export function citationHref(target: CitationTarget): string {
     search.set('line', String(target.passage.line))
     if (target.passage.exact) search.set('match', target.passage.exact)
   }
-  const suffix = search.size ? `?${search.toString()}` : ''
-  return `/documents/${encodeURIComponent(target.documentId)}${suffix}`
+  return search.size ? `?${search.toString()}` : ''
 }
 
 const pendingTargets = new Map<string, CitationTarget>()

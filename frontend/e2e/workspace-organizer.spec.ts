@@ -342,3 +342,96 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
     })
   }
 })
+
+test('renaming an open draft from the file tree keeps autosave on the renamed revision', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'chromium-desktop',
+    'the file tree and the editor are visible together only in the wide layout',
+  )
+  const title = `Rename draft ${randomUUID().slice(0, 8)}`
+  const created = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { title, content: '# Draft\n', content_type: 'text/markdown' },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/documents returns document entity with document_id
+  const { document_id: documentId } = (await created.json()) as CreatedDocument
+  const server = async () => {
+    const response = await request.get(`/api/v1/documents/${documentId}`)
+    // SAFETY: GET /api/v1/documents/{id} returns the document entity with title and content
+    return (await response.json()) as { title: string; content: string }
+  }
+  const editor = page.locator('.cm-content')
+  const typeAtEnd = async (text: string) => {
+    await editor.click()
+    await page.keyboard.press('ControlOrMeta+End')
+    await page.keyboard.type(text)
+  }
+
+  await page.goto(`/documents/${documentId}`)
+  await page.getByRole('radio', { name: 'edit' }).click()
+  await typeAtEnd('before rename')
+  await expect.poll(async () => (await server()).content).toContain('before rename')
+
+  const tree = page.locator('.sangam-file-tree')
+  const item = tree.getByRole('treeitem', { name: title })
+  await item.focus()
+  await item.press('F2')
+  const renameInput = tree.locator('input[data-item-rename-input]')
+  await renameInput.fill(`${title} renamed`)
+  await renameInput.press('Enter')
+  await expect.poll(async () => (await server()).title).toBe(`${title} renamed`)
+  await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue(`${title} renamed`)
+
+  await typeAtEnd(' after rename')
+  await expect.poll(async () => (await server()).content).toContain('after rename')
+  await expect(page.locator('.save-state')).toHaveText('Saved draft')
+})
+
+test('document actions save a title and a path together, and the location keeps its exact case', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'the document header is covered on desktop')
+  const suffix = randomUUID().slice(0, 8)
+  const created = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: `Details ${suffix}`,
+      content: '# Details\n',
+      content_type: 'text/markdown',
+      path: `Details/Case-${suffix}.md`,
+    },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/documents returns document entity with document_id
+  const { document_id: documentId } = (await created.json()) as CreatedDocument
+  const server = async () => {
+    const response = await request.get(`/api/v1/documents/${documentId}`)
+    // SAFETY: GET /api/v1/documents/{id} returns the document entity with title and path
+    return (await response.json()) as { title: string; path: string | null }
+  }
+
+  await page.goto(`/documents/${documentId}`)
+  const label = page.locator('.location-control-pill .location-control-label')
+  await expect(label).toHaveText(`Details/Case-${suffix}.md`)
+  const style = await label.evaluate((element) => {
+    const computed = getComputedStyle(element.closest('.location-control-pill') ?? element)
+    return { transform: computed.textTransform, family: getComputedStyle(element).fontFamily }
+  })
+  expect(style.transform).toBe('none')
+  expect(style.family).toMatch(/mono|SFMono|Consolas/i)
+
+  await page.getByRole('button', { name: 'Document actions' }).click()
+  const actions = page.locator('.document-actions-form')
+  await actions.getByLabel('Title', { exact: true }).fill(`Renamed ${suffix}`)
+  await actions.getByLabel('Workspace path').fill(`Details/Moved-${suffix}.md`)
+  await actions.getByRole('button', { name: 'Save details' }).click()
+
+  await expect.poll(server).toMatchObject({ title: `Renamed ${suffix}`, path: `Details/Moved-${suffix}.md` })
+  await expect(page.getByRole('button', { name: 'Save details' })).toBeHidden()
+  await expect(label).toHaveText(`Details/Moved-${suffix}.md`)
+})

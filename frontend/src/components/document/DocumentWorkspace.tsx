@@ -11,23 +11,19 @@ import {
   PanelRightOpen,
   Rows2,
 } from 'lucide-react'
-import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
-import {
-  evidenceTextForLocator,
-  locateEvidencePassage,
-  locatePassage,
-  type TextLocator,
-} from '../../evidenceCitation'
+import { evidenceTextForLocator, locatePassage } from '../../evidenceCitation'
 import { StateMessage } from '../ui/StateMessage'
 import { SelectableHtmlText } from '../SelectableHtmlText'
-import { TextSelectionToolbar, type TextSelectionAnchor } from './TextSelectionToolbar'
-import { api, SUPPORTED_IMAGE_TYPES, type Document, type Revision } from '../../api'
-import { chatNavigationState } from '../../chatNavigation'
+import { TextSelectionToolbar } from './TextSelectionToolbar'
+import { useSourceSelection } from './useSourceSelection'
+import { api, SUPPORTED_IMAGE_TYPES, writeFailureMessage, type Document, type Revision } from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
+  CITATION_PARAM_KEYS,
   citationTargetFromLocation,
   clearCitationNavigation,
   type CitationTarget,
+  type TextLocator,
 } from '../../citationNavigation'
 import {
   useDocumentSession,
@@ -42,7 +38,7 @@ import { canSplitActiveGroup } from '../../splitPolicy'
 import { initialDocumentMode, saveLabel } from '../../documentWorkspaceState'
 import { DocumentLocationControl } from './DocumentLocationControl'
 import { ActionDialog } from '../ActionMenu'
-import type { EditorSelectionAnchor, MarkdownEditorHandle } from '../MarkdownEditor'
+import type { MarkdownEditorHandle } from '../MarkdownEditor'
 import { PublicationStatusBadge } from './PublicationStatusBadge'
 import { ConflictRecoveryNotice } from './ConflictRecoveryNotice'
 import { DraftRecoveryNotice, offlineRecoveryMessage } from './DraftRecoveryNotice'
@@ -81,14 +77,11 @@ export function DocumentWorkspace({
   const sessions = useDocumentSessions()
   const session = useDocumentSession(documentId)
   const editorRef = useRef<MarkdownEditorHandle>(null)
-  const editorSelectionSnapshot = useRef<{
-    content: string
-    selectedText: string
-    occurrence: number
-    revisionId?: string
-  } | null>(null)
   const document = queryClient.getQueryData<Document>(['document', documentId]) ?? initialDocument
   const content = session.content ?? document.content
+  const workspaceRef = useRef<HTMLElement>(null)
+  const source = useSourceSelection({ documentId, document, content, workspaceRef })
+  const { activeSelection, editorSelection } = source
   const saveState = session.saveState
   const mode = session.mode
   const selection = session.selection
@@ -101,21 +94,11 @@ export function DocumentWorkspace({
     enabled: document.content_type === 'text/html',
   })
   const [linkTarget, setLinkTarget] = useState('')
-  const [activeSelection, setActiveSelection] = useState<{
-    selectedText: string
-    anchor: TextSelectionAnchor
-    sourceContent: string
-    revisionId?: string
-    occurrence: number
-  } | null>(null)
-  const [captureError, setCaptureError] = useState<string | null>(null)
-  const [editorSelection, setEditorSelection] = useState<EditorSelectionAnchor | null>(null)
   const [imageUpload, setImageUpload] = useState<{ pending: number; error: string | null }>({
     pending: 0,
     error: null,
   })
   const imageInputRef = useRef<HTMLInputElement>(null)
-  const navigate = useNavigate()
   const resolveAsset = useCallback(
     async (reference: string) => api.documentAssetUrl(documentId, reference),
     [documentId],
@@ -150,114 +133,6 @@ export function DocumentWorkspace({
     }
   }
 
-  // Asking saves the draft first so chat reads exactly the passage the user selected.
-  const askAbout = async (selectedText: string) => {
-    const current = sessions.getSession(documentId).content ?? document.content
-    const saved = current === document.content ? document : await sessions.flushSnapshot(documentId, current)
-    await navigate({
-      to: '/chat',
-      search: {
-        document: documentId,
-        revision: saved.current_revision_id,
-        returnTo: `/documents/${documentId}`,
-      },
-      state: chatNavigationState(selectedText),
-    })
-  }
-
-  const keepSelection = async (
-    selectedText: string,
-    sourceContent: string,
-    revisionId?: string,
-    occurrence = 0,
-  ) => {
-    try {
-      const pinned =
-        revisionId ?? (await sessions.flushSnapshot(documentId, sourceContent)).current_revision_id
-      const textLocator = locateEvidencePassage(
-        sourceContent,
-        document.content_type,
-        selectedText,
-        occurrence,
-      )
-      if (!textLocator) throw new Error('The selected passage does not match the source. Select it again.')
-      await workspaceEvidenceStore.keepEvidence({
-        sourceDocumentId: documentId,
-        sourceTitle: document.title,
-        sourcePath: document.path,
-        sourceContentType: document.content_type,
-        pinnedRevisionId: pinned,
-        selectedText,
-        textLocator,
-      })
-      setCaptureError(null)
-    } catch (error) {
-      setCaptureError(error instanceof Error ? error.message : String(error))
-      throw error
-    }
-  }
-
-  const checkTextSelection = useCallback(() => {
-    const sel = window.getSelection()
-    if (!sel || sel.isCollapsed || !workspaceRef.current) {
-      return
-    }
-    const text = sel.toString().trim()
-    if (!text || text.length < 2) return
-    const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : null
-    if (!range) return
-    const container =
-      range.commonAncestorContainer instanceof Element
-        ? range.commonAncestorContainer
-        : range.commonAncestorContainer.parentElement
-    if (
-      !workspaceRef.current.contains(range.commonAncestorContainer) &&
-      container?.closest<HTMLElement>('[data-evidence-source]')?.dataset.evidenceSource !== documentId
-    )
-      return
-    if (!container?.closest('.markdown-preview, .html-source-text')) return
-    const surface = container.closest('.markdown-preview, .html-source-text article')
-    const preceding = range.cloneRange()
-    if (surface) {
-      preceding.selectNodeContents(surface)
-      preceding.setEnd(range.startContainer, range.startOffset)
-    }
-    const occurrence = surface ? preceding.toString().split(text).length - 1 : 0
-    const revisionId = container.closest<HTMLElement>('[data-source-revision]')?.dataset.sourceRevision
-    const historical = revisionId
-      ? queryClient.getQueryData<Revision>(['revision', documentId, revisionId])
-      : undefined
-    const rect = range.getBoundingClientRect()
-    if (revisionId && !historical) return
-    if (rect.width === 0 && rect.height === 0) return
-    setActiveSelection({
-      selectedText: text,
-      occurrence,
-      sourceContent: historical?.content ?? content,
-      revisionId:
-        historical?.revision_id ?? (content === document.content ? document.current_revision_id : undefined),
-      anchor: {
-        left: rect.left,
-        right: rect.right,
-        top: rect.top,
-        bottom: rect.bottom,
-        width: rect.width,
-      },
-    })
-  }, [content, document.content, document.current_revision_id, documentId, queryClient])
-
-  useEffect(() => {
-    const handleMouseUp = () => {
-      requestAnimationFrame(checkTextSelection)
-    }
-    const element = window
-    element?.addEventListener('pointerup', handleMouseUp)
-    element?.addEventListener('keyup', handleMouseUp)
-    return () => {
-      element?.removeEventListener('pointerup', handleMouseUp)
-      element?.removeEventListener('keyup', handleMouseUp)
-    }
-  }, [checkTextSelection])
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(() =>
     citationTargetFromLocation(documentId),
   )
@@ -269,6 +144,8 @@ export function DocumentWorkspace({
     if (citationTarget && matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
   }, [citationTarget, updatePreferences])
   const [draftTitle, setDraftTitle] = useState(document.title)
+  // A rename from the file tree, chat, or a restore changes the server title under the input.
+  useEffect(() => setDraftTitle(document.title), [document.title])
 
   useEffect(() => {
     void sessions.initializeDocument(initialDocument)
@@ -286,7 +163,6 @@ export function DocumentWorkspace({
     () => updateDocumentTitle(documentId, document.title),
     [document.title, documentId, updateDocumentTitle],
   )
-  const workspaceRef = useRef<HTMLElement>(null)
   const registerReadyEditor = useCallback(
     () =>
       sessions.registerEditor(
@@ -361,16 +237,12 @@ export function DocumentWorkspace({
   }, [documentId])
 
   const updateCachedDocument = (nextDocument: Document, replaceContent = false) => {
-    queryClient.setQueryData(['document', documentId], nextDocument)
     sessions.acceptServerDocument(nextDocument, replaceContent)
     updateDocumentTitle(documentId, nextDocument.title)
-    void queryClient.invalidateQueries({ queryKey: ['documents'] })
-    void queryClient.invalidateQueries({ queryKey: ['history', documentId] })
-    void queryClient.invalidateQueries({ queryKey: ['folders'] })
   }
   const titleMutation = useMutation({
-    mutationFn: (title: string) => api.updateDocument(document, content, title),
-    onSuccess: (nextDocument) => updateCachedDocument(nextDocument),
+    mutationFn: (title: string) => sessions.rename(documentId, title),
+    onSuccess: (nextDocument) => updateDocumentTitle(documentId, nextDocument.title),
   })
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -475,14 +347,17 @@ export function DocumentWorkspace({
                   }}
                 />
               </h1>
-              {titleMutation.isError && <small className="error-text">Title could not be saved.</small>}
+              {titleMutation.isError && (
+                <small className="error-text" role="alert">
+                  {writeFailureMessage(titleMutation.error, 'Title could not be saved.')}
+                </small>
+              )}
             </div>
 
             {document.content_type !== 'application/pdf' && (
               <div className="document-header-toolbar">
                 <DocumentToolbar
                   document={document}
-                  content={content}
                   saveState={saveState}
                   mode={mode}
                   onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
@@ -539,8 +414,13 @@ export function DocumentWorkspace({
           onRetry={() => sessions.retryDraftPersistence(documentId)}
         />
       )}
-      {captureError && (
-        <StateMessage compact kind="error" title="Evidence could not be kept" description={captureError} />
+      {source.captureError && (
+        <StateMessage
+          compact
+          kind="error"
+          title="Evidence could not be kept"
+          description={source.captureError}
+        />
       )}
       {imageUpload.error && (
         <StateMessage
@@ -564,17 +444,7 @@ export function DocumentWorkspace({
           error={citedHistoryQuery.isError || (citedHistoryQuery.isSuccess && !citedRevision)}
           onClose={() => {
             const url = new URL(window.location.href)
-            for (const key of [
-              'revision',
-              'page',
-              'annotation',
-              'text',
-              'start',
-              'representation',
-              'quoteStart',
-              'quoteEnd',
-            ])
-              url.searchParams.delete(key)
+            for (const key of CITATION_PARAM_KEYS) url.searchParams.delete(key)
             clearCitationNavigation(documentId)
             window.history.replaceState(window.history.state, '', url)
             setCitationTarget(null)
@@ -602,33 +472,14 @@ export function DocumentWorkspace({
               initialViewState={session.viewState}
               onViewStateChange={(viewState) => {
                 const snapshot = sessions.getSession(documentId).content ?? document.content
-                if (viewState.anchor !== viewState.head) {
-                  const selectedText = snapshot
-                    .slice(
-                      Math.min(viewState.anchor, viewState.head),
-                      Math.max(viewState.anchor, viewState.head),
-                    )
-                    .trim()
-                  editorSelectionSnapshot.current = {
-                    content: snapshot,
-                    selectedText,
-                    revisionId:
-                      sessions.getSession(documentId).saveState === 'saved'
-                        ? sessions.getSession(documentId).baseRevisionId
-                        : undefined,
-                    occurrence: selectedText
-                      ? snapshot.slice(0, Math.min(viewState.anchor, viewState.head)).split(selectedText)
-                          .length - 1
-                      : 0,
-                  }
-                }
+                source.rememberEditorSelection(viewState, snapshot)
                 sessions.updateSession(documentId, { viewState })
               }}
               focusOnOpen={session.focusOnOpen}
               onFocused={() => sessions.updateSession(documentId, { focusOnOpen: false })}
               onReady={registerReadyEditor}
               onImageFiles={(files) => void uploadImages(files)}
-              onSelectionSettled={setEditorSelection}
+              onSelectionSettled={source.setEditorSelection}
             />
           </Suspense>
         )}
@@ -701,15 +552,15 @@ export function DocumentWorkspace({
               type="button"
               className="secondary-action"
               onClick={() => {
-                const captured = editorSelectionSnapshot.current
+                const captured = source.editorSnapshot.current
                 const snapshot = captured?.content ?? ''
                 const sel = captured?.selectedText ?? ''
                 if (!sel) return
-                void keepSelection(sel, snapshot, captured?.revisionId, captured?.occurrence ?? 0).catch(
-                  () => {
+                void source
+                  .keepSelection(sel, snapshot, captured?.revisionId, captured?.occurrence ?? 0)
+                  .catch(() => {
                     /* The capture error is displayed above. */
-                  },
-                )
+                  })
               }}
               title="Keep selected text as evidence"
             >
@@ -736,16 +587,16 @@ export function DocumentWorkspace({
           pinnedRevisionId={activeSelection.revisionId}
           selectedText={activeSelection.selectedText}
           anchor={activeSelection.anchor}
-          onDismiss={() => setActiveSelection(null)}
+          onDismiss={source.dismissSelection}
           onKeep={() =>
-            keepSelection(
+            source.keepSelection(
               activeSelection.selectedText,
               activeSelection.sourceContent,
               activeSelection.revisionId,
               activeSelection.occurrence,
             )
           }
-          onAsk={() => void askAbout(activeSelection.selectedText)}
+          onAsk={() => void source.askAbout(activeSelection.selectedText)}
         />
       )}
       {editorSelection &&
@@ -760,23 +611,23 @@ export function DocumentWorkspace({
             contentType={document.content_type}
             selectedText={editorSelection.text}
             anchor={editorSelection.rect}
-            onDismiss={() => setEditorSelection(null)}
+            onDismiss={() => source.setEditorSelection(null)}
             onFormat={
               document.content_type === 'text/markdown'
                 ? (format) => editorRef.current?.applyFormat(format)
                 : undefined
             }
             onKeep={() => {
-              const captured = editorSelectionSnapshot.current
+              const captured = source.editorSnapshot.current
               if (!captured?.selectedText) return Promise.reject(new Error('Select the passage again.'))
-              return keepSelection(
+              return source.keepSelection(
                 captured.selectedText,
                 captured.content,
                 captured.revisionId,
                 captured.occurrence,
               )
             }}
-            onAsk={() => void askAbout(editorSelection.text)}
+            onAsk={() => void source.askAbout(editorSelection.text)}
           />
         )}
     </section>
@@ -863,12 +714,14 @@ function CitedRevisionEvidence({
           Close cited revision
         </button>
       </header>
-      {loading && <p className="small-muted">Loading the immutable cited revision…</p>}
+      {loading && <StateMessage compact kind="loading" title="Loading the immutable cited revision…" />}
       {error && (
-        <p className="error-text">
-          The cited revision is not available in this document’s history. The current head has not been
-          substituted.
-        </p>
+        <StateMessage
+          compact
+          kind="error"
+          title="The cited revision is not available in this document’s history"
+          description="The current head has not been substituted."
+        />
       )}
       {quoteLocator && document.content_type !== 'application/pdf' && (
         <section
@@ -947,7 +800,6 @@ function MobileInspectorToggle() {
 
 function DocumentToolbar({
   document,
-  content,
   saveState,
   mode,
   onMode,
@@ -958,7 +810,6 @@ function DocumentToolbar({
   onDeleted,
 }: {
   document: Document
-  content: string
   saveState: SaveState
   mode: EditorMode
   onMode: (mode: EditorMode) => void
@@ -969,13 +820,24 @@ function DocumentToolbar({
   onDeleted: () => Promise<void>
 }) {
   const navigate = useNavigate()
+  const sessions = useDocumentSessions()
   const [title, setTitle] = useState(document.title)
   const [path, setPath] = useState(document.path ?? '')
-  const rename = useMutation({
-    mutationFn: () => api.updateDocument(document, content, title),
+  // Each step builds on the revision the previous one wrote, so a title and path change
+  // together cannot conflict with themselves.
+  const saveDetails = useMutation({
+    mutationFn: async () => {
+      let current = document
+      if (title !== document.title) current = await sessions.rename(document.document_id, title)
+      if (path !== (document.path ?? '')) {
+        current = document.path
+          ? await api.moveDocument(current, path)
+          : await api.materializeDocument(current, path)
+      }
+      return current
+    },
     onSuccess: onUpdated,
   })
-  const move = useMutation({ mutationFn: () => api.moveDocument(document, path), onSuccess: onUpdated })
   const duplicate = useMutation({
     mutationFn: () => api.duplicateDocument(document),
     onSuccess: async (created) =>
@@ -983,8 +845,7 @@ function DocumentToolbar({
   })
   const remove = useMutation({ mutationFn: () => api.deleteDocument(document), onSuccess: onDeleted })
   const { updatePreferences } = useTheme()
-  const busy =
-    saveState !== 'saved' || rename.isPending || move.isPending || duplicate.isPending || remove.isPending
+  const busy = saveState !== 'saved' || saveDetails.isPending || duplicate.isPending || remove.isPending
   const changeMode = (nextMode: EditorMode) => {
     onMode(nextMode)
     updatePreferences({ editorMode: nextMode })
@@ -1078,11 +939,7 @@ function DocumentToolbar({
                 type="button"
                 className="secondary-action"
                 disabled={busy}
-                onClick={() => {
-                  rename.mutate()
-                  if (path !== (document.path ?? '')) move.mutate()
-                  close()
-                }}
+                onClick={() => saveDetails.mutate(undefined, { onSuccess: close })}
               >
                 Save details
               </button>
@@ -1090,10 +947,7 @@ function DocumentToolbar({
                 type="button"
                 className="secondary-action"
                 disabled={busy}
-                onClick={() => {
-                  duplicate.mutate()
-                  close()
-                }}
+                onClick={() => duplicate.mutate(undefined, { onSuccess: close })}
               >
                 Duplicate
               </button>
@@ -1101,15 +955,19 @@ function DocumentToolbar({
                 type="button"
                 className="danger-button"
                 disabled={busy}
-                onClick={() => {
-                  remove.mutate()
-                  close()
-                }}
+                onClick={() => remove.mutate(undefined, { onSuccess: close })}
               >
                 Move to trash
               </button>
-              {(rename.isError || move.isError || duplicate.isError || remove.isError) && (
-                <p className="error-text">The document action could not be completed.</p>
+              {(saveDetails.isError || duplicate.isError || remove.isError) && (
+                <StateMessage
+                  compact
+                  kind="error"
+                  title={writeFailureMessage(
+                    saveDetails.error ?? duplicate.error ?? remove.error,
+                    'The document action could not be completed.',
+                  )}
+                />
               )}
             </div>
           )}

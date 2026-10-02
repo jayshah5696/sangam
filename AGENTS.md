@@ -9,6 +9,11 @@
 - For user-visible browser changes or browser defect reviews, use the project `browser-verification` skill (`just test-e2e`) before calling the work verified. It defines the desktop, narrow-desktop, true touch-mobile, affected-breakpoint, and visual evidence gates.
 - Run `just format`, `just test`, and `just test-e2e` before updating verified screenshots.
 
+## Chat parity rules
+
+- A user-facing workspace action should also be a chat capability unless `docs/chat-capabilities.md` lists it as unavailable by design.
+- Chat capabilities call the same `WorkspaceAccessService` operations as the app and run with the requester's authority. See `docs/chat-capabilities.md` before adding one.
+
 ## UI consistency rules
 
 - Read `docs/ui-system.md` and search existing components and CSS before changing application UI.
