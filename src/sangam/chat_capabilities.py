@@ -4,14 +4,19 @@ import hashlib
 import json
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
 from sangam.errors import ValidationError
-from sangam.schemas import Document, OrganizationOperation, OrganizationSnapshotItem
+from sangam.schemas import (
+    Document,
+    OrganizationOperation,
+    OrganizationSnapshotItem,
+    ProjectRole,
+)
 from sangam.security import Principal
 
 
@@ -52,6 +57,11 @@ class WorkspaceSearchInput(StrictCapabilityModel):
     query: str = Field(min_length=1, max_length=500)
     limit: int = Field(default=5, ge=1, le=25)
     offset: int = Field(default=0, ge=0, le=10_000)
+    # The same filters the Search page offers.
+    tag_id: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=120)
+    content_type: Literal["text/markdown", "text/html", "application/pdf"] | None = None
+    sort: Literal["relevance", "updated", "title", "path"] = "relevance"
 
 
 class CitationSource(StrictCapabilityModel):
@@ -63,6 +73,13 @@ class CitationSource(StrictCapabilityModel):
     annotation_id: str | None = Field(default=None, max_length=200)
     citation: str = Field(max_length=2000)
     snippet: str | None = Field(default=None, max_length=4000)
+    # What the UI shows beside a document; present when the tool loaded the document itself.
+    category: str | None = Field(default=None, max_length=120)
+    tags: list[str] | None = Field(default=None, max_length=50)
+    trust_level: str | None = Field(default=None, max_length=40)
+    deleted: bool | None = None
+    pdf_extraction_status: str | None = Field(default=None, max_length=40)
+    pdf_page_count: int | None = Field(default=None, ge=0)
 
 
 class WorkspaceSearchResult(StrictCapabilityModel):
@@ -107,6 +124,111 @@ class ReadDocumentResult(StrictCapabilityModel):
     limit: int = Field(ge=1, le=40_000)
     total_chars: int = Field(ge=0)
     truncated: bool
+    # Documents that link here, as the editor's Links panel shows them.
+    backlinks: list[CitationSource] = Field(default_factory=list, max_length=20)
+
+
+class ReadRevisionHistoryInput(StrictCapabilityModel):
+    """List a document's revisions, or diff two of them when `from_revision_id` is given."""
+
+    document_id: str = Field(min_length=1, max_length=200)
+    from_revision_id: str | None = Field(default=None, max_length=200)
+    to_revision_id: str | None = Field(default=None, max_length=200)
+    limit: int = Field(default=20, ge=1, le=50)
+    cursor: str | None = Field(default=None, max_length=1000)
+
+
+class RevisionEntryResult(StrictCapabilityModel):
+    revision_id: str = Field(max_length=200)
+    parent_revision_id: str | None = Field(default=None, max_length=200)
+    actor_id: str = Field(max_length=200)
+    operation: str = Field(max_length=80)
+    summary: str | None = Field(default=None, max_length=500)
+    created_at: str = Field(max_length=64)
+
+
+class RevisionDiffResult(StrictCapabilityModel):
+    from_revision_id: str = Field(max_length=200)
+    to_revision_id: str = Field(max_length=200)
+    unified_diff: str = Field(max_length=30_000)
+    additions: int = Field(ge=0)
+    deletions: int = Field(ge=0)
+    truncated: bool = False
+
+
+class ReadRevisionHistoryResult(StrictCapabilityModel):
+    source: CitationSource
+    revisions: list[RevisionEntryResult] = Field(default_factory=list, max_length=50)
+    next_cursor: str | None = Field(default=None, max_length=1000)
+    diff: RevisionDiffResult | None = None
+
+
+class InspectProjectsInput(StrictCapabilityModel):
+    """List projects, or open one with its member documents."""
+
+    project_id: str | None = Field(default=None, max_length=200)
+
+
+class ProjectSummaryResult(StrictCapabilityModel):
+    project_id: str = Field(max_length=200)
+    name: str = Field(max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    brief_document_id: str | None = Field(default=None, max_length=200)
+    version: int = Field(ge=1)
+    document_count: int = Field(ge=0)
+
+
+class ProjectMemberResult(StrictCapabilityModel):
+    document_id: str = Field(max_length=200)
+    title: str = Field(max_length=500)
+    path: str | None = Field(default=None, max_length=1000)
+    role: ProjectRole
+    pinned_page: int | None = Field(default=None, ge=1)
+    notes: str | None = Field(default=None, max_length=2000)
+    source_updated: bool = False
+
+
+class ProjectDetailResult(ProjectSummaryResult):
+    documents: list[ProjectMemberResult] = Field(default_factory=list, max_length=200)
+
+
+class InspectProjectsResult(StrictCapabilityModel):
+    projects: list[ProjectSummaryResult] = Field(default_factory=list, max_length=200)
+    project: ProjectDetailResult | None = None
+
+
+class CreateProjectChange(StrictCapabilityModel):
+    kind: Literal["create_project"]
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    create_brief: bool = True
+
+
+class AddProjectDocumentChange(StrictCapabilityModel):
+    kind: Literal["add_document"]
+    project_id: str = Field(min_length=1, max_length=200)
+    document_id: str = Field(min_length=1, max_length=200)
+    role: ProjectRole = "source"
+    pinned_page: int | None = Field(default=None, ge=1)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class RemoveProjectDocumentChange(StrictCapabilityModel):
+    kind: Literal["remove_document"]
+    project_id: str = Field(min_length=1, max_length=200)
+    document_id: str = Field(min_length=1, max_length=200)
+
+
+ProjectChange = Annotated[
+    CreateProjectChange | AddProjectDocumentChange | RemoveProjectDocumentChange,
+    Field(discriminator="kind"),
+]
+
+
+class UpdateProjectInput(StrictCapabilityModel):
+    """One exact project change: create a project, or add or remove a member document."""
+
+    change: ProjectChange
 
 
 class ReadPdfPageInput(StrictCapabilityModel):
@@ -222,11 +344,13 @@ class ChatCapability:
     allowed_content_types: tuple[str, ...]
     max_result_bytes: int
     timeout_seconds: float
-    handler: str
-    renderer: str | None
-    telemetry_redaction: Literal["metadata_only"] = "metadata_only"
     requires_global_scope: bool = False
     required_any_authority: tuple[Capability, ...] = ()
+    # Project operations are administrator-only in the UI, so they are here too.
+    requires_administrator: bool = False
+    # What the model needs to know to use this tool. The run's instructions are
+    # the base text plus the guidance of exactly the tools the run was given.
+    guidance: str = ""
 
     @property
     def name(self) -> str:
@@ -264,8 +388,9 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         ("text/markdown", "text/html", "application/pdf"),
         24_000,
         5.0,
-        "get_editor_selection",
-        None,
+        guidance=(
+            "When the user refers to selected text, call get_editor_selection instead of guessing."
+        ),
     ),
     ChatCapability(
         "search_workspace",
@@ -281,8 +406,10 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         (),
         40_000,
         10.0,
-        "search_workspace",
-        None,
+        guidance=(
+            "search_workspace takes the Search page's filters (tag_id, category, "
+            "content_type, sort). A PDF hit carries the page_number to cite."
+        ),
     ),
     ChatCapability(
         "inspect_workspace_organization",
@@ -298,8 +425,10 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         (),
         60_000,
         10.0,
-        "inspect_workspace_organization",
-        None,
+        guidance=(
+            "For organization work, inspect_workspace_organization must run before "
+            "planning. Never infer tags from document content."
+        ),
     ),
     ChatCapability(
         "read_document",
@@ -315,8 +444,11 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         ("text/markdown", "text/html"),
         50_000,
         10.0,
-        "read_document",
-        None,
+        guidance=(
+            "Long documents are paginated: page through them with read_document's offset "
+            "parameter instead of relying on truncation. The result also lists the "
+            "document's tags, category, trust level, and the documents that link to it."
+        ),
     ),
     ChatCapability(
         "read_pdf_page",
@@ -332,8 +464,7 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         ("application/pdf",),
         60_000,
         10.0,
-        "read_pdf_page",
-        None,
+        guidance=("Use read_pdf_page for PDF text and live annotations."),
     ),
     ChatCapability(
         "propose_update",
@@ -349,8 +480,19 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         ("text/markdown", "text/html"),
         10_000,
         10.0,
-        "propose_update",
-        "proposal_diff",
+        guidance=(
+            "For editorial proposals, explain what changed in rationale and what the "
+            "reviewer must decide in judgment_needed. Include up to 20 supporting citations "
+            "with an exact document passage, its revision, and its PDF page and annotation "
+            "when relevant. Never invent quoted text or source locations. Reading a "
+            "document alone does not establish support. Put external claims and your "
+            "interpretation in model_opinion, separately from verified supporting passages. "
+            "Use propose_update for every edit to an existing document and explain that the "
+            "human must review its diff. Prefer patch modes: pass a minimal unique anchor "
+            'copied exactly from read_document output with mode="replace", "insert_before", '
+            'or "insert_after", or use mode="append"; use mode="full" only for small '
+            "documents."
+        ),
     ),
     ChatCapability(
         "create_document",
@@ -366,9 +508,11 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         (),
         10_000,
         10.0,
-        "create_document",
-        "document_create",
         requires_global_scope=True,
+        guidance=(
+            "For an explicit creation request, pass the requested workspace-relative path "
+            "to create_document. Do not encode a path in the title."
+        ),
     ),
     ChatCapability(
         "apply_workspace_organization_plan",
@@ -384,9 +528,21 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         (),
         20_000,
         20.0,
-        "apply_workspace_organization_plan",
-        "workspace_organization_plan",
-        required_any_authority=(Capability.CREATE, Capability.MOVE, Capability.TAG),
+        required_any_authority=(
+            Capability.CREATE,
+            Capability.MOVE,
+            Capability.TAG,
+            Capability.RESTORE,
+            Capability.DELETE,
+        ),
+        guidance=(
+            "Use apply_workspace_organization_plan only for the exact create_folder, "
+            "move_document, trash_document, restore_document, duplicate_document, move_folder, "
+            "or category and existing-tag changes the user requested, and add no operation "
+            "they did not ask for. Trash and restore are reversible. restore_document needs "
+            "the document's current revision and the revision to restore, both from "
+            "read_revision_history; it also brings a trashed document back."
+        ),
     ),
     ChatCapability(
         "publish_document",
@@ -402,8 +558,70 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
         ("text/markdown", "text/html"),
         10_000,
         10.0,
-        "publish_document",
-        "document_publish",
+        guidance=(
+            "Call publish_document only when the user explicitly asks. Publication makes "
+            "the exact revision readable at the chosen access policy."
+        ),
+    ),
+    ChatCapability(
+        "read_revision_history",
+        1,
+        "Read revision history",
+        "List a document's revisions, or diff two of them.",
+        ReadRevisionHistoryInput,
+        ReadRevisionHistoryResult,
+        EffectClass.READ,
+        ApprovalPolicy.NONE,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        60_000,
+        10.0,
+        guidance=(
+            "Use read_revision_history to see who changed a document and when. Pass "
+            "from_revision_id (and optionally to_revision_id) for a diff. Read it before "
+            "restoring a revision."
+        ),
+    ),
+    ChatCapability(
+        "inspect_projects",
+        1,
+        "Inspect projects",
+        "List projects, or open one with its member documents.",
+        InspectProjectsInput,
+        InspectProjectsResult,
+        EffectClass.READ,
+        ApprovalPolicy.NONE,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        40_000,
+        10.0,
+        requires_administrator=True,
+        guidance=(
+            "Use inspect_projects to find projects and their member documents before changing one."
+        ),
+    ),
+    ChatCapability(
+        "update_project",
+        1,
+        "Update project",
+        "Request one exact project change: create a project, or add or remove a member document.",
+        UpdateProjectInput,
+        EffectRequestResult,
+        EffectClass.WRITE,
+        ApprovalPolicy.EXACT_EFFECT,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        10_000,
+        10.0,
+        requires_administrator=True,
+        guidance=(
+            "Use update_project for one project change at a time: create a project, or add "
+            "or remove a member document. Project membership only references documents; it "
+            "never changes them."
+        ),
     ),
 )
 
@@ -441,6 +659,8 @@ class ChatCapabilityRegistry:
         resolved: list[ChatCapability] = []
         for capability in self.capabilities:
             if entry_point not in capability.allowed_entry_points:
+                continue
+            if capability.requires_administrator and not principal.administrator:
                 continue
             if (
                 document is not None

@@ -58,7 +58,7 @@ def test_failure_before_database_commit_rolls_back_everything(
     def fail_before_commit(*_args, **_kwargs) -> None:
         raise RuntimeError("injected before commit")
 
-    monkeypatch.setattr(service, "_record_idempotency", fail_before_commit)
+    monkeypatch.setattr(service.idempotency, "record_document", fail_before_commit)
     with pytest.raises(RuntimeError, match="injected before commit"):
         service.create_document(
             title="Never committed",

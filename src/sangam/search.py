@@ -16,12 +16,12 @@ class SearchIndex:
         with self.database.transaction() as connection:
             connection.execute("DELETE FROM document_search")
             for document in documents:
-                self._replace(connection, document.document_id)
+                self.replace(connection, document.document_id)
 
     def sync(self, document: Document) -> None:
         """Index canonical state under the writer lock, never a caller's stale snapshot."""
         with self.database.transaction() as connection:
-            self._replace(connection, document.document_id)
+            self.replace(connection, document.document_id)
 
     def repair_pending(self) -> int:
         """Repair only committed source changes whose index update was interrupted."""
@@ -34,7 +34,7 @@ class SearchIndex:
                 if not rows:
                     return repaired
                 for row in rows:
-                    self._replace(connection, row["document_id"])
+                    self.replace(connection, row["document_id"])
                 repaired += len(rows)
 
     @staticmethod
@@ -45,7 +45,12 @@ class SearchIndex:
         return " AND ".join(f'"{term}"*' for term in terms)
 
     @staticmethod
-    def _replace(connection: sqlite3.Connection, document_id: str) -> None:
+    def replace(connection: sqlite3.Connection, document_id: str) -> None:
+        """Index one document's committed state on ``connection`` and clear its dirty marker.
+
+        Writers that change many documents in one transaction call this per document
+        so the index commits with them.
+        """
         connection.execute("DELETE FROM document_search WHERE document_id = ?", (document_id,))
         connection.execute(
             "DELETE FROM search_dirty_documents WHERE document_id = ?", (document_id,)

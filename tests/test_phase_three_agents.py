@@ -164,9 +164,12 @@ def test_token_update_changes_authority_without_rotating_secret_and_records_hist
     assert json.loads(history[0]["after_json"])["label"] == "Incident reviewer"
 
     activity = client.get("/api/v1/activity", params={"actor_kind": "human"}).json()
-    event = next(event for event in activity if event["resource_id"] == token_id)
-    assert event["action"] == "update"
-    assert event["details"] == {"current_metadata_version": 2}
+    token_events = [event for event in activity if event["resource_id"] == token_id]
+    assert [(event["action"], event["outcome"]) for event in token_events[:2]] == [
+        ("update", "conflict"),
+        ("update", "accepted"),
+    ]
+    assert token_events[1]["details"] == {"current_metadata_version": 2}
 
     client.delete(f"/api/v1/agent-tokens/{token_id}")
     revoked_edit = client.patch(

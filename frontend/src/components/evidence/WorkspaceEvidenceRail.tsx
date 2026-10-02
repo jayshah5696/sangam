@@ -110,7 +110,7 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
           {evidence.length > 0 && (
             <button
               type="button"
-              className="ghost-button icon-button-sm"
+              className="icon-button-sm"
               title="Clear all kept evidence"
               aria-label="Clear all kept evidence"
               onClick={() =>
@@ -333,7 +333,7 @@ function EvidenceCard({
         </div>
         <button
           type="button"
-          className="ghost-button icon-button-sm"
+          className="icon-button-sm"
           title="Remove evidence"
           aria-label="Remove evidence"
           onClick={() => void commitMetadata(onRemove)}
@@ -551,12 +551,7 @@ function ExcerptComparisonModal({
       <div className="evidence-modal-content">
         <header className="evidence-modal-header">
           <strong>Compare excerpts</strong>
-          <button
-            type="button"
-            className="ghost-button icon-button-sm"
-            onClick={onClose}
-            aria-label="Close comparison"
-          >
+          <button type="button" className="icon-button-sm" onClick={onClose} aria-label="Close comparison">
             <X size="var(--icon-control)" />
           </button>
         </header>
@@ -643,12 +638,7 @@ function SourceVersionComparisonModal({
               {shortRevision(currentRevId)}
             </p>
           </div>
-          <button
-            type="button"
-            className="ghost-button icon-button-sm"
-            onClick={onClose}
-            aria-label="Close comparison"
-          >
+          <button type="button" className="icon-button-sm" onClick={onClose} aria-label="Close comparison">
             <X size="var(--icon-control)" />
           </button>
         </header>

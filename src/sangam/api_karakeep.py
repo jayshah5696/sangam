@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, Header, Query
 
+from sangam.access import WorkspaceAccessService, writes
 from sangam.karakeep import KarakeepService
 from sangam.schemas import (
     ApplyKarakeepRefresh,
@@ -19,9 +20,16 @@ PrincipalResolver = Callable[..., Principal]
 
 
 def create_karakeep_router(
-    *, karakeep: KarakeepService, require_administrator: PrincipalResolver
+    *,
+    karakeep: KarakeepService,
+    workspace: WorkspaceAccessService,
+    require_administrator: PrincipalResolver,
 ) -> APIRouter:
-    """Build the human-admin Phase 6 import and refresh API."""
+    """Build the human-admin Phase 6 import and refresh API.
+
+    Imports and refreshes write as the Karakeep integration actor; the ledger
+    attributes each one to the administrator who requested it.
+    """
     router = APIRouter(prefix="/api/v1/karakeep", tags=["karakeep"])
     admin_dependency = Depends(require_administrator)
 
@@ -57,16 +65,26 @@ def create_karakeep_router(
     @router.post("/imports", response_model=KarakeepImportDetail, status_code=201)
     def import_bookmark(
         body: ImportKarakeepBookmark,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> KarakeepImportDetail:
-        return karakeep.import_bookmark(body.bookmark_id)
+        return workspace.audited(
+            principal,
+            writes("import", "karakeep_import"),
+            lambda: karakeep.import_bookmark(body.bookmark_id),
+            subject=lambda detail: detail.import_id,
+        )
 
     @router.post("/imports/{import_id}/refresh", response_model=KarakeepImportDetail)
     def refresh_import(
         import_id: str,
-        _principal: Principal = admin_dependency,
+        principal: Principal = admin_dependency,
     ) -> KarakeepImportDetail:
-        return karakeep.refresh_import(import_id)
+        return workspace.audited(
+            principal,
+            writes("refresh", "karakeep_import"),
+            lambda: karakeep.refresh_import(import_id),
+            resource_id=import_id,
+        )
 
     @router.post("/imports/{import_id}/apply", response_model=KarakeepImportDetail)
     def apply_refresh(
@@ -75,12 +93,17 @@ def create_karakeep_router(
         idempotency_key: str = Header(alias="Idempotency-Key"),
         principal: Principal = admin_dependency,
     ) -> KarakeepImportDetail:
-        return karakeep.apply_refresh(
-            import_id=import_id,
-            expected_revision_id=body.expected_revision_id,
-            content=body.content,
-            actor_id=principal.actor_id,
-            idempotency_key=idempotency_key,
+        return workspace.audited(
+            principal,
+            writes("apply_refresh", "document"),
+            lambda: karakeep.apply_refresh(
+                import_id=import_id,
+                expected_revision_id=body.expected_revision_id,
+                content=body.content,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            ),
+            subject=lambda detail: detail.document_id or import_id,
         )
 
     return router

@@ -49,6 +49,7 @@ def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() 
             "create_document",
             "apply_workspace_organization_plan",
             "publish_document",
+            "update_project",
         ]
     }
     assert "Do not narrate submission, pending review, or a\nmissing result" in _AGENT_INSTRUCTIONS
@@ -291,6 +292,9 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "publish_document",
         "inspect_workspace_organization",
         "apply_workspace_organization_plan",
+        "read_revision_history",
+        "inspect_projects",
+        "update_project",
     }
     create_thread(client)
 
@@ -788,7 +792,7 @@ def test_chat_proposal_validation_failure_releases_apply_reservation(
     )
     monkeypatch.setattr(
         proposals.workspace,
-        "update_document",
+        "write_document",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValidationError("invalid content")),
     )
 
@@ -812,6 +816,12 @@ def test_chat_tool_wrapper_tracks_task_identity_and_serializes_failures(client: 
             existing = CustomTask(title="Earlier task", content="done", status_indicator="complete")
             workflow = SimpleNamespace(tasks=[existing])
             self.workflow_item = SimpleNamespace(workflow=workflow)
+            self.request_context = SimpleNamespace(
+                run_id=None,
+                principal=Principal.trusted_human(
+                    actor_id="human:jay", display_name="Jay", operation_id="tool-wrapper"
+                ),
+            )
             self.updated_index: int | None = None
 
         async def add_workflow_task(self, task: CustomTask) -> None:
@@ -829,7 +839,7 @@ def test_chat_tool_wrapper_tracks_task_identity_and_serializes_failures(client: 
             ctx,
             toolset.policies["read_document"],
             "missing",
-            lambda: (_ for _ in ()).throw(ValidationError("cannot read document")),
+            lambda _principal: (_ for _ in ()).throw(ValidationError("cannot read document")),
         )
     )
 
@@ -896,8 +906,9 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
     assert agent_context.workflow_item.workflow.tasks[0].status_indicator == "complete"
     events = client.get("/api/v1/activity", params={"actor_id": principal.actor_id}).json()
     tool_events = [event for event in events if event["operation_id"] == "tool-invocation"]
-    assert len(tool_events) == 2
-    assert len({event["event_id"] for event in tool_events}) == 2
+    # Each read_document is two audited reads: the document, then the links to it.
+    assert len(tool_events) == 4
+    assert len({event["event_id"] for event in tool_events}) == 4
     assert {event["outcome"] for event in tool_events} == {"accepted"}
 
 

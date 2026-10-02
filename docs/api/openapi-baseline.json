@@ -1204,9 +1204,11 @@
               "discriminator": {
                 "mapping": {
                   "create_folder": "#/components/schemas/OrganizationCreateFolder",
+                  "duplicate_document": "#/components/schemas/OrganizationDuplicateDocument",
                   "materialize_document": "#/components/schemas/OrganizationMaterializeDocument",
                   "move_document": "#/components/schemas/OrganizationMoveDocument",
                   "move_folder": "#/components/schemas/OrganizationMoveFolder",
+                  "restore_document": "#/components/schemas/OrganizationRestoreDocument",
                   "trash_document": "#/components/schemas/OrganizationTrashDocument",
                   "update_document_metadata": "#/components/schemas/OrganizationUpdateDocumentMetadata",
                   "update_folder_metadata": "#/components/schemas/OrganizationUpdateFolderMetadata"
@@ -1234,6 +1236,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/OrganizationUpdateFolderMetadata"
+                },
+                {
+                  "$ref": "#/components/schemas/OrganizationRestoreDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/OrganizationDuplicateDocument"
                 }
               ]
             },
@@ -1710,7 +1718,8 @@
             "enum": [
               "create_document",
               "publish_document",
-              "apply_workspace_organization_plan"
+              "apply_workspace_organization_plan",
+              "update_project"
             ],
             "title": "Capability Id",
             "type": "string"
@@ -5065,6 +5074,60 @@
         "title": "OrganizationDocumentSnapshot",
         "type": "object"
       },
+      "OrganizationDuplicateDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "destination_path": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Path"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "expected_revision_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Revision Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "duplicate_document",
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "kind",
+          "document_id",
+          "expected_revision_id"
+        ],
+        "title": "OrganizationDuplicateDocument",
+        "type": "object"
+      },
       "OrganizationFolderSnapshot": {
         "properties": {
           "category": {
@@ -5374,6 +5437,43 @@
           "items"
         ],
         "title": "OrganizationPlanResult",
+        "type": "object"
+      },
+      "OrganizationRestoreDocument": {
+        "additionalProperties": false,
+        "description": "Restore a document to a past revision's content, or bring a trashed one back.",
+        "properties": {
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "expected_revision_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Revision Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "restore_document",
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "document_id",
+          "expected_revision_id",
+          "revision_id"
+        ],
+        "title": "OrganizationRestoreDocument",
         "type": "object"
       },
       "OrganizationSnapshotPage": {
@@ -33953,6 +34053,6 @@
   },
   "x-sangam-baseline-review": {
     "date": "2026-10-01",
-    "reason": "Release v0.13.2"
+    "reason": "Chat gains update_project (new capability_id value in chat effect responses) and restore_document/duplicate_document organization plan operations (new request union members). Browser Zod schemas updated in the same change; existing operation kinds and their order are unchanged."
   }
 }

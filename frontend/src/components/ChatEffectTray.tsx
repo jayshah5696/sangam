@@ -2,10 +2,9 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
 import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
 import type { ChatEffect, ChatEffectsSummary } from '../api'
+import { shortId } from '../chatEffectCopy'
 
-export function shortId(value: string): string {
-  return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
-}
+export { shortId }
 
 export function formatAttentionSummary(summary: {
   recovering_active: number
@@ -27,11 +26,17 @@ export function formatAttentionSummary(summary: {
   return parts.join(', ') || 'Pending attention'
 }
 
-export function formatHistorySummary(creations: number, publications: number, plans: number): string {
+export function formatHistorySummary(
+  creations: number,
+  publications: number,
+  plans: number,
+  projectChanges = 0,
+): string {
   const parts = [
     creations ? `${creations} document${creations === 1 ? '' : 's'} created` : '',
     publications ? `${publications} publication${publications === 1 ? '' : 's'} completed` : '',
     plans ? `${plans} organization plan${plans === 1 ? '' : 's'} applied` : '',
+    projectChanges ? `${projectChanges} project change${projectChanges === 1 ? '' : 's'} made` : '',
   ].filter(Boolean)
   return parts.join(' · ') || 'Recorded history'
 }
@@ -61,7 +66,9 @@ export function DurableEffectStatus({
       ? 'Publication'
       : effect.capability_id === 'apply_workspace_organization_plan'
         ? 'Organization plan'
-        : 'Document creation'
+        : effect.capability_id === 'update_project'
+          ? 'Project change'
+          : 'Document creation'
   const href =
     effectResultSchema.safeParse(effect.result).data?.url ??
     (effect.capability_id === 'create_document' && effect.resource_id
@@ -79,6 +86,8 @@ export function DurableEffectStatus({
       failureDetail = `${rawMessage} The document could not be published at that slug. Check permissions and slug availability. A new review is required.`
     } else if (effect.capability_id === 'create_document') {
       failureDetail = `${rawMessage} The document could not be created at that path. Check for collisions or invalid extensions. A new review is required.`
+    } else if (effect.capability_id === 'update_project') {
+      failureDetail = `${rawMessage} The project or document may have changed. Inspect the project and prepare a new request. A new review is required.`
     } else {
       failureDetail = `${rawMessage} A new review is required.`
     }
@@ -92,6 +101,8 @@ export function DurableEffectStatus({
       completedDetail = `The document is published. Recorded effect ${shortId(effect.effect_id)}`
     } else if (effect.capability_id === 'apply_workspace_organization_plan') {
       completedDetail = `The organization plan was applied successfully. Recorded effect ${shortId(effect.effect_id)}`
+    } else if (effect.capability_id === 'update_project') {
+      completedDetail = `The project was updated. Recorded effect ${shortId(effect.effect_id)}`
     }
   }
 
@@ -248,7 +259,10 @@ export function ChatEffectTray({
     const plans = historyItems.filter(
       (e) => e.capability_id === 'apply_workspace_organization_plan' && e.status === 'completed',
     ).length
-    return formatHistorySummary(creations, publications, plans)
+    const projectChanges = historyItems.filter(
+      (e) => e.capability_id === 'update_project' && e.status === 'completed',
+    ).length
+    return formatHistorySummary(creations, publications, plans, projectChanges)
   }, [historyItems])
 
   const handleDismiss = useCallback(

@@ -164,6 +164,11 @@ class AuditReservation:
     def _estimated_bytes(self, value: int) -> None:
         self._reserved_bytes = value
 
+    @property
+    def spent(self) -> bool:
+        """Whether this single-use ticket was already recorded or released."""
+        return self._used or self._released
+
     def record(
         self,
         *,

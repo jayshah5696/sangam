@@ -49,13 +49,34 @@ for (const [file, source] of sources) {
 const sourceFiles = (await readdir(sourceDirectory, { recursive: true })).filter((file) =>
   file.endsWith('.tsx'),
 )
+// A class that no stylesheet defines does nothing, so a component that relies on it (a button
+// that was meant to look primary) silently renders unstyled. Structural hooks that predate
+// this check are listed in the baseline file; new classes need a rule.
+const definedClasses = new Set()
+for (const source of sources.values()) {
+  for (const match of source.matchAll(/\.([A-Za-z_][\w-]*)/g)) definedClasses.add(match[1])
+}
+const knownHooks = new Set(
+  (await readFile(new URL('./ui-system-unstyled-classes.txt', import.meta.url), 'utf8'))
+    .split('\n')
+    .filter((line) => line && !line.startsWith('#')),
+)
+
 for (const file of sourceFiles) {
+  if (/\.(?:test|spec)\./.test(file)) continue
   const source = await readFile(new URL(file, sourceDirectory), 'utf8')
   for (const [index, line] of source.split('\n').entries()) {
     if (/\bsize=\{[^}\n]*\b\d+(?:\.\d+)?\b[^}\n]*\}/.test(line)) {
       violations.push(
         `${join('src', file)}:${index + 1}: use a semantic icon size token instead of a raw number`,
       )
+    }
+    for (const match of line.matchAll(/className="([^"{}$]*)"/g)) {
+      for (const name of match[1].split(/\s+/).filter(Boolean)) {
+        if (!definedClasses.has(name) && !knownHooks.has(name)) {
+          violations.push(`${join('src', file)}:${index + 1}: class "${name}" has no stylesheet rule`)
+        }
+      }
     }
   }
 }

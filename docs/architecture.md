@@ -10,6 +10,18 @@ Sangam is a small, self-hosted document server for humans and agents. One person
 - **Reconciliation** — a service that compares the database against materialized files and reports drift. Conflicts are surfaced in the UI and resolved explicitly, never auto-overwritten.
 - **Publication** — a revision exposed at a stable URL as private, unlisted, or public.
 - **Actor** — `human:jay` or `agent:<name>`. Every change is attributed.
+- **Operation** — one call through `WorkspaceAccessService.audited`. Each operation declares its ledger name and whether it reads or writes (`reads(...)` or `writes(...)` in `access.py`).
+
+## Write path
+
+Every change reaches storage through one entry point, and every document change through one protocol:
+
+1. **Access.** `WorkspaceAccessService.audited` runs each operation under the activity-ledger contract. A write records exactly one ledger row: inside the first transaction it commits, or after it returns if it committed nothing. Denials, conflicts, and failures are recorded too. Reads are recorded only for non-human principals. HTTP routes, chat, organization plans, Karakeep, backups, tokens, and settings enter here. Two writers record their own rows in the same transaction as their change: projects and saved views. The administrator check also records a denial before any operation runs.
+2. **Document writes.** `WorkspaceAccessService.write_document` is the single path for update, duplicate, tag, materialize, move, delete, restore, and trust changes. HTTP routes, chat proposals, and organization plans all call it with the same request bodies. It authorizes the fresh source and destination paths, requires an expected revision unless HTTP `If-Match`/`If-None-Match` conditions are given, and records the diff.
+3. **Commit pipeline.** `DocumentService._commit` is the one storage protocol. Inside the committing transaction it checks the actor, replays a reused idempotency key, re-checks the expected revision, writes the revision, binds the key, and names the ledger target. PDF bytes live only on disk, so a PDF move, trash, or restore first applies a file step that the pipeline undoes if the commit fails. After the commit it materializes text, removes stale files, and re-indexes search.
+4. **Idempotency.** `IdempotencyStore` owns both key tables. Other modules ask it whether a key committed; none of them query the tables directly.
+
+Chat runs outlive the request that started them, so every chat tool call and effect decision first refreshes the run principal's token grants. A token revoked mid-run cannot read, propose, or execute an effect, including in YOLO mode.
 
 ## Trust model
 

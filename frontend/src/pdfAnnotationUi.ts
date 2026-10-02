@@ -1,4 +1,5 @@
 import type { Annotation } from './api'
+import { citationLink } from './citationNavigation'
 
 export type FloatingAnchor = Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom' | 'width'>
 
@@ -19,7 +20,11 @@ export function floatingPosition(
 }
 
 export function annotationLink(annotation: Annotation) {
-  return `sangam://document/${annotation.document_id}?page=${annotation.page_number}&annotation=${annotation.annotation_id}`
+  return citationLink({
+    documentId: annotation.document_id,
+    pageNumber: annotation.page_number,
+    annotationId: annotation.annotation_id,
+  })
 }
 
 export function markdownSelectionCitation(
@@ -28,6 +33,6 @@ export function markdownSelectionCitation(
   pageNumber: number,
   selectedText: string,
 ) {
-  const link = `sangam://document/${documentId}?page=${pageNumber}`
+  const link = citationLink({ documentId, pageNumber })
   return `> ${selectedText.replaceAll('\n', '\n> ')}\n\n[${title}, p. ${pageNumber}](${link})`
 }

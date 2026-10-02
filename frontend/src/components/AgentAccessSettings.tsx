@@ -604,11 +604,15 @@ export function AgentAccessSettings() {
                 </span>
               </div>
             )}
-          <button disabled={issue.isPending}>
+          <button className="primary-button" disabled={issue.isPending}>
             <KeyRound size="var(--icon-inline)" /> {issue.isPending ? 'Issuing…' : 'Issue token'}
           </button>
         </form>
-        {issue.isError && <p className="operation-result error-text">{issue.error.message}</p>}
+        {issue.isError && (
+          <p className="operation-result error-text" role="alert">
+            {issue.error.message}
+          </p>
+        )}
         {rotate.isError && (
           <p className="operation-result error-text" role="alert">
             Token rotation failed: {rotate.error.message}
@@ -1088,7 +1092,7 @@ function AgentTokenEditor({
           </p>
         )}
         <div className="agent-token-edit-actions">
-          <button disabled={pending || selected.size === 0 || writePrefixMissing}>
+          <button className="primary-button" disabled={pending || selected.size === 0 || writePrefixMissing}>
             {pending
               ? isCurrentlyExpired
                 ? 'Renewing…'
