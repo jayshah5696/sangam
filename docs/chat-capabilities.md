@@ -37,15 +37,15 @@ The context record intentionally excludes provider credentials. Run evidence sto
 
 ## Durable effect contract
 
-Document creation, workspace organization, and publication follow this sequence:
+Document creation, workspace organization, publication, publication changes, PDF annotations, and project changes follow this sequence:
 
 1. Validate model arguments with the capability input schema.
 2. Normalize the arguments and calculate a stable digest.
 3. Persist the effect with the requester, run, tool call, capability version, preview, expiry, and stable operation key.
 4. Ask the browser to review the stored effect ID and digest.
-5. Accept a decision only from the requesting principal and only for the stored digest.
+5. Accept an approval only from an administrator and only for the stored digest. Anyone who can see the effect may deny it.
 6. Recheck expiry, current authorization, and current resource state.
-7. Execute through `WorkspaceAccessService` with the reserved operation key.
+7. Execute through `WorkspaceAccessService` with the reserved operation key, as the requester.
 8. Store the resulting resource ID or a safe failure record.
 
 The browser never performs the domain mutation. The model run stops at the first durable effect and resumes only after the browser returns its stored result. This keeps multi-effect requests sequential, prevents duplicate pending cards, and prevents the assistant from narrating a missing result while approval or YOLO execution is still resolving. Reloading the browser restores pending, completed, and failed effect state from SQLite. Repeating a completed approval returns the original result. If the domain mutation commits before the effect completion write, a retry uses the same operation key and converges on the same resource.
@@ -54,11 +54,19 @@ An effect left in `approved` or `executing` state after an interruption is also 
 
 Publication approval binds the document ID, exact revision, slug, and access policy. If the document revision changes, execution fails and requires a new effect. Unlisted publication tokens are returned once to the approving browser and are not stored in the chat effect result.
 
+### Authority and audit
+
+An approved effect runs with the requester's authority, not the approver's. The approver only consents. Before execution the service rebuilds the requester's principal from the stored requester and token ID (migration 030) and rechecks their current grants. If the requester was removed or their token revoked, execution fails. An administrator approving another actor's effect therefore cannot widen what it may do.
+
+The activity ledger names both actors. The row carries `via` (`chat-effect:<id>` or the proposal) and `approved_by`. The Activity view has a **Chat** filter (`via=chat`) that lists only chat-originated changes. Projects and saved views write through `WorkspaceAccessService.audited`, so their failures and denials are ledgered like other writes.
+
+A path-scoped token can create documents through chat inside its own prefix. `preflight_create_document` refuses other destinations, and the model is told the prefix it may use.
+
 ### Workspace organization
 
 `inspect_workspace_organization` returns at most 100 authorized documents, folders, or tags per page. It includes stable IDs, current revision or metadata versions, exact paths, tags, categories, and folder descendant counts. It never returns document content.
 
-`apply_workspace_organization_plan` accepts at most 100 exact operations. Plans can create folders, save unmaterialized drafts at workspace paths, move documents or folders, replace document or folder metadata, move documents to Trash, restore a document to an earlier revision or out of Trash, and duplicate a document. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
+`apply_workspace_organization_plan` accepts at most 100 exact operations. A plan cannot apply a tag it creates, because the new tag has no ID until the plan runs. Create the tag in one plan, inspect the workspace for its ID, then apply it in a second plan. Plans can create folders, create tags (administrators only, checked in preflight), save unmaterialized drafts at workspace paths, move documents or folders, replace document or folder metadata, move documents to Trash, restore a document to an earlier revision or out of Trash, and duplicate a document. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
 
 The explorer, command palette, raw API, and chat all call this service through `WorkspaceAccessService`. A partial result is explicit and never displayed as complete.
 
@@ -72,13 +80,15 @@ Chat can do what the app can, through the same services and with the same author
 | Open a document with its tags, category, trust level, and links | `read_document` returns the same |
 | Revision history and diff | `read_revision_history` lists revisions or diffs two of them |
 | Edit, create, publish | `propose_update`, `create_document`, `publish_document` |
+| Withdraw a publication or change its slug, access policy, or published revision | `update_publication`; the version comes from `read_document`, which returns the publication to principals who can publish the document |
+| PDF notes, comments, bookmarks, citation markers | `annotate_pdf`; add, edit, or delete one annotation per review. Highlights need geometry a model cannot supply, so they stay in the app |
 | Move, trash, restore, duplicate, tag, folders | `apply_workspace_organization_plan`; every operation calls `WorkspaceAccessService.write_document` or the folder services |
 | Projects: list and open | `inspect_projects` |
 | Projects: create, add or remove a document | `update_project`, one exact change per review |
 
 Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
 
-Not available in chat by design: trust changes, agent tokens, provider connections, backups, reconciliation, Karakeep, and importing PDF bytes. These are administrator operations that hold credentials, operate on infrastructure, or need a binary upload. PDF annotations, unpublishing, and creating tags are not yet available in chat.
+Not available in chat by design: trust changes, agent tokens, provider connections, backups, reconciliation, Karakeep, and importing PDF bytes. These are administrator operations that hold credentials, operate on infrastructure, or need a binary upload. Chat never rotates a publication token, because that issues a credential, and it cannot create highlight annotations.
 
 ### Review and YOLO autonomy
 

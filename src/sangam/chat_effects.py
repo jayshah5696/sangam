@@ -4,20 +4,31 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sangam.access import WorkspaceAccessService
 from sangam.authorization import AuthorizationPolicy
+from sangam.capabilities import Capability
 from sangam.chat_capabilities import (
     AddProjectDocumentChange,
+    AnnotatePdfInput,
     ChatCapability,
     ChatCapabilityRegistry,
+    CreateAnnotationChange,
     CreateDocumentInput,
     CreateProjectChange,
+    ProjectAnnotationChange,
+    ProjectThreadChange,
     PublishDocumentInput,
+    RemoveProjectDocumentChange,
+    UnpublishChange,
+    UpdateAnnotationChange,
+    UpdateProjectDetailsChange,
     UpdateProjectInput,
+    UpdateProjectMemberChange,
+    UpdatePublicationInput,
 )
 from sangam.db import Database, utc_now
 from sangam.errors import (
@@ -37,12 +48,16 @@ from sangam.errors import (
 from sangam.idempotency import request_hash
 from sangam.projects import ProjectService
 from sangam.schemas import (
+    AddProjectAnnotation,
     AddProjectDocument,
+    AddProjectThread,
     ApplyOrganizationPlan,
     ChatEffect,
     ChatEffectsAcknowledgementResult,
     ChatEffectsSummary,
     CreateProject,
+    UpdateProject,
+    UpdateProjectDocument,
 )
 from sangam.security import IdentityService, Principal
 
@@ -149,6 +164,16 @@ class ChatEffectService:
                     actor_id=actor, key=key, operation="publish"
                 ),
             ),
+            "annotate_pdf": DurableEffect(
+                preflight=self._preflight_annotation,
+                execute=self._execute_annotation,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
+            "update_publication": DurableEffect(
+                preflight=self._preflight_publication,
+                execute=self._execute_publication,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
             "update_project": DurableEffect(
                 preflight=self._preflight_project,
                 execute=self._execute_project,
@@ -212,10 +237,10 @@ class ChatEffectService:
                 """
                 INSERT INTO chat_effects(
                     effect_id, run_id, thread_id, tool_call_id, capability_id,
-                    capability_version, requested_by, arguments_json, argument_digest,
-                    preview_json, effect_class, risk, status, operation_key,
+                    capability_version, requested_by, requested_token_id, arguments_json,
+                    argument_digest, preview_json, effect_class, risk, status, operation_key,
                     expires_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?)
                 """,
                 (
                     effect_id,
@@ -225,6 +250,7 @@ class ChatEffectService:
                     capability.capability_id,
                     capability.version,
                     principal.actor_id,
+                    principal.token_id,
                     encoded,
                     digest,
                     preview_json,
@@ -237,14 +263,29 @@ class ChatEffectService:
             )
         effect = self.get(principal, effect_id)
         if self._autonomy_allows():
-            return self.decide(
+            # The operator approved every authorized effect in advance; the requester's own
+            # authority still bounds what runs.
+            return self._decide(
                 principal,
                 effect_id=effect.effect_id,
                 verdict="approve",
                 argument_digest=effect.argument_digest,
                 reason="YOLO autonomy mode",
+                approved_by="policy:yolo",
             ).effect
         return effect
+
+    def cancel_pending(self, run_id: str) -> None:
+        """Cancel the effects of a cancelled run that have not started executing."""
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                UPDATE chat_effects
+                SET status = 'cancelled', completed_at = ?
+                WHERE run_id = ? AND status IN ('proposed', 'pending_approval', 'approved')
+                """,
+                (utc_now(), run_id),
+            )
 
     def _autonomy_allows(self) -> bool:
         """Run every authorized effect immediately when the operator enables YOLO."""
@@ -454,7 +495,33 @@ class ChatEffectService:
         argument_digest: str,
         reason: str | None,
     ) -> EffectExecution:
+        """Record a person's decision. Only an administrator may approve.
+
+        An agent that requested an effect could otherwise approve its own request.
+        Anyone who can see the effect may deny it.
+        """
         principal = self.identity.reauthorize(principal)
+        if verdict == "approve" and not principal.administrator:
+            raise AuthorizationError("Only an administrator can approve a chat effect")
+        return self._decide(
+            principal,
+            effect_id=effect_id,
+            verdict=verdict,
+            argument_digest=argument_digest,
+            reason=reason,
+            approved_by=principal.actor_id,
+        )
+
+    def _decide(
+        self,
+        principal: Principal,
+        *,
+        effect_id: str,
+        verdict: str,
+        argument_digest: str,
+        reason: str | None,
+        approved_by: str,
+    ) -> EffectExecution:
         validate_metadata_text(reason, "Decision reason")
         effect = self.get(principal, effect_id)
         if effect.argument_digest != argument_digest:
@@ -528,9 +595,36 @@ class ChatEffectService:
                 effect=denied_effect,
                 client_result={"approved": False, "status": "denied"},
             )
-        return self._execute(principal, effect_id)
+        return self._execute(principal, effect_id, approved_by)
 
-    def _execute(self, principal: Principal, effect_id: str) -> EffectExecution:
+    def _requester_principal(self, approver: Principal, requested_by: str, token_id: str | None):
+        """The requester's own authority, read fresh, for an effect someone else approved."""
+        if requested_by == approver.actor_id:
+            return approver
+        if token_id is not None:
+            return self.identity.reauthorize(
+                Principal(
+                    actor_id=requested_by,
+                    display_name=requested_by,
+                    identity_kind="agent",
+                    operation_id=approver.operation_id,
+                    token_id=token_id,
+                )
+            )
+        with self.database.connection() as connection:
+            actor = connection.execute(
+                "SELECT display_name, identity_kind FROM actors WHERE actor_id = ?",
+                (requested_by,),
+            ).fetchone()
+        if actor is None or actor["identity_kind"] != "human":
+            raise AuthorizationError("The requester can no longer be authorized")
+        return Principal.trusted_human(
+            actor_id=requested_by,
+            display_name=actor["display_name"],
+            operation_id=approver.operation_id,
+        )
+
+    def _execute(self, principal: Principal, effect_id: str, approved_by: str) -> EffectExecution:
         with self.database.transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM chat_effects WHERE effect_id = ?", (effect_id,)
@@ -554,16 +648,23 @@ class ChatEffectService:
             arguments = json.loads(row["arguments_json"])
             operation_key = row["operation_key"]
             capability_id = row["capability_id"]
+            requested_by = row["requested_by"]
+            requested_token_id = row["requested_token_id"]
         durable = self.durable.get(capability_id)
         try:
             if durable is None:
                 raise ValidationError("Unsupported durable chat effect capability")
+            executor = replace(
+                self._requester_principal(principal, requested_by, requested_token_id),
+                via=f"chat-effect:{effect_id}",
+                approved_by=approved_by,
+            )
             outcome = durable.execute(
-                principal,
+                executor,
                 arguments,
                 effect_id,
                 operation_key,
-                durable.committed(principal.actor_id, operation_key),
+                durable.committed(executor.actor_id, operation_key),
             )
         except Exception as error:
             failure = build_effect_failure_record(error)
@@ -663,6 +764,134 @@ class ChatEffectService:
         stored = {key: value for key, value in result.items() if key != "token"}
         return EffectOutcome(result, stored, "publication", publication.publication_id)
 
+    def _preflight_annotation(self, principal: Principal, arguments: dict[str, object]) -> None:
+        change = AnnotatePdfInput.model_validate(arguments).change
+        if isinstance(change, CreateAnnotationChange):
+            document = self.workspace.get_document(principal, change.document_id)
+            if document.content_type != "application/pdf":
+                raise ValidationError("Annotations can only be added to PDF documents")
+            self.workspace.policy.require(principal, Capability.UPDATE, document.path)
+            if change.annotation_type in {"comment", "page_note"} and not (
+                change.note and change.note.strip()
+            ):
+                raise ValidationError("Notes and comments require text")
+            validate_metadata_text(change.note, "Note")
+            return
+        annotation = self.workspace.pdf_research.get_annotation(change.annotation_id)
+        document = self.workspace.get_document(principal, annotation.document_id)
+        self.workspace.policy.require(principal, Capability.UPDATE, document.path)
+        if annotation.version != change.expected_version:
+            raise ConflictError(
+                "The annotation changed since it was read",
+                details={"current_version": annotation.version},
+            )
+
+    def _execute_annotation(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        change = AnnotatePdfInput.model_validate(arguments).change
+        workspace = self.workspace
+        if isinstance(change, CreateAnnotationChange):
+            annotation = workspace.create_annotation(
+                principal,
+                document_id=change.document_id,
+                page_number=change.page_number,
+                annotation_type=change.annotation_type,
+                selected_text=None,
+                note=change.note,
+                geometry=[],
+                tags=change.tags,
+                color=change.color,
+                idempotency_key=operation_key,
+            )
+            status = "created"
+        elif isinstance(change, UpdateAnnotationChange):
+            current = workspace.pdf_research.get_annotation(change.annotation_id)
+            annotation = workspace.update_annotation(
+                principal,
+                annotation_id=change.annotation_id,
+                expected_version=change.expected_version,
+                selected_text=current.selected_text,
+                note=current.note if change.note is None else change.note,
+                geometry=current.geometry,
+                tags=current.tags if change.tags is None else change.tags,
+                color=change.color or current.color,
+                idempotency_key=operation_key,
+            )
+            status = "updated"
+        else:
+            annotation = workspace.delete_annotation(
+                principal,
+                annotation_id=change.annotation_id,
+                expected_version=change.expected_version,
+                idempotency_key=operation_key,
+            )
+            status = "deleted"
+        result: dict[str, object] = {
+            "approved": True,
+            "status": status,
+            "annotation_id": annotation.annotation_id,
+            "document_id": annotation.document_id,
+            "page_number": annotation.page_number,
+        }
+        return EffectOutcome(result, dict(result), "annotation", annotation.annotation_id)
+
+    def _preflight_publication(self, principal: Principal, arguments: dict[str, object]) -> None:
+        change = UpdatePublicationInput.model_validate(arguments).change
+        self.workspace.preflight_update_publication(
+            principal,
+            publication_id=change.publication_id,
+            expected_version=change.expected_version,
+        )
+
+    def _execute_publication(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        change = UpdatePublicationInput.model_validate(arguments).change
+        if isinstance(change, UnpublishChange):
+            publication = self.workspace.unpublish(
+                principal,
+                publication_id=change.publication_id,
+                expected_version=change.expected_version,
+                idempotency_key=operation_key,
+            )
+            status = "unpublished"
+            token = None
+        else:
+            current = self.workspace.publications.get_publication(change.publication_id)
+            issued = self.workspace.update_publication(
+                principal,
+                publication_id=change.publication_id,
+                expected_version=change.expected_version,
+                slug=change.slug or current.slug,
+                access_policy=change.access_policy or current.access_policy,
+                idempotency_key=operation_key,
+                revision_id=change.revision_id,
+            )
+            publication, status, token = issued, "updated", issued.token
+        result: dict[str, object] = {
+            **publication.model_dump(mode="json"),
+            "approved": True,
+            "status": status,
+        }
+        if token:
+            result["token"] = token
+        # An unlisted token is shown once to the approving client and never stored.
+        stored = {key: value for key, value in result.items() if key != "token"}
+        return EffectOutcome(result, stored, "publication", publication.publication_id)
+
     def _preflight_project(self, principal: Principal, arguments: dict[str, object]) -> None:
         AuthorizationPolicy.require_administrator(principal)
         change = UpdateProjectInput.model_validate(arguments).change
@@ -670,11 +899,32 @@ class ChatEffectService:
             validate_metadata_text(change.name, "Project name")
             validate_metadata_text(change.description, "Project description")
             return
-        # Opening the project and reading the document fail now, not after approval.
-        self.projects.get_project(change.project_id, principal)
+        # Opening the project and reading what it points at fail now, not after approval.
+        project = self.projects.get_project(change.project_id, principal)
         if isinstance(change, AddProjectDocumentChange):
             self.workspace.get_document(principal, change.document_id)
             validate_metadata_text(change.notes, "Document notes")
+        elif isinstance(change, UpdateProjectDetailsChange):
+            if change.expected_version is not None and project.version != change.expected_version:
+                raise ConflictError(
+                    "The project changed since it was read",
+                    details={"current_version": project.version},
+                )
+            if change.brief_document_id:
+                self.workspace.get_document(principal, change.brief_document_id)
+        elif isinstance(change, UpdateProjectMemberChange):
+            if not any(member.document_id == change.document_id for member in project.documents):
+                raise NotFoundError("Document is not a project member")
+            validate_metadata_text(change.notes, "Document notes")
+        elif isinstance(change, ProjectThreadChange) and change.kind == "add_thread":
+            if not any(
+                item.thread_id == change.thread_id
+                for item in self.projects.available_threads(principal)
+            ):
+                raise NotFoundError(f"Chat thread not found: {change.thread_id}")
+        elif isinstance(change, ProjectAnnotationChange) and change.kind == "add_annotation":
+            annotation = self.workspace.pdf_research.get_annotation(change.annotation_id)
+            self.workspace.get_document(principal, annotation.document_id)
 
     def _execute_project(
         self,
@@ -686,8 +936,10 @@ class ChatEffectService:
     ) -> EffectOutcome:
         del effect_id, recorded
         change = UpdateProjectInput.model_validate(arguments).change
+        projects = self.projects
+        detail: dict[str, object] = {}
         if isinstance(change, CreateProjectChange):
-            project = self.projects.create_project_once(
+            project = projects.create_project_once(
                 principal,
                 operation_key,
                 CreateProject(
@@ -696,15 +948,10 @@ class ChatEffectService:
                     create_brief=change.create_brief,
                 ),
             )
-            result: dict[str, object] = {
-                "approved": True,
-                "status": "created",
-                "project_id": project.project_id,
-                "name": project.name,
-            }
-            return EffectOutcome(result, dict(result), "project", project.project_id)
-        if isinstance(change, AddProjectDocumentChange):
-            member = self.projects.add_document_once(
+            status, project_id = "created", project.project_id
+            detail = {"name": project.name}
+        elif isinstance(change, AddProjectDocumentChange):
+            member = projects.add_document_once(
                 principal,
                 operation_key,
                 change.project_id,
@@ -715,23 +962,75 @@ class ChatEffectService:
                     notes=change.notes,
                 ),
             )
-            result = {
-                "approved": True,
-                "status": "added",
-                "project_id": member.project_id,
-                "document_id": member.document_id,
-            }
-            return EffectOutcome(result, dict(result), "project", member.project_id)
-        self.projects.remove_document_once(
-            principal, operation_key, change.project_id, change.document_id
-        )
-        result = {
+            status, project_id = "added", member.project_id
+            detail = {"document_id": member.document_id}
+        elif isinstance(change, RemoveProjectDocumentChange):
+            projects.remove_document_once(
+                principal, operation_key, change.project_id, change.document_id
+            )
+            status, project_id = "removed", change.project_id
+            detail = {"document_id": change.document_id}
+        elif isinstance(change, UpdateProjectDetailsChange):
+            fields = change.model_dump(exclude_none=True, exclude={"kind", "project_id"})
+            projects.update_project_once(
+                principal,
+                operation_key,
+                change.project_id,
+                UpdateProject.model_validate(fields),
+            )
+            status, project_id = "updated", change.project_id
+        elif isinstance(change, UpdateProjectMemberChange):
+            fields = change.model_dump(
+                exclude_none=True, exclude={"kind", "project_id", "document_id"}
+            )
+            projects.update_document_once(
+                principal,
+                operation_key,
+                change.project_id,
+                change.document_id,
+                UpdateProjectDocument.model_validate(fields),
+            )
+            status, project_id = "updated", change.project_id
+            detail = {"document_id": change.document_id}
+        elif isinstance(change, ProjectThreadChange):
+            if change.kind == "add_thread":
+                projects.add_thread_once(
+                    principal,
+                    operation_key,
+                    change.project_id,
+                    AddProjectThread(thread_id=change.thread_id),
+                )
+                status = "added"
+            else:
+                projects.remove_thread_once(
+                    principal, operation_key, change.project_id, change.thread_id
+                )
+                status = "removed"
+            project_id = change.project_id
+            detail = {"thread_id": change.thread_id}
+        else:
+            if change.kind == "add_annotation":
+                projects.add_annotation_once(
+                    principal,
+                    operation_key,
+                    change.project_id,
+                    AddProjectAnnotation(annotation_id=change.annotation_id),
+                )
+                status = "added"
+            else:
+                projects.remove_annotation_once(
+                    principal, operation_key, change.project_id, change.annotation_id
+                )
+                status = "removed"
+            project_id = change.project_id
+            detail = {"annotation_id": change.annotation_id}
+        result: dict[str, object] = {
             "approved": True,
-            "status": "removed",
-            "project_id": change.project_id,
-            "document_id": change.document_id,
+            "status": status,
+            "project_id": project_id,
+            **detail,
         }
-        return EffectOutcome(result, dict(result), "project", change.project_id)
+        return EffectOutcome(result, dict(result), "project", project_id)
 
     def _execute_plan(
         self,

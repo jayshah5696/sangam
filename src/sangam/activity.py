@@ -31,6 +31,8 @@ RECENT_DENIED_DAYS = 1
 
 
 ALLOWED_AUDIT_DETAIL_KEYS = {
+    "via",
+    "approved_by",
     "current_revision_id",
     "expected_revision_id",
     "revision_id",
@@ -1143,6 +1145,7 @@ class ActivityService:
         path: str | None = None,
         error_code: str | None = None,
         operation_id: str | None = None,
+        via: str | None = None,
         attention: bool = False,
         since: str | None = None,
         until: str | None = None,
@@ -1160,6 +1163,7 @@ class ActivityService:
             path=path,
             error_code=error_code,
             operation_id=operation_id,
+            via=via,
             attention=attention,
             since=since,
             until=until,
@@ -1215,6 +1219,7 @@ class ActivityService:
         path: str | None = None,
         error_code: str | None = None,
         operation_id: str | None = None,
+        via: str | None = None,
         attention: bool = False,
         since: str | None = None,
         until: str | None = None,
@@ -1233,6 +1238,7 @@ class ActivityService:
             path=path,
             error_code=error_code,
             operation_id=operation_id,
+            via=via,
             attention=attention,
             since=since,
             until=until,
@@ -1255,6 +1261,7 @@ class ActivityService:
         path: str | None = None,
         error_code: str | None = None,
         operation_id: str | None = None,
+        via: str | None = None,
         attention: bool = False,
         since: str | None = None,
         until: str | None = None,
@@ -1270,6 +1277,7 @@ class ActivityService:
             path=path,
             error_code=error_code,
             operation_id=operation_id,
+            via=via,
             attention=attention,
             since=since,
             until=until,
@@ -1532,6 +1540,7 @@ class ActivityService:
         path: str | None,
         error_code: str | None,
         operation_id: str | None,
+        via: str | None,
         attention: bool,
         since: str | None,
         until: str | None,
@@ -1556,6 +1565,10 @@ class ActivityService:
             conditions.append("e.path LIKE ? ESCAPE '\\'")
             escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             parameters.append(f"%{escaped}%")
+        if via:
+            # Changes made through another surface name it in their details, as "chat-effect:<id>".
+            conditions.append("json_extract(e.detail_json, '$.via') LIKE ?")
+            parameters.append(f"{via}-%")
         if attention:
             conditions.append("e.outcome != 'accepted'")
         normalized_since = self._normalize_boundary(since, name="since")

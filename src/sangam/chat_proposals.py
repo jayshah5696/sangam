@@ -5,7 +5,7 @@ import json
 import re
 import sqlite3
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Lock
 from typing import Annotated, Literal
 
@@ -616,7 +616,7 @@ class ChatProposalService:
                         content=applied_content,
                     )
                 self.workspace.write_document(
-                    principal,
+                    replace(principal, via=f"chat-proposal:{proposal_id}"),
                     document_id=proposal.document_id,
                     action="update",
                     body=UpdateDocument(

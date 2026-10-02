@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
-import { expect, test } from './fixtures'
+import { expect, openIfClosed, test } from './fixtures'
 
 async function expectRenderedIconSize(locator: import('@playwright/test').Locator, expected: number) {
   const box = await locator.boundingBox()
@@ -585,8 +585,10 @@ test('settings exposes operational destinations and the compact footer keeps onl
   test.skip(page.viewportSize()?.width !== 1440, 'desktop project only')
 
   await page.goto('/')
-  const revealSidebar = page.getByRole('button', { name: 'Show workspace sidebar' })
-  if (await revealSidebar.isVisible()) await revealSidebar.click()
+  await openIfClosed(
+    page.getByRole('button', { name: 'Show workspace sidebar' }),
+    page.locator('#workspace-tab-files'),
+  )
   const tools = page.getByRole('navigation', { name: 'Workspace tools' })
   for (const label of ['Workspace chat', 'Review changes', 'Publications', 'Trash', 'Settings']) {
     await expect(tools.getByRole('link', { name: label })).toBeVisible()

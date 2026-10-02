@@ -577,15 +577,16 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
 ) -> None:
     from sangam.schemas import TokenScope
 
-    # Ensure agent actors exist in the database for FK constraints
-    client.app.state.services.identity.issue_agent_token(
+    # Real agents authenticate with a token; the effect is later run with that token's grants.
+    identity = client.app.state.services.identity
+    issued = identity.issue_agent_token(
         actor_id="agent:researcher",
         display_name="Researcher",
         label="Test Agent",
         scopes=[TokenScope(capability=Capability.CREATE, path_prefix=None)],
         expires_at=None,
     )
-    client.app.state.services.identity.issue_agent_token(
+    identity.issue_agent_token(
         actor_id="agent:other",
         display_name="Other Agent",
         label="Test Other Agent",
@@ -594,14 +595,7 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
     )
 
     chat = client.app.state.services.chat
-    agent_principal = Principal(
-        actor_id="agent:researcher",
-        display_name="Researcher",
-        identity_kind="agent",
-        operation_id="agent-effect-op",
-        scopes=(ScopeGrant(Capability.CREATE, None),),
-        administrator=False,
-    )
+    agent_principal = identity.authenticate(issued.token, operation_id="agent-effect-op")
     admin_principal = Principal.trusted_human(
         actor_id="human:jay", display_name="Jay", operation_id="admin-review-op"
     )

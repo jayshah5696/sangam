@@ -12,7 +12,10 @@ from chatkit.agents import ClientToolCall
 from chatkit.types import CustomTask
 
 from sangam.access import WorkspaceAccessService
+from sangam.capabilities import Capability
 from sangam.chat_capabilities import (
+    AnnotatePdfInput,
+    AnnotationChange,
     ApplyWorkspaceOrganizationPlanInput,
     ChatCapability,
     ChatCapabilityRegistry,
@@ -22,11 +25,13 @@ from sangam.chat_capabilities import (
     ProjectChange,
     ProposalCitationInput,
     ProposeUpdateInput,
+    PublicationChange,
     PublishDocumentInput,
     ReadDocumentInput,
     ReadPdfPageInput,
     ReadRevisionHistoryInput,
     UpdateProjectInput,
+    UpdatePublicationInput,
     WorkspaceSearchInput,
 )
 from sangam.chat_context import ToolContext
@@ -148,10 +153,29 @@ class ChatToolset:
             function_tool(
                 self.update_project,
                 description_override=(
-                    "Request one exact project change: create a project, or add or remove "
-                    "a member document. Inspect projects first and use stable IDs. Sangam "
+                    "Request one exact project change: create or edit a project, its member "
+                    "documents, conversations, or annotations. Inspect projects first and use "
+                    "stable IDs. Sangam "
                     "pauses it for exact review in Review mode and runs it without a prompt "
                     "in YOLO mode."
+                ),
+            ),
+            function_tool(
+                self.annotate_pdf,
+                description_override=(
+                    "When the user explicitly asks, add a note, comment, bookmark, or citation "
+                    "marker to a PDF page, or edit or delete an annotation using the id and "
+                    "version from read_pdf_page. Sangam pauses it for exact review in Review "
+                    "mode and runs it without a prompt in YOLO mode."
+                ),
+            ),
+            function_tool(
+                self.update_publication,
+                description_override=(
+                    "When the user explicitly asks, withdraw a publication or change its slug, "
+                    "access policy, or published revision. Use the publication id and version "
+                    "from read_document. Sangam pauses it for exact review in Review mode and "
+                    "runs it without a prompt in YOLO mode."
                 ),
             ),
             function_tool(
@@ -337,7 +361,23 @@ class ChatToolset:
             backlinks = self.workspace.get_document_backlinks(
                 principal, document_id=document_id, limit=20
             )
+            publication = (
+                self.workspace.document_publication(principal, document_id)
+                if self.workspace.policy.allows(principal, Capability.PUBLISH, document.path)
+                else None
+            )
             return {
+                "publication": None
+                if publication is None
+                else {
+                    "publication_id": publication.publication_id,
+                    "version": publication.version,
+                    "slug": publication.slug,
+                    "access_policy": publication.access_policy,
+                    "active": publication.active,
+                    "published_revision_id": publication.revision_id,
+                    "url": publication.url,
+                },
                 "source": self._document_source(document, revision_id=revision_id, detail=True),
                 "backlinks": [
                     self._document_source(linking, snippet=linking.search_snippet)
@@ -390,6 +430,8 @@ class ChatToolset:
                 "annotations": [
                     {
                         "annotation_id": annotation.annotation_id,
+                        "version": annotation.version,
+                        "color": annotation.color,
                         "type": annotation.annotation_type,
                         "selected_text": annotation.selected_text,
                         "note": annotation.note,
@@ -484,6 +526,22 @@ class ChatToolset:
                 "projects": [],
                 "project": {
                     **self._project_summary(detail),
+                    "active_document_id": detail.active_document_id,
+                    "active_thread_id": detail.active_thread_id,
+                    "threads": [
+                        {"thread_id": thread.thread_id, "title": thread.title}
+                        for thread in detail.threads
+                    ],
+                    "annotations": [
+                        {
+                            "annotation_id": item.annotation_id,
+                            "document_id": item.document_id,
+                            "page_number": item.page_number,
+                            "annotation_type": item.annotation_type,
+                            "note": item.note,
+                        }
+                        for item in detail.annotations
+                    ],
                     "documents": [
                         {
                             "document_id": member.document_id,
@@ -504,6 +562,26 @@ class ChatToolset:
             self.policies["inspect_projects"],
             validated.project_id or "all projects",
             operation,
+        )
+
+    async def annotate_pdf(self, ctx: ToolContext, change: AnnotationChange) -> str | None:
+        arguments = AnnotatePdfInput.model_validate({"change": change}).model_dump(mode="json")
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["annotate_pdf"],
+            arguments=arguments,
+            preview=arguments,
+        )
+
+    async def update_publication(self, ctx: ToolContext, change: PublicationChange) -> str | None:
+        arguments = UpdatePublicationInput.model_validate({"change": change}).model_dump(
+            mode="json"
+        )
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["update_publication"],
+            arguments=arguments,
+            preview=arguments,
         )
 
     async def update_project(self, ctx: ToolContext, change: ProjectChange) -> str | None:

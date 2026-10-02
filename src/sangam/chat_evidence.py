@@ -237,7 +237,11 @@ class ChatEvidenceRepository:
             )
 
     def request_cancel(self, principal: Principal, *, thread_id: str) -> str | None:
-        """Persist cancellation for the newest run owned by this principal."""
+        """Persist cancellation for the newest run owned by this principal.
+
+        The run's effects belong to ``ChatEffectService``; use ``SangamChatServer.cancel_run``
+        to cancel both together.
+        """
         with self.database.transaction() as connection:
             row = connection.execute(
                 """
@@ -260,14 +264,6 @@ class ChatEvidenceRepository:
             connection.execute(
                 "UPDATE chat_runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?) "
                 "WHERE run_id = ?",
-                (utc_now(), row["run_id"]),
-            )
-            connection.execute(
-                """
-                UPDATE chat_effects
-                SET status = 'cancelled', completed_at = ?
-                WHERE run_id = ? AND status IN ('proposed', 'pending_approval', 'approved')
-                """,
                 (utc_now(), row["run_id"]),
             )
             return row["run_id"]

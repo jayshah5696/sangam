@@ -50,6 +50,8 @@ def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() 
             "apply_workspace_organization_plan",
             "publish_document",
             "update_project",
+            "update_publication",
+            "annotate_pdf",
         ]
     }
     assert "Do not narrate submission, pending review, or a\nmissing result" in _AGENT_INSTRUCTIONS
@@ -119,7 +121,7 @@ def test_workspace_chat_does_not_inherit_a_thread_document_context(client: TestC
         else thread.metadata.get("document_id")
     )
     assert document_id is None
-    assert asyncio.run(chat._app_context(context)) == (
+    assert asyncio.run(chat.app_context(context, "thread-1")) == (
         "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
     )
 
@@ -295,6 +297,8 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "read_revision_history",
         "inspect_projects",
         "update_project",
+        "update_publication",
+        "annotate_pdf",
     }
     create_thread(client)
 

@@ -464,7 +464,9 @@ function ProjectView({ projectId }: { projectId: string }) {
           >
             Attach conversation
           </button>
-          <Link to="/chat">Start a conversation</Link>
+          <Link to="/chat" search={{ project: project.project_id }}>
+            Start a conversation
+          </Link>
           {project.threads.map((t) => (
             <div className="project-doc-row" key={t.thread_id}>
               <button onClick={() => action.mutate(() => openConversation(t.thread_id))}>
