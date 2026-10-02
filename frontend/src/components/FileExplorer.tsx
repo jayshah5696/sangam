@@ -24,7 +24,6 @@ import {
   FolderPlus,
   PanelRightOpen,
   Pencil,
-  Search,
   Tag as TagIcon,
   Trash2,
   X,
@@ -76,7 +75,7 @@ function sortLabel(sort: ExplorerSort) {
   return 'Name Z-A'
 }
 
-export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
+export function FileExplorerPanel() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workbench = useWorkbench()
@@ -736,10 +735,6 @@ export function FileExplorerPanel({ onSearch }: { onSearch: () => void }) {
           <button disabled={create.isPending}>Create</button>
         </form>
       )}
-      <button className="sidebar-search-trigger" onClick={onSearch}>
-        <Search size="var(--icon-control)" />
-        <span>Search workspace</span>
-      </button>
       <div className="sidebar-section-title">
         <span>Workspace</span>
         <span className="explorer-heading-actions">
