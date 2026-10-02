@@ -52,18 +52,5 @@
   <p><a href="https://github.com/jayshah5696/sangam/pull/394">Review PR #394</a></p>
   <footer>Both versions use the same four recent documents, one project and an empty Inbox. Captured from isolated live instances with Chromium. Mobile uses the Pixel 7 profile with touch and mobile enabled. Images are original browser captures.</footer>
 </main>
-<script>
-  const comparison = document.querySelector('.comparison');
-  const controls = document.querySelectorAll('button[data-device]');
-  controls.forEach(button => button.addEventListener('click', () => {
-    const device = button.dataset.device;
-    controls.forEach(control => control.setAttribute('aria-pressed', String(control === button)));
-    comparison.dataset.device = device;
-    comparison.querySelectorAll('figure').forEach((figure, index) => {
-      const source = (index === 0 ? 'before-' : 'after-') + device + '.png';
-      figure.querySelector('img').src = source;
-      figure.querySelector('a').href = source;
-    });
-  }));
-</script>
+<script src="comparison.js"></script>
 </html>

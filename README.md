@@ -9,6 +9,6 @@ Each isolated instance was seeded with the same four recent documents, one proje
 
 Desktop uses Chromium at 1440 × 900. Mobile uses Chromium with the Pixel 7 user agent, device scale factor, `isMobile: true`, `hasTouch: true` and a 390 × 844 viewport.
 
-Open `show-me-home.html` alongside the four PNG files to switch between desktop and mobile comparisons.
+Open `show-me-home.html` alongside `comparison.js` and the four PNG files to switch between desktop and mobile comparisons.
 
 These review artifacts are stored separately from the application PR.
