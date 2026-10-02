@@ -2396,3 +2396,54 @@ def test_concurrent_text_document_mutations_targeting_same_path_preserves_winnin
     winner_doc = fetch_resp.json()
     assert winner_doc["content"] == disk_content
     assert disk_content == "# Updated Doc One Content\n"
+
+
+def test_concurrent_folder_metadata_updates_preserve_latest_manifest(
+    client: TestClient, settings
+) -> None:
+    folder_path = "research/projects"
+
+    # Create initial folder
+    res = client.post(
+        "/api/v1/folders",
+        json={"path": folder_path, "category": "Initial"},
+        headers=headers("create-folder-race"),
+    )
+    assert res.status_code == 201
+    folder = res.json()
+    folder_id = folder["folder_id"]
+    initial_version = folder["metadata_version"]
+
+    results = []
+
+    def update_folder_metadata(worker_idx: int):
+        resp = client.patch(
+            f"/api/v1/folders/{folder_id}",
+            json={
+                "expected_metadata_version": initial_version,
+                "category": f"Category From Worker {worker_idx}",
+            },
+            headers=headers(f"update-folder-race-{worker_idx}"),
+        )
+        results.append(resp)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(update_folder_metadata, 1)
+        f2 = executor.submit(update_folder_metadata, 2)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    status_codes = sorted(r.status_code for r in results)
+    assert status_codes == [200, 409], f"Unexpected status codes: {status_codes}"
+
+    winner_resp = next(r for r in results if r.status_code == 200)
+    winner_folder = winner_resp.json()
+
+    manifest_path = settings.workspace_root / folder_path / ".sangam-folder.json"
+    assert manifest_path.is_file(), "Folder manifest file was deleted or missing!"
+
+    manifest_bytes = manifest_path.read_bytes()
+    manifest_data = json.loads(manifest_bytes.decode("utf-8"))
+
+    assert manifest_data["metadata_version"] == winner_folder["metadata_version"]
+    assert manifest_data["category"] == winner_folder["category"]
