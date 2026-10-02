@@ -444,7 +444,7 @@ async def run_item(
     from chatkit.types import ThreadMetadata
     from openai.types.shared.reasoning import Reasoning
 
-    from sangam.chat import _AGENT_INSTRUCTIONS
+    from sangam.chat import agent_instructions
     from sangam.chat_context import ChatRequestContext
 
     server = env.services.chat
@@ -498,7 +498,7 @@ async def run_item(
 
     agent = Agent(
         name="Sangam workspace agent",
-        instructions=_AGENT_INSTRUCTIONS,
+        instructions=agent_instructions(server.capabilities.capabilities),
         tools=tools,
     )
     run_config = RunConfig(

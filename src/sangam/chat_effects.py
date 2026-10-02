@@ -3,12 +3,22 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sangam.access import WorkspaceAccessService
-from sangam.chat_capabilities import ChatCapability, ChatCapabilityRegistry
+from sangam.authorization import AuthorizationPolicy
+from sangam.chat_capabilities import (
+    AddProjectDocumentChange,
+    ChatCapability,
+    ChatCapabilityRegistry,
+    CreateDocumentInput,
+    CreateProjectChange,
+    PublishDocumentInput,
+    UpdateProjectInput,
+)
 from sangam.db import Database, utc_now
 from sangam.errors import (
     AuthenticationError,
@@ -25,13 +35,16 @@ from sangam.errors import (
     validate_metadata_text,
 )
 from sangam.idempotency import request_hash
+from sangam.projects import ProjectService
 from sangam.schemas import (
+    AddProjectDocument,
     ApplyOrganizationPlan,
     ChatEffect,
     ChatEffectsAcknowledgementResult,
     ChatEffectsSummary,
+    CreateProject,
 )
-from sangam.security import Principal
+from sangam.security import IdentityService, Principal
 
 
 def classify_effect_retry_safety(error: Exception) -> bool:
@@ -77,6 +90,30 @@ class EffectExecution:
     client_result: dict[str, object]
 
 
+@dataclass(frozen=True)
+class EffectOutcome:
+    """What an executed effect returns to the client, stores, and points at."""
+
+    client_result: dict[str, object]
+    stored_result: dict[str, object]
+    resource_type: str
+    resource_id: str
+
+
+@dataclass(frozen=True)
+class DurableEffect:
+    """How one durable capability is checked before approval and run after it.
+
+    ``execute`` receives the effect ID, its stable operation key, and whether that
+    key already committed, so a retried execution replays instead of re-checking
+    preconditions that its own first attempt changed.
+    """
+
+    preflight: Callable[[Principal, dict[str, object]], None]
+    execute: Callable[[Principal, dict[str, object], str, str, bool], EffectOutcome]
+    committed: Callable[[str, str], bool]
+
+
 class ChatEffectService:
     """Persists argument-bound approvals and executes them through workspace services."""
 
@@ -85,13 +122,48 @@ class ChatEffectService:
         *,
         database: Database,
         workspace: WorkspaceAccessService,
+        identity: IdentityService,
+        projects: ProjectService,
         registry: ChatCapabilityRegistry,
         approval_ttl: timedelta = timedelta(minutes=30),
     ) -> None:
         self.database = database
         self.workspace = workspace
+        self.identity = identity
+        self.projects = projects
         self.registry = registry
         self.approval_ttl = approval_ttl
+        idempotency = workspace.documents.idempotency
+        self.durable: dict[str, DurableEffect] = {
+            "create_document": DurableEffect(
+                preflight=self._preflight_create,
+                execute=self._execute_create,
+                committed=lambda actor, key: idempotency.committed(
+                    actor_id=actor, key=key, operation="create"
+                ),
+            ),
+            "publish_document": DurableEffect(
+                preflight=self._preflight_publish,
+                execute=self._execute_publish,
+                committed=lambda actor, key: idempotency.committed(
+                    actor_id=actor, key=key, operation="publish"
+                ),
+            ),
+            "update_project": DurableEffect(
+                preflight=self._preflight_project,
+                execute=self._execute_project,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
+            "apply_workspace_organization_plan": DurableEffect(
+                preflight=lambda principal, arguments: workspace.preflight_organization_plan(
+                    principal, plan=ApplyOrganizationPlan.model_validate(arguments)
+                ),
+                execute=self._execute_plan,
+                committed=lambda actor, key: workspace.organization_plan_started(
+                    actor_id=actor, idempotency_key=key
+                ),
+            ),
+        }
 
     def propose(
         self,
@@ -104,11 +176,9 @@ class ChatEffectService:
         arguments: dict[str, object],
         preview: dict[str, object],
     ) -> ChatEffect:
-        if capability.capability_id not in {
-            "create_document",
-            "publish_document",
-            "apply_workspace_organization_plan",
-        }:
+        principal = self.identity.reauthorize(principal)
+        durable = self.durable.get(capability.capability_id)
+        if durable is None:
             raise ValidationError("That chat capability does not use durable effects")
         normalized = capability.input_schema.model_validate(arguments).model_dump(mode="json")
         hidden_arguments = [
@@ -119,25 +189,7 @@ class ChatEffectService:
                 "The chat effect preview must include every material argument unchanged",
                 details={"fields": hidden_arguments},
             )
-        if capability.capability_id == "create_document":
-            self.workspace.preflight_create_document(
-                principal,
-                title=str(normalized.get("title", "")),
-                content=str(normalized.get("content", "")),
-                content_type=str(normalized.get("content_type", "text/markdown")),
-                path=str(normalized["path"]) if normalized.get("path") else None,
-            )
-        elif capability.capability_id == "publish_document":
-            self.workspace.preflight_publish_document(
-                principal,
-                document_id=str(normalized.get("document_id", "")),
-                revision_id=str(normalized.get("revision_id", "")),
-                slug=str(normalized.get("slug", "")),
-                access_policy=str(normalized.get("access_policy", "")),
-            )
-        elif capability.capability_id == "apply_workspace_organization_plan":
-            plan = ApplyOrganizationPlan.model_validate(normalized)
-            self.workspace.preflight_organization_plan(principal, plan=plan)
+        durable.preflight(principal, normalized)
 
         encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         digest = request_hash(normalized)
@@ -402,6 +454,7 @@ class ChatEffectService:
         argument_digest: str,
         reason: str | None,
     ) -> EffectExecution:
+        principal = self.identity.reauthorize(principal)
         validate_metadata_text(reason, "Decision reason")
         effect = self.get(principal, effect_id)
         if effect.argument_digest != argument_digest:
@@ -501,80 +554,17 @@ class ChatEffectService:
             arguments = json.loads(row["arguments_json"])
             operation_key = row["operation_key"]
             capability_id = row["capability_id"]
-        operation_recorded = self._operation_was_recorded(
-            actor_id=principal.actor_id,
-            operation_key=operation_key,
-            capability_id=capability_id,
-        )
+        durable = self.durable.get(capability_id)
         try:
-            if capability_id == "create_document":
-                document = self.workspace.create_document(
-                    principal,
-                    title=arguments["title"],
-                    content=arguments["content"],
-                    path=arguments["path"],
-                    content_type=arguments["content_type"],
-                    idempotency_key=operation_key,
-                )
-                client_result: dict[str, object] = {
-                    **document.model_dump(mode="json"),
-                    "approved": True,
-                    "status": "created",
-                }
-                stored_result = dict(client_result)
-                resource_type = "document"
-                resource_id = document.document_id
-            elif capability_id == "publish_document":
-                document = self.workspace.get_document(principal, arguments["document_id"])
-                if (
-                    not operation_recorded
-                    and document.current_revision_id != arguments["revision_id"]
-                ):
-                    raise ConflictError(
-                        "The document changed after publication approval",
-                        details={"current_revision_id": document.current_revision_id},
-                    )
-                publication = self.workspace.create_publication(
-                    principal,
-                    document_id=arguments["document_id"],
-                    slug=arguments["slug"],
-                    access_policy=arguments["access_policy"],
-                    idempotency_key=operation_key,
-                    revision_id=arguments["revision_id"],
-                )
-                client_result = {
-                    **publication.model_dump(mode="json"),
-                    "approved": True,
-                    "status": "published",
-                }
-                if publication.token:
-                    client_result["token"] = publication.token
-                stored_result = {
-                    key: value for key, value in client_result.items() if key != "token"
-                }
-                resource_type = "publication"
-                resource_id = publication.publication_id
-            elif capability_id == "apply_workspace_organization_plan":
-                plan = ApplyOrganizationPlan.model_validate(arguments)
-                plan_result = self.workspace.apply_workspace_organization_plan(
-                    principal,
-                    plan=plan,
-                    idempotency_key=operation_key,
-                )
-                if plan_result.status != "completed":
-                    raise ConflictError(
-                        "The organization plan stopped before every operation completed",
-                        details=plan_result.model_dump(mode="json"),
-                    )
-                client_result = {
-                    **plan_result.model_dump(mode="json"),
-                    "approved": True,
-                }
-                stored_result = dict(client_result)
-                resource_type = "organization_plan"
-                resource_id = effect_id
-            else:
+            if durable is None:
                 raise ValidationError("Unsupported durable chat effect capability")
+            outcome = durable.execute(
+                principal,
+                arguments,
+                effect_id,
+                operation_key,
+                durable.committed(principal.actor_id, operation_key),
+            )
         except Exception as error:
             failure = build_effect_failure_record(error)
             with self.database.transaction() as connection:
@@ -588,45 +578,182 @@ class ChatEffectService:
             raise
         self._complete(
             effect_id,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            result=stored_result,
+            resource_type=outcome.resource_type,
+            resource_id=outcome.resource_id,
+            result=outcome.stored_result,
         )
         effect = self.get(principal, effect_id)
-        return EffectExecution(effect=effect, client_result=client_result)
+        return EffectExecution(effect=effect, client_result=outcome.client_result)
 
-    def _operation_was_recorded(
-        self, *, actor_id: str, operation_key: str, capability_id: str
-    ) -> bool:
-        with self.database.connection() as connection:
-            if capability_id == "create_document":
-                row = connection.execute(
-                    """
-                    SELECT 1 FROM idempotency_keys
-                    WHERE actor_id = ? AND idempotency_key = ? AND operation = 'create'
-                    """,
-                    (actor_id, operation_key),
-                ).fetchone()
-            elif capability_id == "publish_document":
-                row = connection.execute(
-                    """
-                    SELECT 1 FROM mutation_idempotency_keys
-                    WHERE actor_id = ? AND idempotency_key = ?
-                      AND operation = 'publish' AND completed_at IS NOT NULL
-                    """,
-                    (actor_id, operation_key),
-                ).fetchone()
-            elif capability_id == "apply_workspace_organization_plan":
-                row = connection.execute(
-                    """
-                    SELECT 1 FROM organization_plan_executions
-                    WHERE actor_id = ? AND idempotency_key = ?
-                    """,
-                    (actor_id, operation_key),
-                ).fetchone()
-            else:
-                row = None
-        return row is not None
+    def _preflight_create(self, principal: Principal, arguments: dict[str, object]) -> None:
+        self.workspace.preflight_create_document(
+            principal,
+            title=str(arguments.get("title", "")),
+            content=str(arguments.get("content", "")),
+            content_type=str(arguments.get("content_type", "text/markdown")),
+            path=str(arguments["path"]) if arguments.get("path") else None,
+        )
+
+    def _execute_create(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        validated = CreateDocumentInput.model_validate(arguments)
+        document = self.workspace.create_document(
+            principal,
+            title=validated.title,
+            content=validated.content,
+            path=validated.path,
+            content_type=validated.content_type,
+            idempotency_key=operation_key,
+        )
+        result: dict[str, object] = {
+            **document.model_dump(mode="json"),
+            "approved": True,
+            "status": "created",
+        }
+        return EffectOutcome(result, dict(result), "document", document.document_id)
+
+    def _preflight_publish(self, principal: Principal, arguments: dict[str, object]) -> None:
+        self.workspace.preflight_publish_document(
+            principal,
+            document_id=str(arguments.get("document_id", "")),
+            revision_id=str(arguments.get("revision_id", "")),
+            slug=str(arguments.get("slug", "")),
+            access_policy=str(arguments.get("access_policy", "")),
+        )
+
+    def _execute_publish(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id
+        validated = PublishDocumentInput.model_validate(arguments)
+        document = self.workspace.get_document(principal, validated.document_id)
+        if not recorded and document.current_revision_id != validated.revision_id:
+            raise ConflictError(
+                "The document changed after publication approval",
+                details={"current_revision_id": document.current_revision_id},
+            )
+        publication = self.workspace.create_publication(
+            principal,
+            document_id=validated.document_id,
+            slug=validated.slug,
+            access_policy=validated.access_policy,
+            idempotency_key=operation_key,
+            revision_id=validated.revision_id,
+        )
+        result: dict[str, object] = {
+            **publication.model_dump(mode="json"),
+            "approved": True,
+            "status": "published",
+        }
+        if publication.token:
+            result["token"] = publication.token
+        # The capability token is shown once to the approving client and never stored.
+        stored = {key: value for key, value in result.items() if key != "token"}
+        return EffectOutcome(result, stored, "publication", publication.publication_id)
+
+    def _preflight_project(self, principal: Principal, arguments: dict[str, object]) -> None:
+        AuthorizationPolicy.require_administrator(principal)
+        change = UpdateProjectInput.model_validate(arguments).change
+        if isinstance(change, CreateProjectChange):
+            validate_metadata_text(change.name, "Project name")
+            validate_metadata_text(change.description, "Project description")
+            return
+        # Opening the project and reading the document fail now, not after approval.
+        self.projects.get_project(change.project_id, principal)
+        if isinstance(change, AddProjectDocumentChange):
+            self.workspace.get_document(principal, change.document_id)
+            validate_metadata_text(change.notes, "Document notes")
+
+    def _execute_project(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        change = UpdateProjectInput.model_validate(arguments).change
+        if isinstance(change, CreateProjectChange):
+            project = self.projects.create_project_once(
+                principal,
+                operation_key,
+                CreateProject(
+                    name=change.name,
+                    description=change.description,
+                    create_brief=change.create_brief,
+                ),
+            )
+            result: dict[str, object] = {
+                "approved": True,
+                "status": "created",
+                "project_id": project.project_id,
+                "name": project.name,
+            }
+            return EffectOutcome(result, dict(result), "project", project.project_id)
+        if isinstance(change, AddProjectDocumentChange):
+            member = self.projects.add_document_once(
+                principal,
+                operation_key,
+                change.project_id,
+                AddProjectDocument(
+                    document_id=change.document_id,
+                    role=change.role,
+                    pinned_page=change.pinned_page,
+                    notes=change.notes,
+                ),
+            )
+            result = {
+                "approved": True,
+                "status": "added",
+                "project_id": member.project_id,
+                "document_id": member.document_id,
+            }
+            return EffectOutcome(result, dict(result), "project", member.project_id)
+        self.projects.remove_document_once(
+            principal, operation_key, change.project_id, change.document_id
+        )
+        result = {
+            "approved": True,
+            "status": "removed",
+            "project_id": change.project_id,
+            "document_id": change.document_id,
+        }
+        return EffectOutcome(result, dict(result), "project", change.project_id)
+
+    def _execute_plan(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del recorded
+        plan_result = self.workspace.apply_workspace_organization_plan(
+            principal,
+            plan=ApplyOrganizationPlan.model_validate(arguments),
+            idempotency_key=operation_key,
+        )
+        if plan_result.status != "completed":
+            raise ConflictError(
+                "The organization plan stopped before every operation completed",
+                details=plan_result.model_dump(mode="json"),
+            )
+        result: dict[str, object] = {**plan_result.model_dump(mode="json"), "approved": True}
+        return EffectOutcome(result, dict(result), "organization_plan", effect_id)
 
     def _complete(
         self,

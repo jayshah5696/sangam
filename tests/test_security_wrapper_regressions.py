@@ -10,6 +10,7 @@ import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
+from sangam.access import writes
 from sangam.api import create_app
 from sangam.capabilities import Capability
 from sangam.config import Settings
@@ -173,29 +174,40 @@ def test_body_only_duplicate_identity_and_legacy_replay_are_source_bound(client)
     )
     assert outside.status_code == 403
 
-    # The older workspace boundary writes the legacy create-shaped idempotency
-    # row and its real duplicate audit provenance. No rows or results are fabricated.
-    legacy = client.app.state.services.workspace_access.duplicate_document(
-        Principal.trusted_human(
-            actor_id="human:jay", display_name="Jay", operation_id="legacy-copy"
-        ),
-        document_id=source["document_id"],
-        expected_revision_id=source["current_revision_id"],
-        title="Legacy copy",
-        path="docs/legacy.md",
-        idempotency_key="legacy-duplicate",
+    # Older releases duplicated through a wrapper that stored the storage-shaped
+    # create key and an accepted duplicate audit row. Reproduce exactly those writes.
+    def legacy_duplicate(*, title: str, path: str, key: str, operation_id: str):
+        services = client.app.state.services
+        principal = Principal.trusted_human(
+            actor_id="human:jay", display_name="Jay", operation_id=operation_id
+        )
+        return services.workspace_access.audited(
+            principal,
+            writes("duplicate", "document"),
+            lambda: services.documents.duplicate_document(
+                document_id=source["document_id"],
+                expected_revision_id=source["current_revision_id"],
+                title=title,
+                path=path,
+                actor_id=principal.actor_id,
+                idempotency_key=key,
+            ),
+            resource_id=source["document_id"],
+            details={
+                "expected_revision_id": source["current_revision_id"],
+                "source_path": source["path"],
+                "destination_path": path,
+                "title": title,
+            },
+        )
+
+    legacy = legacy_duplicate(
+        title="Legacy copy", path="docs/legacy.md", key="legacy-duplicate", operation_id="lc"
     )
     secret_title = "github_pat_abcdefghijklmnopqrstuv"
     secret_path = "docs/glpat-abcdefghijklmnop.md"
-    secret_legacy = client.app.state.services.workspace_access.duplicate_document(
-        Principal.trusted_human(
-            actor_id="human:jay", display_name="Jay", operation_id="legacy-secret-copy"
-        ),
-        document_id=source["document_id"],
-        expected_revision_id=source["current_revision_id"],
-        title=secret_title,
-        path=secret_path,
-        idempotency_key="legacy-secret-duplicate",
+    secret_legacy = legacy_duplicate(
+        title=secret_title, path=secret_path, key="legacy-secret-duplicate", operation_id="ls"
     )
     changed = client.patch(
         f"/api/v1/documents/{source['document_id']}",

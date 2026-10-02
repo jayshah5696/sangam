@@ -25,14 +25,16 @@ from sangam.errors import (
     ValidationError,
     validate_metadata_text,
 )
-from sangam.idempotency import request_hash
+from sangam.idempotency import IdempotencyStore
 from sangam.schemas import (
     ChatProposal,
     ChatProposalCitation,
     ChatProposalEvidence,
     ChatProposalSource,
+    UpdateDocument,
 )
 from sangam.security import IdentityService, Principal
+from sangam.service import append_fingerprint
 
 
 @dataclass(frozen=True)
@@ -190,33 +192,39 @@ class ChatProposalRepository:
         self, principal: Principal, proposal: ChatProposal, idempotency_key: str, content: str
     ) -> str | None:
         """Recover the immutable result, never the document's subsequently changed head."""
-        fingerprint = request_hash(
-            {
-                "document_id": proposal.document_id,
-                "expected_revision_id": proposal.expected_revision_id,
-                "content": content,
-                "title": None,
-                "path": None,
-                "operation": "update",
-                "summary": proposal.summary,
-                "deleted": None,
-            }
+        fingerprint = append_fingerprint(
+            document_id=proposal.document_id,
+            expected_revision_id=proposal.expected_revision_id,
+            content=content,
+            title=None,
+            path=None,
+            operation="update",
+            summary=proposal.summary,
+            deleted=None,
         )
         with self.database.connection() as connection:
-            row = connection.execute(
-                "SELECT r.revision_id, r.content, r.parent_revision_id FROM idempotency_keys i "
-                "JOIN revisions r ON r.revision_id = i.revision_id "
-                "WHERE i.actor_id = ? AND i.idempotency_key = ? AND i.operation = 'update' "
-                "AND i.document_id = ? AND i.request_hash = ?",
-                (principal.actor_id, idempotency_key, proposal.document_id, fingerprint),
+            record = IdempotencyStore.lookup(
+                connection, actor_id=principal.actor_id, key=idempotency_key
+            )
+            if (
+                record is None
+                or record.operation != "update"
+                or record.resource_id != proposal.document_id
+                or record.request_hash != fingerprint
+                or record.revision_id is None
+            ):
+                return None
+            revision = connection.execute(
+                "SELECT content, parent_revision_id FROM revisions WHERE revision_id = ?",
+                (record.revision_id,),
             ).fetchone()
         if (
-            row is None
-            or row["content"] != content
-            or (row["parent_revision_id"] != proposal.expected_revision_id)
+            revision is None
+            or revision["content"] != content
+            or revision["parent_revision_id"] != proposal.expected_revision_id
         ):
             return None
-        return row["revision_id"]
+        return record.revision_id
 
     def release_apply_reservation(
         self, principal: Principal, proposal_id: str, idempotency_key: str
@@ -307,11 +315,12 @@ class ChatProposalService:
         repository: ChatProposalRepository,
         workspace: WorkspaceAccessService,
         evidence: ChatEvidenceRepository,
+        identity: IdentityService,
     ) -> None:
         self.repository = repository
         self.workspace = workspace
         self.evidence = evidence
-        self.identity = IdentityService(repository.database)
+        self.identity = identity
         # Track active applies per proposal. The database payload binding
         # survives interruption; canonical document idempotency recovers its commit.
         self._apply_lock = Lock()
@@ -606,13 +615,15 @@ class ChatProposalService:
                         expected_revision_id=expected_revision_id,
                         content=applied_content,
                     )
-                self.workspace.update_document(
+                self.workspace.write_document(
                     principal,
                     document_id=proposal.document_id,
-                    expected_revision_id=expected_revision_id,
-                    content=applied_content,
-                    title=None,
-                    summary=proposal.summary,
+                    action="update",
+                    body=UpdateDocument(
+                        expected_revision_id=expected_revision_id,
+                        content=applied_content,
+                        summary=proposal.summary,
+                    ),
                     idempotency_key=reserved.idempotency_key,
                 )
                 revision_id = self.repository.committed_revision(

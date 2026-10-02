@@ -11,12 +11,14 @@ import {
   Quote,
   Search,
   StickyNote,
+  X,
 } from 'lucide-react'
 import { evidenceCitationMarkdown } from '../evidenceCitation'
 import { useDocumentSessions } from '../documentSessions'
 import { workspaceEvidenceStore } from '../workspaceEvidenceState'
-import { api, type Annotation, type Document } from '../api'
+import { api, writeFailureMessage, type Annotation, type Document } from '../api'
 import { usePdfResearch } from '../pdfResearchState'
+import { annotationLink } from '../pdfAnnotationUi'
 import { useWorkbench } from '../workbench'
 import { annotationTypeLabel, type AnnotationDraft } from './pdfResearchTypes'
 import { StateMessage } from './ui/StateMessage'
@@ -220,7 +222,7 @@ export function PdfResearchRail({ document }: { document: Document }) {
               <span>{result.snippet}</span>
             </button>
           ))}
-          {search.data.length === 0 && <p className="small-muted">No matching pages.</p>}
+          {search.data.length === 0 && <StateMessage compact kind="empty" title="No matching pages" />}
         </div>
       )}
       <div className="pdf-annotation-actions" role="toolbar" aria-label="Add PDF annotation">
@@ -339,7 +341,7 @@ function AnnotationComposer({
           <strong>{annotationTypeLabel(draft.annotationType)}</strong>
         </div>
         <button type="button" className="icon-button" aria-label="Close annotation form" onClick={onClose}>
-          ×
+          <X size="var(--icon-control)" />
         </button>
       </header>
       {draft.selectedText && <ExpandableQuote>{draft.selectedText}</ExpandableQuote>}
@@ -362,7 +364,13 @@ function AnnotationComposer({
       <button className="panel-button" disabled={create.isPending}>
         <Highlighter size="var(--icon-inline)" /> {create.isPending ? 'Saving…' : 'Save annotation'}
       </button>
-      {create.isError && <p className="error-text">The annotation could not be saved.</p>}
+      {create.isError && (
+        <StateMessage
+          compact
+          kind="error"
+          title={writeFailureMessage(create.error, 'The annotation could not be saved.')}
+        />
+      )}
     </form>
   )
 }
@@ -398,7 +406,7 @@ function AnnotationDetail({ annotation, onClose }: { annotation: Annotation; onC
       onClose()
     },
   })
-  const link = `sangam://document/${annotation.document_id}?page=${annotation.page_number}&annotation=${annotation.annotation_id}`
+  const link = annotationLink(annotation)
   return (
     <section className="annotation-detail">
       <header>
@@ -407,7 +415,7 @@ function AnnotationDetail({ annotation, onClose }: { annotation: Annotation; onC
           <strong>{annotationTypeLabel(annotation.annotation_type)}</strong>
         </div>
         <button className="icon-button" aria-label="Close annotation detail" onClick={onClose}>
-          ×
+          <X size="var(--icon-control)" />
         </button>
       </header>
       {annotation.selected_text && <ExpandableQuote>{annotation.selected_text}</ExpandableQuote>}
@@ -436,8 +444,19 @@ function AnnotationDetail({ annotation, onClose }: { annotation: Annotation; onC
           Remove
         </button>
       </div>
+      {(update.isError || remove.isError) && (
+        <StateMessage
+          compact
+          kind="error"
+          title={writeFailureMessage(
+            update.error ?? remove.error,
+            update.isError ? 'The annotation could not be saved.' : 'The annotation could not be removed.',
+          )}
+        />
+      )}
       <div className="annotation-history">
         <p className="eyebrow">Version history</p>
+        {history.isError && <StateMessage compact kind="error" title="Version history could not be loaded" />}
         {(history.data ?? []).map((event) => (
           <article key={event.event_id}>
             <strong>

@@ -9,6 +9,7 @@ from chatkit.server import NonStreamingResult, StreamingResult
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from sangam.access import writes
 from sangam.chat import ChatRequestContext, SangamChatServer
 from sangam.chat_runtime import ChatAdmissionLease, read_limited_body
 from sangam.errors import ServiceUnavailableError, ValidationError
@@ -100,17 +101,13 @@ def create_chat_router(
         body: CreateProviderConnection,
         principal: Principal = admin_dependency,
     ) -> ProviderConnection:
-        with chat.workspace.documents.database.transaction() as connection:
-            result = chat.provider_connections.create(**body.model_dump())
-            chat.workspace.activity.record_with_connection(
-                connection,
-                principal=principal,
-                action="create",
-                resource_type="provider_connection",
-                resource_id=result.connection_id,
-                outcome="accepted",
-            )
-            return _connection_schema(result)
+        result = chat.workspace.audited(
+            principal,
+            writes("create", "provider_connection"),
+            lambda: chat.provider_connections.create(**body.model_dump()),
+            resource_id=body.connection_id,
+        )
+        return _connection_schema(result)
 
     @router.put("/chat/connections/{connection_id}", response_model=ProviderConnection)
     def update_connection(
@@ -118,30 +115,25 @@ def create_chat_router(
         body: UpdateProviderConnection,
         principal: Principal = admin_dependency,
     ) -> ProviderConnection:
-        with chat.workspace.documents.database.transaction() as connection:
-            result = chat.provider_connections.update(connection_id, **body.model_dump())
-            chat.workspace.activity.record_with_connection(
-                connection,
-                principal=principal,
-                action="update",
-                resource_type="provider_connection",
-                resource_id=result.connection_id,
-                outcome="accepted",
-            )
-            return _connection_schema(result)
+        result = chat.workspace.audited(
+            principal,
+            writes("update", "provider_connection"),
+            lambda: chat.provider_connections.update(connection_id, **body.model_dump()),
+            resource_id=connection_id,
+        )
+        return _connection_schema(result)
 
     @router.post("/chat/connections/{connection_id}/test", response_model=ProviderConnectionTest)
     def test_connection(
         connection_id: str,
         principal: Principal = admin_dependency,
     ) -> ProviderConnectionTest:
-        connection, models = chat.provider_connections.test(connection_id)
-        chat.workspace.activity.record(
-            principal=principal,
-            action="test",
-            resource_type="provider_connection",
-            resource_id=connection.connection_id,
-            outcome="accepted",
+        # A provider probe spends credentials outside Sangam, so it is ledgered like a write.
+        connection, models = chat.workspace.audited(
+            principal,
+            writes("test", "provider_connection"),
+            lambda: chat.provider_connections.test(connection_id),
+            resource_id=connection_id,
         )
         return ProviderConnectionTest(
             connection=_connection_schema(connection),

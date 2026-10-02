@@ -1,18 +1,7 @@
 import { z } from 'zod'
 import MarkdownIt from 'markdown-it'
+import { citationLink, textLocatorSchema, type TextLocator } from './citationNavigation'
 const markdownText = new MarkdownIt({ html: false, linkify: true, typographer: true })
-
-export const textLocatorSchema = z
-  .object({
-    exact: z.string().min(1),
-    start: z.number().int().nonnegative(),
-    end: z.number().int().nonnegative(),
-    prefix: z.string(),
-    suffix: z.string(),
-    representation: z.enum(['source', 'rendered']).optional(),
-  })
-  .refine((value) => value.end - value.start === value.exact.length, 'Invalid passage range')
-export type TextLocator = z.infer<typeof textLocatorSchema>
 
 // The locator is relative to the immutable source text, never the destination draft.
 export function locatePassage(content: string, exact: string, occurrence = 0): TextLocator | undefined {
@@ -194,19 +183,13 @@ export function evidenceCitationMarkdown(reference: EvidenceReference): string {
 }
 
 function evidenceSourceLink(reference: EvidenceReference) {
-  const params = new URLSearchParams()
-  if (reference.revisionId) params.set('revision', reference.revisionId)
-  if (reference.pageNumber && reference.pageNumber > 0) params.set('page', String(reference.pageNumber))
-  if (reference.annotationId) params.set('annotation', reference.annotationId)
-  if (reference.textLocator) {
-    params.set('text', reference.textLocator.exact)
-    params.set('start', String(reference.textLocator.start))
-    if (reference.textLocator.representation)
-      params.set('representation', reference.textLocator.representation)
-  }
-
-  const query = params.size ? `?${params.toString()}` : ''
-  const link = `sangam://document/${encodeURIComponent(reference.documentId)}${query}`
+  const link = citationLink({
+    documentId: reference.documentId,
+    revisionId: reference.revisionId,
+    pageNumber: reference.pageNumber && reference.pageNumber > 0 ? reference.pageNumber : undefined,
+    annotationId: reference.annotationId,
+    textLocator: reference.textLocator,
+  })
 
   let label = reference.title?.trim() || (reference.pageNumber ? 'PDF' : 'Source')
   if (reference.pageNumber && reference.pageNumber > 0) {

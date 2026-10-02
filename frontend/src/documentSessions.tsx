@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useSyncExternalStore, t
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, type Document } from './api'
 import { IndexedDbDraftStorage, type DraftRecord, type DraftStorage } from './browserState/draftStorage'
+import { adoptDocumentInCache } from './documentCache'
 import type { EditorSelection, EditorViewState } from './components/MarkdownEditor'
 import type { AnnotationDraft } from './components/pdfResearchTypes'
 import { evidenceCitationForType, type EvidenceReference } from './evidenceCitation'
@@ -51,8 +52,10 @@ type SessionRuntime = {
 
 type StoreOptions = {
   storage: DraftStorage
-  saveDocument: (document: Document, content: string) => Promise<Document>
-  onSaved?: (document: Document) => void
+  /** Write `content` (and optionally a new title) on top of `document.current_revision_id`. */
+  saveDocument: (document: Document, content: string, title?: string) => Promise<Document>
+  /** Called with every server head the store adopts, so caches can follow it. */
+  onServerDocument?: (document: Document) => void
   isOnline?: () => boolean
   saveDelay?: number
   persistDelay?: number
@@ -73,6 +76,13 @@ export function deriveSaveState(
   return online ? 'dirty' : 'offline'
 }
 
+/**
+ * The one browser-side writer of document content and titles.
+ *
+ * Each open document has a base revision that only this store advances. Saves
+ * and renames are serialized per document, so no write is ever sent on top of a
+ * revision another in-flight write is about to replace.
+ */
 export class DocumentSessionStore {
   private readonly sessions = new Map<string, DocumentSession>()
   private readonly runtimes = new Map<string, SessionRuntime>()
@@ -177,15 +187,7 @@ export class DocumentSessionStore {
   flushSnapshot = async (documentId: string, snapshot: string): Promise<Document> => {
     const runtime = this.runtimes.get(documentId)
     if (!runtime) throw new Error('Source is not loaded.')
-    if (runtime.inFlight)
-      await new Promise<void>((resolve) => {
-        const stop = this.subscribe(documentId, () => {
-          if (!runtime.inFlight) {
-            stop()
-            resolve()
-          }
-        })
-      })
+    await this.whenIdle(runtime, documentId)
     if (runtime.savedContent === snapshot) return runtime.document
     if (this.getSession(documentId).content !== snapshot)
       throw new Error('The source changed after selection. Select the passage again.')
@@ -193,6 +195,34 @@ export class DocumentSessionStore {
     if (runtime.savedContent !== snapshot)
       throw new Error('Save the source successfully before keeping evidence.')
     return runtime.document
+  }
+
+  /**
+   * Rename a document, saving its current editor content in the same revision.
+   * Waits for an in-flight autosave so the rename builds on that save's revision.
+   */
+  rename = async (documentId: string, title: string): Promise<Document> => {
+    if (!this.runtimes.has(documentId)) await this.initializeDocument(await api.getDocument(documentId))
+    const runtime = this.runtimes.get(documentId)
+    if (!runtime) throw new Error('The document could not be loaded.')
+    await this.whenIdle(runtime, documentId)
+    if (runtime.saveTimer !== undefined) window.clearTimeout(runtime.saveTimer)
+    runtime.saveTimer = undefined
+    const renamed = await this.save(documentId, title)
+    if (!renamed) throw new Error('Another save started before the rename. Try again.')
+    return renamed
+  }
+
+  private whenIdle(runtime: SessionRuntime, documentId: string): Promise<void> {
+    if (!runtime.inFlight) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const stop = this.subscribe(documentId, () => {
+        if (!runtime.inFlight) {
+          stop()
+          resolve()
+        }
+      })
+    })
   }
 
   getSession = (documentId: string): DocumentSession => {
@@ -326,7 +356,9 @@ export class DocumentSessionStore {
     }
   }
 
+  /** Adopt a head written outside this store, such as an applied proposal or a restore. */
   acceptServerDocument(document: Document, replaceContent = false) {
+    this.options.onServerDocument?.(document)
     const documentId = document.document_id
     const runtime = this.runtimes.get(documentId)
     const current = this.getSession(documentId)
@@ -418,19 +450,24 @@ export class DocumentSessionStore {
     }, delay)
   }
 
-  private async save(documentId: string) {
+  /**
+   * Send the session's content as the next revision. An autosave (no `title`)
+   * skips when there is nothing to save; a rename always writes and rethrows failure.
+   */
+  private async save(documentId: string, title?: string): Promise<Document | undefined> {
     const runtime = this.runtimes.get(documentId)
     const session = this.getSession(documentId)
+    const renaming = title !== undefined
+    if (!runtime || runtime.inFlight) return
     if (
-      !runtime ||
-      runtime.inFlight ||
-      !this.online ||
-      session.content === undefined ||
-      session.content === runtime.savedContent ||
-      session.saveState === 'conflict'
+      !renaming &&
+      (!this.online ||
+        session.content === undefined ||
+        session.content === runtime.savedContent ||
+        session.saveState === 'conflict')
     )
       return
-    const submittedContent = session.content
+    const submittedContent = session.content ?? runtime.savedContent
     const base = session.baseRevisionId
       ? { ...runtime.document, current_revision_id: session.baseRevisionId }
       : runtime.document
@@ -438,10 +475,10 @@ export class DocumentSessionStore {
     runtime.queued = false
     this.setSession(documentId, { ...session, saveState: 'saving' })
     try {
-      const savedDocument = await this.options.saveDocument(base, submittedContent)
+      const savedDocument = await this.options.saveDocument(base, submittedContent, title)
       runtime.document = savedDocument
       runtime.savedContent = submittedContent
-      this.options.onSaved?.(savedDocument)
+      this.options.onServerDocument?.(savedDocument)
       const current = this.getSession(documentId)
       const isCurrent = current.content === submittedContent
       this.setSession(documentId, {
@@ -451,13 +488,17 @@ export class DocumentSessionStore {
       })
       if (isCurrent) this.deleteDraft(documentId)
       else this.scheduleDraftPersistence(documentId)
+      return savedDocument
     } catch (error) {
       const current = this.getSession(documentId)
+      const conflicted = error instanceof ApiError && error.kind === 'conflict'
+      // A failed rename leaves unsaved content to autosave; only a conflict stops it.
+      const failedState = renaming && current.content === runtime.savedContent ? 'saved' : 'failed'
       this.setSession(documentId, {
         ...current,
-        saveState:
-          error instanceof ApiError && error.status === 409 ? 'conflict' : this.online ? 'failed' : 'offline',
+        saveState: conflicted ? 'conflict' : this.online ? failedState : 'offline',
       })
+      if (renaming) throw error
     } finally {
       runtime.inFlight = false
       this.listeners.get(documentId)?.forEach((listener) => listener())
@@ -597,12 +638,7 @@ export function DocumentSessionsProvider({
         onWritingIntent,
         saveDocument: api.updateDocument,
         isOnline: () => navigator.onLine,
-        onSaved: (document) => {
-          queryClient.setQueryData(['document', document.document_id], document)
-          void queryClient.invalidateQueries({ queryKey: ['documents'] })
-          void queryClient.invalidateQueries({ queryKey: ['history', document.document_id] })
-          void queryClient.invalidateQueries({ queryKey: ['folders'] })
-        },
+        onServerDocument: (document) => adoptDocumentInCache(queryClient, document),
       }),
   )
 

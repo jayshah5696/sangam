@@ -34,6 +34,7 @@ import workerSource from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { api, type Annotation, type Document, type PdfRect } from '../api'
 import type { PdfViewState } from '../documentSessions'
 import { normalizePdfRect } from '../pdfGeometry'
+import { citationLink } from '../citationNavigation'
 import { PdfAnnotationPreview } from './PdfAnnotationPreview'
 import { PdfSelectionToolbar, type PdfTextSelection } from './PdfSelectionToolbar'
 import { annotationTypeLabel, type AnnotationDraft } from './pdfResearchTypes'
@@ -254,7 +255,7 @@ export function PdfViewer({
             aria-label="Copy page link"
             onClick={() =>
               void navigator.clipboard.writeText(
-                `[${document.title}, p. ${pageNumber}](sangam://document/${document.document_id}?page=${pageNumber})`,
+                `[${document.title}, p. ${pageNumber}](${citationLink({ documentId: document.document_id, pageNumber })})`,
               )
             }
           >

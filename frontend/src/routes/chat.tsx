@@ -4,6 +4,7 @@ import { createFileRoute, useLocation, useNavigate } from '@tanstack/react-route
 import { ArrowLeft, MessageSquareText } from 'lucide-react'
 import { z } from 'zod'
 import { api, type Document } from '../api'
+import { adoptDocumentInCache } from '../documentCache'
 import { StateMessage } from '../components/ui/StateMessage'
 
 const ChatPanel = lazy(() =>
@@ -75,8 +76,7 @@ function WorkspaceChat() {
       replace: true,
     })
   const updateDocument = (nextDocument: Document) => {
-    queryClient.setQueryData(['document', nextDocument.document_id], nextDocument)
-    void queryClient.invalidateQueries({ queryKey: ['documents'] })
+    adoptDocumentInCache(queryClient, nextDocument)
     void navigate({
       search: (current) => ({ ...current, revision: nextDocument.current_revision_id }),
       replace: true,

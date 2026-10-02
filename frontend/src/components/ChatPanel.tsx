@@ -35,7 +35,15 @@ import {
   type CreateConfirmationRequest,
 } from './ChatCreateConfirmation'
 import { useChatKitScript } from './useChatKitScript'
-import { ChatEffectTray, DurableEffectStatus, shortId } from './ChatEffectTray'
+import { ChatEffectTray, DurableEffectStatus } from './ChatEffectTray'
+import { ChatProjectConfirmation } from './ChatProjectConfirmation'
+import {
+  organizationOperationDetail,
+  organizationOperationTitle,
+  parseProjectChange,
+  shortId,
+  type ProjectChange,
+} from '../chatEffectCopy'
 
 export { DurableEffectStatus, shortId }
 
@@ -88,6 +96,7 @@ export function ChatPanel({
   const [published, setPublished] = useState<IssuedPublication | null>(null)
   const [pendingCreate, setPendingCreate] = useState<CreateConfirmationRequest | null>(null)
   const [pendingOrganization, setPendingOrganization] = useState<OrganizationOperation[] | null>(null)
+  const [pendingProject, setPendingProject] = useState<ProjectChange | null>(null)
   const [pendingEffect, setPendingEffect] = useState<ChatEffect | null>(null)
   const [createError, setCreateError] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -97,7 +106,8 @@ export function ChatPanel({
   const [resumeErrorIds, setResumeErrorIds] = useState<Set<string>>(() => new Set())
   const publishResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
   const createResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
-  const organizationResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
+  // Organization plans and project changes share one review slot; only one can be pending.
+  const reviewResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
   const [settledEffectIds, setSettledEffectIds] = useState<Set<string>>(() => new Set())
   const threadIdRef = useRef(threadId)
   const configQuery = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
@@ -238,6 +248,7 @@ export function ChatPanel({
       setPublishError(false)
       setPublished(null)
       setPendingOrganization(null)
+      setPendingProject(null)
     } else if (effect.capability_id === 'create_document') {
       const request = parseCreateConfirmation(effect.preview)
       if (!request) return false
@@ -246,10 +257,19 @@ export function ChatPanel({
       setCreateError(false)
       setCreatedDocument(null)
       setPendingOrganization(null)
+      setPendingProject(null)
+    } else if (effect.capability_id === 'update_project') {
+      const change = parseProjectChange(effect.preview)
+      if (!change) return false
+      setPendingProject(change)
+      setPendingOrganization(null)
+      setPendingPublication(null)
+      setPendingCreate(null)
     } else {
       const parsed = z.array(organizationOperationSchema).safeParse(effect.preview.operations)
       if (!parsed.success) return false
       setPendingOrganization(parsed.data)
+      setPendingProject(null)
       setPendingPublication(null)
       setPendingCreate(null)
     }
@@ -260,13 +280,14 @@ export function ChatPanel({
     (result: Record<string, JsonPayload> = { approved: false, status: 'cancelled' }) => {
       publishResolver.current?.(result)
       createResolver.current?.(result)
-      organizationResolver.current?.(result)
+      reviewResolver.current?.(result)
       publishResolver.current = null
       createResolver.current = null
-      organizationResolver.current = null
+      reviewResolver.current = null
       setPendingPublication(null)
       setPendingCreate(null)
       setPendingOrganization(null)
+      setPendingProject(null)
       setPendingEffect(null)
       setPublishError(false)
       setCreateError(false)
@@ -313,7 +334,7 @@ export function ChatPanel({
       return new Promise<Record<string, JsonPayload>>((resolve) => {
         if (effect.capability_id === 'publish_document') publishResolver.current = resolve
         else if (effect.capability_id === 'create_document') createResolver.current = resolve
-        else organizationResolver.current = resolve
+        else reviewResolver.current = resolve
       })
     },
     [showPendingEffect],
@@ -322,7 +343,7 @@ export function ChatPanel({
     () => () => {
       publishResolver.current = null
       createResolver.current = null
-      organizationResolver.current = null
+      reviewResolver.current = null
     },
     [],
   )
@@ -555,21 +576,24 @@ export function ChatPanel({
       setCreating(false)
     }
   }
-  const decideOrganization = async (verdict: 'approve' | 'deny') => {
-    if (!pendingEffect || !pendingOrganization || creating) return
+  const decideReview = async (verdict: 'approve' | 'deny') => {
+    if (!pendingEffect || !(pendingOrganization || pendingProject) || creating) return
     setCreating(true)
     setCreateError(false)
     try {
       const decision = await api.decideChatEffect(pendingEffect, verdict)
       setSettledEffectIds((effectIds) => new Set(effectIds).add(pendingEffect.effect_id))
-      organizationResolver.current?.(decision.client_result)
-      organizationResolver.current = null
+      reviewResolver.current?.(decision.client_result)
+      reviewResolver.current = null
       removeEffectFromPendingCache(pendingEffect.effect_id)
       setPendingOrganization(null)
+      setPendingProject(null)
       setPendingEffect(null)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['documents'] }),
         queryClient.invalidateQueries({ queryKey: ['folders'] }),
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+        queryClient.invalidateQueries({ queryKey: ['project'] }),
         queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] }),
       ])
     } catch {
@@ -599,6 +623,8 @@ export function ChatPanel({
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['documents'] }),
           queryClient.invalidateQueries({ queryKey: ['folders'] }),
+          queryClient.invalidateQueries({ queryKey: ['projects'] }),
+          queryClient.invalidateQueries({ queryKey: ['project'] }),
         ])
       }
       removeEffectFromPendingCache(effect.effect_id)
@@ -731,8 +757,18 @@ export function ChatPanel({
               operations={pendingOrganization}
               pending={creating}
               error={createError}
-              onApprove={() => void decideOrganization('approve')}
-              onCancel={() => void decideOrganization('deny')}
+              onApprove={() => void decideReview('approve')}
+              onCancel={() => void decideReview('deny')}
+            />
+          )}
+          {pendingProject && pendingEffect && !settledEffectIds.has(pendingEffect.effect_id) && (
+            <ChatProjectConfirmation
+              effect={pendingEffect}
+              change={pendingProject}
+              pending={creating}
+              error={createError}
+              onApprove={() => void decideReview('approve')}
+              onCancel={() => void decideReview('deny')}
             />
           )}
           {createdDocument && (
@@ -1012,32 +1048,6 @@ function OrganizationPlanConfirmation({
       </div>
     </section>
   )
-}
-
-function organizationOperationTitle(operation: OrganizationOperation) {
-  if (operation.kind === 'create_folder') return `Create folder ${operation.path}`
-  if (operation.kind === 'materialize_document')
-    return `Save draft ${shortId(operation.document_id)} to workspace`
-  if (operation.kind === 'move_document') return `Move document ${shortId(operation.document_id)}`
-  if (operation.kind === 'trash_document') return `Move document ${shortId(operation.document_id)} to Trash`
-  if (operation.kind === 'move_folder') return `Move folder ${operation.expected_source_path}`
-  if (operation.kind === 'update_document_metadata')
-    return `Update document ${shortId(operation.document_id)} metadata`
-  return `Update folder ${shortId(operation.folder_id)} metadata`
-}
-
-function organizationOperationDetail(operation: OrganizationOperation) {
-  if (operation.kind === 'create_folder')
-    return `New path: ${operation.path} · category ${operation.category ?? 'none'} · ${operation.tag_ids.length} tags`
-  if (operation.kind === 'materialize_document')
-    return `New path: ${operation.destination_path} · revision ${shortId(operation.expected_revision_id)}`
-  if (operation.kind === 'move_document')
-    return `${operation.expected_source_path} → ${operation.destination_path} · revision ${shortId(operation.expected_revision_id)}`
-  if (operation.kind === 'trash_document')
-    return `${operation.expected_source_path} → Trash · revision ${shortId(operation.expected_revision_id)}`
-  if (operation.kind === 'move_folder')
-    return `${operation.expected_source_path} → ${operation.destination_path} · ${operation.expected_descendant_documents} descendant documents`
-  return `Category ${operation.expected_category ?? 'none'} → ${operation.category ?? 'none'} · tags ${operation.expected_tag_ids.length ? operation.expected_tag_ids.join(', ') : 'none'} → ${operation.tag_ids.length ? operation.tag_ids.join(', ') : 'none'} · metadata version ${operation.expected_metadata_version}`
 }
 
 export function CompletionRow({

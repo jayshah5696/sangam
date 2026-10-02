@@ -49,6 +49,10 @@ def atomic[T, **P](
     return run
 
 
+class DeletedProjectReference(BaseModel):
+    """The recorded result of a removal, so a replayed removal has something to return."""
+
+
 class ProjectService:
     """Small reference-based project model. Membership never grants resource access."""
 
@@ -104,6 +108,49 @@ class ProjectService:
                 (principal.actor_id, key, result.model_dump_json()),
             )
             return result
+
+    # The three changes below are exposed to both the HTTP API and chat. Each runs once
+    # per idempotency key under the operation name every caller shares.
+
+    def create_project_once(
+        self, principal: Principal, key: str, request: CreateProject
+    ) -> ProjectDetail:
+        return self.execute(
+            principal,
+            key=key,
+            operation="project:create",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectDetail,
+            mutation=lambda: self.create_project(principal, request),
+        )
+
+    def add_document_once(
+        self, principal: Principal, key: str, project_id: str, request: AddProjectDocument
+    ) -> ProjectDocumentItem:
+        return self.execute(
+            principal,
+            key=key,
+            operation=f"project:add-document:{project_id}",
+            payload=request.model_dump(exclude_unset=True),
+            response_type=ProjectDocumentItem,
+            mutation=lambda: self.add_document(principal, project_id, request),
+        )
+
+    def remove_document_once(
+        self, principal: Principal, key: str, project_id: str, document_id: str
+    ) -> None:
+        def run() -> DeletedProjectReference:
+            self.remove_document(principal, project_id, document_id)
+            return DeletedProjectReference()
+
+        self.execute(
+            principal,
+            key=key,
+            operation=f"project:remove-document:{project_id}:{document_id}",
+            payload={},
+            response_type=DeletedProjectReference,
+            mutation=run,
+        )
 
     def _readable_replay(self, principal: Principal, result: M) -> M:
         """A replay acknowledges the original write but cannot revive unavailable references."""
@@ -415,21 +462,28 @@ class ProjectService:
             if brief.content_type != "text/markdown":
                 raise ValidationError("Project brief must be Markdown")
         elif request.create_brief:
-            # This UUID is private until commit. The pathless brief has no filesystem pipeline.
-            brief = self.documents._create_document_locked(
-                document_id=str(uuid.uuid4()),
+            brief = self.documents.create_draft_in_transaction(
                 title=f"{request.name} Brief",
                 content=(
                     f"# {request.name}\n\n## Purpose\n\n"
                     f"{request.description or 'Describe the purpose of this work.'}\n\n"
                     "## Unresolved decisions\n\n- [ ] Choose the next question to answer\n"
                 ),
-                content_type="text/markdown",
-                path=None,
                 actor_id=principal.actor_id,
                 idempotency_key=f"project-brief:{project_id}",
             )
             brief_id = brief.document_id
+            with self.database.connection() as conn:
+                self.activity.record_with_connection(
+                    conn,
+                    principal=principal,
+                    action="create",
+                    resource_type="document",
+                    resource_id=brief_id,
+                    revision_id=brief.current_revision_id,
+                    outcome="accepted",
+                    details={"title": brief.title, "content_type": brief.content_type},
+                )
         with self.database.connection() as conn:
             conn.execute(
                 """INSERT INTO projects (project_id,name,description,brief_document_id,

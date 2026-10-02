@@ -509,6 +509,7 @@ class IdentityService:
                 "INSERT INTO token_scopes(token_id, capability, path_prefix) VALUES (?, ?, ?)",
                 [(token_id, grant.capability.value, grant.path_prefix or "") for grant in grants],
             )
+            self.database.set_audit_target(resource_id=token_id)
             row = connection.execute(
                 """
                 SELECT t.*, a.display_name AS actor_display_name
@@ -626,6 +627,9 @@ class IdentityService:
             if updated_row is None:
                 raise RuntimeError("Updated token could not be reloaded")
             updated = self._token_from_row(connection, updated_row)
+            self.database.set_audit_target(
+                resource_id=token_id, details={"current_metadata_version": next_version}
+            )
             connection.execute(
                 """
                 INSERT INTO actor_token_events(
@@ -652,6 +656,7 @@ class IdentityService:
                 "UPDATE actor_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE token_id = ?",
                 (now, token_id),
             )
+            self.database.set_audit_target(resource_id=token_id)
             row = connection.execute(
                 """
                 SELECT t.*, a.display_name AS actor_display_name

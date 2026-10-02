@@ -12,22 +12,19 @@ import {
   Rows2,
 } from 'lucide-react'
 import { workspaceEvidenceStore } from '../../workspaceEvidenceState'
-import {
-  evidenceTextForLocator,
-  locateEvidencePassage,
-  locatePassage,
-  type TextLocator,
-} from '../../evidenceCitation'
+import { evidenceTextForLocator, locateEvidencePassage, locatePassage } from '../../evidenceCitation'
 import { StateMessage } from '../ui/StateMessage'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 import { TextSelectionToolbar, type TextSelectionAnchor } from './TextSelectionToolbar'
-import { api, SUPPORTED_IMAGE_TYPES, type Document, type Revision } from '../../api'
+import { api, SUPPORTED_IMAGE_TYPES, writeFailureMessage, type Document, type Revision } from '../../api'
 import { chatNavigationState } from '../../chatNavigation'
 import {
   CITATION_NAVIGATION_EVENT,
+  CITATION_PARAM_KEYS,
   citationTargetFromLocation,
   clearCitationNavigation,
   type CitationTarget,
+  type TextLocator,
 } from '../../citationNavigation'
 import {
   useDocumentSession,
@@ -269,6 +266,8 @@ export function DocumentWorkspace({
     if (citationTarget && matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
   }, [citationTarget, updatePreferences])
   const [draftTitle, setDraftTitle] = useState(document.title)
+  // A rename from the file tree, chat, or a restore changes the server title under the input.
+  useEffect(() => setDraftTitle(document.title), [document.title])
 
   useEffect(() => {
     void sessions.initializeDocument(initialDocument)
@@ -361,16 +360,12 @@ export function DocumentWorkspace({
   }, [documentId])
 
   const updateCachedDocument = (nextDocument: Document, replaceContent = false) => {
-    queryClient.setQueryData(['document', documentId], nextDocument)
     sessions.acceptServerDocument(nextDocument, replaceContent)
     updateDocumentTitle(documentId, nextDocument.title)
-    void queryClient.invalidateQueries({ queryKey: ['documents'] })
-    void queryClient.invalidateQueries({ queryKey: ['history', documentId] })
-    void queryClient.invalidateQueries({ queryKey: ['folders'] })
   }
   const titleMutation = useMutation({
-    mutationFn: (title: string) => api.updateDocument(document, content, title),
-    onSuccess: (nextDocument) => updateCachedDocument(nextDocument),
+    mutationFn: (title: string) => sessions.rename(documentId, title),
+    onSuccess: (nextDocument) => updateDocumentTitle(documentId, nextDocument.title),
   })
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -475,14 +470,17 @@ export function DocumentWorkspace({
                   }}
                 />
               </h1>
-              {titleMutation.isError && <small className="error-text">Title could not be saved.</small>}
+              {titleMutation.isError && (
+                <small className="error-text" role="alert">
+                  {writeFailureMessage(titleMutation.error, 'Title could not be saved.')}
+                </small>
+              )}
             </div>
 
             {document.content_type !== 'application/pdf' && (
               <div className="document-header-toolbar">
                 <DocumentToolbar
                   document={document}
-                  content={content}
                   saveState={saveState}
                   mode={mode}
                   onMode={(nextMode) => sessions.updateSession(documentId, { mode: nextMode })}
@@ -564,17 +562,7 @@ export function DocumentWorkspace({
           error={citedHistoryQuery.isError || (citedHistoryQuery.isSuccess && !citedRevision)}
           onClose={() => {
             const url = new URL(window.location.href)
-            for (const key of [
-              'revision',
-              'page',
-              'annotation',
-              'text',
-              'start',
-              'representation',
-              'quoteStart',
-              'quoteEnd',
-            ])
-              url.searchParams.delete(key)
+            for (const key of CITATION_PARAM_KEYS) url.searchParams.delete(key)
             clearCitationNavigation(documentId)
             window.history.replaceState(window.history.state, '', url)
             setCitationTarget(null)
@@ -863,12 +851,14 @@ function CitedRevisionEvidence({
           Close cited revision
         </button>
       </header>
-      {loading && <p className="small-muted">Loading the immutable cited revision…</p>}
+      {loading && <StateMessage compact kind="loading" title="Loading the immutable cited revision…" />}
       {error && (
-        <p className="error-text">
-          The cited revision is not available in this document’s history. The current head has not been
-          substituted.
-        </p>
+        <StateMessage
+          compact
+          kind="error"
+          title="The cited revision is not available in this document’s history"
+          description="The current head has not been substituted."
+        />
       )}
       {quoteLocator && document.content_type !== 'application/pdf' && (
         <section
@@ -947,7 +937,6 @@ function MobileInspectorToggle() {
 
 function DocumentToolbar({
   document,
-  content,
   saveState,
   mode,
   onMode,
@@ -958,7 +947,6 @@ function DocumentToolbar({
   onDeleted,
 }: {
   document: Document
-  content: string
   saveState: SaveState
   mode: EditorMode
   onMode: (mode: EditorMode) => void
@@ -969,13 +957,24 @@ function DocumentToolbar({
   onDeleted: () => Promise<void>
 }) {
   const navigate = useNavigate()
+  const sessions = useDocumentSessions()
   const [title, setTitle] = useState(document.title)
   const [path, setPath] = useState(document.path ?? '')
-  const rename = useMutation({
-    mutationFn: () => api.updateDocument(document, content, title),
+  // Each step builds on the revision the previous one wrote, so a title and path change
+  // together cannot conflict with themselves.
+  const saveDetails = useMutation({
+    mutationFn: async () => {
+      let current = document
+      if (title !== document.title) current = await sessions.rename(document.document_id, title)
+      if (path !== (document.path ?? '')) {
+        current = document.path
+          ? await api.moveDocument(current, path)
+          : await api.materializeDocument(current, path)
+      }
+      return current
+    },
     onSuccess: onUpdated,
   })
-  const move = useMutation({ mutationFn: () => api.moveDocument(document, path), onSuccess: onUpdated })
   const duplicate = useMutation({
     mutationFn: () => api.duplicateDocument(document),
     onSuccess: async (created) =>
@@ -983,8 +982,7 @@ function DocumentToolbar({
   })
   const remove = useMutation({ mutationFn: () => api.deleteDocument(document), onSuccess: onDeleted })
   const { updatePreferences } = useTheme()
-  const busy =
-    saveState !== 'saved' || rename.isPending || move.isPending || duplicate.isPending || remove.isPending
+  const busy = saveState !== 'saved' || saveDetails.isPending || duplicate.isPending || remove.isPending
   const changeMode = (nextMode: EditorMode) => {
     onMode(nextMode)
     updatePreferences({ editorMode: nextMode })
@@ -1078,11 +1076,7 @@ function DocumentToolbar({
                 type="button"
                 className="secondary-action"
                 disabled={busy}
-                onClick={() => {
-                  rename.mutate()
-                  if (path !== (document.path ?? '')) move.mutate()
-                  close()
-                }}
+                onClick={() => saveDetails.mutate(undefined, { onSuccess: close })}
               >
                 Save details
               </button>
@@ -1090,10 +1084,7 @@ function DocumentToolbar({
                 type="button"
                 className="secondary-action"
                 disabled={busy}
-                onClick={() => {
-                  duplicate.mutate()
-                  close()
-                }}
+                onClick={() => duplicate.mutate(undefined, { onSuccess: close })}
               >
                 Duplicate
               </button>
@@ -1101,15 +1092,19 @@ function DocumentToolbar({
                 type="button"
                 className="danger-button"
                 disabled={busy}
-                onClick={() => {
-                  remove.mutate()
-                  close()
-                }}
+                onClick={() => remove.mutate(undefined, { onSuccess: close })}
               >
                 Move to trash
               </button>
-              {(rename.isError || move.isError || duplicate.isError || remove.isError) && (
-                <p className="error-text">The document action could not be completed.</p>
+              {(saveDetails.isError || duplicate.isError || remove.isError) && (
+                <StateMessage
+                  compact
+                  kind="error"
+                  title={writeFailureMessage(
+                    saveDetails.error ?? duplicate.error ?? remove.error,
+                    'The document action could not be completed.',
+                  )}
+                />
               )}
             </div>
           )}

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, IntegrationError, NotFoundError, ValidationError
+from sangam.idempotency import IdempotencyStore
 from sangam.karakeep_extraction import NormalizedSnapshot
 from sangam.schemas import KarakeepAsset, KarakeepImport, KarakeepImportDetail
 
@@ -117,6 +118,7 @@ class KarakeepRepository:
                 """,
                 (now, now, row["import_id"]),
             )
+            self.database.set_audit_target(resource_id=row["import_id"])
             return ImportReservation(
                 import_id=row["import_id"],
                 bookmark_id=row["bookmark_id"],
@@ -133,14 +135,10 @@ class KarakeepRepository:
                 raise NotFoundError(f"Karakeep import not found: {import_id}")
             if current["document_id"]:
                 return current["document_id"]
-            created = connection.execute(
-                """
-                SELECT document_id FROM idempotency_keys
-                WHERE actor_id = ? AND idempotency_key = ? AND operation = 'create'
-                """,
-                (KARAKEEP_ACTOR_ID, create_key),
-            ).fetchone()
-            if created is None:
+            created = IdempotencyStore.lookup(
+                connection, actor_id=KARAKEEP_ACTOR_ID, key=create_key
+            )
+            if created is None or created.operation != "create":
                 return None
             snapshot = connection.execute(
                 """
@@ -157,13 +155,13 @@ class KarakeepRepository:
                 WHERE import_id = ?
                 """,
                 (
-                    created["document_id"],
+                    created.resource_id,
                     snapshot["snapshot_id"] if snapshot else None,
                     utc_now(),
                     import_id,
                 ),
             )
-            return created["document_id"]
+            return created.resource_id
 
     def claim_refresh(self, import_id: str) -> None:
         now = utc_now()
@@ -341,15 +339,12 @@ class KarakeepRepository:
 
     def is_document_retry(self, *, actor_id: str, idempotency_key: str, document_id: str) -> bool:
         with self.database.connection() as connection:
-            row = connection.execute(
-                """
-                SELECT 1 FROM idempotency_keys
-                WHERE actor_id = ? AND idempotency_key = ?
-                    AND operation = 'update' AND document_id = ?
-                """,
-                (actor_id, idempotency_key, document_id),
-            ).fetchone()
-        return row is not None
+            record = IdempotencyStore.lookup(connection, actor_id=actor_id, key=idempotency_key)
+        return (
+            record is not None
+            and record.operation == "update"
+            and (record.resource_id == document_id)
+        )
 
     @staticmethod
     def _import_query() -> str:

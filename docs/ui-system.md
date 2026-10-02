@@ -231,6 +231,13 @@ Use `StateMessage` for loading, empty, error, success, and offline messages on
 utility routes and recoverable workbench surfaces. Use compact mode inside a
 row or panel; use the standard mode when the state replaces the page content.
 
+Failed writes say what to do next. Pass the error to `writeFailureMessage` with
+a fallback that names what failed. It adds "reload" for a conflict and
+"could not be reached" when offline, using the `kind` that `ApiError` derives from
+the response. Show the result in a compact `StateMessage` so assistive
+technology announces it. Keep an action menu open until its action succeeds,
+otherwise the error has nowhere to appear.
+
 ## Motion
 
 Motion in Sangam is restrained, functional, and semantic. It exists to explain state
@@ -375,6 +382,11 @@ components remain synchronized with native Sangam controls.
 3. Reuse existing rail, tab, field, button, row, badge, or menu behavior.
 4. Add new tokens only when the role is genuinely absent, not to match a single mockup.
 5. Check every theme and both desktop and narrow layouts before merging.
+6. Give every class name you put in a component a stylesheet rule. A class with no rule
+   does nothing, so a button that relies on it renders unstyled. The UI system check
+   fails on such classes; `frontend/scripts/ui-system-unstyled-classes.txt` lists the
+   structural hooks that predate the check and must not grow.
+7. Paths and identifiers use `--font-mono` and keep their exact case. Never uppercase them.
 
 ## Verification and screenshots
 

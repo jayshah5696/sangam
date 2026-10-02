@@ -1,0 +1,24 @@
+# Class names used in TSX that have no CSS rule. Each is a structural hook kept for
+# selectors and tests. Do not add to this list: give new classes a style, or remove them.
+action-dialog-popover
+activity-attention
+chat-effect-history-section
+chat-proposal-dismiss
+chat-proposal-stale
+chat-selection-chip
+chat-selection-chip-label
+chat-selection-chip-note
+chat-selection-chip-preview
+comparison-claim
+connection-create
+current
+editorial-review-card
+group-error
+location-control-popover-content
+one-time-secret-heading
+publication-editor-collapsed
+search-load-more
+theme-wireframe-inspector
+trusted
+welcome-pinned
+welcome-search-more

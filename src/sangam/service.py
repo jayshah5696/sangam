@@ -7,15 +7,14 @@ import hashlib
 import json
 import sqlite3
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from sangam.actors import ActorService
-from sangam.conditions import validate_storage_condition
 from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
-    IdempotencyError,
     MaterializationError,
     NotFoundError,
     ValidationError,
@@ -62,6 +61,71 @@ def _decode_revision_cursor(cursor: str, document_id: str) -> tuple[str, str]:
     ):
         raise ValidationError("Revision cursor does not match this document")
     return value[1], value[2]
+
+
+@dataclass(frozen=True)
+class Written:
+    """The revision one write committed, and workspace files it left stale."""
+
+    revision_id: str
+    stale_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FileStep:
+    """A workspace file change that must precede its commit, and how to undo it."""
+
+    apply: Callable[[], None]
+    undo: Callable[[], None]
+
+
+def _require_revision(current: Document, expected_revision_id: str) -> None:
+    if current.current_revision_id != expected_revision_id:
+        raise ConflictError(
+            "The document changed since it was read",
+            details={
+                "document_id": current.document_id,
+                "expected_revision_id": expected_revision_id,
+                "current_revision_id": current.current_revision_id,
+            },
+        )
+
+
+def append_fingerprint(
+    *,
+    document_id: str,
+    expected_revision_id: str,
+    content: str | None,
+    title: str | None,
+    path: str | None,
+    operation: str,
+    summary: str | None,
+    deleted: bool | None,
+) -> str:
+    """The request hash a text revision append binds to its idempotency key.
+
+    Recovery code that must prove a key committed one exact append rebuilds it here.
+    """
+    return request_hash(
+        {
+            "document_id": document_id,
+            "expected_revision_id": expected_revision_id,
+            "content": content,
+            "title": title,
+            "path": path,
+            "operation": operation,
+            "summary": summary,
+            "deleted": deleted,
+        }
+    )
+
+
+def default_duplicate_path(document: Document) -> str | None:
+    """Name a PDF copy beside its source; text copies default to pathless drafts."""
+    if document.content_type != "application/pdf" or not document.path:
+        return None
+    source = PurePosixPath(document.path)
+    return (source.parent / f"{source.stem} copy{source.suffix}").as_posix()
 
 
 class DocumentService:
@@ -199,7 +263,7 @@ class DocumentService:
         summary = self._document_summary_from_row(row)
         return Document(**summary.model_dump(), content=row["content"])
 
-    def _get_document_in_connection(
+    def get_document_in_connection(
         self, connection: sqlite3.Connection, document_id: str, *, include_deleted: bool = True
     ) -> Document:
         row = connection.execute(
@@ -214,9 +278,38 @@ class DocumentService:
 
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> Document:
         with self.database.connection() as connection:
-            return self._get_document_in_connection(
+            return self.get_document_in_connection(
                 connection, document_id, include_deleted=include_deleted
             )
+
+    def revision_content(self, document_id: str, revision_id: str) -> str:
+        """Read one immutable revision's text, scoped to its own document."""
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT content FROM revisions WHERE revision_id = ? AND document_id = ?",
+                (revision_id, document_id),
+            ).fetchone()
+        if row is None:
+            raise NotFoundError(f"Revision not found for document: {revision_id}")
+        return row["content"]
+
+    def finish_replayed_write(self, document_id: str) -> Document:
+        """Complete a replayed write: materialize a pending head and re-index it.
+
+        A replay never appends a revision, but the original request may have
+        crashed after commit and before its workspace file was written.
+        """
+        document = self.get_document(document_id, include_deleted=True)
+        self._finish_if_current(document.document_id, document.current_revision_id)
+        document = self.get_document(document_id, include_deleted=True)
+        with self.database.transaction():
+            self.database.set_audit_target(
+                resource_id=document.document_id,
+                revision_id=document.current_revision_id,
+                path=document.path,
+            )
+            self.search_index.sync(document)
+        return document
 
     def update_trust(
         self,
@@ -297,7 +390,7 @@ class DocumentService:
                     resource_type="document",
                     resource_id=document_id,
                 )
-                current = self._get_document_in_connection(connection, document_id)
+                current = self.get_document_in_connection(connection, document_id)
                 self.database.set_audit_target(
                     resource_id=document_id,
                     revision_id=current.current_revision_id,
@@ -438,54 +531,6 @@ class DocumentService:
             parameters.extend((prefix, f"{prefix}/", f"{prefix}0"))
         conditions.append(f"({' OR '.join(clauses)})")
 
-    def _idempotent_result(
-        self,
-        connection: sqlite3.Connection,
-        *,
-        actor_id: str,
-        key: str,
-        operation: str,
-        request_hash: str,
-    ) -> tuple[str, str] | None:
-        self.idempotency.ensure_document_key_available(connection, actor_id=actor_id, key=key)
-        row = connection.execute(
-            """
-            SELECT operation, request_hash, document_id, revision_id
-            FROM idempotency_keys WHERE actor_id = ? AND idempotency_key = ?
-            """,
-            (actor_id, key),
-        ).fetchone()
-        if not row:
-            validate_storage_condition(connection)
-            return None
-        if row["operation"] != operation or row["request_hash"] != request_hash:
-            raise IdempotencyError(
-                "Idempotency key was already used for a different mutation",
-                details={"idempotency_key": key},
-            )
-        return row["document_id"], row["revision_id"]
-
-    def _record_idempotency(
-        self,
-        connection: sqlite3.Connection,
-        *,
-        actor_id: str,
-        key: str,
-        operation: str,
-        request_hash: str,
-        document_id: str,
-        revision_id: str,
-    ) -> None:
-        connection.execute(
-            """
-            INSERT INTO idempotency_keys(
-                actor_id, idempotency_key, operation, request_hash,
-                document_id, revision_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (actor_id, key, operation, request_hash, document_id, revision_id, utc_now()),
-        )
-
     def legacy_duplicate_replay_matches(
         self,
         connection: sqlite3.Connection,
@@ -582,7 +627,7 @@ class DocumentService:
                 }
             )
             with self.database.connection() as connection:
-                duplicate = self._idempotent_result(
+                duplicate = self.idempotency.document_result(
                     connection,
                     actor_id=actor_id,
                     key=idempotency_key,
@@ -601,6 +646,24 @@ class DocumentService:
                     document_id=document_id,
                 )
 
+    def create_draft_in_transaction(
+        self, *, title: str, content: str, actor_id: str, idempotency_key: str
+    ) -> Document:
+        """Create a pathless Markdown draft inside the caller's open transaction.
+
+        The caller owns atomicity and auditing. The new ID stays private until the
+        caller commits, and a draft has no workspace file, so no lock is needed.
+        """
+        return self._create_document_locked(
+            document_id=str(uuid.uuid4()),
+            title=title,
+            content=content,
+            path=None,
+            content_type="text/markdown",
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
+
     def _create_document_locked(
         self,
         *,
@@ -618,97 +681,153 @@ class DocumentService:
         if content_type not in {"text/markdown", "text/html"}:
             raise ValidationError("Unsupported text document content type")
         self._validate_path_type(normalized_path, content_type)
-        payload = {
-            "title": title,
-            "content": content,
-            "path": normalized_path,
-            "content_type": content_type,
-        }
-        fingerprint = request_hash(payload)
-        duplicate: tuple[str, str] | None = None
-        try:
-            with self.database.transaction() as connection:
-                self.actors.require_known(connection, actor_id)
-                duplicate = self._idempotent_result(
+
+        def write(connection: sqlite3.Connection) -> Written:
+            now = utc_now()
+            revision_id = str(uuid.uuid4())
+            content_hash = _content_hash(content)
+            size_bytes = len(content.encode("utf-8"))
+            connection.execute(
+                """
+                INSERT INTO documents(
+                    document_id, title, content_type, path, current_revision_id,
+                    content_hash, size_bytes, materialization_state, file_hash,
+                    deleted, created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, 0, ?, ?, ?)
+                """,
+                (
+                    document_id,
+                    title.strip(),
+                    content_type,
+                    normalized_path,
+                    content_hash,
+                    size_bytes,
+                    "pending" if normalized_path else "none",
+                    actor_id,
+                    now,
+                    now,
+                ),
+            )
+            if normalized_path:
+                self.organization.ensure_document_folder_hierarchy(connection, normalized_path)
+            connection.execute(
+                """
+                INSERT INTO revisions(
+                    revision_id, document_id, parent_revision_id, content,
+                    content_hash, size_bytes, actor_id, operation, summary, created_at
+                ) VALUES (?, ?, NULL, ?, ?, ?, ?, 'create', NULL, ?)
+                """,
+                (revision_id, document_id, content, content_hash, size_bytes, actor_id, now),
+            )
+            connection.execute(
+                "UPDATE documents SET current_revision_id = ? WHERE document_id = ?",
+                (revision_id, document_id),
+            )
+            return Written(revision_id)
+
+        return self._commit(
+            document_id=document_id,
+            operation="create",
+            fingerprint=request_hash(
+                {
+                    "title": title,
+                    "content": content,
+                    "path": normalized_path,
+                    "content_type": content_type,
+                }
+            ),
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+            write=write,
+        )
+
+    def _commit(
+        self,
+        *,
+        document_id: str,
+        operation: str,
+        fingerprint: str,
+        actor_id: str,
+        idempotency_key: str,
+        write: Callable[[sqlite3.Connection], Written],
+        prepare: Callable[[sqlite3.Connection, Document], FileStep] | None = None,
+    ) -> Document:
+        """Commit one document write through the protocol every write shares.
+
+        Callers hold the document and path locks. ``prepare`` validates against a
+        read snapshot and returns a workspace file change that must precede the
+        commit (PDF bytes live only on disk); it is undone if the commit fails.
+        ``write`` runs in the committing transaction after the actor and replay
+        checks and must re-check its own preconditions there. The pipeline binds
+        the idempotency key, names the ledger target, then materializes text,
+        removes stale files, and re-indexes search after the commit.
+        """
+        file_step: FileStep | None = None
+        if prepare is not None:
+            with self.database.connection() as connection:
+                replayed = self.idempotency.document_result(
                     connection,
                     actor_id=actor_id,
                     key=idempotency_key,
-                    operation="create",
+                    operation=operation,
                     request_hash=fingerprint,
                 )
-                if duplicate is None:
-                    now = utc_now()
-                    revision_id = str(uuid.uuid4())
-                    content_hash = _content_hash(content)
-                    size_bytes = len(content.encode("utf-8"))
-                    connection.execute(
-                        """
-                        INSERT INTO documents(
-                            document_id, title, content_type, path, current_revision_id,
-                            content_hash, size_bytes, materialization_state, file_hash,
-                            deleted, created_by, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, 0, ?, ?, ?)
-                        """,
-                        (
-                            document_id,
-                            title.strip(),
-                            content_type,
-                            normalized_path,
-                            content_hash,
-                            size_bytes,
-                            "pending" if normalized_path else "none",
-                            actor_id,
-                            now,
-                            now,
-                        ),
+                if replayed is None:
+                    file_step = prepare(
+                        connection, self.get_document_in_connection(connection, document_id)
                     )
-                    if normalized_path:
-                        self.organization.ensure_document_folder_hierarchy(
-                            connection, normalized_path
-                        )
-                    connection.execute(
-                        """
-                        INSERT INTO revisions(
-                            revision_id, document_id, parent_revision_id, content,
-                            content_hash, size_bytes, actor_id, operation, summary, created_at
-                        ) VALUES (?, ?, NULL, ?, ?, ?, ?, 'create', NULL, ?)
-                        """,
-                        (
-                            revision_id,
-                            document_id,
-                            content,
-                            content_hash,
-                            size_bytes,
-                            actor_id,
-                            now,
-                        ),
-                    )
-                    connection.execute(
-                        "UPDATE documents SET current_revision_id = ? WHERE document_id = ?",
-                        (revision_id, document_id),
-                    )
-                    self._record_idempotency(
+            if file_step is not None:
+                file_step.apply()
+        stale_paths: tuple[str, ...] = ()
+        try:
+            with self.database.transaction() as connection:
+                self.actors.require_known(connection, actor_id)
+                replayed = self.idempotency.document_result(
+                    connection,
+                    actor_id=actor_id,
+                    key=idempotency_key,
+                    operation=operation,
+                    request_hash=fingerprint,
+                )
+                if replayed is None:
+                    written = write(connection)
+                    revision_id, stale_paths = written.revision_id, written.stale_paths
+                    self.idempotency.record_document(
                         connection,
                         actor_id=actor_id,
                         key=idempotency_key,
-                        operation="create",
+                        operation=operation,
                         request_hash=fingerprint,
                         document_id=document_id,
                         revision_id=revision_id,
                     )
-                    duplicate = (document_id, revision_id)
-                if duplicate is not None:
-                    self.database.set_audit_target(
-                        resource_id=duplicate[0],
-                        revision_id=duplicate[1],
-                        path=normalized_path,
-                    )
-        except sqlite3.IntegrityError as error:
-            raise ValidationError("A document already uses that path") from error
-        if duplicate is None:
-            raise RuntimeError("Document creation completed without an idempotent result")
-        self._finish_if_current(*duplicate)
-        result = self.get_document(duplicate[0], include_deleted=True)
+                else:
+                    document_id, revision_id = replayed
+                path_row = connection.execute(
+                    "SELECT path FROM documents WHERE document_id = ?", (document_id,)
+                ).fetchone()
+                self.database.set_audit_target(
+                    resource_id=document_id,
+                    revision_id=revision_id,
+                    path=path_row["path"] if path_row else None,
+                )
+        except Exception as error:
+            if file_step is not None:
+                try:
+                    file_step.undo()
+                except Exception as rollback_error:
+                    raise RuntimeError(
+                        f"{operation.capitalize()} failed and filesystem rollback failed"
+                    ) from rollback_error
+            if isinstance(error, sqlite3.IntegrityError):
+                raise ValidationError("A document already uses that path") from error
+            raise
+        self._finish_if_current(document_id, revision_id)
+        for stale_path in stale_paths:
+            self.workspace.delete_document(stale_path)
+        result = self.get_document(document_id, include_deleted=True)
+        if result.deleted and result.path and result.content_type != "application/pdf":
+            self.workspace.delete_document(result.path)
         self.search_index.sync(result)
         return result
 
@@ -725,177 +844,151 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
         deleted: bool | None = None,
-    ) -> tuple[Document, str | None]:
+    ) -> Document:
+        """Append one text revision under the document's path and identity locks."""
         current = self.get_document(document_id, include_deleted=True)
         target_path = self._normalize_path(path) if path is not None else None
         with (
             self.mutations.paths(current.path, target_path),
             self.mutations.document(document_id),
         ):
-            return self._append_revision_locked(
+            validate_metadata_text(title, "Document title")
+            validate_metadata_text(summary, "Revision summary")
+
+            def write(connection: sqlite3.Connection) -> Written:
+                current = self.get_document_in_connection(connection, document_id)
+                _require_revision(current, expected_revision_id)
+                if current.deleted and operation != "restore":
+                    raise NotFoundError(f"Document is deleted: {document_id}")
+                next_content = current.content if content is None else content
+                self._validate_content_size(next_content)
+                next_title = current.title if title is None else title.strip()
+                next_path = current.path if path is None else path
+                next_deleted = current.deleted if deleted is None else deleted
+                if next_deleted or not next_path:
+                    state, file_hash = "none", None
+                else:
+                    state = "pending"
+                    file_hash = current.file_hash if current.path == next_path else None
+                revision_id = self._insert_revision(
+                    connection,
+                    current,
+                    content=next_content,
+                    actor_id=actor_id,
+                    operation=operation,
+                    summary=summary,
+                )
+                if next_path:
+                    self.organization.ensure_document_folder_hierarchy(connection, next_path)
+                connection.execute(
+                    """
+                    UPDATE documents
+                    SET title = ?, path = ?, current_revision_id = ?, content_hash = ?,
+                        size_bytes = ?, materialization_state = ?, file_hash = ?,
+                        deleted = ?, updated_at = ?
+                    WHERE document_id = ?
+                    """,
+                    (
+                        next_title,
+                        next_path,
+                        revision_id,
+                        _content_hash(next_content),
+                        len(next_content.encode("utf-8")),
+                        state,
+                        file_hash,
+                        int(next_deleted),
+                        utc_now(),
+                        document_id,
+                    ),
+                )
+                moved_from = current.path if current.path and current.path != next_path else None
+                return Written(revision_id, (moved_from,) if moved_from else ())
+
+            return self._commit(
                 document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                content=content,
-                title=title,
-                path=path,
                 operation=operation,
-                summary=summary,
+                fingerprint=append_fingerprint(
+                    document_id=document_id,
+                    expected_revision_id=expected_revision_id,
+                    content=content,
+                    title=title,
+                    path=path,
+                    operation=operation,
+                    summary=summary,
+                    deleted=deleted,
+                ),
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
-                deleted=deleted,
+                write=write,
             )
 
-    def _append_revision_locked(
+    @staticmethod
+    def _insert_revision(
+        connection: sqlite3.Connection,
+        current: Document,
+        *,
+        content: str,
+        actor_id: str,
+        operation: str,
+        summary: str | None,
+        content_hash: str | None = None,
+        size_bytes: int | None = None,
+    ) -> str:
+        """Append an immutable revision as the child of the current head."""
+        revision_id = str(uuid.uuid4())
+        connection.execute(
+            """
+            INSERT INTO revisions(
+                revision_id, document_id, parent_revision_id, content,
+                content_hash, size_bytes, actor_id, operation, summary, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                revision_id,
+                current.document_id,
+                current.current_revision_id,
+                content,
+                content_hash or _content_hash(content),
+                len(content.encode("utf-8")) if size_bytes is None else size_bytes,
+                actor_id,
+                operation,
+                summary,
+                utc_now(),
+            ),
+        )
+        return revision_id
+
+    def _commit_pdf_head(
         self,
+        connection: sqlite3.Connection,
         *,
         document_id: str,
         expected_revision_id: str,
-        content: str | None,
-        title: str | None,
-        path: str | None,
         operation: str,
-        summary: str | None,
+        summary: str,
         actor_id: str,
-        idempotency_key: str,
-        deleted: bool | None = None,
-    ) -> tuple[Document, str | None]:
-        validate_metadata_text(title, "Document title")
-        validate_metadata_text(summary, "Revision summary")
-        payload = {
-            "document_id": document_id,
-            "expected_revision_id": expected_revision_id,
-            "content": content,
-            "title": title,
-            "path": path,
-            "operation": operation,
-            "summary": summary,
-            "deleted": deleted,
-        }
-        fingerprint = request_hash(payload)
-        old_path: str | None = None
-        result: tuple[str, str] | None = None
-        try:
-            with self.database.transaction() as connection:
-                self.actors.require_known(connection, actor_id)
-                result = self._idempotent_result(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation=operation,
-                    request_hash=fingerprint,
-                )
-                if result is None:
-                    current = self._get_document_in_connection(
-                        connection, document_id, include_deleted=True
-                    )
-                    if current.current_revision_id != expected_revision_id:
-                        raise ConflictError(
-                            "The document changed since it was read",
-                            details={
-                                "document_id": document_id,
-                                "expected_revision_id": expected_revision_id,
-                                "current_revision_id": current.current_revision_id,
-                            },
-                        )
-                    if current.deleted and operation != "restore":
-                        raise NotFoundError(f"Document is deleted: {document_id}")
-                    next_content = current.content if content is None else content
-                    self._validate_content_size(next_content)
-                    next_title = current.title if title is None else title.strip()
-                    next_path = current.path if path is None else path
-                    next_deleted = current.deleted if deleted is None else deleted
-                    now = utc_now()
-                    revision_id = str(uuid.uuid4())
-                    content_hash = _content_hash(next_content)
-                    size_bytes = len(next_content.encode("utf-8"))
-                    old_path = (
-                        current.path if path is not None and current.path != next_path else None
-                    )
-                    if next_deleted:
-                        state = "none"
-                        file_hash = None
-                    elif next_path:
-                        state = "pending"
-                        file_hash = current.file_hash if current.path == next_path else None
-                    else:
-                        state = "none"
-                        file_hash = None
-                    connection.execute(
-                        """
-                        INSERT INTO revisions(
-                            revision_id, document_id, parent_revision_id, content,
-                            content_hash, size_bytes, actor_id, operation, summary, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            revision_id,
-                            document_id,
-                            current.current_revision_id,
-                            next_content,
-                            content_hash,
-                            size_bytes,
-                            actor_id,
-                            operation,
-                            summary,
-                            now,
-                        ),
-                    )
-                    if next_path:
-                        self.organization.ensure_document_folder_hierarchy(connection, next_path)
-                    connection.execute(
-                        """
-                        UPDATE documents
-                        SET title = ?, path = ?, current_revision_id = ?, content_hash = ?,
-                            size_bytes = ?, materialization_state = ?, file_hash = ?,
-                            deleted = ?, updated_at = ?
-                        WHERE document_id = ?
-                        """,
-                        (
-                            next_title,
-                            next_path,
-                            revision_id,
-                            content_hash,
-                            size_bytes,
-                            state,
-                            file_hash,
-                            int(next_deleted),
-                            now,
-                            document_id,
-                        ),
-                    )
-                    self._record_idempotency(
-                        connection,
-                        actor_id=actor_id,
-                        key=idempotency_key,
-                        operation=operation,
-                        request_hash=fingerprint,
-                        document_id=document_id,
-                        revision_id=revision_id,
-                    )
-                    result = (document_id, revision_id)
-                    self.database.set_audit_target(
-                        resource_id=result[0],
-                        revision_id=result[1],
-                        path=next_path,
-                    )
-                else:
-                    self.database.set_audit_target(
-                        resource_id=result[0],
-                        revision_id=result[1],
-                        path=path,
-                    )
-        except sqlite3.IntegrityError as error:
-            raise ValidationError("A document already uses that path") from error
-        if result is None:
-            raise RuntimeError("Revision append completed without a result")
-        self._finish_if_current(*result)
-        current_result = self.get_document(document_id, include_deleted=True)
-        if old_path and old_path != current_result.path:
-            self.workspace.delete_document(old_path)
-        if current_result.deleted and current_result.path:
-            self.workspace.delete_document(current_result.path)
-        self.search_index.sync(current_result)
-        return current_result, old_path
+        assignments: str,
+        parameters: tuple[object, ...],
+    ) -> Written:
+        """Record a PDF identity change as a byte-less revision of the same content."""
+        current = self.get_document_in_connection(connection, document_id)
+        _require_revision(current, expected_revision_id)
+        revision_id = self._insert_revision(
+            connection,
+            current,
+            content="",
+            actor_id=actor_id,
+            operation=operation,
+            summary=summary,
+            content_hash=current.content_hash,
+            size_bytes=current.size_bytes,
+        )
+        connection.execute(
+            f"UPDATE documents SET current_revision_id = ?, {assignments}, updated_at = ? "
+            "WHERE document_id = ?",
+            (revision_id, *parameters, utc_now(), document_id),
+        )
+        return Written(revision_id)
 
     def update_document(
         self,
@@ -909,7 +1002,7 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         self._require_text_document(document_id, "PDF source bytes cannot be edited in place")
-        document, _ = self._append_revision(
+        return self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
             content=content,
@@ -920,7 +1013,6 @@ class DocumentService:
             actor_id=actor_id,
             idempotency_key=idempotency_key,
         )
-        return document
 
     def reconcile_content(
         self,
@@ -935,7 +1027,7 @@ class DocumentService:
         self._require_text_document(
             document_id, "Changed PDF bytes must be imported as a replacement document"
         )
-        document, _ = self._append_revision(
+        return self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
             content=content,
@@ -946,7 +1038,6 @@ class DocumentService:
             actor_id="system:reconcile",
             idempotency_key=idempotency_key,
         )
-        return document
 
     def duplicate_document(
         self,
@@ -1006,17 +1097,8 @@ class DocumentService:
                 "Source PDF content does not match stored content hash",
                 details={"expected_hash": source.content_hash, "actual_hash": actual_hash},
             )
-        if path is not None:
-            destination_path = self._normalize_path(path)
-            self._validate_path_type(destination_path, "application/pdf")
-        else:
-            source_parts = PurePosixPath(source.path)
-            candidate_name = f"{source_parts.stem} copy{source_parts.suffix}"
-            destination_path = (
-                (source_parts.parent / candidate_name).as_posix()
-                if source_parts.parent != PurePosixPath(".")
-                else candidate_name
-            )
+        destination_path = self._normalize_path(path or default_duplicate_path(source) or "")
+        self._validate_path_type(destination_path, "application/pdf")
         with self.database.connection() as connection:
             if connection.execute(
                 "SELECT 1 FROM documents WHERE path = ? AND deleted = 0", (destination_path,)
@@ -1063,7 +1145,7 @@ class DocumentService:
         if current.content_type == "application/pdf":
             raise ValidationError("PDFs are materialized when they are imported")
         self._validate_path_type(normalized_path, current.content_type)
-        document, _ = self._append_revision(
+        return self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
             content=None,
@@ -1074,7 +1156,6 @@ class DocumentService:
             actor_id=actor_id,
             idempotency_key=idempotency_key,
         )
-        return document
 
     def move_document(
         self,
@@ -1100,7 +1181,7 @@ class DocumentService:
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
             )
-        document, _ = self._append_revision(
+        return self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
             content=None,
@@ -1111,7 +1192,6 @@ class DocumentService:
             actor_id=actor_id,
             idempotency_key=idempotency_key,
         )
-        return document
 
     def _move_pdf_document(
         self,
@@ -1124,145 +1204,72 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         current = self.get_document(document_id, include_deleted=True)
-        with (
-            self.mutations.paths(current.path, path),
-            self.mutations.document(document_id),
-        ):
-            payload = {
-                "document_id": document_id,
-                "expected_revision_id": expected_revision_id,
-                "path": path,
-                "operation": "move",
-                "summary": summary,
-            }
-            fingerprint = request_hash(payload)
-            with self.database.connection() as connection:
-                duplicate = self._idempotent_result(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation="move",
-                    request_hash=fingerprint,
-                )
-                if duplicate is not None:
-                    return self.get_document(duplicate[0], include_deleted=True)
 
-                current = self._get_document_in_connection(
-                    connection, document_id, include_deleted=True
-                )
-                if current.current_revision_id != expected_revision_id:
-                    raise ConflictError(
-                        "The document changed since it was read",
-                        details={
-                            "document_id": document_id,
-                            "expected_revision_id": expected_revision_id,
-                            "current_revision_id": current.current_revision_id,
-                        },
-                    )
-                if current.deleted:
-                    raise NotFoundError(f"Document is deleted: {document_id}")
-                if current.path == path:
-                    raise ValidationError("An organization plan cannot contain a no-op move")
-                if not current.path:
-                    raise ValidationError(
-                        "Unmaterialized documents must be materialized before moving"
-                    )
-
-                existing = connection.execute(
-                    "SELECT document_id FROM documents WHERE path = ? AND deleted = 0",
-                    (path,),
-                ).fetchone()
-                if existing and existing["document_id"] != document_id:
-                    raise ConflictError(f"A document already uses that path: {path}")
-                if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
-                    raise ConflictError(f"Destination path conflicts with a folder: {path}")
-
+        def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
+            _require_revision(current, expected_revision_id)
+            if current.deleted:
+                raise NotFoundError(f"Document is deleted: {document_id}")
+            if current.path == path:
+                raise ValidationError("A document cannot be moved to its current path")
+            if not current.path:
+                raise ValidationError("Unmaterialized documents must be materialized before moving")
+            existing = connection.execute(
+                "SELECT document_id FROM documents WHERE path = ? AND deleted = 0", (path,)
+            ).fetchone()
+            if existing and existing["document_id"] != document_id:
+                raise ConflictError(f"A document already uses that path: {path}")
+            if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
+                raise ConflictError(f"Destination path conflicts with a folder: {path}")
             old_path = current.path
             source_exists = self.workspace.is_document_file(old_path)
-            dest_exists = self.workspace.is_document_file(path)
-            if dest_exists and source_exists:
+            if source_exists and self.workspace.is_document_file(path):
                 raise ConflictError(f"A workspace file already exists at that path: {path}")
 
-            if source_exists:
-                self.workspace.move_document(old_path, path)
+            def apply() -> None:
+                if source_exists:
+                    self.workspace.move_document(old_path, path)
 
-            try:
-                with self.database.transaction() as connection:
-                    self.actors.require_known(connection, actor_id)
-                    duplicate = self._idempotent_result(
-                        connection,
-                        actor_id=actor_id,
-                        key=idempotency_key,
-                        operation="move",
-                        request_hash=fingerprint,
-                    )
-                    if duplicate is not None:
-                        result = duplicate
-                    else:
-                        now = utc_now()
-                        revision_id = str(uuid.uuid4())
-                        self.organization.ensure_document_folder_hierarchy(connection, path)
-                        connection.execute(
-                            """
-                            INSERT INTO revisions(
-                                revision_id, document_id, parent_revision_id, content,
-                                content_hash, size_bytes, actor_id, operation, summary, created_at
-                            ) VALUES (?, ?, ?, '', ?, ?, ?, 'move', ?, ?)
-                            """,
-                            (
-                                revision_id,
-                                document_id,
-                                current.current_revision_id,
-                                current.content_hash,
-                                current.size_bytes,
-                                actor_id,
-                                summary or f"Moved to {path}",
-                                now,
-                            ),
-                        )
-                        connection.execute(
-                            """
-                            UPDATE documents
-                            SET path = ?, current_revision_id = ?, materialization_state = 'clean',
-                                file_hash = ?, updated_at = ?
-                            WHERE document_id = ?
-                            """,
-                            (path, revision_id, current.content_hash, now, document_id),
-                        )
-                        self._record_idempotency(
-                            connection,
-                            actor_id=actor_id,
-                            key=idempotency_key,
-                            operation="move",
-                            request_hash=fingerprint,
-                            document_id=document_id,
-                            revision_id=revision_id,
-                        )
-                        self.organization._replace_document_search_row(connection, document_id)
-                        result = (document_id, revision_id)
-                    if result is not None:
-                        self.database.set_audit_target(
-                            resource_id=result[0],
-                            revision_id=result[1],
-                            path=path,
-                        )
-            except Exception:
-                try:
-                    if (
-                        source_exists
-                        and self.workspace.is_document_file(path)
-                        and not self.workspace.is_document_file(old_path)
-                    ):
-                        self.workspace.move_document(path, old_path)
-                except Exception as rollback_err:
-                    raise RuntimeError(
-                        "Move failed and filesystem rollback failed"
-                    ) from rollback_err
-                raise
+            def undo() -> None:
+                if (
+                    source_exists
+                    and self.workspace.is_document_file(path)
+                    and not self.workspace.is_document_file(old_path)
+                ):
+                    self.workspace.move_document(path, old_path)
 
-            document = self.get_document(result[0], include_deleted=True)
-            self.search_index.sync(document)
-            return document
+            return FileStep(apply=apply, undo=undo)
+
+        def write(connection: sqlite3.Connection) -> Written:
+            self.organization.ensure_document_folder_hierarchy(connection, path)
+            return self._commit_pdf_head(
+                connection,
+                document_id=document_id,
+                expected_revision_id=expected_revision_id,
+                operation="move",
+                summary=summary or f"Moved to {path}",
+                actor_id=actor_id,
+                assignments="path = ?, materialization_state = 'clean', file_hash = content_hash",
+                parameters=(path,),
+            )
+
+        with self.mutations.paths(current.path, path), self.mutations.document(document_id):
+            return self._commit(
+                document_id=document_id,
+                operation="move",
+                fingerprint=request_hash(
+                    {
+                        "document_id": document_id,
+                        "expected_revision_id": expected_revision_id,
+                        "path": path,
+                        "operation": "move",
+                        "summary": summary,
+                    }
+                ),
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+                write=write,
+                prepare=prepare,
+            )
 
     def delete_document(
         self,
@@ -1282,7 +1289,7 @@ class DocumentService:
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
             )
-        document, _ = self._append_revision(
+        return self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
             content=None,
@@ -1294,7 +1301,6 @@ class DocumentService:
             idempotency_key=idempotency_key,
             deleted=True,
         )
-        return document
 
     def _delete_pdf_document(
         self,
@@ -1306,134 +1312,67 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         current = self.get_document(document_id, include_deleted=True)
-        with (
-            self.mutations.paths(current.path),
-            self.mutations.document(document_id),
-        ):
-            payload = {
-                "document_id": document_id,
-                "expected_revision_id": expected_revision_id,
-                "operation": "delete",
-                "summary": summary,
-                "deleted": True,
-            }
-            fingerprint = request_hash(payload)
-            with self.database.connection() as connection:
-                duplicate = self._idempotent_result(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation="delete",
-                    request_hash=fingerprint,
-                )
-                if duplicate is not None:
-                    return self.get_document(duplicate[0], include_deleted=True)
 
-                current = self._get_document_in_connection(
-                    connection, document_id, include_deleted=True
+        def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
+            del connection
+            _require_revision(current, expected_revision_id)
+            if current.deleted:
+                raise NotFoundError(f"Document is deleted: {document_id}")
+            if not current.path:
+                raise ValidationError("Unmaterialized documents cannot be moved to trash")
+            path = current.path
+
+            def apply() -> None:
+                self.workspace.trash_document(
+                    document_id=document_id,
+                    path=path,
+                    content_hash=current.content_hash,
+                    size_bytes=current.size_bytes,
                 )
-                if current.current_revision_id != expected_revision_id:
-                    raise ConflictError(
-                        "The document changed since it was read",
-                        details={
-                            "document_id": document_id,
-                            "expected_revision_id": expected_revision_id,
-                            "current_revision_id": current.current_revision_id,
-                        },
+
+            def undo() -> None:
+                if self.workspace.has_trashed_document(
+                    document_id
+                ) and not self.workspace.is_document_file(path):
+                    self.workspace.restore_trash_document(
+                        document_id=document_id,
+                        path=path,
+                        content_hash=current.content_hash,
+                        size_bytes=current.size_bytes,
                     )
-                if current.deleted:
-                    raise NotFoundError(f"Document is deleted: {document_id}")
-                if not current.path:
-                    raise ValidationError("Unmaterialized documents cannot be moved to trash")
 
-            old_path = current.path
-            self.workspace.trash_document(
+            return FileStep(apply=apply, undo=undo)
+
+        def write(connection: sqlite3.Connection) -> Written:
+            return self._commit_pdf_head(
+                connection,
                 document_id=document_id,
-                path=old_path,
-                content_hash=current.content_hash,
-                size_bytes=current.size_bytes,
+                expected_revision_id=expected_revision_id,
+                operation="delete",
+                summary=summary or "Moved to trash",
+                actor_id=actor_id,
+                assignments="deleted = 1, materialization_state = 'none', file_hash = NULL",
+                parameters=(),
             )
 
-            try:
-                with self.database.transaction() as connection:
-                    self.actors.require_known(connection, actor_id)
-                    duplicate = self._idempotent_result(
-                        connection,
-                        actor_id=actor_id,
-                        key=idempotency_key,
-                        operation="delete",
-                        request_hash=fingerprint,
-                    )
-                    if duplicate is not None:
-                        result = duplicate
-                    else:
-                        now = utc_now()
-                        revision_id = str(uuid.uuid4())
-                        connection.execute(
-                            """
-                            INSERT INTO revisions(
-                                revision_id, document_id, parent_revision_id, content,
-                                content_hash, size_bytes, actor_id, operation, summary, created_at
-                            ) VALUES (?, ?, ?, '', ?, ?, ?, 'delete', ?, ?)
-                            """,
-                            (
-                                revision_id,
-                                document_id,
-                                current.current_revision_id,
-                                current.content_hash,
-                                current.size_bytes,
-                                actor_id,
-                                summary or "Moved to trash",
-                                now,
-                            ),
-                        )
-                        connection.execute(
-                            """
-                            UPDATE documents
-                            SET current_revision_id = ?, deleted = 1,
-                                materialization_state = 'none',
-                                file_hash = NULL, updated_at = ?
-                            WHERE document_id = ?
-                            """,
-                            (revision_id, now, document_id),
-                        )
-                        self._record_idempotency(
-                            connection,
-                            actor_id=actor_id,
-                            key=idempotency_key,
-                            operation="delete",
-                            request_hash=fingerprint,
-                            document_id=document_id,
-                            revision_id=revision_id,
-                        )
-                        self.organization._replace_document_search_row(connection, document_id)
-                        result = (document_id, revision_id)
-                    if result is not None:
-                        self.database.set_audit_target(
-                            resource_id=result[0],
-                            revision_id=result[1],
-                            path=old_path,
-                        )
-            except Exception:
-                try:
-                    if self.workspace.has_trashed_document(
-                        document_id
-                    ) and not self.workspace.is_document_file(old_path):
-                        self.workspace.restore_trash_document(
-                            document_id=document_id,
-                            path=old_path,
-                            content_hash=current.content_hash,
-                            size_bytes=current.size_bytes,
-                        )
-                except Exception as rollback_err:
-                    raise RuntimeError(
-                        "Delete failed and filesystem rollback failed"
-                    ) from rollback_err
-                raise
-
-            document = self.get_document(result[0], include_deleted=True)
-            self.search_index.sync(document)
-            return document
+        with self.mutations.paths(current.path), self.mutations.document(document_id):
+            return self._commit(
+                document_id=document_id,
+                operation="delete",
+                fingerprint=request_hash(
+                    {
+                        "document_id": document_id,
+                        "expected_revision_id": expected_revision_id,
+                        "operation": "delete",
+                        "summary": summary,
+                        "deleted": True,
+                    }
+                ),
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+                write=write,
+                prepare=prepare,
+            )
 
     def history(self, document_id: str) -> list[Revision]:
         self.get_document(document_id, include_deleted=True)
@@ -1588,17 +1527,10 @@ class DocumentService:
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
             )
-        with self.database.connection() as connection:
-            target = connection.execute(
-                "SELECT content FROM revisions WHERE revision_id = ? AND document_id = ?",
-                (revision_id, document_id),
-            ).fetchone()
-        if not target:
-            raise NotFoundError(f"Revision not found for document: {revision_id}")
-        document, _ = self._append_revision(
+        return self._append_revision(
             document_id=document_id,
             expected_revision_id=expected_revision_id,
-            content=target["content"],
+            content=self.revision_content(document_id, revision_id),
             title=None,
             path=None,
             operation="restore",
@@ -1607,7 +1539,6 @@ class DocumentService:
             idempotency_key=idempotency_key,
             deleted=False,
         )
-        return document
 
     def _restore_pdf_document(
         self,
@@ -1620,158 +1551,86 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         current = self.get_document(document_id, include_deleted=True)
-        with (
-            self.mutations.paths(current.path),
-            self.mutations.document(document_id),
-        ):
-            payload = {
-                "document_id": document_id,
-                "expected_revision_id": expected_revision_id,
-                "revision_id": revision_id,
-                "operation": "restore",
-                "summary": summary,
-                "deleted": False,
-            }
-            fingerprint = request_hash(payload)
-            with self.database.connection() as connection:
-                duplicate = self._idempotent_result(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation="restore",
-                    request_hash=fingerprint,
+
+        def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
+            if not current.deleted:
+                raise ValidationError(
+                    "Immutable PDF source bytes cannot be restored as text revisions"
                 )
-                if duplicate is not None:
-                    return self.get_document(duplicate[0], include_deleted=True)
-
-                current = self._get_document_in_connection(
-                    connection, document_id, include_deleted=True
+            _require_revision(current, expected_revision_id)
+            if not current.path:
+                raise ValidationError("Cannot restore a document without a path")
+            path = current.path
+            existing = connection.execute(
+                "SELECT document_id FROM documents WHERE path = ? AND deleted = 0", (path,)
+            ).fetchone()
+            if existing and existing["document_id"] != document_id:
+                raise ConflictError(f"Cannot restore document: path is occupied: {path}")
+            if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
+                raise ConflictError(
+                    f"Cannot restore document: path conflicts with a folder: {path}"
                 )
-                if not current.deleted:
-                    raise ValidationError(
-                        "Immutable PDF source bytes cannot be restored as text revisions"
-                    )
-                if current.current_revision_id != expected_revision_id:
-                    raise ConflictError(
-                        "The document changed since it was read",
-                        details={
-                            "document_id": document_id,
-                            "expected_revision_id": expected_revision_id,
-                            "current_revision_id": current.current_revision_id,
-                        },
-                    )
-                if not current.path:
-                    raise ValidationError("Cannot restore a document without a path")
-
-                existing = connection.execute(
-                    "SELECT document_id FROM documents WHERE path = ? AND deleted = 0",
-                    (current.path,),
-                ).fetchone()
-                if existing and existing["document_id"] != document_id:
-                    raise ConflictError(
-                        f"Cannot restore document: path is occupied: {current.path}"
-                    )
-                if connection.execute(
-                    "SELECT 1 FROM folders WHERE path = ?", (current.path,)
-                ).fetchone():
-                    raise ConflictError(
-                        f"Cannot restore document: path conflicts with a folder: {current.path}"
-                    )
-
-            if self.workspace.is_document_file(current.path):
-                raise ConflictError(f"Cannot restore document: path is occupied: {current.path}")
+            if self.workspace.is_document_file(path):
+                raise ConflictError(f"Cannot restore document: path is occupied: {path}")
             if not self.workspace.has_trashed_document(document_id):
                 raise NotFoundError(f"Retained trash file not found for document: {document_id}")
 
-            target_path = current.path
-            self.workspace.restore_trash_document(
+            def apply() -> None:
+                self.workspace.restore_trash_document(
+                    document_id=document_id,
+                    path=path,
+                    content_hash=current.content_hash,
+                    size_bytes=current.size_bytes,
+                )
+
+            def undo() -> None:
+                if self.workspace.is_document_file(
+                    path
+                ) and not self.workspace.has_trashed_document(document_id):
+                    self.workspace.trash_document(
+                        document_id=document_id,
+                        path=path,
+                        content_hash=current.content_hash,
+                        size_bytes=current.size_bytes,
+                    )
+
+            return FileStep(apply=apply, undo=undo)
+
+        def write(connection: sqlite3.Connection) -> Written:
+            if current.path:
+                self.organization.ensure_document_folder_hierarchy(connection, current.path)
+            return self._commit_pdf_head(
+                connection,
                 document_id=document_id,
-                path=target_path,
-                content_hash=current.content_hash,
-                size_bytes=current.size_bytes,
+                expected_revision_id=expected_revision_id,
+                operation="restore",
+                summary=summary or f"Restored {document_id} from trash",
+                actor_id=actor_id,
+                assignments=(
+                    "deleted = 0, materialization_state = 'clean', file_hash = content_hash"
+                ),
+                parameters=(),
             )
 
-            try:
-                with self.database.transaction() as connection:
-                    self.actors.require_known(connection, actor_id)
-                    duplicate = self._idempotent_result(
-                        connection,
-                        actor_id=actor_id,
-                        key=idempotency_key,
-                        operation="restore",
-                        request_hash=fingerprint,
-                    )
-                    if duplicate is not None:
-                        result = duplicate
-                    else:
-                        now = utc_now()
-                        new_revision_id = str(uuid.uuid4())
-                        self.organization.ensure_document_folder_hierarchy(connection, target_path)
-                        connection.execute(
-                            """
-                            INSERT INTO revisions(
-                                revision_id, document_id, parent_revision_id, content,
-                                content_hash, size_bytes, actor_id, operation, summary, created_at
-                            ) VALUES (?, ?, ?, '', ?, ?, ?, 'restore', ?, ?)
-                            """,
-                            (
-                                new_revision_id,
-                                document_id,
-                                current.current_revision_id,
-                                current.content_hash,
-                                current.size_bytes,
-                                actor_id,
-                                summary or f"Restored {document_id} from trash",
-                                now,
-                            ),
-                        )
-                        connection.execute(
-                            """
-                            UPDATE documents
-                            SET current_revision_id = ?, deleted = 0,
-                                materialization_state = 'clean',
-                                file_hash = ?, updated_at = ?
-                            WHERE document_id = ?
-                            """,
-                            (new_revision_id, current.content_hash, now, document_id),
-                        )
-                        self._record_idempotency(
-                            connection,
-                            actor_id=actor_id,
-                            key=idempotency_key,
-                            operation="restore",
-                            request_hash=fingerprint,
-                            document_id=document_id,
-                            revision_id=new_revision_id,
-                        )
-                        self.organization._replace_document_search_row(connection, document_id)
-                        result = (document_id, new_revision_id)
-                    if result is not None:
-                        self.database.set_audit_target(
-                            resource_id=result[0],
-                            revision_id=result[1],
-                            path=target_path,
-                        )
-            except Exception:
-                try:
-                    if self.workspace.is_document_file(
-                        target_path
-                    ) and not self.workspace.has_trashed_document(document_id):
-                        self.workspace.trash_document(
-                            document_id=document_id,
-                            path=target_path,
-                            content_hash=current.content_hash,
-                            size_bytes=current.size_bytes,
-                        )
-                except Exception as rollback_err:
-                    raise RuntimeError(
-                        "Restore failed and filesystem rollback failed"
-                    ) from rollback_err
-                raise
-
-            document = self.get_document(result[0], include_deleted=True)
-            self.search_index.sync(document)
-            return document
+        with self.mutations.paths(current.path), self.mutations.document(document_id):
+            return self._commit(
+                document_id=document_id,
+                operation="restore",
+                fingerprint=request_hash(
+                    {
+                        "document_id": document_id,
+                        "expected_revision_id": expected_revision_id,
+                        "revision_id": revision_id,
+                        "operation": "restore",
+                        "summary": summary,
+                        "deleted": False,
+                    }
+                ),
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+                write=write,
+                prepare=prepare,
+            )
 
     def _finish_materialization(self, document: Document) -> None:
         if document.deleted or not document.path:
@@ -1854,95 +1713,79 @@ class DocumentService:
     ) -> Document:
         validate_metadata_text(category, "Document category")
         normalized_category = category.strip() if category and category.strip() else None
-        payload = {
-            "document_id": document_id,
-            "expected_metadata_version": expected_metadata_version,
-            "category": normalized_category,
-            "tag_ids": sorted(set(tag_ids)),
-        }
-        fingerprint = request_hash(payload)
-        with self.database.transaction() as connection:
-            self.actors.require_known(connection, actor_id)
-            duplicate = self._idempotent_result(
-                connection,
-                actor_id=actor_id,
-                key=idempotency_key,
-                operation="metadata",
-                request_hash=fingerprint,
+
+        def write(connection: sqlite3.Connection) -> Written:
+            current = self.get_document_in_connection(
+                connection, document_id, include_deleted=False
             )
-            if duplicate is None:
-                current = self._get_document_in_connection(
-                    connection, document_id, include_deleted=False
+            if current.metadata_version != expected_metadata_version:
+                raise ConflictError(
+                    "Document metadata changed since it was read",
+                    details={
+                        "document_id": document_id,
+                        "expected_metadata_version": expected_metadata_version,
+                        "current_metadata_version": current.metadata_version,
+                    },
                 )
-                if current.metadata_version != expected_metadata_version:
-                    raise ConflictError(
-                        "Document metadata changed since it was read",
-                        details={
-                            "document_id": document_id,
-                            "expected_metadata_version": expected_metadata_version,
-                            "current_metadata_version": current.metadata_version,
-                        },
-                    )
-                valid_tag_ids = self.organization.validate_tag_ids(connection, tag_ids)
-                before = {
-                    "category": current.category,
-                    "tag_ids": [tag.tag_id for tag in current.tags],
-                    "metadata_version": current.metadata_version,
-                }
-                now = utc_now()
-                connection.execute(
-                    """
-                    UPDATE documents
-                    SET category = ?, metadata_version = metadata_version + 1, updated_at = ?
-                    WHERE document_id = ?
-                    """,
-                    (normalized_category, now, document_id),
-                )
-                connection.execute(
-                    "DELETE FROM document_tags WHERE document_id = ?", (document_id,)
-                )
-                connection.executemany(
-                    "INSERT INTO document_tags(document_id, tag_id) VALUES (?, ?)",
-                    [(document_id, tag_id) for tag_id in valid_tag_ids],
-                )
-                after = {
+            valid_tag_ids = self.organization.validate_tag_ids(connection, tag_ids)
+            before = {
+                "category": current.category,
+                "tag_ids": [tag.tag_id for tag in current.tags],
+                "metadata_version": current.metadata_version,
+            }
+            now = utc_now()
+            connection.execute(
+                """
+                UPDATE documents
+                SET category = ?, metadata_version = metadata_version + 1, updated_at = ?
+                WHERE document_id = ?
+                """,
+                (normalized_category, now, document_id),
+            )
+            connection.execute("DELETE FROM document_tags WHERE document_id = ?", (document_id,))
+            connection.executemany(
+                "INSERT INTO document_tags(document_id, tag_id) VALUES (?, ?)",
+                [(document_id, tag_id) for tag_id in valid_tag_ids],
+            )
+            after = {
+                "category": normalized_category,
+                "tag_ids": valid_tag_ids,
+                "metadata_version": current.metadata_version + 1,
+            }
+            connection.execute(
+                """
+                INSERT INTO metadata_events(
+                    event_id, entity_type, entity_id, actor_id,
+                    operation, before_json, after_json, created_at
+                ) VALUES (?, 'document', ?, ?, 'organize', ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    document_id,
+                    actor_id,
+                    json.dumps(before),
+                    json.dumps(after),
+                    now,
+                ),
+            )
+            # Metadata is not content: the key binds to the unchanged head revision.
+            return Written(current.current_revision_id)
+
+        return self._commit(
+            document_id=document_id,
+            operation="metadata",
+            fingerprint=request_hash(
+                {
+                    "document_id": document_id,
+                    "expected_metadata_version": expected_metadata_version,
                     "category": normalized_category,
-                    "tag_ids": valid_tag_ids,
-                    "metadata_version": current.metadata_version + 1,
+                    "tag_ids": sorted(set(tag_ids)),
                 }
-                connection.execute(
-                    """
-                    INSERT INTO metadata_events(
-                        event_id, entity_type, entity_id, actor_id,
-                        operation, before_json, after_json, created_at
-                    ) VALUES (?, 'document', ?, ?, 'organize', ?, ?, ?)
-                    """,
-                    (
-                        str(uuid.uuid4()),
-                        document_id,
-                        actor_id,
-                        json.dumps(before),
-                        json.dumps(after),
-                        now,
-                    ),
-                )
-                self._record_idempotency(
-                    connection,
-                    actor_id=actor_id,
-                    key=idempotency_key,
-                    operation="metadata",
-                    request_hash=fingerprint,
-                    document_id=document_id,
-                    revision_id=current.current_revision_id,
-                )
-                self.database.set_audit_target(
-                    resource_id=document_id,
-                    revision_id=current.current_revision_id,
-                    path=current.path,
-                )
-        updated = self.get_document(document_id)
-        self.search_index.sync(updated)
-        return updated
+            ),
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+            write=write,
+        )
 
     def search_documents(
         self,

@@ -14,9 +14,9 @@ The [architecture diagram](assets/chat-capability-lifecycle.html) shows the comp
 - an approval policy;
 - required Sangam actor capabilities and scope behavior;
 - allowed entry points and document content types;
-- result byte and execution-time limits;
-- the application handler and optional UI renderer; and
-- metadata-only telemetry redaction.
+- result byte and execution-time limits.
+
+The agent tool for each capability lives in `ChatToolset` (`src/sangam/chat_tools.py`), which runs every tool against the run principal's current token grants. Durable `write` and `external` capabilities also register one `DurableEffect` in `ChatEffectService.durable` (`src/sangam/chat_effects.py`): its preflight before approval, its execution after approval, and how to tell that its operation key already committed. Tool telemetry records metadata only.
 
 The registry resolves the tool set for every run from the authenticated principal, `WorkspaceAccessService` policy, chat entry point, attached document, content type, model compatibility, and capability version. Compact document chat and full workspace chat use this same resolver.
 
@@ -58,9 +58,27 @@ Publication approval binds the document ID, exact revision, slug, and access pol
 
 `inspect_workspace_organization` returns at most 100 authorized documents, folders, or tags per page. It includes stable IDs, current revision or metadata versions, exact paths, tags, categories, and folder descendant counts. It never returns document content.
 
-`apply_workspace_organization_plan` accepts at most 100 exact operations. Plans can create folders, save unmaterialized drafts at workspace paths, move documents or folders, replace document or folder metadata, and move documents to Trash. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
+`apply_workspace_organization_plan` accepts at most 100 exact operations. Plans can create folders, save unmaterialized drafts at workspace paths, move documents or folders, replace document or folder metadata, move documents to Trash, restore a document to an earlier revision or out of Trash, and duplicate a document. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
 
 The explorer, command palette, raw API, and chat all call this service through `WorkspaceAccessService`. A partial result is explicit and never displayed as complete.
+
+### Parity with the app
+
+Chat can do what the app can, through the same services and with the same authority.
+
+| In the app | In chat |
+| --- | --- |
+| Search with tag, category, and type filters | `search_workspace` takes the same filters and cites the PDF page of a hit |
+| Open a document with its tags, category, trust level, and links | `read_document` returns the same |
+| Revision history and diff | `read_revision_history` lists revisions or diffs two of them |
+| Edit, create, publish | `propose_update`, `create_document`, `publish_document` |
+| Move, trash, restore, duplicate, tag, folders | `apply_workspace_organization_plan`; every operation calls `WorkspaceAccessService.write_document` or the folder services |
+| Projects: list and open | `inspect_projects` |
+| Projects: create, add or remove a document | `update_project`, one exact change per review |
+
+Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
+
+Not available in chat by design: trust changes, agent tokens, provider connections, backups, reconciliation, Karakeep, and importing PDF bytes. These are administrator operations that hold credentials, operate on infrastructure, or need a binary upload. PDF annotations, unpublishing, and creating tags are not yet available in chat.
 
 ### Review and YOLO autonomy
 
@@ -117,8 +135,8 @@ Complete these steps in order:
 3. Classify the effect. Use `propose` for existing-document edits, `write` for private mutations, and `external` for externally visible changes.
 4. Define strict, bounded input and result models. Reject extra fields. Set string, collection, result-byte, and time limits.
 5. Declare actor capabilities, path-scope behavior, entry points, supported content types, and model requirements.
-6. Choose the approval policy and renderer. Every material effect argument must be visible.
-7. Register the descriptor explicitly and map its handler to an existing application service.
+6. Choose the approval policy and how the review card renders it. Every material effect argument must be visible.
+7. Register the descriptor in `CAPABILITIES`, add its tool to `ChatToolset`, and, for a durable effect, add its `DurableEffect` entry that calls an existing application service.
 8. Add schema, authority, lifecycle, duplicate-delivery, stale-context, and abuse tests.
 9. Add entry-point copy or starter prompts only after the capability works through both compact and full chat.
 

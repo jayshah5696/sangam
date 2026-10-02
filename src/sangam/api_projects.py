@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, Response, status
 from pydantic import BaseModel
 
 from sangam.authorization import AuthorizationPolicy
-from sangam.projects import ProjectService
+from sangam.projects import DeletedProjectReference, ProjectService
 from sangam.schemas import (
     AddProjectAnnotation,
     AddProjectDocument,
@@ -26,10 +26,6 @@ from sangam.security import Principal
 
 PrincipalResolver = Callable[..., Principal]
 M = TypeVar("M", bound=BaseModel)
-
-
-class DeletedProjectReference(BaseModel):
-    pass
 
 
 def create_projects_router(
@@ -92,14 +88,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectDetail:
-        return mutate(
-            principal,
-            key,
-            "project:create",
-            body,
-            ProjectDetail,
-            lambda: projects.create_project(principal, body),
-        )
+        return projects.create_project_once(principal, key, body)
 
     @router.get("/{project_id}", response_model=ProjectDetail)
     def get_project(
@@ -149,14 +138,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> ProjectDocumentItem:
-        return mutate(
-            principal,
-            key,
-            f"project:add-document:{project_id}",
-            body,
-            ProjectDocumentItem,
-            lambda: projects.add_document(principal, project_id, body),
-        )
+        return projects.add_document_once(principal, key, project_id, body)
 
     @router.patch("/{project_id}/documents/{document_id}", response_model=ProjectDocumentItem)
     def update_project_document(
@@ -182,12 +164,7 @@ def create_projects_router(
         principal: Principal = principal_dependency,
         key: str = key_dependency,
     ) -> Response:
-        remove(
-            principal,
-            key,
-            f"project:remove-document:{project_id}:{document_id}",
-            lambda: projects.remove_document(principal, project_id, document_id),
-        )
+        projects.remove_document_once(principal, key, project_id, document_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post(

@@ -230,6 +230,7 @@ def build_application_services(
         config=chat_config,
         model_catalog=model_catalog,
         provider_connections=provider_connections,
+        projects=projects,
     )
     return ApplicationServices(
         documents=documents,

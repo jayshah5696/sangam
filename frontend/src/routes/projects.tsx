@@ -56,7 +56,11 @@ function ProjectsPage() {
           kind="error"
           title="Could not load projects"
           description={projects.error.message}
-          action={<button onClick={() => void projects.refetch()}>Retry</button>}
+          action={
+            <button className="secondary-action" onClick={() => void projects.refetch()}>
+              Retry
+            </button>
+          }
         />
       )}
       {projects.data?.length === 0 && (
@@ -235,7 +239,9 @@ function ProjectView({ projectId }: { projectId: string }) {
         description={detail.error.message}
         action={
           <>
-            <button onClick={() => void detail.refetch()}>Retry</button>
+            <button className="secondary-action" onClick={() => void detail.refetch()}>
+              Retry
+            </button>
             <Link to="/projects" search={{}}>
               Back to projects
             </Link>

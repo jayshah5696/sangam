@@ -154,7 +154,7 @@ def test_failed_repair_preserves_dirty_marker_and_previous_index(client, monkeyp
         raise RuntimeError("interrupted indexing")
 
     with monkeypatch.context() as patch:
-        patch.setattr(index, "_replace", fail)
+        patch.setattr(index, "replace", fail)
         with pytest.raises(RuntimeError, match="interrupted indexing"):
             index.repair_pending()
     assert client.get("/api/v1/search", params={"q": "originaltoken"}).json()
