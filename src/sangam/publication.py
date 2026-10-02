@@ -11,10 +11,10 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from sangam.db import Database, utc_now
+from sangam.document_assets import ATTACHMENTS_FOLDER, resolve_asset_reference
 from sangam.errors import ConflictError, IdempotencyError, NotFoundError, ValidationError
 from sangam.html_javascript import HtmlJavascriptSettingsService
 from sangam.idempotency import IdempotencyStore, request_hash
@@ -166,15 +166,23 @@ class PublicationService:
         access_policy: str,
         actor_id: str,
         idempotency_key: str,
+        revision_id: str | None = None,
     ) -> IssuedPublication:
         normalized_slug = self._normalize_slug(slug)
         self._validate_policy(access_policy)
         document = self.documents.get_document(document_id)
         if document.content_type == "application/pdf":
             raise ValidationError("PDF publications are deferred; use the private research view")
-        fingerprint = request_hash(
-            {"document_id": document_id, "slug": normalized_slug, "access_policy": access_policy}
-        )
+        published_revision = revision_id or document.current_revision_id
+        fingerprint_fields: dict[str, object] = {
+            "document_id": document_id,
+            "slug": normalized_slug,
+            "access_policy": access_policy,
+        }
+        # Only explicit revisions join the fingerprint so earlier retries still match.
+        if revision_id is not None:
+            fingerprint_fields["revision_id"] = revision_id
+        fingerprint = request_hash(fingerprint_fields)
         with self.database.transaction() as connection:
             duplicate = self._idempotent_resource(
                 connection,
@@ -187,6 +195,9 @@ class PublicationService:
                 publication_id = duplicate
                 raw_token = None
             else:
+                self._require_document_revision(
+                    connection, document_id=document.document_id, revision_id=published_revision
+                )
                 publication_id = str(uuid.uuid4())
                 now = utc_now()
                 try:
@@ -194,8 +205,8 @@ class PublicationService:
                         """
                         INSERT INTO publications(
                             publication_id, document_id, slug, access_policy, version, active,
-                            created_by, updated_by, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?, ?)
+                            created_by, updated_by, created_at, updated_at, revision_id
+                        ) VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
                         """,
                         (
                             publication_id,
@@ -206,6 +217,7 @@ class PublicationService:
                             actor_id,
                             now,
                             now,
+                            published_revision,
                         ),
                     )
                 except sqlite3.IntegrityError as error:
@@ -224,7 +236,7 @@ class PublicationService:
                     publication_id=publication_id,
                     actor_id=actor_id,
                     operation="publish",
-                    details={"access_policy": access_policy},
+                    details={"access_policy": access_policy, "revision_id": published_revision},
                 )
                 self._record_idempotency(
                     connection,
@@ -246,17 +258,19 @@ class PublicationService:
         access_policy: str,
         actor_id: str,
         idempotency_key: str,
+        revision_id: str | None = None,
     ) -> IssuedPublication:
         normalized_slug = self._normalize_slug(slug)
         self._validate_policy(access_policy)
-        fingerprint = request_hash(
-            {
-                "publication_id": publication_id,
-                "expected_version": expected_version,
-                "slug": normalized_slug,
-                "access_policy": access_policy,
-            }
-        )
+        fingerprint_fields: dict[str, object] = {
+            "publication_id": publication_id,
+            "expected_version": expected_version,
+            "slug": normalized_slug,
+            "access_policy": access_policy,
+        }
+        if revision_id is not None:
+            fingerprint_fields["revision_id"] = revision_id
+        fingerprint = request_hash(fingerprint_fields)
         raw_token: str | None = None
         with self.database.transaction() as connection:
             duplicate = self._idempotent_resource(
@@ -277,16 +291,27 @@ class PublicationService:
                         "The publication changed since it was read",
                         details={"current_version": current["version"]},
                     )
+                published_revision = revision_id or current["revision_id"]
+                self._require_document_revision(
+                    connection, document_id=current["document_id"], revision_id=published_revision
+                )
                 now = utc_now()
                 try:
                     connection.execute(
                         """
                         UPDATE publications
                         SET slug = ?, access_policy = ?, version = version + 1,
-                            active = 1, updated_by = ?, updated_at = ?
+                            active = 1, updated_by = ?, updated_at = ?, revision_id = ?
                         WHERE publication_id = ?
                         """,
-                        (normalized_slug, access_policy, actor_id, now, publication_id),
+                        (
+                            normalized_slug,
+                            access_policy,
+                            actor_id,
+                            now,
+                            published_revision,
+                            publication_id,
+                        ),
                     )
                 except sqlite3.IntegrityError as error:
                     raise ConflictError("That publication slug is already in use") from error
@@ -303,7 +328,11 @@ class PublicationService:
                     publication_id=publication_id,
                     actor_id=actor_id,
                     operation="update" if current["active"] else "republish",
-                    details={"access_policy": access_policy, "slug": normalized_slug},
+                    details={
+                        "access_policy": access_policy,
+                        "slug": normalized_slug,
+                        "revision_id": published_revision,
+                    },
                 )
                 self._record_idempotency(
                     connection,
@@ -549,8 +578,9 @@ class PublicationService:
                 connection, row["publication_id"], raw_unlisted_token
             ):
                 raise NotFoundError("Publication not found")
-            resolved_revision = revision_id or row["current_revision_id"]
-            if revision_id is not None and revision_id != row["current_revision_id"]:
+            published_revision = row["revision_id"]
+            resolved_revision = revision_id or published_revision
+            if revision_id is not None and revision_id != published_revision:
                 exposed = connection.execute(
                     """
                     SELECT 1 FROM publication_revision_exposures
@@ -587,7 +617,7 @@ class PublicationService:
             content=revision["content"],
             trust_level=row["trust_level"],
             javascript_enabled=javascript_enabled,
-            is_latest=resolved_revision == row["current_revision_id"],
+            is_latest=resolved_revision == published_revision,
             asset_base_url=(
                 f"/api/v1/publications/{row['slug']}/asset?revision={resolved_revision}&path="
             ),
@@ -616,32 +646,10 @@ class PublicationService:
         return self._read_document_asset(document=document, asset_reference=asset_reference)
 
     def _read_document_asset(self, *, document: Document, asset_reference: str) -> PublicationAsset:
-        if document.path is None:
-            raise NotFoundError("Publication asset not found")
-        parsed = urlsplit(unquote(asset_reference))
-        if parsed.scheme or parsed.netloc or parsed.path.startswith("/"):
-            raise NotFoundError("Publication asset not found")
-        document_parent = PurePosixPath(document.path).parent
-        parent_parts = [p for p in document_parent.parts if p not in {"", "."}]
-        candidate = PurePosixPath(document_parent, parsed.path)
-        normalized_parts: list[str] = []
-        for part in candidate.parts:
-            if part in {"", "."}:
-                continue
-            if part == "..":
-                if not normalized_parts:
-                    raise NotFoundError("Publication asset not found")
-                normalized_parts.pop()
-            else:
-                normalized_parts.append(part)
-        if (
-            len(normalized_parts) <= len(parent_parts)
-            or normalized_parts[: len(parent_parts)] != parent_parts
-        ):
-            raise NotFoundError("Publication asset not found")
         try:
+            workspace_path = resolve_asset_reference(document.path, asset_reference)
             content, media_type = self.workspace.read_asset(
-                "/".join(normalized_parts), max_bytes=self.max_asset_bytes
+                workspace_path, max_bytes=self.max_asset_bytes
             )
         except Exception as error:
             raise NotFoundError("Publication asset not found") from error
@@ -664,7 +672,8 @@ class PublicationService:
             if reference
             and not urlsplit(reference).scheme
             and not urlsplit(reference).netloc
-            and not reference.startswith(("/", "#"))
+            and not reference.startswith("#")
+            and (not reference.startswith("/") or reference.startswith(f"/{ATTACHMENTS_FOLDER}/"))
         }
 
     def _revision_content(self, *, document_id: str, revision_id: str) -> sqlite3.Row:
@@ -695,6 +704,7 @@ class PublicationService:
     def _publication_query() -> str:
         return """
             SELECT p.*, d.title AS document_title, d.path AS document_path,
+                d.current_revision_id AS document_revision_id,
                 EXISTS(
                     SELECT 1 FROM publication_tokens t
                     WHERE t.publication_id = p.publication_id AND t.revoked_at IS NULL
@@ -708,6 +718,17 @@ class PublicationService:
         values["has_active_token"] = bool(values["has_active_token"])
         values["url"] = f"{self.publication_base_url}/{values['slug']}"
         return Publication.model_validate(values)
+
+    @staticmethod
+    def _require_document_revision(
+        connection: sqlite3.Connection, *, document_id: str, revision_id: str
+    ) -> None:
+        row = connection.execute(
+            "SELECT 1 FROM revisions WHERE revision_id = ? AND document_id = ?",
+            (revision_id, document_id),
+        ).fetchone()
+        if row is None:
+            raise NotFoundError("Revision not found for the published document")
 
     @staticmethod
     def _has_active_token(connection: sqlite3.Connection, publication_id: str) -> bool:

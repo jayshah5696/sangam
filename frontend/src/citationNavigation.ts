@@ -10,6 +10,8 @@ export type CitationTarget = {
   textLocator?: TextLocator
   quoteStart?: number
   quoteEnd?: number
+  /** A search passage in the current revision: a 1-based line and the matched word. */
+  passage?: { line: number; exact?: string }
 }
 
 export const CITATION_NAVIGATION_EVENT = 'sangam:citation-navigation'
@@ -85,12 +87,17 @@ export function citationTargetFromLocation(documentId: string): CitationTarget |
       target.quoteStart = start.data
       target.quoteEnd = end.data
     }
+    const line = z.coerce.number().int().positive().safeParse(search.get('line'))
+    if (search.has('line') && line.success) {
+      target.passage = { line: line.data, exact: search.get('match')?.slice(0, 200) || undefined }
+    }
   }
   return target &&
     (target.revisionId ||
       target.pageNumber ||
       target.annotationId ||
       target.textLocator ||
+      target.passage ||
       target.quoteStart !== undefined)
     ? target
     : null
@@ -108,6 +115,10 @@ export function citationHref(target: CitationTarget): string {
   }
   if (target.quoteStart !== undefined) search.set('quoteStart', String(target.quoteStart))
   if (target.quoteEnd !== undefined) search.set('quoteEnd', String(target.quoteEnd))
+  if (target.passage) {
+    search.set('line', String(target.passage.line))
+    if (target.passage.exact) search.set('match', target.passage.exact)
+  }
   const suffix = search.size ? `?${search.toString()}` : ''
   return `/documents/${encodeURIComponent(target.documentId)}${suffix}`
 }
