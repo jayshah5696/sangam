@@ -5,7 +5,7 @@ import json
 from conftest import headers
 from fastapi.testclient import TestClient
 
-from sangam.security import sanitize_headers, sanitize_sensitive_data
+from sangam.security import sanitize_headers, sanitize_sensitive_data, sanitize_sensitive_text
 
 
 def test_sensitive_header_and_data_sanitization() -> None:
@@ -564,3 +564,102 @@ def test_organization_plan_audit_provenance(client: TestClient) -> None:
     assert move_event["outcome"] == "accepted"
     assert move_event["details"]["source_path"] == "docs/plan_test_doc.md"
     assert move_event["details"]["destination_path"] == "archive/plan_test_doc.md"
+
+
+def test_uri_credentials_and_bearer_text_sanitization() -> None:
+    text_with_secrets = (
+        "Config: DATABASE_URL=postgresql://dbuser:super_secret_password@db.local:5432/sangam "
+        "and Auth: Bearer my_custom_bearer_token_abc123 and API_KEY=secret_key_778899 "
+        "and db_pass: my_database_pass_123"
+    )
+    sanitized = sanitize_sensitive_text(text_with_secrets)
+    assert "super_secret_password" not in sanitized
+    assert "my_custom_bearer_token_abc123" not in sanitized
+    assert "secret_key_778899" not in sanitized
+    assert "my_database_pass_123" not in sanitized
+    assert "postgresql://[REDACTED]:[REDACTED]@db.local:5432/sangam" in sanitized
+    assert "Bearer [REDACTED]" in sanitized
+    assert "API_KEY=[REDACTED]" in sanitized
+    assert "db_pass=[REDACTED]" in sanitized
+
+
+def test_extended_credential_keys_sanitization() -> None:
+    payload = {
+        "passwd": "user_password_val",
+        "db_pass": "database_password_val",
+        "credentials": "user_credentials_blob",
+        "api_credentials": "api_credentials_blob",
+    }
+    sanitized = sanitize_sensitive_data(payload)
+    assert isinstance(sanitized, dict)
+    assert sanitized["passwd"] == "[REDACTED]"
+    assert sanitized["db_pass"] == "[REDACTED]"
+    assert sanitized["credentials"] == "[REDACTED]"
+    assert sanitized["api_credentials"] == "[REDACTED]"
+
+
+def test_audit_provenance_and_structured_change_events_detail(client: TestClient) -> None:
+    # 1. Create a document with initial content
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Structured Audit Doc",
+            "content": "line1\nline2",
+            "path": "docs/structured_audit.md",
+        },
+        headers=headers("idemp_struct_audit_create"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # 2. Update the document to generate patch diff metadata
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "line1\nline2_modified\nline3_added",
+        },
+        headers=headers("idemp_struct_audit_update"),
+    )
+    assert update_resp.status_code == 200
+
+    # 3. Duplicate the document
+    dupe_resp = client.post(
+        f"/api/v1/documents/{doc_id}/duplicate",
+        json={
+            "expected_revision_id": update_resp.json()["current_revision_id"],
+            "title": "Structured Audit Doc Copy",
+            "path": "docs/structured_audit_copy.md",
+        },
+        headers=headers("idemp_struct_audit_duplicate"),
+    )
+    assert dupe_resp.status_code == 201
+    dupe_doc_id = dupe_resp.json()["document_id"]
+
+    # 4. Inspect activity log for structured change events and provenance
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    update_events = [e for e in events if e["resource_id"] == doc_id and e["action"] == "update"]
+    assert len(update_events) == 1
+    up_event = update_events[0]
+    assert up_event["actor_kind"] == "human"
+    assert up_event["path"] == "docs/structured_audit.md"
+    assert up_event["outcome"] == "accepted"
+    assert up_event["details"]["lines_added"] == 2
+    assert up_event["details"]["lines_removed"] == 1
+    assert "diff" in up_event["details"]
+    assert up_event["details"]["expected_revision_id"] == rev1
+
+    dupe_events = [
+        e for e in events if e["resource_id"] == dupe_doc_id and e["action"] == "duplicate"
+    ]
+    assert len(dupe_events) == 1
+    dupe_event = dupe_events[0]
+    assert dupe_event["actor_kind"] == "human"
+    assert dupe_event["path"] == "docs/structured_audit_copy.md"
+    assert dupe_event["details"]["source_path"] == "docs/structured_audit.md"
+    assert dupe_event["details"]["destination_path"] == "docs/structured_audit_copy.md"
