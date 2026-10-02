@@ -166,3 +166,31 @@ def test_applying_a_proposal_names_the_proposal_in_the_ledger(client: TestClient
     ).json()
     [update] = [e for e in events if e["action"] == "update"]
     assert update["details"]["via"] == f"chat-proposal:{proposal.proposal_id}"
+
+
+def test_the_activity_ledger_can_be_filtered_to_changes_made_through_chat(
+    client: TestClient,
+) -> None:
+    set_chat_autonomy(client, "workspace")
+    client.post(
+        "/api/v1/documents",
+        json={"title": "By hand", "content": "x", "path": "hand.md"},
+        headers=headers("by-hand"),
+    )
+    prepare_effect(
+        client,
+        capability_id="create_document",
+        arguments={**ARGUMENTS, "title": "By chat", "path": "chat.md"},
+        tool_call_id="call_filter_chat",
+    )
+
+    everything = client.get("/api/v1/activity", params={"actor_kind": "human", "limit": 200}).json()
+    through_chat = client.get(
+        "/api/v1/activity", params={"actor_kind": "human", "via": "chat", "limit": 200}
+    ).json()
+
+    assert {"By hand", "By chat"} <= {
+        event["details"].get("title") for event in everything if event["action"] == "create"
+    }
+    assert [e["details"]["title"] for e in through_chat] == ["By chat"]
+    assert client.get("/api/v1/activity", params={"via": "%"}).status_code == 422

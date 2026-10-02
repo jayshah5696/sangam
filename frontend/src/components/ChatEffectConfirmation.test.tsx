@@ -3,8 +3,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChatEffect } from '../api'
-import { parseProjectChange } from '../chatEffectCopy'
-import { ChatProjectConfirmation } from './ChatProjectConfirmation'
+import { describeEffectReview } from '../chatEffectCopy'
+import { ChatEffectConfirmation } from './ChatEffectConfirmation'
 
 afterEach(cleanup)
 
@@ -30,14 +30,14 @@ const effect: ChatEffect = {
 }
 
 function renderCard(props: { pending?: boolean; error?: boolean } = {}) {
-  const change = parseProjectChange(effect.preview)
-  if (!change) throw new Error('fixture preview must parse')
+  const review = describeEffectReview(effect)
+  if (!review) throw new Error('fixture preview must parse')
   const onApprove = vi.fn()
   const onCancel = vi.fn()
   render(
-    <ChatProjectConfirmation
+    <ChatEffectConfirmation
       effect={effect}
-      change={change}
+      review={review}
       pending={props.pending ?? false}
       error={props.error ?? false}
       onApprove={onApprove}
@@ -47,7 +47,7 @@ function renderCard(props: { pending?: boolean; error?: boolean } = {}) {
   return { onApprove, onCancel }
 }
 
-describe('ChatProjectConfirmation', () => {
+describe('ChatEffectConfirmation', () => {
   it('names the exact change and lets the reviewer approve or cancel it', () => {
     const { onApprove, onCancel } = renderCard()
 

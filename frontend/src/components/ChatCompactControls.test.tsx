@@ -3,7 +3,12 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ChatEffect } from '../api'
-import { chatRequestNeedsTurnContext, CompactChatControls, DurableEffectStatus } from './ChatPanel'
+import {
+  applyChatContextHeaders,
+  chatRequestNeedsTurnContext,
+  CompactChatControls,
+  DurableEffectStatus,
+} from './ChatPanel'
 
 afterEach(cleanup)
 
@@ -69,4 +74,20 @@ it('offers a safe recovery action only when the durable effect permits it', () =
   )
   expect(screen.queryByRole('button', { name: 'Retry safely' })).toBeNull()
   expect(screen.getByText(/A new review is required/)).toBeTruthy()
+})
+
+it('tells the server which project the conversation started from, and stops when there is none', () => {
+  const headers = new Headers({ 'X-Sangam-Project-ID': 'stale' })
+
+  applyChatContextHeaders(headers, { documentId: null, revisionId: null, projectId: 'proj_1' })
+  expect(headers.get('X-Sangam-Project-ID')).toBe('proj_1')
+  expect(headers.get('X-Sangam-Workspace-Context')).toBe('1')
+  expect(headers.get('X-Sangam-Chat-Entry')).toBe('workspace')
+
+  applyChatContextHeaders(headers, { documentId: 'doc_1', revisionId: 'rev_1', projectId: null })
+  expect(headers.has('X-Sangam-Project-ID')).toBe(false)
+  expect(headers.get('X-Sangam-Document-ID')).toBe('doc_1')
+  expect(headers.get('X-Sangam-Revision-ID')).toBe('rev_1')
+  expect(headers.get('X-Sangam-Chat-Entry')).toBe('document')
+  expect(headers.has('X-Sangam-Workspace-Context')).toBe(false)
 })

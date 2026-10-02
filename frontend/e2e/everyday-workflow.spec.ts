@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { APIRequestContext, Page } from '@playwright/test'
 import { documentSchema, projectDetailSchema, publicationSchema } from '../src/api'
-import { expect, test } from './fixtures'
+import { expect, openIfClosed, test } from './fixtures'
 
 // 1x1 transparent PNG.
 const PNG = Buffer.from(
@@ -19,8 +19,10 @@ async function create(request: APIRequestContext, data: { title: string; content
 }
 
 async function showSidebar(page: Page) {
-  const reveal = page.getByRole('button', { name: 'Show workspace sidebar', exact: true })
-  if (await reveal.isVisible()) await reveal.click()
+  await openIfClosed(
+    page.getByRole('button', { name: 'Show workspace sidebar', exact: true }),
+    page.locator('#workspace-tab-files'),
+  )
 }
 
 async function openSearch(page: Page) {

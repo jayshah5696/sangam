@@ -1204,6 +1204,7 @@
               "discriminator": {
                 "mapping": {
                   "create_folder": "#/components/schemas/OrganizationCreateFolder",
+                  "create_tag": "#/components/schemas/OrganizationCreateTag",
                   "duplicate_document": "#/components/schemas/OrganizationDuplicateDocument",
                   "materialize_document": "#/components/schemas/OrganizationMaterializeDocument",
                   "move_document": "#/components/schemas/OrganizationMoveDocument",
@@ -1242,6 +1243,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/OrganizationDuplicateDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/OrganizationCreateTag"
                 }
               ]
             },
@@ -1719,7 +1723,9 @@
               "create_document",
               "publish_document",
               "apply_workspace_organization_plan",
-              "update_project"
+              "update_project",
+              "update_publication",
+              "annotate_pdf"
             ],
             "title": "Capability Id",
             "type": "string"
@@ -4993,6 +4999,35 @@
         "title": "OrganizationCreateFolder",
         "type": "object"
       },
+      "OrganizationCreateTag": {
+        "additionalProperties": false,
+        "description": "Create a tag. Later operations in the same plan cannot use it: tag IDs are assigned\non creation, so apply the tag in a second plan after inspecting the new ID.",
+        "properties": {
+          "color": {
+            "default": "#527ea3",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Color",
+            "type": "string"
+          },
+          "kind": {
+            "const": "create_tag",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "OrganizationCreateTag",
+        "type": "object"
+      },
       "OrganizationDocumentSnapshot": {
         "properties": {
           "category": {
@@ -5356,7 +5391,8 @@
           "resource_type": {
             "enum": [
               "document",
-              "folder"
+              "folder",
+              "tag"
             ],
             "title": "Resource Type",
             "type": "string"
@@ -8282,6 +8318,23 @@
           },
           {
             "in": "query",
+            "name": "via",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(chat)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Via"
+            }
+          },
+          {
+            "in": "query",
             "name": "attention",
             "required": false,
             "schema": {
@@ -8696,6 +8749,23 @@
                 }
               ],
               "title": "Operation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "via",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(chat)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Via"
             }
           },
           {
@@ -9473,6 +9543,23 @@
                 }
               ],
               "title": "Operation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "via",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(chat)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Via"
             }
           },
           {
@@ -16677,6 +16764,23 @@
               "default": "workspace",
               "title": "X-Sangam-Chat-Entry",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Sangam-Project-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Sangam-Project-Id"
             }
           },
           {
@@ -34052,7 +34156,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-10-01",
-    "reason": "Chat gains update_project (new capability_id value in chat effect responses) and restore_document/duplicate_document organization plan operations (new request union members). Browser Zod schemas updated in the same change; existing operation kinds and their order are unchanged."
+    "date": "2026-10-02",
+    "reason": "Chat follow-ups: update_publication/annotate_pdf effects, create_tag organization op, activity via filter; frontend schemas updated"
   }
 }

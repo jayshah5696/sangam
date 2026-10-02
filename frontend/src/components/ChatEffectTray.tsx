@@ -26,18 +26,74 @@ export function formatAttentionSummary(summary: {
   return parts.join(', ') || 'Pending attention'
 }
 
+type EffectCopy = {
+  /** Names the effect in "<noun> completed" and "<noun> failed". */
+  noun: string
+  /** Counts completed effects in the history summary. */
+  history: (count: number) => string
+  /** What to tell someone when the effect failed for good. */
+  failed: string
+  /** What to tell someone when it completed. */
+  completed: string
+}
+
+const plural = (count: number, one: string, many = `${one}s`) => (count === 1 ? one : many)
+
+// Every durable capability says the same four things, in one place.
+const EFFECT_COPY = {
+  create_document: {
+    noun: 'Document creation',
+    history: (n) => `${n} ${plural(n, 'document')} created`,
+    failed: 'The document could not be created at that path. Check for collisions or invalid extensions.',
+    completed: 'The document was created and is open in the workspace.',
+  },
+  publish_document: {
+    noun: 'Publication',
+    history: (n) => `${n} ${plural(n, 'publication')} completed`,
+    failed: 'The document could not be published at that slug. Check permissions and slug availability.',
+    completed: 'The document is published.',
+  },
+  apply_workspace_organization_plan: {
+    noun: 'Organization plan',
+    history: (n) => `${n} organization ${plural(n, 'plan')} applied`,
+    failed: 'The workspace changed or the plan was invalid. Inspect current state and prepare a new request.',
+    completed: 'The organization plan was applied successfully.',
+  },
+  update_project: {
+    noun: 'Project change',
+    history: (n) => `${n} project ${plural(n, 'change')} made`,
+    failed: 'The project or document may have changed. Inspect the project and prepare a new request.',
+    completed: 'The project was updated.',
+  },
+  update_publication: {
+    noun: 'Publication change',
+    history: (n) => `${n} publication ${plural(n, 'change')} made`,
+    failed: 'The publication may have changed. Read the document again and prepare a new request.',
+    completed: 'The publication was updated.',
+  },
+  annotate_pdf: {
+    noun: 'PDF annotation',
+    history: (n) => `${n} PDF ${plural(n, 'annotation change')} made`,
+    failed: 'The annotation may have changed. Read the page again and prepare a new request.',
+    completed: 'The PDF annotation was saved.',
+  },
+} satisfies Record<ChatEffect['capability_id'], EffectCopy>
+
+const EFFECT_ORDER = [
+  'create_document',
+  'publish_document',
+  'apply_workspace_organization_plan',
+  'update_project',
+  'update_publication',
+  'annotate_pdf',
+] as const satisfies readonly ChatEffect['capability_id'][]
+
 export function formatHistorySummary(
-  creations: number,
-  publications: number,
-  plans: number,
-  projectChanges = 0,
+  completed: Partial<Record<ChatEffect['capability_id'], number>>,
 ): string {
-  const parts = [
-    creations ? `${creations} document${creations === 1 ? '' : 's'} created` : '',
-    publications ? `${publications} publication${publications === 1 ? '' : 's'} completed` : '',
-    plans ? `${plans} organization plan${plans === 1 ? '' : 's'} applied` : '',
-    projectChanges ? `${projectChanges} project change${projectChanges === 1 ? '' : 's'} made` : '',
-  ].filter(Boolean)
+  const parts = EFFECT_ORDER.filter((id) => completed[id]).map((id) =>
+    EFFECT_COPY[id].history(completed[id] ?? 0),
+  )
   return parts.join(' · ') || 'Recorded history'
 }
 
@@ -61,14 +117,8 @@ export function DurableEffectStatus({
   const retrySafe = effect.failure?.retry_safe === true
   const interrupted = effect.status === 'approved' || effect.status === 'executing'
   const canResume = interrupted || (failed && retrySafe)
-  const noun =
-    effect.capability_id === 'publish_document'
-      ? 'Publication'
-      : effect.capability_id === 'apply_workspace_organization_plan'
-        ? 'Organization plan'
-        : effect.capability_id === 'update_project'
-          ? 'Project change'
-          : 'Document creation'
+  const copy = EFFECT_COPY[effect.capability_id]
+  const noun = copy.noun
   const href =
     effectResultSchema.safeParse(effect.result).data?.url ??
     (effect.capability_id === 'create_document' && effect.resource_id
@@ -78,33 +128,13 @@ export function DurableEffectStatus({
   let failureDetail = ''
   if (failed) {
     const rawMessage = String(effect.failure?.message ?? 'The effect could not be completed.')
-    if (retrySafe) {
-      failureDetail = `${rawMessage} This transient failure is safe to retry with the same approved parameters.`
-    } else if (effect.capability_id === 'apply_workspace_organization_plan') {
-      failureDetail = `${rawMessage} The workspace changed or the plan was invalid. Inspect current state and prepare a new request. A new review is required.`
-    } else if (effect.capability_id === 'publish_document') {
-      failureDetail = `${rawMessage} The document could not be published at that slug. Check permissions and slug availability. A new review is required.`
-    } else if (effect.capability_id === 'create_document') {
-      failureDetail = `${rawMessage} The document could not be created at that path. Check for collisions or invalid extensions. A new review is required.`
-    } else if (effect.capability_id === 'update_project') {
-      failureDetail = `${rawMessage} The project or document may have changed. Inspect the project and prepare a new request. A new review is required.`
-    } else {
-      failureDetail = `${rawMessage} A new review is required.`
-    }
+    failureDetail = retrySafe
+      ? `${rawMessage} This transient failure is safe to retry with the same approved parameters.`
+      : `${rawMessage} ${copy.failed} A new review is required.`
   }
 
-  let completedDetail = `Recorded effect ${shortId(effect.effect_id)}`
-  if (effect.status === 'completed') {
-    if (effect.capability_id === 'create_document') {
-      completedDetail = `The document was created and is open in the workspace. Recorded effect ${shortId(effect.effect_id)}`
-    } else if (effect.capability_id === 'publish_document') {
-      completedDetail = `The document is published. Recorded effect ${shortId(effect.effect_id)}`
-    } else if (effect.capability_id === 'apply_workspace_organization_plan') {
-      completedDetail = `The organization plan was applied successfully. Recorded effect ${shortId(effect.effect_id)}`
-    } else if (effect.capability_id === 'update_project') {
-      completedDetail = `The project was updated. Recorded effect ${shortId(effect.effect_id)}`
-    }
-  }
+  const recorded = `Recorded effect ${shortId(effect.effect_id)}`
+  const completedDetail = effect.status === 'completed' ? `${copy.completed} ${recorded}` : recorded
 
   return (
     <div
@@ -250,19 +280,13 @@ export function ChatEffectTray({
   }, [summary, sortedAttention])
 
   const historySummaryText = useMemo(() => {
-    const creations = historyItems.filter(
-      (e) => e.capability_id === 'create_document' && e.status === 'completed',
-    ).length
-    const publications = historyItems.filter(
-      (e) => e.capability_id === 'publish_document' && e.status === 'completed',
-    ).length
-    const plans = historyItems.filter(
-      (e) => e.capability_id === 'apply_workspace_organization_plan' && e.status === 'completed',
-    ).length
-    const projectChanges = historyItems.filter(
-      (e) => e.capability_id === 'update_project' && e.status === 'completed',
-    ).length
-    return formatHistorySummary(creations, publications, plans, projectChanges)
+    const completed: Partial<Record<ChatEffect['capability_id'], number>> = {}
+    for (const effect of historyItems) {
+      if (effect.status === 'completed') {
+        completed[effect.capability_id] = (completed[effect.capability_id] ?? 0) + 1
+      }
+    }
+    return formatHistorySummary(completed)
   }, [historyItems])
 
   const handleDismiss = useCallback(

@@ -11,6 +11,7 @@ import {
   ListFilter,
   ShieldAlert,
   XCircle,
+  MessageSquare,
 } from 'lucide-react'
 import { useState } from 'react'
 import { groupActivityEvents } from '../../activityGrouping'
@@ -222,11 +223,19 @@ function EventRow({ event }: { event: OperationEvent }) {
         {event.resource_id && <code title={event.resource_id}>Resource {event.resource_id}</code>}
         {event.error_code && <small>Error: {event.error_code}</small>}
         {event.revision_id && <code title={event.revision_id}>Revision {event.revision_id}</code>}
-        {Object.entries(event.details).map(([key, value]) => (
-          <small key={key}>
-            {detailLabel(key)}: <code>{String(value)}</code>
+        {event.details.via?.startsWith('chat-') && (
+          <small className="activity-via-chat">
+            <MessageSquare size="var(--icon-inline)" /> Made through chat
+            {event.details.approved_by ? ` · approved by ${event.details.approved_by}` : ''}
           </small>
-        ))}
+        )}
+        {Object.entries(event.details)
+          .filter(([key]) => key !== 'via' && key !== 'approved_by')
+          .map(([key, value]) => (
+            <small key={key}>
+              {detailLabel(key)}: <code>{String(value)}</code>
+            </small>
+          ))}
       </div>
       <div className="activity-event-actions">
         {event.resource_id && event.resource_type === 'document' && (

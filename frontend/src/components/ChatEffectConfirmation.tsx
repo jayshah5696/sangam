@@ -1,19 +1,18 @@
-import { FolderKanban } from 'lucide-react'
 import type { ChatEffect } from '../api'
-import { projectChangeDetail, projectChangeTitle, type ProjectChange } from '../chatEffectCopy'
+import type { EffectReview } from '../chatEffectCopy'
 import { StateMessage } from './ui/StateMessage'
 
-/** Review one exact project change before chat is allowed to make it. */
-export function ChatProjectConfirmation({
+/** Review one exact change to one resource before chat is allowed to make it. */
+export function ChatEffectConfirmation({
   effect,
-  change,
+  review,
   pending,
   error,
   onApprove,
   onCancel,
 }: {
   effect: ChatEffect
-  change: ProjectChange
+  review: EffectReview
   pending: boolean
   error: boolean
   onApprove: () => void
@@ -27,16 +26,14 @@ export function ChatProjectConfirmation({
     <section
       className="chat-effect-confirmation"
       role="alertdialog"
-      aria-labelledby="project-change-title"
-      aria-describedby="project-change-detail"
+      aria-labelledby={`review-title-${effect.effect_id}`}
+      aria-describedby={`review-detail-${effect.effect_id}`}
     >
       <header>
-        <p className="eyebrow">Project change</p>
-        <h3 id="project-change-title">
-          <FolderKanban size="var(--icon-inline)" /> {projectChangeTitle(change)}
-        </h3>
-        <p id="project-change-detail">
-          {projectChangeDetail(change)} · requested by {effect.requested_by} · expires at {expires}
+        <p className="eyebrow">{review.eyebrow}</p>
+        <h3 id={`review-title-${effect.effect_id}`}>{review.title}</h3>
+        <p id={`review-detail-${effect.effect_id}`}>
+          {review.detail} · requested by {effect.requested_by} · expires at {expires}
         </p>
       </header>
       {error && (
@@ -52,7 +49,7 @@ export function ChatProjectConfirmation({
           Cancel task
         </button>
         <button type="button" className="primary-button" disabled={pending} onClick={onApprove}>
-          {pending ? 'Applying…' : 'Approve project change'}
+          {pending ? 'Applying…' : review.approveLabel}
         </button>
       </div>
     </section>
