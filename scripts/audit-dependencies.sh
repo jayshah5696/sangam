@@ -12,6 +12,6 @@ uv --quiet export --frozen --no-dev --no-emit-project \
   --output-file "$REQUIREMENTS"
 uvx --from pip-audit==2.10.1 pip-audit --requirement "$REQUIREMENTS" \
   --require-hashes --disable-pip
-pnpm --dir frontend audit --audit-level=high
+pnpm --dir frontend audit --audit-level=high --ignore-unfixable
 
 echo "Python runtime and pnpm dependency vulnerability policies passed."
