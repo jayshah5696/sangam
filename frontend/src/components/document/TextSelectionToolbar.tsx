@@ -78,23 +78,27 @@ export function TextSelectionToolbar({
     )
   }, [anchor, isCommenting])
 
-  // Dismiss on clicking outside
+  // Dismiss on clicking outside or pressing Escape
   useEffect(() => {
-    const handlePointerDown = (event: MouseEvent) => {
-      const toolbar = toolbarRef.current
-      // SAFETY: pointer events on document originate from DOM Node elements
-      if (toolbar && !toolbar.contains(event.target as Node)) {
-        onDismiss()
+    const dismiss = () => {
+      // Escape does not collapse a native selection in every browser. Clear it
+      // so the workspace's keyup/pointerup capture cannot reopen this toolbar.
+      window.getSelection()?.removeAllRanges()
+      onDismiss()
+    }
+    const dismissFromKeyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dismiss()
+    }
+    const dismissFromPointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !toolbarRef.current?.contains(event.target)) {
+        dismiss()
       }
     }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onDismiss()
-    }
-    window.addEventListener('pointerdown', handlePointerDown)
-    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', dismissFromKeyboard)
+    window.addEventListener('pointerdown', dismissFromPointer, true)
     return () => {
-      window.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keydown', dismissFromKeyboard)
+      window.removeEventListener('pointerdown', dismissFromPointer, true)
     }
   }, [onDismiss])
 
@@ -168,6 +172,7 @@ export function TextSelectionToolbar({
                 e.preventDefault()
                 void handleSaveComment()
               } else if (e.key === 'Escape') {
+                e.stopPropagation()
                 setIsCommenting(false)
               }
             }}
