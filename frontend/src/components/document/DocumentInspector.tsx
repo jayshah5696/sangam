@@ -30,10 +30,11 @@ import { workspaceLayoutPatch, workspaceLayoutPresets } from '../../workspaceLay
 
 import { WorkspaceEvidenceRail } from '../evidence/WorkspaceEvidenceRail'
 import { DocumentBacklinks } from './DocumentBacklinks'
+import { DocumentCommentsRail } from './DocumentCommentsRail'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
-const standardInspectorTabs = ['properties', 'research', 'outline', 'history', 'chat'] as const
+const standardInspectorTabs = ['properties', 'research', 'outline', 'history', 'chat', 'comments'] as const
 const inspectorFocusableSelector =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
@@ -67,6 +68,12 @@ export function DocumentInspector({
   const navigate = useNavigate()
   const { preferences, updatePreferences } = useTheme()
   const isNarrow = useMediaQuery('(max-width: 900px)')
+  const commentsQuery = useQuery({
+    queryKey: ['documents', documentId, 'comments'],
+    queryFn: () => api.listComments(documentId),
+    enabled: Boolean(documentId),
+  })
+  const unresolvedCommentsCount = commentsQuery.data?.filter((c) => !c.resolved_at).length ?? 0
   const pdf = document.content_type === 'application/pdf'
   const inspectorTabs = standardInspectorTabs
   const preferredTab = preferences.rightTab
@@ -234,7 +241,7 @@ export function DocumentInspector({
         </div>
       </div>
       <div
-        className={`inspector-tabs ${inspectorTabs.length === 5 ? 'inspector-tabs-5' : ''}`}
+        className={`inspector-tabs inspector-tabs-${inspectorTabs.length}`}
         role="tablist"
         aria-label="Document inspector"
       >
@@ -251,6 +258,9 @@ export function DocumentInspector({
             onKeyDown={activateTabFromKeyboard}
           >
             {candidate}
+            {candidate === 'comments' && unresolvedCommentsCount > 0 && (
+              <span className="tab-count-badge">{unresolvedCommentsCount}</span>
+            )}
           </button>
         ))}
       </div>
@@ -458,6 +468,7 @@ export function DocumentInspector({
             </Suspense>
           </section>
         )}
+        {tab === 'comments' && <DocumentCommentsRail document={document} content={content} />}
       </div>
     </aside>
   )

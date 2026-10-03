@@ -3057,6 +3057,58 @@
         "title": "CreateDocument",
         "type": "object"
       },
+      "CreateDocumentCommentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "end": {
+            "minimum": 0.0,
+            "title": "End",
+            "type": "integer"
+          },
+          "exact": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Exact",
+            "type": "string"
+          },
+          "prefix": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "start": {
+            "minimum": 0.0,
+            "title": "Start",
+            "type": "integer"
+          },
+          "suffix": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision_id",
+          "exact",
+          "start",
+          "end",
+          "body"
+        ],
+        "title": "CreateDocumentCommentRequest",
+        "type": "object"
+      },
       "CreateFolder": {
         "additionalProperties": false,
         "properties": {
@@ -3576,6 +3628,85 @@
           "size_bytes"
         ],
         "title": "DocumentAsset",
+        "type": "object"
+      },
+      "DocumentComment": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "comment_id": {
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "exact": {
+            "title": "Exact",
+            "type": "string"
+          },
+          "prefix": {
+            "default": "",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          },
+          "suffix": {
+            "default": "",
+            "title": "Suffix",
+            "type": "string"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "comment_id",
+          "document_id",
+          "revision_id",
+          "exact",
+          "start",
+          "end",
+          "body",
+          "created_by",
+          "created_at"
+        ],
+        "title": "DocumentComment",
         "type": "object"
       },
       "DocumentSummary": {
@@ -6905,6 +7036,26 @@
           "path"
         ],
         "title": "ReindexPath",
+        "type": "object"
+      },
+      "ResolveDocumentCommentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "resolved": {
+            "default": true,
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "ResolveDocumentCommentRequest",
         "type": "object"
       },
       "RestoreDocument": {
@@ -18738,6 +18889,811 @@
           }
         ],
         "summary": "Get Document Backlinks"
+      }
+    },
+    "/api/v1/documents/{document_id}/comments": {
+      "get": {
+        "description": "List anchored comments on Markdown and HTML document passages.",
+        "operationId": "listComments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_resolved",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Resolved",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentComment"
+                  },
+                  "title": "Response List Comments Api V1 Documents  Document Id  Comments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "List Comments"
+      },
+      "post": {
+        "description": "Create an anchored comment on a document passage against a specific revision. Requires UPDATE capability and an Idempotency-Key.",
+        "operationId": "createComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentCommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentComment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Create Comment"
+      }
+    },
+    "/api/v1/documents/{document_id}/comments/{comment_id}": {
+      "get": {
+        "operationId": "getComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentComment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Get Comment"
+      }
+    },
+    "/api/v1/documents/{document_id}/comments/{comment_id}/resolve": {
+      "post": {
+        "description": "Resolve or unresolve an anchored comment against expected_version. Requires UPDATE capability.",
+        "operationId": "resolveComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveDocumentCommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentComment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Resolve Comment"
       }
     },
     "/api/v1/documents/{document_id}/diff": {
@@ -34156,7 +35112,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-10-02",
-    "reason": "Chat follow-ups: update_publication/annotate_pdf effects, create_tag organization op, activity via filter; frontend schemas updated"
+    "date": "2026-10-03",
+    "reason": "Add document comments endpoints"
   }
 }

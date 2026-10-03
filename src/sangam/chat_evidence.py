@@ -236,28 +236,40 @@ class ChatEvidenceRepository:
                 ),
             )
 
-    def request_cancel(self, principal: Principal, *, thread_id: str) -> str | None:
+    def request_cancel(
+        self,
+        principal: Principal,
+        *,
+        thread_id: str,
+        cancellable_run_ids: set[str] | None = None,
+    ) -> str | None:
         """Persist cancellation for the newest run owned by this principal.
 
-        The run's effects belong to ``ChatEffectService``; use ``SangamChatServer.cancel_run``
+        The run's effects belong to ChatEffectService; use SangamChatServer.cancel_run
         to cancel both together.
         """
         with self.database.transaction() as connection:
+            if cancellable_run_ids:
+                placeholders = ",".join("?" for _ in cancellable_run_ids)
+                clause = f"r.status = 'running' OR r.run_id IN ({placeholders})"
+                params: list[object] = [
+                    thread_id,
+                    principal.actor_id,
+                    int(principal.administrator),
+                    *cancellable_run_ids,
+                ]
+            else:
+                clause = "r.status = 'running'"
+                params = [thread_id, principal.actor_id, int(principal.administrator)]
+
             row = connection.execute(
-                """
+                f"""
                 SELECT r.run_id FROM chat_runs r
                 WHERE r.thread_id = ? AND (r.actor_id = ? OR ?)
-                  AND (
-                    r.status = 'running'
-                    OR EXISTS (
-                      SELECT 1 FROM chat_effects e
-                      WHERE e.run_id = r.run_id
-                        AND e.status IN ('proposed', 'pending_approval', 'approved')
-                    )
-                  )
+                  AND ({clause})
                 ORDER BY r.started_at DESC LIMIT 1
                 """,
-                (thread_id, principal.actor_id, int(principal.administrator)),
+                params,
             ).fetchone()
             if row is None:
                 return None

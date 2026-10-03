@@ -11,6 +11,12 @@ from typing import Literal
 from sangam.access import WorkspaceAccessService
 from sangam.authorization import AuthorizationPolicy
 from sangam.capabilities import Capability
+from sangam.chat_actions import (
+    ActionDigest,
+    build_failure_record,
+    check_autonomy_allows,
+    classify_retry_safety,
+)
 from sangam.chat_capabilities import (
     AddProjectDocumentChange,
     AnnotatePdfInput,
@@ -32,20 +38,12 @@ from sangam.chat_capabilities import (
 )
 from sangam.db import Database, utc_now
 from sangam.errors import (
-    AuthenticationError,
     AuthorizationError,
     ConflictError,
-    CredentialConflictError,
-    IdempotencyError,
-    IntegrationError,
-    InvalidPathError,
-    MaterializationError,
     NotFoundError,
-    SangamError,
     ValidationError,
     validate_metadata_text,
 )
-from sangam.idempotency import request_hash
 from sangam.projects import ProjectService
 from sangam.schemas import (
     AddProjectAnnotation,
@@ -61,42 +59,8 @@ from sangam.schemas import (
 )
 from sangam.security import IdentityService, Principal
 
-
-def classify_effect_retry_safety(error: Exception) -> bool:
-    """Determine whether the exact same request can succeed without human intervention
-    or workspace changes.
-    """
-    if isinstance(
-        error,
-        (
-            InvalidPathError,
-            ValidationError,
-            NotFoundError,
-            ConflictError,
-            CredentialConflictError,
-            IdempotencyError,
-            AuthenticationError,
-            AuthorizationError,
-            MaterializationError,
-        ),
-    ):
-        return False
-    return isinstance(error, IntegrationError)
-
-
-def build_effect_failure_record(error: Exception) -> dict[str, object]:
-    """Produce a safe, bounded failure record stored with the durable effect."""
-    if isinstance(error, SangamError):
-        code = error.code
-        message = error.message
-    else:
-        code = "execution_failed"
-        message = "The effect could not be completed."
-    return {
-        "code": code,
-        "message": message[:500],
-        "retry_safe": classify_effect_retry_safety(error),
-    }
+classify_effect_retry_safety = classify_retry_safety
+build_effect_failure_record = build_failure_record
 
 
 @dataclass(frozen=True)
@@ -217,7 +181,7 @@ class ChatEffectService:
         durable.preflight(principal, normalized)
 
         encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
-        digest = request_hash(normalized)
+        digest = ActionDigest.compute(normalized)
         preview_json = json.dumps(preview, sort_keys=True, separators=(",", ":"))
         with self.database.transaction() as connection:
             existing = connection.execute(
@@ -289,11 +253,18 @@ class ChatEffectService:
 
     def _autonomy_allows(self) -> bool:
         """Run every authorized effect immediately when the operator enables YOLO."""
-        with self.database.connection() as connection:
-            settings = connection.execute(
-                "SELECT autonomy_mode FROM chat_model_settings WHERE id = 1"
-            ).fetchone()
-        return settings is not None and settings["autonomy_mode"] == "workspace"
+        return check_autonomy_allows(self.database)
+
+    def cancellable_run_ids(self, connection: sqlite3.Connection, thread_id: str) -> set[str]:
+        """Find run IDs with pending reviewable effects in this thread."""
+        rows = connection.execute(
+            """
+            SELECT DISTINCT run_id FROM chat_effects
+            WHERE thread_id = ? AND status IN ('proposed', 'pending_approval', 'approved')
+            """,
+            (thread_id,),
+        ).fetchall()
+        return {r[0] for r in rows if r[0]}
 
     def get(self, principal: Principal, effect_id: str) -> ChatEffect:
         with self.database.connection() as connection:
@@ -524,8 +495,11 @@ class ChatEffectService:
     ) -> EffectExecution:
         validate_metadata_text(reason, "Decision reason")
         effect = self.get(principal, effect_id)
-        if effect.argument_digest != argument_digest:
-            raise ConflictError("The approval digest does not match the stored effect request")
+        ActionDigest.verify(
+            effect.argument_digest,
+            argument_digest,
+            "The approval digest does not match the stored effect request",
+        )
         if effect.status == "completed":
             return EffectExecution(effect=effect, client_result=effect.result or {})
         if effect.status in {"denied", "expired", "cancelled"}:

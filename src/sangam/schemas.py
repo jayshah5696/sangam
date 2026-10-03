@@ -1326,3 +1326,36 @@ class AddProjectThread(MutationRequest):
 
 class AddProjectAnnotation(MutationRequest):
     annotation_id: str
+
+
+class DocumentComment(BaseModel):
+    comment_id: str
+    document_id: str
+    revision_id: str
+    exact: str
+    prefix: str = ""
+    suffix: str = ""
+    start: int
+    end: int
+    body: str
+    resolved_at: str | None = None
+    created_by: str
+    created_at: str
+    version: int = 1
+
+
+class CreateDocumentCommentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision_id: str
+    exact: str = Field(min_length=1, max_length=20_000)
+    prefix: str = Field(default="", max_length=2_000)
+    suffix: str = Field(default="", max_length=2_000)
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    body: str = Field(min_length=1, max_length=50_000)
+
+
+class ResolveDocumentCommentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resolved: bool = True
+    expected_version: int = Field(ge=1)
