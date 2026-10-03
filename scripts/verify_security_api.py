@@ -9,6 +9,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -193,6 +194,40 @@ def main() -> None:
         403,
         body={"content": "forbidden"},
         headers=mutation_headers(**agents[0], **{"If-Match": "malformed"}),
+    )
+
+    preview_document = create(
+        "proof/preview.html", content="<h1>Scoped preview</h1>", content_type="text/html"
+    ).json()
+    preview_url = (
+        f"/documents/{preview_document['document_id']}/trusted-preview"
+        f"?revision_id={preview_document['current_revision_id']}"
+    )
+    denied_preview_agent = issue("agent:preview-denied", "private", ("read",))
+    request("POST", preview_url, 403, headers=denied_preview_agent)
+    preview_grant = request("POST", preview_url, 200, headers=agents[0]).json()
+    preview_content = request(
+        "GET",
+        "/trusted-previews/content",
+        200,
+        headers={
+            "Host": urlsplit(preview_grant["url"]).netloc,
+            "Authorization": "Sangam-Preview " + preview_grant["token"],
+        },
+    )
+    assert "<h1>Scoped preview</h1>" in preview_content.text
+    preview_events = request(
+        "GET",
+        f"/activity?actor_kind=agent&action=issue_trusted_preview"
+        f"&resource_id={preview_document['document_id']}",
+        200,
+    ).json()
+    assert len(preview_events) == 2, preview_events
+    assert {event["outcome"] for event in preview_events} == {"accepted", "denied"}
+    assert all(event["resource_type"] == "document" for event in preview_events)
+    assert all(
+        event["details"]["revision_id"] == preview_document["current_revision_id"]
+        for event in preview_events
     )
 
     secrets = [
