@@ -62,7 +62,13 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
       if (!createKeyRef.current) {
         createKeyRef.current = crypto.randomUUID()
       }
-      return api.createDocument('Untitled document', undefined, 'text/markdown', undefined, createKeyRef.current)
+      return api.createDocument(
+        'Untitled document',
+        undefined,
+        'text/markdown',
+        undefined,
+        createKeyRef.current,
+      )
     },
     onSuccess: async (document) => {
       createKeyRef.current = null

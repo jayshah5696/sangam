@@ -172,9 +172,7 @@ describe('sidebar footer navigation preferences', () => {
       getByRole('button', { name: 'Toggle Projects' }).click()
     })
     expect(getByTestId('projects').textContent).toBe('false')
-    const stored = JSON.parse(
-      window.localStorage.getItem('sangam.workspace-preferences.v1') ?? '{}',
-    )
+    const stored = JSON.parse(window.localStorage.getItem('sangam.workspace-preferences.v1') ?? '{}')
     expect(stored.sidebarFooterTools.projects).toBe(false)
     expect(stored.sidebarFooterTools.trash).toBe(true)
   })

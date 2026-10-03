@@ -335,12 +335,42 @@ function PrimarySidebar({
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   const { preferences } = useTheme()
   const links = [
-    { id: 'projects' as const, to: '/projects' as const, label: 'Projects', short: 'Projects', icon: FolderKanban },
-    { id: 'chat' as const, to: '/chat' as const, label: 'Workspace chat', short: 'Chat', icon: MessageSquareText },
-    { id: 'review' as const, to: '/review' as const, label: 'Review changes', short: 'Review', icon: ShieldAlert },
-    { id: 'publications' as const, to: '/publications' as const, label: 'Publications', short: 'Publications', icon: Globe2 },
+    {
+      id: 'projects' as const,
+      to: '/projects' as const,
+      label: 'Projects',
+      short: 'Projects',
+      icon: FolderKanban,
+    },
+    {
+      id: 'chat' as const,
+      to: '/chat' as const,
+      label: 'Workspace chat',
+      short: 'Chat',
+      icon: MessageSquareText,
+    },
+    {
+      id: 'review' as const,
+      to: '/review' as const,
+      label: 'Review changes',
+      short: 'Review',
+      icon: ShieldAlert,
+    },
+    {
+      id: 'publications' as const,
+      to: '/publications' as const,
+      label: 'Publications',
+      short: 'Publications',
+      icon: Globe2,
+    },
     { id: 'trash' as const, to: '/trash' as const, label: 'Trash', short: 'Trash', icon: Trash2 },
-    { id: 'settings' as const, to: '/settings' as const, label: 'Settings', short: 'Settings', icon: Settings },
+    {
+      id: 'settings' as const,
+      to: '/settings' as const,
+      label: 'Settings',
+      short: 'Settings',
+      icon: Settings,
+    },
   ]
   const visibleLinks = links.filter((link) => preferences.sidebarFooterTools?.[link.id] ?? true)
   return (
