@@ -13,6 +13,7 @@ from pydantic import Field, TypeAdapter
 from pydantic import ValidationError as PayloadValidationError
 
 from sangam.access import WorkspaceAccessService
+from sangam.chat_actions import ActionDigest, check_autonomy_allows, validate_action_ownership
 from sangam.chat_capabilities import ProposalCitationInput
 from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.db import Database, utc_now
@@ -55,8 +56,9 @@ class ChatProposalRepository:
             row = connection.execute(
                 "SELECT created_by FROM chat_threads WHERE thread_id = ?", (thread_id,)
             ).fetchone()
-        if row is None or (row["created_by"] != principal.actor_id and not principal.administrator):
+        if row is None:
             raise NotFoundError(f"Chat thread not found: {thread_id}")
+        validate_action_ownership(principal, thread_owner=row["created_by"])
         return row["created_by"]
 
     def create(
@@ -108,11 +110,27 @@ class ChatProposalRepository:
             )
         return self.get_owned(principal, proposal_id)
 
+    def cancel_pending(self, run_id: str) -> None:
+        """Cancel proposals belonging to a cancelled run that are still pending."""
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                UPDATE chat_proposals
+                SET status = 'dismissed', summary = COALESCE(summary, 'Run cancelled')
+                WHERE run_id = ? AND status = 'pending'
+                """,
+                (run_id,),
+            )
+
     def list_owned(
         self, principal: Principal, *, thread_id: str | None, document_id: str | None
     ) -> list[ChatProposal]:
-        clauses = ["(thread.created_by = ? OR ?)"]
-        params: list[object] = [principal.actor_id, int(principal.administrator)]
+        clauses = ["(thread.created_by = ? OR context.actor_id = ? OR ?)"]
+        params: list[object] = [
+            principal.actor_id,
+            principal.actor_id,
+            int(principal.administrator),
+        ]
         if thread_id:
             clauses.append("proposal.thread_id = ?")
             params.append(thread_id)
@@ -150,9 +168,12 @@ class ChatProposalRepository:
         with self.database.transaction() as connection:
             row = self._owned_row(connection, principal, proposal_id)
             proposal = _proposal_from_row(row)
-            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
-            if row["apply_payload_digest"] is not None and row["apply_payload_digest"] != digest:
-                raise ConflictError("Apply retry must contain the exact reserved wording")
+            digest = ActionDigest.compute(content)
+            ActionDigest.verify(
+                row["apply_payload_digest"],
+                digest,
+                "Apply retry must contain the exact reserved wording",
+            )
             if row["apply_actor_id"] is not None and row["apply_actor_id"] != principal.actor_id:
                 raise ConflictError("Apply recovery must use the original reviewer's actor")
             if proposal.status not in {"pending", "applied"}:
@@ -297,9 +318,9 @@ class ChatProposalRepository:
             FROM chat_proposals AS proposal
             JOIN chat_threads AS thread ON thread.thread_id = proposal.thread_id
             LEFT JOIN chat_turn_contexts AS context ON context.context_id = proposal.context_id
-            WHERE proposal.proposal_id = ? AND (thread.created_by = ? OR ?)
+            WHERE proposal.proposal_id = ? AND (thread.created_by = ? OR context.actor_id = ? OR ?)
             """,
-            (proposal_id, principal.actor_id, int(principal.administrator)),
+            (proposal_id, principal.actor_id, principal.actor_id, int(principal.administrator)),
         ).fetchone()
         if row is None:
             raise NotFoundError(f"Chat proposal not found: {proposal_id}")
@@ -325,6 +346,9 @@ class ChatProposalService:
         # survives interruption; canonical document idempotency recovers its commit.
         self._apply_lock = Lock()
         self._applying: set[str] = set()
+
+    def cancel_pending(self, run_id: str) -> None:
+        self.repository.cancel_pending(run_id)
 
     def create(
         self,
@@ -416,7 +440,19 @@ class ChatProposalService:
             .dump_json(enriched_citations)
             .decode(),
         )
-        return self._visible_evidence(principal, proposal)
+        visible = self._visible_evidence(principal, proposal)
+        if check_autonomy_allows(self.repository.database):
+            try:
+                return self.apply(
+                    principal,
+                    proposal_id=proposal.proposal_id,
+                    expected_revision_id=expected_revision_id,
+                    idempotency_key=f"yolo:{proposal.proposal_id}",
+                    content=resolved_content,
+                )
+            except Exception:
+                return visible
+        return visible
 
     def _validated_citations(
         self,
@@ -581,6 +617,10 @@ class ChatProposalService:
                 principal, thread_id=thread_id, document_id=document_id
             )
         ]
+
+    def get(self, principal: Principal, proposal_id: str) -> ChatProposal:
+        proposal = self.repository.get_owned(principal, proposal_id)
+        return self._visible_evidence(principal, proposal)
 
     def apply(
         self,

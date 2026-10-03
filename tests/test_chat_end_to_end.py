@@ -8,196 +8,25 @@ and the run resumes with the stored result.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Sequence
-from typing import Any, Literal, cast
+from collections.abc import Sequence
+from typing import Any, cast
 
 import pytest
-from agents.models.interface import Model, ModelProvider
 from fastapi.testclient import TestClient
-from openai.types.responses import (
-    Response,
-    ResponseCompletedEvent,
-    ResponseContentPartAddedEvent,
-    ResponseContentPartDoneEvent,
-    ResponseCreatedEvent,
-    ResponseFunctionCallArgumentsDeltaEvent,
-    ResponseFunctionCallArgumentsDoneEvent,
-    ResponseFunctionToolCall,
-    ResponseOutputItemAddedEvent,
-    ResponseOutputItemDoneEvent,
-    ResponseOutputMessage,
-    ResponseOutputText,
-    ResponseTextDeltaEvent,
-    ResponseTextDoneEvent,
-)
 from test_chat_capability_lifecycle import set_chat_autonomy
 from test_phase_seven_chat import chatkit_request, create_thread_with_model
 
-
-class Say:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class Call:
-    def __init__(self, name: str, arguments: dict[str, Any]) -> None:
-        self.name = name
-        self.arguments = arguments
-
-
-Step = Say | Call
-
-
-def _response(output: list[Any], status: Literal["completed", "in_progress"] = "completed"):
-    return Response(
-        id="resp_scripted",
-        object="response",
-        created_at=0,
-        model="scripted",
-        output=output,
-        parallel_tool_calls=False,
-        tool_choice="auto",
-        tools=[],
-        instructions=None,
-        status=status,
-    )
-
-
-class ScriptedModel(Model):
-    """Plays the next step of a shared script each time the agent asks for a response."""
-
-    def __init__(self, steps: list[Step], seen: list[Any]) -> None:
-        self.steps = steps
-        self.seen = seen
-
-    async def get_response(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError
-
-    async def stream_response(  # type: ignore[override]
-        self, system_instructions: str | None, input: str | list[Any], *args: Any, **kwargs: Any
-    ) -> AsyncIterator[Any]:
-        self.seen.append(input)
-        step = self.steps.pop(0)
-        sequence = 0
-
-        def seq() -> int:
-            nonlocal sequence
-            sequence += 1
-            return sequence
-
-        yield ResponseCreatedEvent(
-            type="response.created", response=_response([], "in_progress"), sequence_number=seq()
-        )
-        if isinstance(step, Call):
-            encoded = json.dumps(step.arguments)
-            pending = ResponseFunctionToolCall(
-                type="function_call",
-                id="fc_1",
-                call_id=f"call_{step.name}",
-                name=step.name,
-                arguments="",
-                status="in_progress",
-            )
-            yield ResponseOutputItemAddedEvent(
-                type="response.output_item.added",
-                output_index=0,
-                item=pending,
-                sequence_number=seq(),
-            )
-            yield ResponseFunctionCallArgumentsDeltaEvent(
-                type="response.function_call_arguments.delta",
-                item_id="fc_1",
-                output_index=0,
-                delta=encoded,
-                sequence_number=seq(),
-            )
-            yield ResponseFunctionCallArgumentsDoneEvent(
-                type="response.function_call_arguments.done",
-                item_id="fc_1",
-                output_index=0,
-                name=step.name,
-                arguments=encoded,
-                sequence_number=seq(),
-            )
-            done = pending.model_copy(update={"arguments": encoded, "status": "completed"})
-            yield ResponseOutputItemDoneEvent(
-                type="response.output_item.done",
-                output_index=0,
-                item=done,
-                sequence_number=seq(),
-            )
-            yield ResponseCompletedEvent(
-                type="response.completed", response=_response([done]), sequence_number=seq()
-            )
-            return
-        text = step.text
-        part = ResponseOutputText(type="output_text", text=text, annotations=[])
-        message = ResponseOutputMessage(
-            id="msg_1", type="message", role="assistant", status="completed", content=[part]
-        )
-        yield ResponseOutputItemAddedEvent(
-            type="response.output_item.added",
-            output_index=0,
-            item=message.model_copy(update={"status": "in_progress", "content": []}),
-            sequence_number=seq(),
-        )
-        yield ResponseContentPartAddedEvent(
-            type="response.content_part.added",
-            item_id="msg_1",
-            output_index=0,
-            content_index=0,
-            part=ResponseOutputText(type="output_text", text="", annotations=[]),
-            sequence_number=seq(),
-        )
-        yield ResponseTextDeltaEvent(
-            type="response.output_text.delta",
-            item_id="msg_1",
-            output_index=0,
-            content_index=0,
-            delta=text,
-            sequence_number=seq(),
-            logprobs=[],
-        )
-        yield ResponseTextDoneEvent(
-            type="response.output_text.done",
-            item_id="msg_1",
-            output_index=0,
-            content_index=0,
-            text=text,
-            sequence_number=seq(),
-            logprobs=[],
-        )
-        yield ResponseContentPartDoneEvent(
-            type="response.content_part.done",
-            item_id="msg_1",
-            output_index=0,
-            content_index=0,
-            part=part,
-            sequence_number=seq(),
-        )
-        yield ResponseOutputItemDoneEvent(
-            type="response.output_item.done",
-            output_index=0,
-            item=message,
-            sequence_number=seq(),
-        )
-        yield ResponseCompletedEvent(
-            type="response.completed", response=_response([message]), sequence_number=seq()
-        )
+from sangam.chat_models import Call, Say, ScriptedModelProvider, Step
 
 
 def script_model(client: TestClient, steps: Sequence[Step]) -> list[Any]:
-    """Give the chat server a model that plays `steps`. Returns the inputs it was handed."""
     remaining = list(steps)
     seen: list[Any] = []
 
-    class Provider(ModelProvider):
-        def get_model(self, model_name: str | None) -> Model:
-            return ScriptedModel(remaining, seen)
-
+    provider = ScriptedModelProvider(remaining, seen)
     connections = client.app.state.services.provider_connections
     connections._credential_overrides["openrouter"] = "sk-test"
-    connections.model_provider = lambda _connection_id: Provider()
+    client.app.state.services.chat._model_provider = provider
     return seen
 
 
@@ -343,3 +172,13 @@ def test_a_tool_the_run_was_not_given_cannot_be_called(client: TestClient) -> No
     with pytest.raises(AssertionError):
         review_request(events_of(response.text))
     assert client.get("/api/v1/projects").json() == []
+
+
+def test_constructor_injected_model_provider(client: TestClient) -> None:
+    seen: list[Any] = []
+    provider = ScriptedModelProvider([Say("Constructor injected answer.")], seen)
+    connections = client.app.state.services.provider_connections
+    connections._credential_overrides["openrouter"] = "sk-test"
+    client.app.state.services.chat._model_provider = provider
+    thread_id, events = create_thread_with_model(client, "Hello constructor model")
+    assert assistant_text(events) == "Constructor injected answer."

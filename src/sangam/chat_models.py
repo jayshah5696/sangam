@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Any, Literal
 
+from agents.models.interface import Model
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from pydantic import ValidationError as PydanticError
 
@@ -481,3 +482,191 @@ def _pretty_name(model_id: str) -> str:
 
 def _publisher_of(model_id: str) -> str:
     return model_id.split("/", 1)[0] if "/" in model_id else "unknown"
+
+
+class Say:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class Call:
+    def __init__(self, name: str, arguments: dict[str, Any]) -> None:
+        self.name = name
+        self.arguments = arguments
+
+
+Step = Say | Call
+
+
+def _scripted_response(
+    output: list[Any], status: Literal["completed", "in_progress"] = "completed"
+):
+    from openai.types.responses import Response
+
+    return Response(
+        id="resp_scripted",
+        object="response",
+        created_at=0,
+        model="scripted",
+        output=output,
+        parallel_tool_calls=False,
+        tool_choice="auto",
+        tools=[],
+        instructions=None,
+        status=status,
+    )
+
+
+class ScriptedModel(Model):
+    """Plays the next step of a shared script each time the agent asks for a response."""
+
+    def __init__(self, steps: list[Step], seen: list[Any]) -> None:
+        self.steps = steps
+        self.seen = seen
+
+    async def get_response(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+    async def stream_response(
+        self, system_instructions: str | None, input: str | list[Any], *args: Any, **kwargs: Any
+    ):
+        from openai.types.responses import (
+            ResponseCompletedEvent,
+            ResponseContentPartAddedEvent,
+            ResponseContentPartDoneEvent,
+            ResponseCreatedEvent,
+            ResponseFunctionCallArgumentsDeltaEvent,
+            ResponseFunctionCallArgumentsDoneEvent,
+            ResponseFunctionToolCall,
+            ResponseOutputItemAddedEvent,
+            ResponseOutputItemDoneEvent,
+            ResponseOutputMessage,
+            ResponseOutputText,
+            ResponseTextDeltaEvent,
+            ResponseTextDoneEvent,
+        )
+
+        self.seen.append(input)
+        step = self.steps.pop(0)
+        sequence = 0
+
+        def seq() -> int:
+            nonlocal sequence
+            sequence += 1
+            return sequence
+
+        yield ResponseCreatedEvent(
+            type="response.created",
+            response=_scripted_response([], "in_progress"),
+            sequence_number=seq(),
+        )
+        if isinstance(step, Call):
+            encoded = json.dumps(step.arguments)
+            pending = ResponseFunctionToolCall(
+                type="function_call",
+                id="fc_1",
+                call_id=f"call_{step.name}",
+                name=step.name,
+                arguments="",
+                status="in_progress",
+            )
+            yield ResponseOutputItemAddedEvent(
+                type="response.output_item.added",
+                output_index=0,
+                item=pending,
+                sequence_number=seq(),
+            )
+            yield ResponseFunctionCallArgumentsDeltaEvent(
+                type="response.function_call_arguments.delta",
+                item_id="fc_1",
+                output_index=0,
+                delta=encoded,
+                sequence_number=seq(),
+            )
+            yield ResponseFunctionCallArgumentsDoneEvent(
+                type="response.function_call_arguments.done",
+                item_id="fc_1",
+                output_index=0,
+                name=step.name,
+                arguments=encoded,
+                sequence_number=seq(),
+            )
+            done = pending.model_copy(update={"arguments": encoded, "status": "completed"})
+            yield ResponseOutputItemDoneEvent(
+                type="response.output_item.done",
+                output_index=0,
+                item=done,
+                sequence_number=seq(),
+            )
+            yield ResponseCompletedEvent(
+                type="response.completed",
+                response=_scripted_response([done]),
+                sequence_number=seq(),
+            )
+            return
+
+        text = step.text
+        part = ResponseOutputText(type="output_text", text=text, annotations=[])
+        message = ResponseOutputMessage(
+            id="msg_1", type="message", role="assistant", status="completed", content=[part]
+        )
+        yield ResponseOutputItemAddedEvent(
+            type="response.output_item.added",
+            output_index=0,
+            item=message.model_copy(update={"status": "in_progress", "content": []}),
+            sequence_number=seq(),
+        )
+        yield ResponseContentPartAddedEvent(
+            type="response.content_part.added",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            part=ResponseOutputText(type="output_text", text="", annotations=[]),
+            sequence_number=seq(),
+        )
+        yield ResponseTextDeltaEvent(
+            type="response.output_text.delta",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            delta=text,
+            sequence_number=seq(),
+            logprobs=[],
+        )
+        yield ResponseTextDoneEvent(
+            type="response.output_text.done",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            text=text,
+            sequence_number=seq(),
+            logprobs=[],
+        )
+        yield ResponseContentPartDoneEvent(
+            type="response.content_part.done",
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            part=part,
+            sequence_number=seq(),
+        )
+        yield ResponseOutputItemDoneEvent(
+            type="response.output_item.done",
+            output_index=0,
+            item=message,
+            sequence_number=seq(),
+        )
+        yield ResponseCompletedEvent(
+            type="response.completed", response=_scripted_response([message]), sequence_number=seq()
+        )
+
+
+class ScriptedModelProvider:
+    """Model provider returning a ScriptedModel for tests and evals."""
+
+    def __init__(self, steps: list[Step], seen: list[Any]) -> None:
+        self.steps = steps
+        self.seen = seen
+
+    def get_model(self, model_name: str | None) -> ScriptedModel:
+        return ScriptedModel(self.steps, self.seen)
