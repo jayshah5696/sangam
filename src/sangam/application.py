@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agents.models.interface import ModelProvider
 
 from sangam.access import WorkspaceAccessService
 from sangam.activity import ActivityService
@@ -71,7 +76,10 @@ def initialize_application_state(settings: Settings) -> Database:
 
 
 def build_application_services(
-    settings: Settings, *, initialized_database: Database | None = None
+    settings: Settings,
+    *,
+    initialized_database: Database | None = None,
+    model_provider: ModelProvider | Callable[[str], ModelProvider] | None = None,
 ) -> ApplicationServices:
     """Construct adapters and services after explicit state initialization."""
     database = initialized_database or initialize_application_state(settings)
@@ -232,6 +240,7 @@ def build_application_services(
         model_catalog=model_catalog,
         provider_connections=provider_connections,
         projects=projects,
+        model_provider=model_provider,
     )
     return ApplicationServices(
         documents=documents,

@@ -86,6 +86,7 @@ def prepare_run(
         principal=principal,
         thread_id=thread_id,
         run_id=run_id,
+        context_id=turn.context_id,
         capability=capability,
     )
 
@@ -1261,3 +1262,326 @@ def test_attention_vs_history_queries_and_summary(client: TestClient) -> None:
     ).json()
     assert len(page2) == 1
     assert page2[0]["effect_id"] != page1[0]["effect_id"]
+
+
+def prepare_proposal(
+    client: TestClient,
+    *,
+    tool_call_id: str = "call_proposal",
+    content: str = "# Proposed revision\n\nNew content here.",
+):
+    doc = client.post(
+        "/api/v1/documents",
+        headers=headers("proposal-target"),
+        json={"title": "Proposal Doc", "path": "proposal.md", "content": "# Original content"},
+    ).json()
+    run = prepare_run(
+        client,
+        capability_id="create_document",
+        document_id=doc["document_id"],
+        tool_call_id=tool_call_id,
+    )
+    proposal = run.chat.proposals.create(
+        run.principal,
+        thread_id=run.thread_id,
+        context_id=run.context_id,
+        run_id=run.run_id,
+        document_id=doc["document_id"],
+        expected_revision_id=doc["current_revision_id"],
+        content=content,
+        summary="Update heading",
+    )
+    run.proposal = proposal
+    run.document = doc
+    run.content = content
+    return run
+
+
+@pytest.mark.parametrize("action_kind", ["effect", "proposal"])
+def test_reviewed_action_approval_digest_binding_and_tamper_rejection(
+    client: TestClient, action_kind: str
+) -> None:
+    if action_kind == "effect":
+        prepared = prepare_effect(
+            client,
+            capability_id="create_document",
+            arguments={
+                "title": "Bound Doc",
+                "content": "# Content",
+                "content_type": "text/markdown",
+            },
+            tool_call_id="call_digest_effect",
+        )
+        tampered = client.post(
+            f"/api/v1/chat/effects/{prepared.effect.effect_id}/decision",
+            json={"verdict": "approve", "argument_digest": "0" * 64, "reason": None},
+        )
+        assert tampered.status_code == 409
+
+        approved = client.post(
+            f"/api/v1/chat/effects/{prepared.effect.effect_id}/decision",
+            json={
+                "verdict": "approve",
+                "argument_digest": prepared.effect.argument_digest,
+                "reason": None,
+            },
+        )
+        assert approved.status_code == 200
+        assert approved.json()["effect"]["status"] == "completed"
+    else:
+        prepared = prepare_proposal(client, tool_call_id="call_digest_proposal")
+        # First apply attempt binds the payload digest to the idempotency key
+        approved = client.post(
+            f"/api/v1/chat/proposals/{prepared.proposal.proposal_id}/apply",
+            headers={"Idempotency-Key": f"key-bound-{prepared.proposal.proposal_id}"},
+            json={
+                "expected_revision_id": prepared.document["current_revision_id"],
+                "content": prepared.content,
+            },
+        )
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "applied"
+
+        # Tampered retry with same idempotency key fails with 409 Conflict (digest mismatch)
+        tampered = client.post(
+            f"/api/v1/chat/proposals/{prepared.proposal.proposal_id}/apply",
+            headers={"Idempotency-Key": f"key-bound-{prepared.proposal.proposal_id}"},
+            json={
+                "expected_revision_id": prepared.document["current_revision_id"],
+                "content": "# Tampered content",
+            },
+        )
+        assert tampered.status_code == 409
+
+
+@pytest.mark.parametrize("action_kind", ["effect", "proposal"])
+def test_reviewed_action_cancellation_on_run_cancel(client: TestClient, action_kind: str) -> None:
+    if action_kind == "effect":
+        prepared = prepare_effect(
+            client,
+            capability_id="create_document",
+            arguments={
+                "title": "To Cancel",
+                "content": "# Content",
+                "content_type": "text/markdown",
+            },
+            tool_call_id="call_cancel_effect",
+        )
+        cancel_resp = client.post(f"/api/v1/chat/threads/{prepared.thread_id}/cancel")
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json() == {"cancelled": True, "run_id": prepared.run_id}
+
+        effect = prepared.chat.effects.get(prepared.principal, prepared.effect.effect_id)
+        assert effect.status == "cancelled"
+
+        approval = client.post(
+            f"/api/v1/chat/effects/{prepared.effect.effect_id}/decision",
+            json={
+                "verdict": "approve",
+                "argument_digest": prepared.effect.argument_digest,
+                "reason": None,
+            },
+        )
+        assert approval.status_code == 409
+    else:
+        prepared = prepare_proposal(client, tool_call_id="call_cancel_proposal")
+        cancel_resp = client.post(f"/api/v1/chat/threads/{prepared.thread_id}/cancel")
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json() == {"cancelled": True, "run_id": prepared.run_id}
+
+        proposal = prepared.chat.proposals.get(prepared.principal, prepared.proposal.proposal_id)
+        assert proposal.status == "dismissed"
+
+        apply_resp = client.post(
+            f"/api/v1/chat/proposals/{prepared.proposal.proposal_id}/apply",
+            headers={"Idempotency-Key": f"key-cancelled-{prepared.proposal.proposal_id}"},
+            json={
+                "expected_revision_id": prepared.document["current_revision_id"],
+                "content": prepared.content,
+            },
+        )
+        assert apply_resp.status_code == 409
+
+
+@pytest.mark.parametrize("action_kind", ["effect", "proposal"])
+def test_reviewed_action_yolo_autonomy_applies_immediately(
+    client: TestClient, action_kind: str
+) -> None:
+    set_chat_autonomy(client, "workspace")
+    if action_kind == "effect":
+        prepared = prepare_effect(
+            client,
+            capability_id="create_document",
+            arguments={
+                "title": "YOLO Doc",
+                "content": "# Autonomous",
+                "content_type": "text/markdown",
+            },
+            tool_call_id="call_yolo_matrix_effect",
+        )
+        assert prepared.effect.status == "completed"
+        docs = [d["title"] for d in client.get("/api/v1/documents").json()]
+        assert "YOLO Doc" in docs
+    else:
+        prepared = prepare_proposal(
+            client,
+            tool_call_id="call_yolo_matrix_proposal",
+            content="# YOLO Applied Content\n\nAutomatically approved.",
+        )
+        assert prepared.proposal.status == "applied"
+        doc = client.get(f"/api/v1/documents/{prepared.document['document_id']}").json()
+        assert "Automatically approved." in doc["content"]
+
+
+@pytest.mark.parametrize("action_kind", ["effect", "proposal"])
+def test_reviewed_action_owner_check_and_cross_actor_rejection(
+    client: TestClient, action_kind: str
+) -> None:
+    foreign_principal = Principal(
+        actor_id="agent:intruder",
+        display_name="Intruder",
+        identity_kind="agent",
+        operation_id="cross-actor-test",
+        administrator=False,
+    )
+    if action_kind == "effect":
+        prepared = prepare_effect(
+            client,
+            capability_id="create_document",
+            arguments={"title": "Private", "content": "# Secret", "content_type": "text/markdown"},
+            tool_call_id="call_private_effect",
+        )
+        with pytest.raises((AuthorizationError, NotFoundError)):
+            prepared.chat.effects.get(foreign_principal, prepared.effect.effect_id)
+        with pytest.raises((AuthorizationError, NotFoundError)):
+            prepared.chat.effects.decide(
+                foreign_principal,
+                effect_id=prepared.effect.effect_id,
+                verdict="approve",
+                argument_digest=prepared.effect.argument_digest,
+                reason=None,
+            )
+    else:
+        prepared = prepare_proposal(client, tool_call_id="call_private_proposal")
+        with pytest.raises((AuthorizationError, NotFoundError)):
+            prepared.chat.proposals.get(foreign_principal, prepared.proposal.proposal_id)
+        with pytest.raises((AuthorizationError, NotFoundError)):
+            prepared.chat.proposals.apply(
+                foreign_principal,
+                proposal_id=prepared.proposal.proposal_id,
+                expected_revision_id=prepared.document["current_revision_id"],
+                idempotency_key="foreign-key",
+                content=prepared.content,
+            )
+
+
+def test_read_revision_history_lifecycle(client: TestClient) -> None:
+    doc = client.post(
+        "/api/v1/documents",
+        headers=headers("rev-doc"),
+        json={"title": "Revision Doc", "path": "rev.md", "content": "# Rev 1"},
+    ).json()
+    client.post(
+        f"/api/v1/documents/{doc['document_id']}/revisions",
+        headers=headers("rev-doc-2"),
+        json={"expected_revision_id": doc["current_revision_id"], "content": "# Rev 2"},
+    )
+    chat = client.app.state.services.chat
+    cap = chat.capabilities.get("read_revision_history")
+    assert cap is not None
+    res = client.get(f"/api/v1/documents/{doc['document_id']}/revisions").json()
+    assert len(res) == 2
+
+
+def test_inspect_projects_and_update_project_lifecycle(client: TestClient) -> None:
+    created = prepare_effect(
+        client,
+        capability_id="update_project",
+        arguments={
+            "change": {
+                "kind": "create_project",
+                "name": "Project Apollo",
+                "description": "Moon mission",
+            }
+        },
+        tool_call_id="call_proj_create",
+    )
+    assert created.effect.status == "pending_approval"
+    approval = client.post(
+        f"/api/v1/chat/effects/{created.effect.effect_id}/decision",
+        json={
+            "verdict": "approve",
+            "argument_digest": created.effect.argument_digest,
+            "reason": None,
+        },
+    )
+    assert approval.status_code == 200
+    projects = client.get("/api/v1/projects").json()
+    assert any(p["name"] == "Project Apollo" for p in projects)
+
+
+def test_organization_plan_restore_document_lifecycle(client: TestClient) -> None:
+    doc = client.post(
+        "/api/v1/documents",
+        headers=headers("trash-target"),
+        json={"title": "To Trash", "path": "trash.md", "content": "# Trash me"},
+    ).json()
+    # Trash it
+    trash_effect = prepare_effect(
+        client,
+        capability_id="apply_workspace_organization_plan",
+        arguments={
+            "operations": [
+                {
+                    "kind": "trash_document",
+                    "document_id": doc["document_id"],
+                    "expected_revision_id": doc["current_revision_id"],
+                    "expected_source_path": "trash.md",
+                }
+            ]
+        },
+        tool_call_id="call_move_trash",
+    )
+    appr_trash = client.post(
+        f"/api/v1/chat/effects/{trash_effect.effect.effect_id}/decision",
+        json={
+            "verdict": "approve",
+            "argument_digest": trash_effect.effect.argument_digest,
+            "reason": None,
+        },
+    )
+    assert appr_trash.status_code == 200
+    assert client.get(f"/api/v1/documents/{doc['document_id']}").status_code == 404
+
+    # Fetch the deleted document revision state
+    trashed_meta = client.app.state.services.documents.get_document(
+        doc["document_id"], include_deleted=True
+    )
+
+    # Restore it
+    restore_effect = prepare_effect(
+        client,
+        capability_id="apply_workspace_organization_plan",
+        arguments={
+            "operations": [
+                {
+                    "kind": "restore_document",
+                    "document_id": doc["document_id"],
+                    "expected_revision_id": trashed_meta.current_revision_id,
+                    "revision_id": doc["current_revision_id"],
+                }
+            ]
+        },
+        tool_call_id="call_restore_trash",
+    )
+    approved_restore = client.post(
+        f"/api/v1/chat/effects/{restore_effect.effect.effect_id}/decision",
+        json={
+            "verdict": "approve",
+            "argument_digest": restore_effect.effect.argument_digest,
+            "reason": None,
+        },
+    )
+    assert approved_restore.status_code == 200
+    restored_doc = client.get(f"/api/v1/documents/{doc['document_id']}").json()
+    assert restored_doc["path"] == "trash.md"
