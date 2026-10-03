@@ -7,7 +7,10 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import BinaryIO, Literal, Protocol, TypeVar
+from typing import TYPE_CHECKING, BinaryIO, Literal, Protocol, TypeVar
+
+if TYPE_CHECKING:
+    from sangam.comments import DocumentCommentService
 
 from sangam.activity import ActivityService
 from sangam.authorization import AuthorizationPolicy
@@ -27,6 +30,7 @@ from sangam.errors import (
     IdempotencyError,
     NotFoundError,
     SangamError,
+    ServiceUnavailableError,
     ValidationError,
 )
 from sangam.idempotency import request_hash
@@ -38,9 +42,11 @@ from sangam.schemas import (
     AnnotationEvent,
     AnnotationType,
     ApplyOrganizationPlan,
+    CreateDocumentCommentRequest,
     DeleteDocument,
     Document,
     DocumentAsset,
+    DocumentComment,
     DocumentSummary,
     DuplicateDocument,
     Folder,
@@ -67,6 +73,7 @@ from sangam.schemas import (
     PdfSearchResult,
     Publication,
     PublicationRevision,
+    ResolveDocumentCommentRequest,
     RestoreDocument,
     Revision,
     RevisionDiff,
@@ -554,6 +561,7 @@ class WorkspaceAccessService:
         publications: PublicationService,
         pdf_research: PdfResearchService,
         assets: DocumentAssetService,
+        comments: DocumentCommentService | None = None,
     ) -> None:
         self.documents = documents
         self.organization = organization
@@ -562,6 +570,7 @@ class WorkspaceAccessService:
         self.publications = publications
         self.pdf_research = pdf_research
         self.assets = assets
+        self.comments = comments
 
     def validate_proposed_update(
         self,
@@ -824,6 +833,97 @@ class WorkspaceAccessService:
             action=reads("annotation_history", "document"),
             current=current,
             operation=lambda: self.pdf_research.annotation_history(annotation_id),
+        )
+
+    def list_comments(
+        self,
+        principal: Principal,
+        document_id: str,
+        *,
+        include_resolved: bool = True,
+    ) -> list[DocumentComment]:
+        current = self.documents.get_document(document_id)
+        self.policy.require(principal, Capability.READ, current.path)
+        if self.comments is None:
+            return []
+        return self.comments.list_comments(document_id, include_resolved=include_resolved)
+
+    def get_comment(
+        self,
+        principal: Principal,
+        document_id: str,
+        comment_id: str,
+    ) -> DocumentComment:
+        current = self.documents.get_document(document_id)
+        self.policy.require(principal, Capability.READ, current.path)
+        if self.comments is None:
+            raise NotFoundError(f"Comment not found: {comment_id}")
+        comment = self.comments.get_comment(comment_id)
+        if comment.document_id != document_id:
+            raise NotFoundError(f"Comment not found: {comment_id}")
+        return comment
+
+    def create_comment(
+        self,
+        principal: Principal,
+        document_id: str,
+        request: CreateDocumentCommentRequest,
+        *,
+        idempotency_key: str | None = None,
+    ) -> DocumentComment:
+        if self.comments is None:
+            raise ServiceUnavailableError("Document comments are not configured")
+        current = self.documents.get_document(document_id)
+        details: dict[str, object] = {
+            "revision_id": request.revision_id,
+            "exact": request.exact,
+            "start": request.start,
+            "end": request.end,
+        }
+        return self._document_operation(
+            principal,
+            capability=Capability.UPDATE,
+            action=writes("comment", "document"),
+            current=current,
+            operation=lambda: self.comments.create_comment(
+                document_id=document_id,
+                request=request,
+                actor_id=principal.actor_id,
+                idempotency_key=idempotency_key,
+            ),
+            details=details,
+        )
+
+    def resolve_comment(
+        self,
+        principal: Principal,
+        document_id: str,
+        comment_id: str,
+        request: ResolveDocumentCommentRequest,
+    ) -> DocumentComment:
+        if self.comments is None:
+            raise ServiceUnavailableError("Document comments are not configured")
+        current = self.documents.get_document(document_id)
+        comment = self.comments.get_comment(comment_id)
+        if comment.document_id != document_id:
+            raise NotFoundError(f"Comment not found: {comment_id}")
+        details: dict[str, object] = {
+            "comment_id": comment_id,
+            "resolved": request.resolved,
+            "expected_version": request.expected_version,
+        }
+        return self._document_operation(
+            principal,
+            capability=Capability.UPDATE,
+            action=writes("resolve_comment", "document"),
+            current=current,
+            operation=lambda: self.comments.resolve_comment(
+                comment_id=comment_id,
+                resolved=request.resolved,
+                expected_version=request.expected_version,
+                actor_id=principal.actor_id,
+            ),
+            details=details,
         )
 
     def list_documents(

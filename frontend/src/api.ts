@@ -272,6 +272,43 @@ export const revisionDiffSchema = z.object({
 
 export type RevisionDiff = z.infer<typeof revisionDiffSchema>
 
+export const documentCommentSchema = z.object({
+  comment_id: z.string(),
+  document_id: z.string(),
+  revision_id: z.string(),
+  exact: z.string(),
+  prefix: z.string().default(''),
+  suffix: z.string().default(''),
+  start: z.number().int(),
+  end: z.number().int(),
+  body: z.string(),
+  resolved_at: z.string().nullable(),
+  created_by: z.string(),
+  created_at: z.string(),
+  version: z.number().int(),
+})
+
+export type DocumentComment = z.infer<typeof documentCommentSchema>
+
+export const createDocumentCommentRequestSchema = z.object({
+  revision_id: z.string(),
+  exact: z.string(),
+  prefix: z.string().optional(),
+  suffix: z.string().optional(),
+  start: z.number().int(),
+  end: z.number().int(),
+  body: z.string(),
+})
+
+export type CreateDocumentCommentRequest = z.infer<typeof createDocumentCommentRequestSchema>
+
+export const resolveDocumentCommentRequestSchema = z.object({
+  resolved: z.boolean().default(true),
+  expected_version: z.number().int(),
+})
+
+export type ResolveDocumentCommentRequest = z.infer<typeof resolveDocumentCommentRequestSchema>
+
 export const reconciliationConflictSchema = z.object({
   conflict_id: z.string(),
   conflict_type: z.enum(['unexpected_hash', 'possible_move', 'unknown_file']),
@@ -1875,6 +1912,38 @@ export const api = {
     const params = new URLSearchParams({ from_revision_id: fromRevisionId })
     if (toRevisionId) params.set('to_revision_id', toRevisionId)
     return revisionDiffSchema.parse(await request(`/documents/${documentId}/diff?${params.toString()}`))
+  },
+  async listComments(documentId: string, includeResolved = true): Promise<DocumentComment[]> {
+    const params = new URLSearchParams()
+    if (includeResolved) params.set('include_resolved', 'true')
+    const query = params.size ? `?${params.toString()}` : ''
+    return z.array(documentCommentSchema).parse(await request(`/documents/${documentId}/comments${query}`))
+  },
+  async createComment(
+    documentId: string,
+    input: CreateDocumentCommentRequest,
+    idempotencyKey?: string,
+  ): Promise<DocumentComment> {
+    return documentCommentSchema.parse(
+      await request(`/documents/${documentId}/comments`, {
+        method: 'POST',
+        headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async resolveComment(
+    documentId: string,
+    commentId: string,
+    resolved = true,
+    expectedVersion = 1,
+  ): Promise<DocumentComment> {
+    return documentCommentSchema.parse(
+      await request(`/documents/${documentId}/comments/${commentId}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ resolved, expected_version: expectedVersion }),
+      }),
+    )
   },
   async restore(document: DocumentSummary, revisionId: string): Promise<Document> {
     return documentSchema.parse(

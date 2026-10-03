@@ -1141,3 +1141,211 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   font-size: var(--text-meta);
   margin-left: auto;
 }
+
+.inspector-tabs.inspector-tabs-6 { grid-template-columns: repeat(6, 1fr); }
+
+.tab-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: white;
+  font-size: var(--text-meta);
+  line-height: 1;
+  font-weight: 600;
+}
+
+.document-comments-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.comments-rail-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.comments-rail-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.comments-rail-filters {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.comments-filter-tab {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-meta);
+  padding: 4px 6px;
+  border-radius: calc(var(--radius-control) - 2px);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--motion-fast);
+}
+
+.comments-filter-tab:hover {
+  color: var(--text);
+}
+
+.comments-filter-tab.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-panel-inset);
+  font-weight: 500;
+}
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.comment-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  transition: border-color var(--motion-fast);
+}
+
+.comment-card.resolved {
+  opacity: 0.72;
+}
+
+.comment-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.comment-card-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.comment-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.comment-card-author {
+  font-size: var(--text-label);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.scope-badge-resolved {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.scope-badge-anchored {
+  background: color-mix(in srgb, #247a4b 15%, transparent);
+  color: #247a4b;
+}
+
+.scope-badge-detached {
+  background: color-mix(in srgb, var(--warning) 20%, transparent);
+  color: var(--warning);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.comment-card-quote {
+  margin: 0;
+  padding: var(--space-2);
+  background: var(--surface-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  font-size: var(--text-meta);
+  line-height: var(--leading-ui);
+}
+
+.comment-card-quote.interactive {
+  cursor: pointer;
+}
+
+.comment-card-quote.interactive:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-soft));
+}
+
+.comment-card-quote.detached {
+  border-left-color: var(--warning);
+  opacity: 0.85;
+}
+
+.comment-card-quote p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.comment-card-body {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-ui);
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.comment-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.toolbar-comment-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+}
+
+.toolbar-comment-inline input {
+  min-width: 14rem;
+  padding: 4px 8px;
+  font-size: var(--text-control);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text);
+}
+
+.toolbar-comment-inline button {
+  padding: 4px 8px;
+  font-size: var(--text-control);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.toolbar-comment-inline button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

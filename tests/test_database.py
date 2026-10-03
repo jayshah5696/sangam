@@ -56,8 +56,11 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "028",
         "029",
         "030",
+        "031",
     ]
     assert {
+        "document_comments_document_idx",
+        "document_comments_revision_idx",
         "projects_created_at_idx",
         "projects_updated_at_idx",
         "project_documents_doc_idx",

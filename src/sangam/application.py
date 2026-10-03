@@ -15,6 +15,7 @@ from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
 from sangam.chat import SangamChatServer
 from sangam.chat_models import ChatModelCatalog, ChatModelSettingsRepository
+from sangam.comments import DocumentCommentService
 from sangam.config import Settings
 from sangam.db import Database, utc_now
 from sangam.document_assets import DocumentAssetService
@@ -64,6 +65,7 @@ class ApplicationServices:
     readiness: ReadinessService
     projects: ProjectService
     saved_views: SavedViewService
+    comments: DocumentCommentService
 
 
 def initialize_application_state(settings: Settings) -> Database:
@@ -197,6 +199,12 @@ def build_application_services(
         repository=KarakeepRepository(database),
     )
     karakeep.recover_interrupted_imports()
+    comments = DocumentCommentService(
+        database=database,
+        idempotency=idempotency,
+        actors=actors,
+        documents=documents,
+    )
     workspace_access = WorkspaceAccessService(
         documents=documents,
         organization=organization,
@@ -207,6 +215,7 @@ def build_application_services(
         assets=DocumentAssetService(
             workspace=workspace, max_bytes=settings.max_publication_asset_bytes
         ),
+        comments=comments,
     )
     chat_config = settings.chat_server_config()
     provider_connections = ProviderConnectionService(
@@ -261,6 +270,7 @@ def build_application_services(
         readiness=readiness,
         projects=projects,
         saved_views=SavedViewService(database=database, audited=workspace_access.audited),
+        comments=comments,
     )
 
 
