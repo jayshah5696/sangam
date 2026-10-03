@@ -1,6 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bold, BookmarkCheck, Check, Code, Copy, FileText, Italic, Link2, MessageSquare } from 'lucide-react'
+import {
+  Bold,
+  BookmarkCheck,
+  Check,
+  Code,
+  Copy,
+  FileText,
+  Italic,
+  Link2,
+  MessageSquare,
+  MessageSquarePlus,
+} from 'lucide-react'
 import type { MarkdownFormat } from '../MarkdownEditor'
 import { evidenceCitationMarkdown } from '../../evidenceCitation'
 import { floatingPosition } from '../../pdfAnnotationUi'
@@ -27,6 +38,7 @@ export function TextSelectionToolbar({
   onKeep,
   onFormat,
   onAsk,
+  onComment,
 }: {
   documentId: string
   documentTitle: string
@@ -41,12 +53,17 @@ export function TextSelectionToolbar({
   onFormat?: (format: MarkdownFormat) => void
   /** Ask workspace chat about the selection. */
   onAsk?: () => void
+  /** Create passage comment on selection. */
+  onComment?: (body: string) => Promise<void>
 }) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: anchor.left, top: anchor.top })
   const [copied, setCopied] = useState<'text' | 'citation' | null>(null)
   const [kept, setKept] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isCommenting, setIsCommenting] = useState(false)
+  const [commentBody, setCommentBody] = useState('')
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false)
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current
@@ -59,28 +76,25 @@ export function TextSelectionToolbar({
         { width: window.innerWidth, height: window.innerHeight },
       ),
     )
-  }, [anchor])
+  }, [anchor, isCommenting])
 
+  // Dismiss on clicking outside
   useEffect(() => {
-    const dismiss = () => {
-      // Escape does not collapse a native selection in every browser. Clear it
-      // so the workspace's keyup/pointerup capture cannot reopen this toolbar.
-      window.getSelection()?.removeAllRanges()
-      onDismiss()
-    }
-    const dismissFromKeyboard = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dismiss()
-    }
-    const dismissFromPointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !toolbarRef.current?.contains(event.target)) {
-        dismiss()
+    const handlePointerDown = (event: MouseEvent) => {
+      const toolbar = toolbarRef.current
+      // SAFETY: pointer events on document originate from DOM Node elements
+      if (toolbar && !toolbar.contains(event.target as Node)) {
+        onDismiss()
       }
     }
-    window.addEventListener('keydown', dismissFromKeyboard)
-    window.addEventListener('pointerdown', dismissFromPointer, true)
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onDismiss()
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
     return () => {
-      window.removeEventListener('keydown', dismissFromKeyboard)
-      window.removeEventListener('pointerdown', dismissFromPointer, true)
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
     }
   }, [onDismiss])
 
@@ -118,6 +132,21 @@ export function TextSelectionToolbar({
     }
   }
 
+  const handleSaveComment = async () => {
+    if (!commentBody.trim() || !onComment) return
+    try {
+      setIsSubmittingComment(true)
+      await onComment(commentBody.trim())
+      setCommentBody('')
+      setIsCommenting(false)
+      onDismiss()
+    } catch (err) {
+      setError(`Comment failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setIsSubmittingComment(false)
+    }
+  }
+
   return createPortal(
     <div
       ref={toolbarRef}
@@ -126,66 +155,112 @@ export function TextSelectionToolbar({
       aria-label="Selected text actions"
       style={{ left: position.left, top: position.top }}
     >
-      {onFormat && (
+      {isCommenting ? (
+        <div className="toolbar-comment-inline">
+          <input
+            autoFocus
+            type="text"
+            placeholder="Add comment..."
+            value={commentBody}
+            onChange={(e) => setCommentBody(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && commentBody.trim() && !isSubmittingComment) {
+                e.preventDefault()
+                void handleSaveComment()
+              } else if (e.key === 'Escape') {
+                setIsCommenting(false)
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={!commentBody.trim() || isSubmittingComment}
+            onClick={() => void handleSaveComment()}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            disabled={isSubmittingComment}
+            onClick={() => setIsCommenting(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
         <>
-          {(
-            [
-              ['bold', 'Bold', Bold],
-              ['italic', 'Italic', Italic],
-              ['code', 'Inline code', Code],
-              ['link', 'Link', Link2],
-            ] as const
-          ).map(([format, label, Icon]) => (
+          {onFormat && (
+            <>
+              {(
+                [
+                  ['bold', 'Bold', Bold],
+                  ['italic', 'Italic', Italic],
+                  ['code', 'Inline code', Code],
+                  ['link', 'Link', Link2],
+                ] as const
+              ).map(([format, label, Icon]) => (
+                <button
+                  key={format}
+                  type="button"
+                  aria-label={label}
+                  title={label}
+                  // Keep the editor's selection: a pressed button must not take focus first.
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onFormat(format)
+                    onDismiss()
+                  }}
+                >
+                  <Icon size="var(--icon-inline)" />
+                </button>
+              ))}
+              <span className="pdf-selection-divider" />
+            </>
+          )}
+          <button
+            type="button"
+            aria-label="Keep as evidence"
+            title="Keep as evidence"
+            onClick={() => void handleKeep()}
+          >
+            {kept ? <Check size="var(--icon-inline)" /> : <BookmarkCheck size="var(--icon-inline)" />}
+            {kept ? 'Kept' : 'Keep as evidence'}
+          </button>
+          {onComment && (
             <button
-              key={format}
               type="button"
-              aria-label={label}
-              title={label}
-              // Keep the editor's selection: a pressed button must not take focus first.
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onFormat(format)
-                onDismiss()
-              }}
+              aria-label="Add comment"
+              title="Add comment"
+              onClick={() => setIsCommenting(true)}
             >
-              <Icon size="var(--icon-inline)" />
+              <MessageSquarePlus size="var(--icon-inline)" /> Comment
             </button>
-          ))}
+          )}
+          {onAsk && (
+            <button type="button" aria-label="Ask about selection" title="Ask workspace chat" onClick={onAsk}>
+              <MessageSquare size="var(--icon-inline)" /> Ask
+            </button>
+          )}
+          {error && <StateMessage compact kind="error" title="Action failed" description={error} />}
           <span className="pdf-selection-divider" />
+          <button
+            type="button"
+            aria-label="Copy selected text"
+            title="Copy selected text"
+            onClick={() => void copy('text')}
+          >
+            {copied === 'text' ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
+          </button>
+          <button
+            type="button"
+            aria-label="Copy Markdown citation"
+            title="Copy Markdown citation"
+            onClick={() => void copy('citation')}
+          >
+            {copied === 'citation' ? <Check size="var(--icon-inline)" /> : <FileText size="var(--icon-inline)" />}
+          </button>
         </>
       )}
-      <button
-        type="button"
-        aria-label="Keep as evidence"
-        title="Keep as evidence"
-        onClick={() => void handleKeep()}
-      >
-        {kept ? <Check size="var(--icon-inline)" /> : <BookmarkCheck size="var(--icon-inline)" />}
-        {kept ? 'Kept' : 'Keep as evidence'}
-      </button>
-      {onAsk && (
-        <button type="button" aria-label="Ask about selection" title="Ask workspace chat" onClick={onAsk}>
-          <MessageSquare size="var(--icon-inline)" /> Ask
-        </button>
-      )}
-      {error && <StateMessage compact kind="error" title="Evidence storage failed" description={error} />}
-      <span className="pdf-selection-divider" />
-      <button
-        type="button"
-        aria-label="Copy selected text"
-        title="Copy selected text"
-        onClick={() => void copy('text')}
-      >
-        {copied === 'text' ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
-      </button>
-      <button
-        type="button"
-        aria-label="Copy Markdown citation"
-        title="Copy Markdown citation"
-        onClick={() => void copy('citation')}
-      >
-        {copied === 'citation' ? <Check size="var(--icon-inline)" /> : <FileText size="var(--icon-inline)" />}
-      </button>
     </div>,
     document.body,
   )
