@@ -8,13 +8,7 @@ import { StateMessage } from '../ui/StateMessage'
 
 type CommentFilter = 'open' | 'resolved' | 'all'
 
-export function DocumentCommentsRail({
-  document,
-  content,
-}: {
-  document: Document
-  content: string
-}) {
+export function DocumentCommentsRail({ document, content }: { document: Document; content: string }) {
   const [filter, setFilter] = useState<CommentFilter>('open')
   const queryClient = useQueryClient()
 
@@ -96,9 +90,7 @@ export function DocumentCommentsRail({
           kind="error"
           title="Could not load comments"
           description={
-            commentsQuery.error instanceof Error
-              ? commentsQuery.error.message
-              : String(commentsQuery.error)
+            commentsQuery.error instanceof Error ? commentsQuery.error.message : String(commentsQuery.error)
           }
         />
       ) : filteredComments.length === 0 ? (

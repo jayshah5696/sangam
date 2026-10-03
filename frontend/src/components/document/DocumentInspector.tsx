@@ -468,9 +468,7 @@ export function DocumentInspector({
             </Suspense>
           </section>
         )}
-        {tab === 'comments' && (
-          <DocumentCommentsRail document={document} content={content} />
-        )}
+        {tab === 'comments' && <DocumentCommentsRail document={document} content={content} />}
       </div>
     </aside>
   )

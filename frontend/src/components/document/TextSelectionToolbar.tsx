@@ -179,11 +179,7 @@ export function TextSelectionToolbar({
           >
             Save
           </button>
-          <button
-            type="button"
-            disabled={isSubmittingComment}
-            onClick={() => setIsCommenting(false)}
-          >
+          <button type="button" disabled={isSubmittingComment} onClick={() => setIsCommenting(false)}>
             Cancel
           </button>
         </div>
@@ -257,7 +253,11 @@ export function TextSelectionToolbar({
             title="Copy Markdown citation"
             onClick={() => void copy('citation')}
           >
-            {copied === 'citation' ? <Check size="var(--icon-inline)" /> : <FileText size="var(--icon-inline)" />}
+            {copied === 'citation' ? (
+              <Check size="var(--icon-inline)" />
+            ) : (
+              <FileText size="var(--icon-inline)" />
+            )}
           </button>
         </>
       )}
