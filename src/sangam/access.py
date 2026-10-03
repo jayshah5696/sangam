@@ -72,6 +72,7 @@ from sangam.schemas import (
     RevisionDiff,
     RevisionPage,
     Tag,
+    TrustedPreviewGrant,
     UpdateDocument,
     UpdateDocumentMetadata,
     UpdateDocumentTrust,
@@ -978,6 +979,25 @@ class WorkspaceAccessService:
             action=reads("read", "document"),
             current=current,
             operation=lambda: self.assets.read(document=current, reference=reference),
+        )
+
+    def issue_trusted_preview(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        revision_id: str,
+    ) -> TrustedPreviewGrant:
+        current = self.documents.get_document(document_id)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action=reads("issue_trusted_preview", "document"),
+            current=current,
+            operation=lambda: self.publications.issue_trusted_preview(
+                document_id=document_id, revision_id=revision_id
+            ),
+            details={"revision_id": revision_id},
         )
 
     def create_publication(

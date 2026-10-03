@@ -237,6 +237,43 @@ def test_scoped_denial_precedes_parsing_and_is_audited(client: TestClient):
     assert any(e["action"] == "update" and e["outcome"] == "denied" for e in events)
 
 
+def test_issue_trusted_preview_enforces_read_scope_and_records_audit(client: TestClient):
+    html_doc = create(
+        client, path="docs/page.html", content="<h1>HTML</h1>", content_type="text/html"
+    )
+    doc_id = html_doc.json()["document_id"]
+    rev_id = html_doc.json()["current_revision_id"]
+
+    denied_token = issue_agent_token(client, capabilities=("read",), path_prefix="other")
+    denied_res = client.post(
+        f"/api/v1/documents/{doc_id}/trusted-preview",
+        params={"revision_id": rev_id},
+        headers={"Authorization": f"Bearer {denied_token}"},
+    )
+    assert denied_res.status_code == 403
+
+    allowed_token = issue_agent_token(client, capabilities=("read",), path_prefix="docs")
+    allowed_res = client.post(
+        f"/api/v1/documents/{doc_id}/trusted-preview",
+        params={"revision_id": rev_id},
+        headers={"Authorization": f"Bearer {allowed_token}"},
+    )
+    assert allowed_res.status_code == 200
+    assert "token" in allowed_res.json()
+
+    events = client.get("/api/v1/activity", params={"actor_kind": "agent"}).json()
+    accepted = [
+        e for e in events if e["action"] == "issue_trusted_preview" and e["outcome"] == "accepted"
+    ]
+    denied = [
+        e for e in events if e["action"] == "issue_trusted_preview" and e["outcome"] == "denied"
+    ]
+    assert len(accepted) >= 1
+    assert len(denied) >= 1
+    assert accepted[0]["resource_id"] == doc_id
+    assert accepted[0].get("details", {}).get("revision_id") == rev_id
+
+
 def test_coordinated_agents_one_strong_winner_then_wildcard_uses_new_head(
     client: TestClient, settings
 ):
