@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import type { Document, Revision } from '../../api'
+import { api, type Document, type Revision } from '../../api'
 import { chatNavigationState } from '../../chatNavigation'
 import { locateEvidencePassage } from '../../evidenceCitation'
 import { useDocumentSessions } from '../../documentSessions'
@@ -80,6 +80,40 @@ export function useSourceSelection({
       },
       state: chatNavigationState(selectedText),
     })
+  }
+
+  const commentOnSelection = async (
+    selectedText: string,
+    sourceContent: string,
+    revisionId: string | undefined,
+    occurrence = 0,
+    body: string,
+  ) => {
+    try {
+      const pinned =
+        revisionId ?? (await sessions.flushSnapshot(documentId, sourceContent)).current_revision_id
+      const textLocator = locateEvidencePassage(
+        sourceContent,
+        document.content_type,
+        selectedText,
+        occurrence,
+      )
+      if (!textLocator) throw new Error('The selected passage does not match the source. Select it again.')
+      await api.createComment(documentId, {
+        revision_id: pinned,
+        exact: textLocator.exact,
+        prefix: textLocator.prefix,
+        suffix: textLocator.suffix,
+        start: textLocator.start,
+        end: textLocator.end,
+        body,
+      })
+      void queryClient.invalidateQueries({ queryKey: ['documents', documentId, 'comments'] })
+      setCaptureError(null)
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : String(error))
+      throw error
+    }
   }
 
   const keepSelection = async (
@@ -185,6 +219,7 @@ export function useSourceSelection({
     rememberEditorSelection,
     captureError,
     keepSelection,
+    commentOnSelection,
     askAbout,
   }
 }

@@ -596,6 +596,15 @@ export function DocumentWorkspace({
               activeSelection.occurrence,
             )
           }
+          onComment={(body) =>
+            source.commentOnSelection(
+              activeSelection.selectedText,
+              activeSelection.sourceContent,
+              activeSelection.revisionId,
+              activeSelection.occurrence,
+              body,
+            )
+          }
           onAsk={() => void source.askAbout(activeSelection.selectedText)}
         />
       )}
@@ -625,6 +634,17 @@ export function DocumentWorkspace({
                 captured.content,
                 captured.revisionId,
                 captured.occurrence,
+              )
+            }}
+            onComment={(body) => {
+              const captured = source.editorSnapshot.current
+              if (!captured?.selectedText) return Promise.reject(new Error('Select the passage again.'))
+              return source.commentOnSelection(
+                captured.selectedText,
+                captured.content,
+                captured.revisionId,
+                captured.occurrence,
+                body,
               )
             }}
             onAsk={() => void source.askAbout(editorSelection.text)}

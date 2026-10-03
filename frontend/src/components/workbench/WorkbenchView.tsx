@@ -6,6 +6,7 @@ import {
   History,
   ListTree,
   MessageSquare,
+  MessageSquareText,
   MoreHorizontal,
   NotebookTabs,
   PanelRightClose,
@@ -378,6 +379,14 @@ function GroupInspector({ documentId }: { documentId: string }) {
           onClick={() => openToTab('history')}
         >
           <History size="var(--icon-control)" />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Document comments"
+          data-tooltip="Document comments"
+          onClick={() => openToTab('comments')}
+        >
+          <MessageSquareText size="var(--icon-control)" />
         </button>
         <button
           className="icon-button"

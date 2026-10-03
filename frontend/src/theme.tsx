@@ -41,7 +41,7 @@ export const editorSizes: Array<{ id: EditorSize; name: string }> = [
   { id: 'large', name: 'Large' },
 ]
 
-export type InspectorTab = 'properties' | 'research' | 'outline' | 'history' | 'chat'
+export type InspectorTab = 'properties' | 'research' | 'outline' | 'history' | 'chat' | 'comments'
 
 export const themeColorRoles = [
   { key: 'appBg', label: 'App background', token: '--app-bg' },
