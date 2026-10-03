@@ -720,15 +720,13 @@ test('preview is the default editor mode and a chosen mode persists', async ({ p
   await expect(page.getByRole('radio', { name: 'edit' })).toBeChecked()
 })
 
-test('home page searches documents inline and opens the top result', async ({ page, seededWorkspace }) => {
+test('Home uses workspace search to find and open a document', async ({ page, seededWorkspace }) => {
   await page.goto('/')
-  const quickSearch = page.getByRole('searchbox', { name: 'Quick search documents' })
-  await expect(quickSearch).toBeVisible()
-  await quickSearch.fill(seededWorkspace.documentTitle)
-  await expect(
-    page.getByRole('list', { name: 'Matching documents' }).getByRole('listitem').first(),
-  ).toContainText(seededWorkspace.documentTitle)
-  await quickSearch.press('Enter')
+  await page.locator('body').press('/')
+  const search = page.getByRole('searchbox', { name: 'Search documents', exact: true })
+  await expect(search).toBeFocused()
+  await search.fill(seededWorkspace.documentTitle)
+  await page.locator('.search-result').getByRole('link', { name: seededWorkspace.documentTitle }).click()
   await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
 })
 
@@ -764,13 +762,14 @@ test('large search remains bounded and exposes the next result page', async ({ p
       searchRequests.push(url.search)
   })
   await page.goto('/')
-  await expect(page.getByRole('searchbox', { name: 'Quick search documents' })).toBeVisible()
+  await expect(page.locator('.welcome h1')).toBeVisible()
   expect(documentsRequests.every((query) => query.includes('limit=200'))).toBeTruthy()
-  expect(documentsRequests.every((query) => !query.includes('offset=200'))).toBeTruthy()
+  // Inbox loads its complete index; search itself stays bounded below.
 
-  const quickSearch = page.getByRole('searchbox', { name: 'Quick search documents' })
-  await quickSearch.fill(token)
-  const matchingResults = page.getByRole('listitem').filter({ hasText: token })
+  await page.locator('body').press('/')
+  const search = page.getByRole('searchbox', { name: 'Search documents', exact: true })
+  await search.fill(token)
+  const matchingResults = page.locator('.search-result').filter({ hasText: token })
   await expect(matchingResults).toHaveCount(200, { timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Load more results' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('search-first-page.png'), fullPage: true })

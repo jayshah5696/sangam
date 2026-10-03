@@ -21,4 +21,3 @@ search-load-more
 theme-wireframe-inspector
 trusted
 welcome-pinned
-welcome-search-more

@@ -93,7 +93,7 @@ export function ProjectHome({
             <p>
               {draft
                 ? `Continue the draft${detail.documents.some((d) => d.role === 'source') ? ' beside your saved sources' : ''}${detail.active_thread_id ? ' and conversation' : ''}.`
-                : 'Attach a draft or source, or create a document below.'}
+                : 'Attach a draft or source, or create a new document.'}
             </p>
             {detail.documents
               .filter((d) => d.role === 'source' && d.pinned_page)

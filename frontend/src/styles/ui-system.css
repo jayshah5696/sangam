@@ -445,7 +445,10 @@ textarea::placeholder {
 }
 
 @media (pointer: coarse) {
-  :where(button, a, input, select, summary, [role="button"], [role="option"]) {
+  :where(button, a, input, select, summary, [role="button"], [role="option"]),
+  .welcome-create,
+  .action-menu-popover > button,
+  .action-menu-popover .document-layout-actions > button {
     min-height: var(--control-touch);
   }
 }
