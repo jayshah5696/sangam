@@ -157,7 +157,9 @@ def test_project_atomic_audit_failure_rolls_back_brief(settings: Settings) -> No
             "WHEN NEW.resource_type = 'project' BEGIN SELECT RAISE(ABORT, 'audit blocked'); END"
         )
     with pytest.raises(Exception, match="audit blocked"):
-        services.projects.create_project(principal, CreateProject(name="Rollback"))
+        services.projects.create_project_once(
+            principal, "atomic-key", CreateProject(name="Rollback")
+        )
     assert services.projects.list_projects() == []
     assert services.documents.list_document_summaries() == []
 

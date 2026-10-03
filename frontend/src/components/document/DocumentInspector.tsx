@@ -4,6 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { ArrowRight, Maximize2, NotebookTabs, Upload } from 'lucide-react'
 import {
   api,
+  writeFailureMessage,
   type Document,
   type Publication,
   type Revision,
@@ -785,7 +786,18 @@ function PublicationEditor({
         />
       )}
       {(save.isError || remove.isError || rotate.isError) && (
-        <p className="error-text">The publication setting could not be saved.</p>
+        <StateMessage
+          compact
+          kind="error"
+          title={writeFailureMessage(
+            save.error ?? remove.error ?? rotate.error,
+            save.isError
+              ? 'The publication setting could not be saved.'
+              : remove.isError
+                ? 'The publication could not be withdrawn.'
+                : 'The access token could not be rotated.',
+          )}
+        />
       )}
     </section>
   )
@@ -906,7 +918,16 @@ function MetadataEditor({
       <button className="panel-button" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
         {mutation.isPending ? 'Saving…' : 'Save tags'}
       </button>
-      {(mutation.isError || createTag.isError) && <p className="error-text">The tags could not be saved.</p>}
+      {(mutation.isError || createTag.isError) && (
+        <StateMessage
+          compact
+          kind="error"
+          title={writeFailureMessage(
+            mutation.error ?? createTag.error,
+            createTag.isError ? 'The tag could not be added.' : 'The tags could not be saved.',
+          )}
+        />
+      )}
     </section>
   )
 }

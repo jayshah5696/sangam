@@ -743,8 +743,9 @@ class AssignmentService:
                 )
                 members = self.projects.get_project(assignment.project_id, principal).documents
                 if not any(member.document_id == document.document_id for member in members):
-                    self.projects.add_document(
+                    self.projects.add_document_once(
                         principal,
+                        f"{assignment.assignment_id}:result-member:{assignment.steps}",
                         assignment.project_id,
                         AddProjectDocument(document_id=document.document_id, role="output"),
                     )

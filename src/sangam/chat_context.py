@@ -23,6 +23,8 @@ class ChatRequestContext:
     pdf_page_number: int | None = None
     annotation_id: str | None = None
     run_id: str | None = None
+    # The project the person started this conversation from, if any.
+    project_id: str | None = None
 
 
 AgentRunContext = AgentContext[ChatRequestContext]

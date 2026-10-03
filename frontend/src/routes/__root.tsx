@@ -20,7 +20,7 @@ import {
 import { api } from '../api'
 import { FileExplorerPanel } from '../components/FileExplorer'
 import { CommandPalette } from '../components/CommandPalette'
-import { SettingsRouteSidebar, SettingsSidebar } from '../components/SettingsSidebar'
+import { SettingsRouteSidebar, SettingsSidebar, type SettingsCategory } from '../components/SettingsSidebar'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { activateTabFromKeyboard } from '../components/tabKeyboard'
 import { WorkspaceSearch } from '../components/search/WorkspaceSearch'
@@ -45,7 +45,9 @@ function RootLayout() {
   const isDocumentWorkspace = location.pathname === '/' || location.pathname.startsWith('/documents/')
   const isSettings = location.pathname.startsWith('/settings')
   const isActivity = location.pathname.startsWith('/activity')
-  const usesSettingsRail = isSettings || isActivity
+  const isOperations = ['/reconciliation', '/backups', '/karakeep'].includes(location.pathname)
+  const usesSettingsRail = isSettings || isActivity || isOperations
+  const settingsCategory = isActivity ? 'agents' : isOperations ? 'operations' : undefined
   const locationKey = location.state.__TSR_key ?? location.href
   const sidebarVisible = narrowSidebar ? mobileSidebarLocationKey === locationKey : preferences.leftVisible
 
@@ -127,7 +129,7 @@ function RootLayout() {
             onCollapse={hideSidebar}
             onMode={(next) => void chooseSidebarMode(next)}
             settings={usesSettingsRail}
-            activity={isActivity}
+            settingsCategory={settingsCategory}
             onSettingsBack={returnFromSettings}
             style={{ width: preferences.leftWidth }}
           />
@@ -182,7 +184,7 @@ function PrimarySidebar({
   onCollapse,
   onMode,
   settings,
-  activity,
+  settingsCategory,
   onSettingsBack,
   style,
 }: {
@@ -191,7 +193,7 @@ function PrimarySidebar({
   onCollapse: () => void
   onMode: (mode: SidebarMode) => void
   settings: boolean
-  activity: boolean
+  settingsCategory?: SettingsCategory
   onSettingsBack: () => void
   style: CSSProperties
 }) {
@@ -268,8 +270,8 @@ function PrimarySidebar({
         </button>
       </header>
       {settings ? (
-        activity ? (
-          <SettingsSidebar activeCategory="agents" onBack={onSettingsBack} />
+        settingsCategory ? (
+          <SettingsSidebar activeCategory={settingsCategory} onBack={onSettingsBack} />
         ) : (
           <SettingsRouteSidebar onBack={onSettingsBack} />
         )
@@ -308,7 +310,7 @@ function PrimarySidebar({
               role="tabpanel"
               aria-labelledby="workspace-tab-files"
             >
-              <FileExplorerPanel onSearch={() => onMode('search')} />
+              <FileExplorerPanel />
             </div>
           )}
           {mode === 'search' && (

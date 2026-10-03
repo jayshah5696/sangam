@@ -57,9 +57,13 @@ describe('ChatEffectTray summary formatters', () => {
   })
 
   it('formats history summary string accurately', () => {
-    expect(formatHistorySummary(1, 2, 3)).toBe(
-      '1 document created · 2 publications completed · 3 organization plans applied',
-    )
+    expect(
+      formatHistorySummary({
+        create_document: 1,
+        publish_document: 2,
+        apply_workspace_organization_plan: 3,
+      }),
+    ).toBe('1 document created · 2 publications completed · 3 organization plans applied')
   })
 })
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Cpu, Plus, RefreshCw, ServerCog, ShieldAlert, TestTube2 } from 'lucide-react'
+import { StateMessage } from './ui/StateMessage'
 import {
   ApiError,
   api,
@@ -164,9 +165,9 @@ export function ChatModelSettings() {
 
   if (models.isLoading || connections.isLoading || runtime.isLoading) {
     return (
-      <div className="settings-panel center-message" id="chat-models" tabIndex={-1}>
-        Loading AI connections…
-      </div>
+      <section className="settings-panel" id="chat-models" tabIndex={-1}>
+        <StateMessage kind="loading" title="Loading AI connections…" />
+      </section>
     )
   }
   if (
@@ -334,10 +335,8 @@ export function ChatModelSettings() {
               {createConnection.isPending ? 'Adding…' : 'Add connection'}
             </button>
             {createConnection.isError && (
-              <p className="error-text">
-                {createConnection.error instanceof Error
-                  ? createConnection.error.message
-                  : 'Failed to create connection'}
+              <p className="error-text" role="alert">
+                {createConnection.error.message}
               </p>
             )}
           </form>
@@ -427,14 +426,14 @@ export function ChatModelSettings() {
 
         <div className="chat-model-save">
           {save.isError && (
-            <span className="error-text">
-              {save.error instanceof ApiError && save.error.status === 409
+            <span className="error-text" role="alert">
+              {save.error instanceof ApiError && save.error.kind === 'conflict'
                 ? 'Settings changed elsewhere. Reload before saving.'
                 : save.error.message}
             </span>
           )}
           {save.isSuccess && !dirty && (
-            <span className="operation-result success">
+            <span className="operation-result success" role="status">
               <Check size="var(--icon-inline)" /> Saved
             </span>
           )}
@@ -564,10 +563,20 @@ function ConnectionCard({
       {!connection.credential_present && connection.credential_env && (
         <small>Credential missing. Set {connection.credential_env} on the server and restart.</small>
       )}
-      {connection.last_error && <small className="error-text">{connection.last_error}</small>}
-      {test.isSuccess && <small className="operation-result success">{test.data.message}</small>}
+      {connection.last_error && (
+        <small className="error-text" role="alert">
+          {connection.last_error}
+        </small>
+      )}
+      {test.isSuccess && (
+        <small className="operation-result success" role="status">
+          {test.data.message}
+        </small>
+      )}
       {(test.isError || refresh.isError || save.isError) && (
-        <small className="error-text">{(test.error ?? refresh.error ?? save.error)?.message}</small>
+        <small className="error-text" role="alert">
+          {(test.error ?? refresh.error ?? save.error)?.message}
+        </small>
       )}
     </article>
   )

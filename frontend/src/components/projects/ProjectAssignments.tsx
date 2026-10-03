@@ -226,7 +226,11 @@ export function ProjectBriefing({
           kind="error"
           title="Could not load recorded changes"
           description={briefing.error.message}
-          action={<button onClick={() => void briefing.refetch()}>Retry</button>}
+          action={
+            <button className="secondary-action" onClick={() => void briefing.refetch()}>
+              Retry
+            </button>
+          }
         />
       )}
       <ul className="project-briefing-list">

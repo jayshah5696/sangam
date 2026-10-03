@@ -32,6 +32,7 @@ function ActivityPage() {
     path: search.path,
     errorCode: search.error_code,
     operationId: search.operation_id,
+    via: search.via,
     attention: search.attention,
     ...range,
   }

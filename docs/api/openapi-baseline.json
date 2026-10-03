@@ -1204,9 +1204,12 @@
               "discriminator": {
                 "mapping": {
                   "create_folder": "#/components/schemas/OrganizationCreateFolder",
+                  "create_tag": "#/components/schemas/OrganizationCreateTag",
+                  "duplicate_document": "#/components/schemas/OrganizationDuplicateDocument",
                   "materialize_document": "#/components/schemas/OrganizationMaterializeDocument",
                   "move_document": "#/components/schemas/OrganizationMoveDocument",
                   "move_folder": "#/components/schemas/OrganizationMoveFolder",
+                  "restore_document": "#/components/schemas/OrganizationRestoreDocument",
                   "trash_document": "#/components/schemas/OrganizationTrashDocument",
                   "update_document_metadata": "#/components/schemas/OrganizationUpdateDocumentMetadata",
                   "update_folder_metadata": "#/components/schemas/OrganizationUpdateFolderMetadata"
@@ -1234,6 +1237,15 @@
                 },
                 {
                   "$ref": "#/components/schemas/OrganizationUpdateFolderMetadata"
+                },
+                {
+                  "$ref": "#/components/schemas/OrganizationRestoreDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/OrganizationDuplicateDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/OrganizationCreateTag"
                 }
               ]
             },
@@ -1710,7 +1722,10 @@
             "enum": [
               "create_document",
               "publish_document",
-              "apply_workspace_organization_plan"
+              "apply_workspace_organization_plan",
+              "update_project",
+              "update_publication",
+              "annotate_pdf"
             ],
             "title": "Capability Id",
             "type": "string"
@@ -4984,6 +4999,35 @@
         "title": "OrganizationCreateFolder",
         "type": "object"
       },
+      "OrganizationCreateTag": {
+        "additionalProperties": false,
+        "description": "Create a tag. Later operations in the same plan cannot use it: tag IDs are assigned\non creation, so apply the tag in a second plan after inspecting the new ID.",
+        "properties": {
+          "color": {
+            "default": "#527ea3",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Color",
+            "type": "string"
+          },
+          "kind": {
+            "const": "create_tag",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "OrganizationCreateTag",
+        "type": "object"
+      },
       "OrganizationDocumentSnapshot": {
         "properties": {
           "category": {
@@ -5063,6 +5107,60 @@
           "deleted"
         ],
         "title": "OrganizationDocumentSnapshot",
+        "type": "object"
+      },
+      "OrganizationDuplicateDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "destination_path": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Path"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "expected_revision_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Revision Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "duplicate_document",
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "kind",
+          "document_id",
+          "expected_revision_id"
+        ],
+        "title": "OrganizationDuplicateDocument",
         "type": "object"
       },
       "OrganizationFolderSnapshot": {
@@ -5293,7 +5391,8 @@
           "resource_type": {
             "enum": [
               "document",
-              "folder"
+              "folder",
+              "tag"
             ],
             "title": "Resource Type",
             "type": "string"
@@ -5374,6 +5473,43 @@
           "items"
         ],
         "title": "OrganizationPlanResult",
+        "type": "object"
+      },
+      "OrganizationRestoreDocument": {
+        "additionalProperties": false,
+        "description": "Restore a document to a past revision's content, or bring a trashed one back.",
+        "properties": {
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "expected_revision_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Revision Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "restore_document",
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "document_id",
+          "expected_revision_id",
+          "revision_id"
+        ],
+        "title": "OrganizationRestoreDocument",
         "type": "object"
       },
       "OrganizationSnapshotPage": {
@@ -8001,7 +8137,7 @@
   "info": {
     "description": "Revision-aware document workspace API for humans and scoped agents. Read a document immediately before changing it, send its current revision as expected_revision_id, and give every intended mutation an Idempotency-Key.",
     "title": "Sangam API",
-    "version": "0.13.1"
+    "version": "0.13.2"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -8178,6 +8314,23 @@
                 }
               ],
               "title": "Operation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "via",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(chat)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Via"
             }
           },
           {
@@ -8596,6 +8749,23 @@
                 }
               ],
               "title": "Operation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "via",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(chat)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Via"
             }
           },
           {
@@ -9373,6 +9543,23 @@
                 }
               ],
               "title": "Operation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "via",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(chat)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Via"
             }
           },
           {
@@ -16577,6 +16764,23 @@
               "default": "workspace",
               "title": "X-Sangam-Chat-Entry",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Sangam-Project-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Sangam-Project-Id"
             }
           },
           {
@@ -33952,7 +34156,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-10-01",
-    "reason": "#322 #321: server-side saved views and root-relative /attachments image references"
+    "date": "2026-10-02",
+    "reason": "Chat follow-ups: update_publication/annotate_pdf effects, create_tag organization op, activity via filter; frontend schemas updated"
   }
 }

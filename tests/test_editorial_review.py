@@ -62,15 +62,15 @@ def test_distinct_concurrent_edits_cannot_change_reserved_wording(
 ):
     principal, document, _, service, proposal = editorial
     entered, release = Event(), Event()
-    update = service.workspace.update_document
+    update = service.workspace.write_document
 
     def paused(*args, **kwargs):
-        assert kwargs["content"] == "review A", "A second reviewer reached the write boundary"
+        assert kwargs["body"].content == "review A", "A second reviewer reached the write boundary"
         entered.set()
         assert release.wait(5)
         return update(*args, **kwargs)
 
-    monkeypatch.setattr(service.workspace, "update_document", paused)
+    monkeypatch.setattr(service.workspace, "write_document", paused)
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(apply_edit, editorial, "review A", "key-A")
         assert entered.wait(5)

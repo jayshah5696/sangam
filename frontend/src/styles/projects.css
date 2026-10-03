@@ -94,18 +94,17 @@
   color: var(--muted);
 }
 
-.projects-page a,
-.project-home a {
+/* Links use the accent; links styled as buttons keep their own button colors. :where()
+   keeps the exclusion from raising specificity above component rules such as
+   .project-home .project-briefing-title. */
+.projects-page a:where(:not(.primary-button, .secondary-action)),
+.project-home a:where(:not(.primary-button, .secondary-action)) {
   color: var(--accent);
 }
 
-.project-home a.secondary-action {
-  color: var(--text);
-  text-decoration: none;
-}
-
+.project-home a.secondary-action,
 .project-home a.primary-button {
-  color: var(--accent-text);
+  text-decoration: none;
 }
 
 .project-doc-title-btn {
@@ -153,6 +152,8 @@
 .welcome.welcome-work {
   margin: 0 auto;
   padding: var(--space-5);
+  display: grid;
+  gap: var(--space-5);
 }
 
 .sidebar-collapsed .welcome.welcome-work .welcome-heading-row {

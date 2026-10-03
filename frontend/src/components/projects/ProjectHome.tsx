@@ -78,7 +78,11 @@ export function ProjectHome({
           kind="error"
           title="Could not load selected project"
           description={project.error.message}
-          action={<button onClick={() => void project.refetch()}>Retry</button>}
+          action={
+            <button className="secondary-action" onClick={() => void project.refetch()}>
+              Retry
+            </button>
+          }
         />
       )}
       {detail && (
@@ -89,7 +93,7 @@ export function ProjectHome({
             <p>
               {draft
                 ? `Continue the draft${detail.documents.some((d) => d.role === 'source') ? ' beside your saved sources' : ''}${detail.active_thread_id ? ' and conversation' : ''}.`
-                : 'Attach a draft or source, or create a document below.'}
+                : 'Attach a draft or source, or create a new document.'}
             </p>
             {detail.documents
               .filter((d) => d.role === 'source' && d.pinned_page)
@@ -132,7 +136,11 @@ export function ProjectHome({
           kind="error"
           title="Could not load review attention"
           description={proposals.error.message}
-          action={<button onClick={() => void proposals.refetch()}>Retry</button>}
+          action={
+            <button className="secondary-action" onClick={() => void proposals.refetch()}>
+              Retry
+            </button>
+          }
         />
       )}
       {detail && (

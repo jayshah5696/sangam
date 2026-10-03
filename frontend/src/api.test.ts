@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { api, collectPages, type ChatEffect, type ChatProposal } from './api'
+import { api, ApiError, collectPages, type ChatEffect, type ChatProposal } from './api'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -52,6 +52,43 @@ describe('response handling', () => {
       '/api/v1/backups/20260822T120000000000Z-deadbeef',
       expect.objectContaining({ method: 'DELETE' }),
     )
+  })
+
+  it('reports a proxy error page as a server failure instead of a JSON parse error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('<html><body>502 Bad Gateway</body></html>', {
+        status: 502,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    )
+
+    const listing = api.listTags()
+    await expect(listing).rejects.toBeInstanceOf(ApiError)
+    await expect(listing).rejects.toMatchObject({ status: 502, kind: 'server' })
+  })
+
+  it('reports an unreachable server as offline', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const listing = api.listTags()
+    await expect(listing).rejects.toBeInstanceOf(ApiError)
+    await expect(listing).rejects.toMatchObject({ status: 0, kind: 'offline' })
+  })
+
+  it.each([
+    [409, 'conflict'],
+    [412, 'conflict'],
+    [403, 'denied'],
+    [401, 'denied'],
+    [422, 'invalid'],
+    [404, 'invalid'],
+    [500, 'server'],
+  ] as const)('classifies a %i error response as %s', async (status, kind) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({ error: { code: 'example', message: 'Example', details: {} } }, { status }),
+    )
+
+    await expect(api.listTags()).rejects.toMatchObject({ status, kind, code: 'example' })
   })
 })
 

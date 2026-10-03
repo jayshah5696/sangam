@@ -188,14 +188,14 @@ describe('FileExplorerPanel', () => {
   it('provides row decorations during the first Pierre render', () => {
     state.folders = [folder]
 
-    render(<FileExplorerPanel onSearch={vi.fn()} />)
+    render(<FileExplorerPanel />)
 
     expect(state.decorations[0]).toEqual({ text: '3', title: '3 documents' })
   })
 
   it('restores selection and keyboard focus by document ID after a draft rename', async () => {
     state.documents = [document]
-    const view = render(<FileExplorerPanel onSearch={vi.fn()} />)
+    const view = render(<FileExplorerPanel />)
     const rename = state.mutationOptions[1]
 
     await act(async () => {
@@ -204,7 +204,7 @@ describe('FileExplorerPanel', () => {
     state.documents = [{ ...document, title: 'New title' }]
     vi.clearAllMocks()
 
-    view.rerender(<FileExplorerPanel onSearch={vi.fn()} />)
+    view.rerender(<FileExplorerPanel />)
 
     expect(state.model.getItem).toHaveBeenCalledWith('Drafts/New title')
     expect(state.item.select).toHaveBeenCalled()
@@ -217,7 +217,7 @@ describe('FileExplorerPanel', () => {
 
   it('triggers startRenaming when F2 is pressed on a focused tree item', () => {
     state.model.getFocusedPath = vi.fn(() => 'projects/note.md')
-    const { container } = render(<FileExplorerPanel onSearch={vi.fn()} />)
+    const { container } = render(<FileExplorerPanel />)
     const tree = container.querySelector('[data-testid="pierre-tree"]') ?? container.firstElementChild!
 
     // Simulate F2 keydown
@@ -228,7 +228,7 @@ describe('FileExplorerPanel', () => {
   })
 
   it('renders labels via aria-label pseudo-element and hides Pierre MiddleTruncate', () => {
-    render(<FileExplorerPanel onSearch={vi.fn()} />)
+    render(<FileExplorerPanel />)
 
     // SAFETY: MockFileTreeOptions captures unsafeCSS as string
     const unsafeCSS = state.useFileTreeOptions[0]?.unsafeCSS as string
@@ -247,7 +247,7 @@ describe('FileExplorerPanel', () => {
     ]
     state.folders = [folder]
 
-    render(<FileExplorerPanel onSearch={vi.fn()} />)
+    render(<FileExplorerPanel />)
 
     const options = state.useFileTreeOptions[0]
     expect(options?.renaming?.canRename({ isFolder: true, path: 'projects' })).toBe(true)
@@ -259,14 +259,14 @@ describe('FileExplorerPanel', () => {
 
   it('applies sort via prepareFileTreeInput on resetPaths, not on useFileTree options', () => {
     state.documents = [document]
-    render(<FileExplorerPanel onSearch={vi.fn()} />)
+    render(<FileExplorerPanel />)
 
     const options = state.useFileTreeOptions[0]
     expect(options && 'sort' in options).toBe(false)
   })
 
   it('ensures shadow DOM file tree has keyboard accessibility on the first treeitem', async () => {
-    const { container } = render(<FileExplorerPanel onSearch={vi.fn()} />)
+    const { container } = render(<FileExplorerPanel />)
     const treeShell = container.querySelector('.pierre-tree-shell')
     expect(treeShell).not.toBeNull()
 

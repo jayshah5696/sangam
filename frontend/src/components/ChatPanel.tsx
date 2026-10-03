@@ -35,7 +35,15 @@ import {
   type CreateConfirmationRequest,
 } from './ChatCreateConfirmation'
 import { useChatKitScript } from './useChatKitScript'
-import { ChatEffectTray, DurableEffectStatus, shortId } from './ChatEffectTray'
+import { ChatEffectTray, DurableEffectStatus } from './ChatEffectTray'
+import { ChatEffectConfirmation } from './ChatEffectConfirmation'
+import {
+  organizationOperationDetail,
+  organizationOperationTitle,
+  describeEffectReview,
+  shortId,
+  type EffectReview,
+} from '../chatEffectCopy'
 
 export { DurableEffectStatus, shortId }
 
@@ -61,6 +69,7 @@ export function ChatPanel({
   compact = false,
   initialPrompt,
   initialThreadId,
+  projectId,
 }: {
   document?: Document | null
   selectedText?: string
@@ -71,6 +80,7 @@ export function ChatPanel({
   compact?: boolean
   initialPrompt?: string
   initialThreadId?: string
+  projectId?: string
 }) {
   const activeDocument = document ?? null
   const activeSelectedText = selectedText ?? ''
@@ -82,22 +92,17 @@ export function ChatPanel({
     () => initialThreadId ?? localStorage.getItem(threadStorageKey),
   )
   const [chatEpoch, setChatEpoch] = useState(0)
-  const [pendingPublication, setPendingPublication] = useState<PublishConfirmationRequest | null>(null)
-  const [publishError, setPublishError] = useState(false)
-  const [publishing, setPublishing] = useState(false)
+  // One review is pending at a time: the card for the effect the model is waiting on.
+  const [review, setReview] = useState<PendingReview | null>(null)
+  const [decisionError, setDecisionError] = useState(false)
+  const [deciding, setDeciding] = useState(false)
   const [published, setPublished] = useState<IssuedPublication | null>(null)
-  const [pendingCreate, setPendingCreate] = useState<CreateConfirmationRequest | null>(null)
-  const [pendingOrganization, setPendingOrganization] = useState<OrganizationOperation[] | null>(null)
-  const [pendingEffect, setPendingEffect] = useState<ChatEffect | null>(null)
-  const [createError, setCreateError] = useState(false)
-  const [creating, setCreating] = useState(false)
   const [createdDocument, setCreatedDocument] = useState<Document | null>(null)
+  const pendingEffect = review?.effect ?? null
   const [openedCitation, setOpenedCitation] = useState<CitationTarget | null>(null)
   const [resumingEffectId, setResumingEffectId] = useState<string | null>(null)
   const [resumeErrorIds, setResumeErrorIds] = useState<Set<string>>(() => new Set())
-  const publishResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
-  const createResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
-  const organizationResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
+  const reviewResolver = useRef<((result: Record<string, JsonPayload>) => void) | null>(null)
   const [settledEffectIds, setSettledEffectIds] = useState<Set<string>>(() => new Set())
   const threadIdRef = useRef(threadId)
   const configQuery = useQuery({ queryKey: ['chat-config'], queryFn: api.chatConfig })
@@ -230,48 +235,21 @@ export function ChatPanel({
   )
   const showPendingEffect = useCallback((effect: ChatEffect) => {
     if (effect.status !== 'pending_approval') return false
-    if (effect.capability_id === 'publish_document') {
-      const request = parsePublishConfirmation(effect.preview)
-      if (!request) return false
-      setPendingPublication(request)
-      setPendingCreate(null)
-      setPublishError(false)
-      setPublished(null)
-      setPendingOrganization(null)
-    } else if (effect.capability_id === 'create_document') {
-      const request = parseCreateConfirmation(effect.preview)
-      if (!request) return false
-      setPendingCreate(request)
-      setPendingPublication(null)
-      setCreateError(false)
-      setCreatedDocument(null)
-      setPendingOrganization(null)
-    } else {
-      const parsed = z.array(organizationOperationSchema).safeParse(effect.preview.operations)
-      if (!parsed.success) return false
-      setPendingOrganization(parsed.data)
-      setPendingPublication(null)
-      setPendingCreate(null)
-    }
-    setPendingEffect(effect)
+    const view = reviewViewFor(effect)
+    if (!view) return false
+    if (view.kind === 'publish') setPublished(null)
+    if (view.kind === 'create') setCreatedDocument(null)
+    setDecisionError(false)
+    setReview({ effect, view })
     return true
   }, [])
   const clearPendingReview = useCallback(
     (result: Record<string, JsonPayload> = { approved: false, status: 'cancelled' }) => {
-      publishResolver.current?.(result)
-      createResolver.current?.(result)
-      organizationResolver.current?.(result)
-      publishResolver.current = null
-      createResolver.current = null
-      organizationResolver.current = null
-      setPendingPublication(null)
-      setPendingCreate(null)
-      setPendingOrganization(null)
-      setPendingEffect(null)
-      setPublishError(false)
-      setCreateError(false)
-      setPublishing(false)
-      setCreating(false)
+      reviewResolver.current?.(result)
+      reviewResolver.current = null
+      setReview(null)
+      setDecisionError(false)
+      setDeciding(false)
     },
     [],
   )
@@ -311,18 +289,14 @@ export function ChatPanel({
       }
       if (!showPendingEffect(effect)) return { approved: false, error: `Effect is ${effect.status}` }
       return new Promise<Record<string, JsonPayload>>((resolve) => {
-        if (effect.capability_id === 'publish_document') publishResolver.current = resolve
-        else if (effect.capability_id === 'create_document') createResolver.current = resolve
-        else organizationResolver.current = resolve
+        reviewResolver.current = resolve
       })
     },
     [showPendingEffect],
   )
   useEffect(
     () => () => {
-      publishResolver.current = null
-      createResolver.current = null
-      organizationResolver.current = null
+      reviewResolver.current = null
     },
     [],
   )
@@ -335,6 +309,7 @@ export function ChatPanel({
     revisionId: activeDocument?.current_revision_id ?? null,
     pdfPageNumber: pdfPageNumber ?? null,
     annotationId: annotationId ?? null,
+    projectId: projectId ?? null,
     selectedText: activeSelectedText,
     refreshProposals,
     navigate,
@@ -346,6 +321,7 @@ export function ChatPanel({
       revisionId: activeDocument?.current_revision_id ?? null,
       pdfPageNumber: pdfPageNumber ?? null,
       annotationId: annotationId ?? null,
+      projectId: projectId ?? null,
       selectedText: activeSelectedText,
       refreshProposals,
       navigate,
@@ -473,109 +449,48 @@ export function ChatPanel({
     },
     [clearPendingReview, queryClient],
   )
-  const cancelPublication = async () => {
-    if (!pendingEffect || publishing) return
-    setPublishing(true)
+  // What the page shows and refreshes once an effect has really been applied. The
+  // result is the stored one, so a resumed or retried effect announces the same way.
+  const announceApplied = useCallback(
+    async (effect: ChatEffect, result: Record<string, JsonPayload>) => {
+      if (effect.capability_id === 'create_document') {
+        setCreatedDocument(documentSchema.parse(result))
+        await queryClient.invalidateQueries({ queryKey: ['documents'] })
+        return
+      }
+      if (effect.capability_id === 'publish_document') {
+        setPublished(issuedPublicationSchema.parse(result))
+      } else if (effect.capability_id === 'update_publication') {
+        // Changing a publication to unlisted issues a token, shown once.
+        const issued = issuedPublicationSchema.safeParse(result)
+        if (issued.success && issued.data.token) setPublished(issued.data)
+      }
+      await Promise.all(
+        ['publication', 'documents', 'folders', 'projects', 'project', 'annotations'].map((key) =>
+          queryClient.invalidateQueries({ queryKey: [key] }),
+        ),
+      )
+    },
+    [queryClient],
+  )
+  const decide = async (verdict: 'approve' | 'deny') => {
+    if (!review || deciding) return
+    const { effect } = review
+    setDeciding(true)
+    setDecisionError(false)
     try {
-      const decision = await api.decideChatEffect(pendingEffect, 'deny')
-      setSettledEffectIds((effectIds) => new Set(effectIds).add(pendingEffect.effect_id))
-      publishResolver.current?.(decision.client_result)
-      publishResolver.current = null
-      removeEffectFromPendingCache(pendingEffect.effect_id)
-      setPendingPublication(null)
-      setPendingEffect(null)
-      setPublishError(false)
+      const decision = await api.decideChatEffect(effect, verdict)
+      setSettledEffectIds((effectIds) => new Set(effectIds).add(effect.effect_id))
+      if (verdict === 'approve') await announceApplied(effect, decision.client_result)
+      reviewResolver.current?.(decision.client_result)
+      reviewResolver.current = null
+      removeEffectFromPendingCache(effect.effect_id)
+      setReview(null)
       await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
     } catch {
-      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setPublishError(true)
+      if (!(await reconcileEffectAfterDecisionFailure(effect))) setDecisionError(true)
     } finally {
-      setPublishing(false)
-    }
-  }
-  const approvePublication = async () => {
-    if (!pendingPublication || !pendingEffect || publishing) return
-    setPublishing(true)
-    setPublishError(false)
-    try {
-      const decision = await api.decideChatEffect(pendingEffect, 'approve')
-      setSettledEffectIds((effectIds) => new Set(effectIds).add(pendingEffect.effect_id))
-      const result = issuedPublicationSchema.parse(decision.client_result)
-      await queryClient.invalidateQueries({ queryKey: ['publication', pendingPublication.documentId] })
-      publishResolver.current?.(decision.client_result)
-      publishResolver.current = null
-      removeEffectFromPendingCache(pendingEffect.effect_id)
-      setPublished(result)
-      setPendingPublication(null)
-      setPendingEffect(null)
-      await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
-    } catch {
-      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setPublishError(true)
-    } finally {
-      setPublishing(false)
-    }
-  }
-  const cancelCreate = async () => {
-    if (!pendingEffect || creating) return
-    setCreating(true)
-    try {
-      const decision = await api.decideChatEffect(pendingEffect, 'deny')
-      setSettledEffectIds((effectIds) => new Set(effectIds).add(pendingEffect.effect_id))
-      createResolver.current?.(decision.client_result)
-      createResolver.current = null
-      removeEffectFromPendingCache(pendingEffect.effect_id)
-      setPendingCreate(null)
-      setPendingEffect(null)
-      setCreateError(false)
-      await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
-    } catch {
-      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setCreateError(true)
-    } finally {
-      setCreating(false)
-    }
-  }
-  const approveCreate = async () => {
-    if (!pendingCreate || !pendingEffect || creating) return
-    setCreating(true)
-    setCreateError(false)
-    try {
-      const decision = await api.decideChatEffect(pendingEffect, 'approve')
-      setSettledEffectIds((effectIds) => new Set(effectIds).add(pendingEffect.effect_id))
-      const result = documentSchema.parse(decision.client_result)
-      createResolver.current?.(decision.client_result)
-      createResolver.current = null
-      removeEffectFromPendingCache(pendingEffect.effect_id)
-      setPendingCreate(null)
-      setPendingEffect(null)
-      setCreatedDocument(result)
-      await queryClient.invalidateQueries({ queryKey: ['documents'] })
-      await queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] })
-    } catch {
-      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setCreateError(true)
-    } finally {
-      setCreating(false)
-    }
-  }
-  const decideOrganization = async (verdict: 'approve' | 'deny') => {
-    if (!pendingEffect || !pendingOrganization || creating) return
-    setCreating(true)
-    setCreateError(false)
-    try {
-      const decision = await api.decideChatEffect(pendingEffect, verdict)
-      setSettledEffectIds((effectIds) => new Set(effectIds).add(pendingEffect.effect_id))
-      organizationResolver.current?.(decision.client_result)
-      organizationResolver.current = null
-      removeEffectFromPendingCache(pendingEffect.effect_id)
-      setPendingOrganization(null)
-      setPendingEffect(null)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['documents'] }),
-        queryClient.invalidateQueries({ queryKey: ['folders'] }),
-        queryClient.invalidateQueries({ queryKey: ['chat-effects', threadId] }),
-      ])
-    } catch {
-      if (!(await reconcileEffectAfterDecisionFailure(pendingEffect))) setCreateError(true)
-    } finally {
-      setCreating(false)
+      setDeciding(false)
     }
   }
   const resumeEffect = async (effect: ChatEffect) => {
@@ -588,19 +503,7 @@ export function ChatPanel({
     })
     try {
       const decision = await api.decideChatEffect(effect, 'approve')
-      if (effect.capability_id === 'create_document') {
-        setCreatedDocument(documentSchema.parse(decision.client_result))
-        await queryClient.invalidateQueries({ queryKey: ['documents'] })
-      } else if (effect.capability_id === 'publish_document') {
-        const result = issuedPublicationSchema.parse(decision.client_result)
-        setPublished(result)
-        await queryClient.invalidateQueries({ queryKey: ['publication', effect.preview.document_id] })
-      } else {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['documents'] }),
-          queryClient.invalidateQueries({ queryKey: ['folders'] }),
-        ])
-      }
+      await announceApplied(effect, decision.client_result)
       removeEffectFromPendingCache(effect.effect_id)
     } catch {
       setResumeErrorIds((effectIds) => new Set(effectIds).add(effect.effect_id))
@@ -707,32 +610,13 @@ export function ChatPanel({
               onClose={() => setOpenedCitation(null)}
             />
           )}
-          {pendingPublication && pendingEffect && !settledEffectIds.has(pendingEffect.effect_id) && (
-            <PublishConfirmationCard
-              request={pendingPublication}
-              publishing={publishing}
-              error={publishError}
-              onApprove={() => void approvePublication()}
-              onCancel={() => void cancelPublication()}
-            />
-          )}
-          {pendingCreate && pendingEffect && !settledEffectIds.has(pendingEffect.effect_id) && (
-            <ChatCreateConfirmation
-              request={pendingCreate}
-              pending={creating}
-              error={createError}
-              onApprove={() => void approveCreate()}
-              onCancel={() => void cancelCreate()}
-            />
-          )}
-          {pendingOrganization && pendingEffect && !settledEffectIds.has(pendingEffect.effect_id) && (
-            <OrganizationPlanConfirmation
-              effect={pendingEffect}
-              operations={pendingOrganization}
-              pending={creating}
-              error={createError}
-              onApprove={() => void decideOrganization('approve')}
-              onCancel={() => void decideOrganization('deny')}
+          {review && !settledEffectIds.has(review.effect.effect_id) && (
+            <PendingReviewCard
+              review={review}
+              deciding={deciding}
+              error={decisionError}
+              onApprove={() => void decide('approve')}
+              onCancel={() => void decide('deny')}
             />
           )}
           {createdDocument && (
@@ -949,6 +833,88 @@ function PublishedFromChat({ result, onDismiss }: { result: IssuedPublication; o
   )
 }
 
+type ReviewView =
+  | { kind: 'publish'; request: PublishConfirmationRequest }
+  | { kind: 'create'; request: CreateConfirmationRequest }
+  | { kind: 'organization'; operations: OrganizationOperation[] }
+  | { kind: 'generic'; review: EffectReview }
+type PendingReview = { effect: ChatEffect; view: ReviewView }
+
+/** The card for an effect, or null when its preview cannot be shown exactly. */
+function reviewViewFor(effect: ChatEffect): ReviewView | null {
+  if (effect.capability_id === 'publish_document') {
+    const request = parsePublishConfirmation(effect.preview)
+    return request && { kind: 'publish', request }
+  }
+  if (effect.capability_id === 'create_document') {
+    const request = parseCreateConfirmation(effect.preview)
+    return request && { kind: 'create', request }
+  }
+  if (effect.capability_id === 'apply_workspace_organization_plan') {
+    const parsed = z.array(organizationOperationSchema).safeParse(effect.preview.operations)
+    return parsed.success ? { kind: 'organization', operations: parsed.data } : null
+  }
+  const review = describeEffectReview(effect)
+  return review && { kind: 'generic', review }
+}
+
+function PendingReviewCard({
+  review,
+  deciding,
+  error,
+  onApprove,
+  onCancel,
+}: {
+  review: PendingReview
+  deciding: boolean
+  error: boolean
+  onApprove: () => void
+  onCancel: () => void
+}) {
+  const { view, effect } = review
+  if (view.kind === 'publish')
+    return (
+      <PublishConfirmationCard
+        request={view.request}
+        publishing={deciding}
+        error={error}
+        onApprove={onApprove}
+        onCancel={onCancel}
+      />
+    )
+  if (view.kind === 'create')
+    return (
+      <ChatCreateConfirmation
+        request={view.request}
+        pending={deciding}
+        error={error}
+        onApprove={onApprove}
+        onCancel={onCancel}
+      />
+    )
+  if (view.kind === 'organization')
+    return (
+      <OrganizationPlanConfirmation
+        effect={effect}
+        operations={view.operations}
+        pending={deciding}
+        error={error}
+        onApprove={onApprove}
+        onCancel={onCancel}
+      />
+    )
+  return (
+    <ChatEffectConfirmation
+      effect={effect}
+      review={view.review}
+      pending={deciding}
+      error={error}
+      onApprove={onApprove}
+      onCancel={onCancel}
+    />
+  )
+}
+
 function OrganizationPlanConfirmation({
   effect,
   operations,
@@ -1012,32 +978,6 @@ function OrganizationPlanConfirmation({
       </div>
     </section>
   )
-}
-
-function organizationOperationTitle(operation: OrganizationOperation) {
-  if (operation.kind === 'create_folder') return `Create folder ${operation.path}`
-  if (operation.kind === 'materialize_document')
-    return `Save draft ${shortId(operation.document_id)} to workspace`
-  if (operation.kind === 'move_document') return `Move document ${shortId(operation.document_id)}`
-  if (operation.kind === 'trash_document') return `Move document ${shortId(operation.document_id)} to Trash`
-  if (operation.kind === 'move_folder') return `Move folder ${operation.expected_source_path}`
-  if (operation.kind === 'update_document_metadata')
-    return `Update document ${shortId(operation.document_id)} metadata`
-  return `Update folder ${shortId(operation.folder_id)} metadata`
-}
-
-function organizationOperationDetail(operation: OrganizationOperation) {
-  if (operation.kind === 'create_folder')
-    return `New path: ${operation.path} · category ${operation.category ?? 'none'} · ${operation.tag_ids.length} tags`
-  if (operation.kind === 'materialize_document')
-    return `New path: ${operation.destination_path} · revision ${shortId(operation.expected_revision_id)}`
-  if (operation.kind === 'move_document')
-    return `${operation.expected_source_path} → ${operation.destination_path} · revision ${shortId(operation.expected_revision_id)}`
-  if (operation.kind === 'trash_document')
-    return `${operation.expected_source_path} → Trash · revision ${shortId(operation.expected_revision_id)}`
-  if (operation.kind === 'move_folder')
-    return `${operation.expected_source_path} → ${operation.destination_path} · ${operation.expected_descendant_documents} descendant documents`
-  return `Category ${operation.expected_category ?? 'none'} → ${operation.category ?? 'none'} · tags ${operation.expected_tag_ids.length ? operation.expected_tag_ids.join(', ') : 'none'} → ${operation.tag_ids.length ? operation.tag_ids.join(', ') : 'none'} · metadata version ${operation.expected_metadata_version}`
 }
 
 export function CompletionRow({
@@ -1338,6 +1278,7 @@ type LiveChatContext = {
   revisionId: string | null
   pdfPageNumber: number | null
   annotationId: string | null
+  projectId: string | null
   selectedText: string
   refreshProposals: () => void
   navigate: ReturnType<typeof useNavigate>
@@ -1345,6 +1286,26 @@ type LiveChatContext = {
     effect_id?: string
     argument_digest?: string
   }) => Promise<Record<string, JsonPayload>>
+}
+
+/** Tell the server what the person is looking at: a document, or the workspace, and a project. */
+export function applyChatContextHeaders(
+  headers: Headers,
+  live: { documentId: string | null; revisionId: string | null; projectId: string | null },
+) {
+  if (live.documentId) {
+    headers.set('X-Sangam-Document-ID', live.documentId)
+    if (live.revisionId) headers.set('X-Sangam-Revision-ID', live.revisionId)
+    else headers.delete('X-Sangam-Revision-ID')
+    headers.delete('X-Sangam-Workspace-Context')
+  } else {
+    headers.delete('X-Sangam-Document-ID')
+    headers.delete('X-Sangam-Revision-ID')
+    headers.set('X-Sangam-Workspace-Context', '1')
+  }
+  headers.set('X-Sangam-Chat-Entry', live.documentId ? 'document' : 'workspace')
+  if (live.projectId) headers.set('X-Sangam-Project-ID', live.projectId)
+  else headers.delete('X-Sangam-Project-ID')
 }
 
 const chatTurnRequestSchema = z.object({
@@ -1455,17 +1416,7 @@ function WorkspaceChatSurface({
   const customFetch = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers)
-      if (liveRef.current.documentId) {
-        headers.set('X-Sangam-Document-ID', liveRef.current.documentId)
-        if (liveRef.current.revisionId) headers.set('X-Sangam-Revision-ID', liveRef.current.revisionId)
-        else headers.delete('X-Sangam-Revision-ID')
-        headers.delete('X-Sangam-Workspace-Context')
-      } else {
-        headers.delete('X-Sangam-Document-ID')
-        headers.delete('X-Sangam-Revision-ID')
-        headers.set('X-Sangam-Workspace-Context', '1')
-      }
-      headers.set('X-Sangam-Chat-Entry', liveRef.current.documentId ? 'document' : 'workspace')
+      applyChatContextHeaders(headers, liveRef.current)
       const startsTurn = chatRequestNeedsTurnContext(init?.body)
       if (startsTurn) {
         const snapshot = await api.createChatTurnContext({

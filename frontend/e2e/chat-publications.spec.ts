@@ -56,7 +56,11 @@ async function createChatThread(request: import('@playwright/test').APIRequestCo
 
 test('workspace chat opens without a document and reports transport setup truthfully', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Ask workspace' }).click()
+  const chat = page.getByRole('link', { name: 'Workspace chat', exact: true })
+  const reveal = page.getByRole('button', { name: 'Show workspace sidebar', exact: true })
+  await expect(chat.or(reveal)).toBeVisible()
+  if (await reveal.isVisible()) await reveal.click()
+  await chat.click()
   await expect(page).toHaveURL(/\/chat$/)
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()
   const runtime = await page.request.get('/api/v1/chat/config')
@@ -566,6 +570,98 @@ test('completed effects stay grouped and organization review shows exact operati
       path: path.join(evidenceDir, `grouped-effects-and-organization-${testInfo.project.name}.png`),
     })
   }
+})
+
+function pendingEffect(
+  threadId: string,
+  capabilityId: ChatEffect['capability_id'],
+  preview: ChatEffect['preview'],
+): ChatEffect {
+  return {
+    effect_id: `effect-${capabilityId}`,
+    thread_id: threadId,
+    requested_by: 'human:jay',
+    capability_id: capabilityId,
+    capability_version: 1,
+    argument_digest: 'c'.repeat(64),
+    preview,
+    effect_class: 'write',
+    risk: 'workspace',
+    status: 'pending_approval',
+    expires_at: '2099-08-23T12:00:00Z',
+    resource_type: null,
+    resource_id: null,
+    result: null,
+    failure: null,
+    created_at: '2026-08-23T12:00:00Z',
+    decided_at: null,
+    completed_at: null,
+  }
+}
+
+async function openWorkspaceChatWithPendingEffect(
+  page: import('@playwright/test').Page,
+  request: import('@playwright/test').APIRequestContext,
+  build: (threadId: string) => ChatEffect,
+) {
+  const threadId = await createChatThread(request)
+  const effect = build(threadId)
+  await page.route('**/api/v1/chat/effects**', async (route) => {
+    await route.fulfill({ json: [effect] })
+  })
+  await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
+  await page.goto('/chat')
+}
+
+test('project change review shows the exact change and its reviewer actions', async ({ page, request }) => {
+  await openWorkspaceChatWithPendingEffect(page, request, (threadId) =>
+    pendingEffect(threadId, 'update_project', {
+      change: {
+        kind: 'add_document',
+        project_id: 'project-aaaa-bbbb',
+        document_id: 'document-aaaa-cccc',
+        role: 'draft',
+        pinned_page: 4,
+      },
+    }),
+  )
+
+  const review = page.getByRole('alertdialog', {
+    name: /Add document document…cccc to project project-…bbbb/,
+  })
+  await expect(review).toBeVisible()
+  await expect(review).toContainText('Role draft · pinned to page 4')
+  await expect(review.getByRole('button', { name: 'Approve project change' })).toBeVisible()
+  await expect(review.getByRole('button', { name: 'Cancel task' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+})
+
+test('organization review names restore and duplicate operations exactly', async ({ page, request }) => {
+  await openWorkspaceChatWithPendingEffect(page, request, (threadId) =>
+    pendingEffect(threadId, 'apply_workspace_organization_plan', {
+      operations: [
+        {
+          kind: 'restore_document',
+          document_id: 'document-aaaa-cccc',
+          expected_revision_id: 'revision-current-0001',
+          revision_id: 'revision-earlier-0009',
+        },
+        {
+          kind: 'duplicate_document',
+          document_id: 'document-aaaa-cccc',
+          expected_revision_id: 'revision-current-0001',
+          title: 'Copy of notes',
+          destination_path: 'notes/copy.md',
+        },
+      ],
+    }),
+  )
+
+  const review = page.getByRole('alertdialog', { name: 'Review 2 organization changes' })
+  await expect(review.getByText('Restore document document…cccc')).toBeVisible()
+  await expect(review.getByText('Content of revision revision…0009', { exact: false })).toBeVisible()
+  await expect(review.getByText('Duplicate document document…cccc')).toBeVisible()
+  await expect(review.getByText('notes/copy.md titled "Copy of notes"', { exact: false })).toBeVisible()
 })
 
 test('failed chat effects are recoverable, dismissible, bounded, and save evidence', async ({
