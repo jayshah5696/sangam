@@ -328,7 +328,7 @@ export function WorkspaceSettings() {
                     <strong>Sidebar footer navigation</strong>
                   </div>
                   <span>
-                    {Object.values(preferences.sidebarFooterTools).filter(Boolean).length} of{' ' }
+                    {Object.values(preferences.sidebarFooterTools).filter(Boolean).length} of{' '}
                     {sidebarFooterToolDefinitions.length} visible
                   </span>
                 </div>
@@ -336,12 +336,7 @@ export function WorkspaceSettings() {
                   {sidebarFooterToolDefinitions.map(({ id, label, detail }) => {
                     const isVisible = preferences.sidebarFooterTools?.[id] ?? true
                     return (
-                      <SettingRow
-                        key={id}
-                        id={`sidebar-tool-${id}`}
-                        label={label}
-                        detail={detail}
-                      >
+                      <SettingRow key={id} id={`sidebar-tool-${id}`} label={label} detail={detail}>
                         <label className="compact-switch">
                           <input
                             type="checkbox"
