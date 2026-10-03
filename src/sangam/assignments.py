@@ -626,7 +626,7 @@ class AssignmentService:
                 run_config=RunConfig(
                     model=model.model_id,
                     model_provider=await self.chat.admission.run_sync(
-                        self.chat.provider_connections.model_provider, connection.connection_id
+                        self.chat._resolve_model_provider, connection.connection_id
                     ),
                     model_settings=ModelSettings(
                         max_tokens=self.chat.config.max_output_tokens, store=False
