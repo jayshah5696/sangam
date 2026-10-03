@@ -56,9 +56,22 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
     queryFn: api.listDocuments,
     enabled: open,
   })
+  const createKeyRef = useRef<string | null>(null)
   const { mutate: createNewDocument } = useMutation({
-    mutationFn: () => api.createDocument('Untitled document'),
+    mutationFn: () => {
+      if (!createKeyRef.current) {
+        createKeyRef.current = crypto.randomUUID()
+      }
+      return api.createDocument(
+        'Untitled document',
+        undefined,
+        'text/markdown',
+        undefined,
+        createKeyRef.current,
+      )
+    },
     onSuccess: async (document) => {
+      createKeyRef.current = null
       sessions.openForWriting(document)
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
       workbench.ensureDocumentOpen(document.document_id, document.title, workbench.activeGroupId)

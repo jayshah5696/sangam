@@ -184,8 +184,10 @@ test('command palette creation from an open inspector keeps focus in the new edi
   await page.goto('/')
   await createFromHome(page)
   await expect(page.locator('.cm-content')).toBeFocused()
-  const open = page.getByRole('button', { name: 'Open document inspector', exact: true })
-  if (await open.isVisible()) await open.click()
+  await openIfClosed(
+    page.getByRole('button', { name: 'Open document inspector', exact: true }),
+    page.getByRole('tab', { name: 'properties', exact: true }),
+  )
   await expect(page.getByRole('tab', { name: 'properties', exact: true })).toBeVisible()
   await page.locator('body').press('ControlOrMeta+k')
   await page.getByRole('textbox', { name: 'Search workspace and actions' }).fill('New document')

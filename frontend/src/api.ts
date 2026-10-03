@@ -1564,6 +1564,7 @@ export const api = {
     path?: string,
     contentType: Document['content_type'] = 'text/markdown',
     initialContent?: string,
+    idempotencyKey?: string,
   ): Promise<Document> {
     const content =
       initialContent ??
@@ -1573,6 +1574,7 @@ export const api = {
     return documentSchema.parse(
       await request('/documents', {
         method: 'POST',
+        headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
         body: JSON.stringify({ title, content, path, content_type: contentType }),
       }),
     )

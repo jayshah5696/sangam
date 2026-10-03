@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, render } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, render } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ThemeProvider, useTheme } from './theme'
 
 class MemoryStorage {
@@ -19,6 +19,10 @@ class MemoryStorage {
 
 beforeEach(() => {
   Object.defineProperty(window, 'localStorage', { value: new MemoryStorage(), configurable: true })
+})
+
+afterEach(() => {
+  cleanup()
 })
 
 function Probe() {
@@ -102,5 +106,74 @@ describe('workspace typography preferences', () => {
     ) as Record<string, string>
     expect(stored.uiFont).toBe('serif')
     expect(stored.uiDensity).toBe('compact')
+  })
+})
+
+describe('sidebar footer navigation preferences', () => {
+  function SidebarProbe() {
+    const { preferences, updatePreferences } = useTheme()
+    return (
+      <div>
+        <span data-testid="projects">{String(preferences.sidebarFooterTools.projects)}</span>
+        <span data-testid="trash">{String(preferences.sidebarFooterTools.trash)}</span>
+        <button
+          type="button"
+          onClick={() =>
+            updatePreferences({
+              sidebarFooterTools: {
+                ...preferences.sidebarFooterTools,
+                projects: false,
+              },
+            })
+          }
+        >
+          Toggle Projects
+        </button>
+      </div>
+    )
+  }
+
+  it('initializes with all sidebar footer tools enabled by default', () => {
+    const { getByTestId } = render(
+      <ThemeProvider>
+        <SidebarProbe />
+      </ThemeProvider>,
+    )
+    expect(getByTestId('projects').textContent).toBe('true')
+    expect(getByTestId('trash').textContent).toBe('true')
+  })
+
+  it('restores custom sidebar footer tool visibility from storage', () => {
+    window.localStorage.setItem(
+      'sangam.workspace-preferences.v1',
+      JSON.stringify({
+        sidebarFooterTools: {
+          projects: false,
+          trash: false,
+        },
+      }),
+    )
+    const { getByTestId } = render(
+      <ThemeProvider>
+        <SidebarProbe />
+      </ThemeProvider>,
+    )
+    expect(getByTestId('projects').textContent).toBe('false')
+    expect(getByTestId('trash').textContent).toBe('false')
+  })
+
+  it('persists updated sidebar footer tool visibility', () => {
+    const { getByRole, getByTestId } = render(
+      <ThemeProvider>
+        <SidebarProbe />
+      </ThemeProvider>,
+    )
+    act(() => {
+      getByRole('button', { name: 'Toggle Projects' }).click()
+    })
+    expect(getByTestId('projects').textContent).toBe('false')
+    const stored = JSON.parse(window.localStorage.getItem('sangam.workspace-preferences.v1') ?? '{}')
+    expect(stored.sidebarFooterTools.projects).toBe(false)
+    expect(stored.sidebarFooterTools.trash).toBe(true)
   })
 })
