@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlsplit
 
-from sangam.errors import NotFoundError, ValidationError
+from sangam.errors import NotFoundError, ValidationError, validate_metadata_text
 from sangam.schemas import Document, DocumentAsset
 from sangam.workspace import WorkspaceFilesystem
 
@@ -111,6 +111,7 @@ class DocumentAssetService:
     def store(
         self, *, document: Document, filename: str, media_type: str, content: bytes
     ) -> DocumentAsset:
+        validate_metadata_text(filename, "Image filename")
         if document.content_type == "application/pdf":
             raise ValidationError("Images can be added to Markdown and HTML documents only")
         if media_type not in _SIGNATURES:
