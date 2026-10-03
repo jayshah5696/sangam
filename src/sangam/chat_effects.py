@@ -256,16 +256,13 @@ class ChatEffectService:
         return check_autonomy_allows(self.database)
 
     def cancellable_run_ids(self, connection: sqlite3.Connection, thread_id: str) -> set[str]:
-        """Find run IDs with pending reviewable effects or proposals in this thread."""
+        """Find run IDs with pending reviewable effects in this thread."""
         rows = connection.execute(
             """
             SELECT DISTINCT run_id FROM chat_effects
             WHERE thread_id = ? AND status IN ('proposed', 'pending_approval', 'approved')
-            UNION
-            SELECT DISTINCT run_id FROM chat_proposals
-            WHERE thread_id = ? AND status = 'pending' AND run_id IS NOT NULL
             """,
-            (thread_id, thread_id),
+            (thread_id,),
         ).fetchall()
         return {r[0] for r in rows if r[0]}
 
