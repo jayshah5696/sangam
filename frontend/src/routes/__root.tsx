@@ -333,31 +333,35 @@ function PrimarySidebar({
 // Visible labels keep destinations recognizable without hovering. Each
 // accessible name contains its visible label so voice control matches both.
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const { preferences } = useTheme()
   const links = [
-    { to: '/projects' as const, label: 'Projects', short: 'Projects', icon: FolderKanban },
-    { to: '/chat' as const, label: 'Workspace chat', short: 'Chat', icon: MessageSquareText },
-    { to: '/review' as const, label: 'Review changes', short: 'Review', icon: ShieldAlert },
-    { to: '/publications' as const, label: 'Publications', short: 'Publications', icon: Globe2 },
-    { to: '/trash' as const, label: 'Trash', short: 'Trash', icon: Trash2 },
-    { to: '/settings' as const, label: 'Settings', short: 'Settings', icon: Settings },
+    { id: 'projects' as const, to: '/projects' as const, label: 'Projects', short: 'Projects', icon: FolderKanban },
+    { id: 'chat' as const, to: '/chat' as const, label: 'Workspace chat', short: 'Chat', icon: MessageSquareText },
+    { id: 'review' as const, to: '/review' as const, label: 'Review changes', short: 'Review', icon: ShieldAlert },
+    { id: 'publications' as const, to: '/publications' as const, label: 'Publications', short: 'Publications', icon: Globe2 },
+    { id: 'trash' as const, to: '/trash' as const, label: 'Trash', short: 'Trash', icon: Trash2 },
+    { id: 'settings' as const, to: '/settings' as const, label: 'Settings', short: 'Settings', icon: Settings },
   ]
+  const visibleLinks = links.filter((link) => preferences.sidebarFooterTools?.[link.id] ?? true)
   return (
     <div className="sidebar-footer">
-      <nav className="sidebar-footer-nav" aria-label="Workspace tools">
-        {links.map(({ to, label, short, icon: Icon }) => (
-          <Link
-            key={to}
-            to={to}
-            aria-label={label === short ? undefined : label}
-            title={label === short ? undefined : label}
-            activeProps={{ className: 'active', 'aria-current': 'page' }}
-            onClick={onNavigate}
-          >
-            <Icon size="var(--icon-inline)" aria-hidden="true" />
-            <span>{short}</span>
-          </Link>
-        ))}
-      </nav>
+      {visibleLinks.length > 0 && (
+        <nav className="sidebar-footer-nav" aria-label="Workspace tools">
+          {visibleLinks.map(({ to, label, short, icon: Icon }) => (
+            <Link
+              key={to}
+              to={to}
+              aria-label={label === short ? undefined : label}
+              title={label === short ? undefined : label}
+              activeProps={{ className: 'active', 'aria-current': 'page' }}
+              onClick={onNavigate}
+            >
+              <Icon size="var(--icon-inline)" aria-hidden="true" />
+              <span>{short}</span>
+            </Link>
+          ))}
+        </nav>
+      )}
       <WorkspaceFreshness />
     </div>
   )

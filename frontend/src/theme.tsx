@@ -217,7 +217,29 @@ export const themes: Array<{ id: ThemeId; name: string; description: string; col
   },
 ]
 
-type WorkspacePreferences = {
+export const sidebarFooterToolDefinitions = [
+  { id: 'projects', label: 'Projects', detail: 'View and manage active projects' },
+  { id: 'chat', label: 'Workspace chat', detail: 'Open AI-assisted document chat and generation' },
+  { id: 'review', label: 'Review changes', detail: 'Inspect pending changes, proposals, and activity' },
+  { id: 'publications', label: 'Publications', detail: 'View documents published to the web or exported' },
+  { id: 'trash', label: 'Trash', detail: 'Browse deleted documents and restore retained files' },
+  { id: 'settings', label: 'Settings', detail: 'Quick access to workspace preferences and configuration' },
+] as const
+
+export type SidebarFooterToolId = (typeof sidebarFooterToolDefinitions)[number]['id']
+
+export type SidebarFooterToolsVisibility = Record<SidebarFooterToolId, boolean>
+
+export const defaultSidebarFooterTools = {
+  projects: true,
+  chat: true,
+  review: true,
+  publications: true,
+  trash: true,
+  settings: true,
+} satisfies SidebarFooterToolsVisibility
+
+export type WorkspacePreferences = {
   theme: ThemeId | `${typeof customThemeIdPrefix}${string}`
   uiFont: UiFontId
   uiDensity: UiDensity
@@ -229,6 +251,7 @@ type WorkspacePreferences = {
   rightVisible: boolean
   rightTab: InspectorTab
   editorMode: EditorMode
+  sidebarFooterTools: SidebarFooterToolsVisibility
 }
 
 type ThemeContextValue = {
@@ -250,6 +273,7 @@ const defaults: WorkspacePreferences = {
   rightVisible: false,
   rightTab: 'properties',
   editorMode: 'preview',
+  sidebarFooterTools: defaultSidebarFooterTools,
 }
 
 const storageKey = 'sangam.workspace-preferences.v1'
@@ -305,6 +329,7 @@ const rawStoredPreferencesSchema = z.object({
   rightVisible: z.boolean().optional(),
   rightTab: inspectorTabSchema.optional(),
   customThemes: z.array(rawCustomThemeSchema.passthrough()).optional(),
+  sidebarFooterTools: z.record(z.string(), z.boolean()).optional(),
 })
 
 function loadPreferences(): WorkspacePreferences {
@@ -325,6 +350,16 @@ function loadPreferences(): WorkspacePreferences {
     const customRef = storedTheme as `custom:${string}`
     const theme = themeIsValidCustom ? customRef : parsedTheme.success ? parsedTheme.data : defaults.theme
 
+    const storedSidebarTools = stored.sidebarFooterTools ?? {}
+    const sidebarFooterTools = {
+      projects: storedSidebarTools.projects ?? defaultSidebarFooterTools.projects,
+      chat: storedSidebarTools.chat ?? defaultSidebarFooterTools.chat,
+      review: storedSidebarTools.review ?? defaultSidebarFooterTools.review,
+      publications: storedSidebarTools.publications ?? defaultSidebarFooterTools.publications,
+      trash: storedSidebarTools.trash ?? defaultSidebarFooterTools.trash,
+      settings: storedSidebarTools.settings ?? defaultSidebarFooterTools.settings,
+    } satisfies SidebarFooterToolsVisibility
+
     return {
       ...defaults,
       ...stored,
@@ -334,6 +369,7 @@ function loadPreferences(): WorkspacePreferences {
       editorSize: stored.editorSize ?? defaults.editorSize,
       editorMode: stored.editorMode ?? defaults.editorMode,
       customThemes,
+      sidebarFooterTools,
       rightVisible: stored.rightVisible ?? false,
     }
   } catch {
@@ -366,7 +402,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [preferences])
 
   const updatePreferences = (patch: Partial<WorkspacePreferences>) => {
-    setPreferences((current) => ({ ...current, ...patch }))
+    setPreferences((current) => ({
+      ...current,
+      ...patch,
+      sidebarFooterTools: patch.sidebarFooterTools
+        ? { ...current.sidebarFooterTools, ...patch.sidebarFooterTools }
+        : current.sidebarFooterTools,
+    }))
   }
 
   return <ThemeContext.Provider value={{ preferences, updatePreferences }}>{children}</ThemeContext.Provider>

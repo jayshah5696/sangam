@@ -226,6 +226,8 @@
 
 .sidebar-footer { flex: none; border-top: 1px solid color-mix(in srgb, var(--sidebar-text) 11%, transparent); }
 .sidebar-footer-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1); padding: var(--space-2); }
+.sidebar-footer-nav:empty { display: none; }
+.sidebar-footer-nav > :last-child:nth-child(odd) { grid-column: span 2; }
 .sidebar-footer-nav a { min-width: 0; min-height: var(--control-compact); display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border-radius: var(--radius-control); color: var(--sidebar-muted); font-size: var(--text-control); text-decoration: none; transition: background var(--motion-control) var(--ease-ui-out), color var(--motion-control) var(--ease-ui-out), box-shadow var(--motion-control) var(--ease-ui-out); }
 .sidebar-footer-nav a span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-footer-nav a:hover, .sidebar-footer-nav a:focus-visible, .sidebar-footer-nav a.active { background: var(--sidebar-raised); color: var(--sidebar-text); }

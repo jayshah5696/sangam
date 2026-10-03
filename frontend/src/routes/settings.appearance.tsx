@@ -36,6 +36,7 @@ import {
   uiDensities,
   uiFonts,
   useTheme,
+  sidebarFooterToolDefinitions,
   type CustomTheme,
   type ThemeColorKey,
   type ThemeId,
@@ -319,6 +320,49 @@ export function WorkspaceSettings() {
                   </label>
                 </SettingRow>
               </div>
+
+              <section className="settings-subsection" id="sidebar-tools" tabIndex={-1}>
+                <div className="settings-subtitle">
+                  <div>
+                    <Wrench size="var(--icon-control)" />
+                    <strong>Sidebar footer navigation</strong>
+                  </div>
+                  <span>
+                    {Object.values(preferences.sidebarFooterTools).filter(Boolean).length} of{' ' }
+                    {sidebarFooterToolDefinitions.length} visible
+                  </span>
+                </div>
+                <div className="settings-rows">
+                  {sidebarFooterToolDefinitions.map(({ id, label, detail }) => {
+                    const isVisible = preferences.sidebarFooterTools?.[id] ?? true
+                    return (
+                      <SettingRow
+                        key={id}
+                        id={`sidebar-tool-${id}`}
+                        label={label}
+                        detail={detail}
+                      >
+                        <label className="compact-switch">
+                          <input
+                            type="checkbox"
+                            aria-label={`Toggle ${label} visibility`}
+                            checked={isVisible}
+                            onChange={(event) =>
+                              updatePreferences({
+                                sidebarFooterTools: {
+                                  ...preferences.sidebarFooterTools,
+                                  [id]: event.target.checked,
+                                },
+                              })
+                            }
+                          />
+                          <span>{isVisible ? 'Visible' : 'Hidden'}</span>
+                        </label>
+                      </SettingRow>
+                    )
+                  })}
+                </div>
+              </section>
             </SettingsSection>
           )}
 
