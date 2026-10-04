@@ -147,7 +147,7 @@ function KarakeepConfluence() {
         />
       </div>
       {(importBookmark.isError || refreshImport.isError || applyRefresh.isError) && (
-        <p className="operation-result error-text">
+        <p className="operation-result error-text" role="alert">
           {(importBookmark.error ?? refreshImport.error ?? applyRefresh.error)?.message}
         </p>
       )}
@@ -263,7 +263,11 @@ function ImportReview({
         <TagList tags={detail.tags} />
         <span>{detail.assets.length} attachments recorded</span>
       </div>
-      {detail.last_error && <p className="karakeep-message error-text">{detail.last_error}</p>}
+      {detail.last_error && (
+        <p className="karakeep-message error-text" role="alert">
+          {detail.last_error}
+        </p>
+      )}
       <div className="karakeep-comparison">
         <SourceColumn title="Archived extraction" content={detail.accepted_markdown} />
         <SourceColumn title="Corrected working copy" content={detail.working_copy} />

@@ -13,6 +13,7 @@ from sangam.actors import ActorService
 from sangam.authorization import AuthorizationPolicy
 from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
+from sangam.capture import CaptureService
 from sangam.chat import SangamChatServer
 from sangam.chat_models import ChatModelCatalog, ChatModelSettingsRepository
 from sangam.comments import DocumentCommentService
@@ -66,6 +67,7 @@ class ApplicationServices:
     projects: ProjectService
     saved_views: SavedViewService
     comments: DocumentCommentService
+    capture: CaptureService
 
 
 def initialize_application_state(settings: Settings) -> Database:
@@ -251,6 +253,13 @@ def build_application_services(
         projects=projects,
         model_provider=model_provider,
     )
+    capture = CaptureService(
+        workspace=workspace_access,
+        documents=documents,
+        pdf_research=pdf_research,
+        projects=projects,
+        extractor=karakeep.extractor,
+    )
     return ApplicationServices(
         documents=documents,
         organization=organization,
@@ -271,6 +280,7 @@ def build_application_services(
         projects=projects,
         saved_views=SavedViewService(database=database, audited=workspace_access.audited),
         comments=comments,
+        capture=capture,
     )
 
 

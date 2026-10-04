@@ -42,6 +42,37 @@
   --ease-ui-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring-snappy: cubic-bezier(0.175, 0.885, 0.32, 1.1);
   --transition-fast: var(--motion-control) ease;
+  --shadow-dialog: 0 28px 80px color-mix(in srgb, var(--shadow) 70%, transparent);
+  --shadow-drawer: 18px 0 45px color-mix(in srgb, var(--shadow) 60%, transparent);
+  --annotation-badge-text: #151515;
+
+  --wire-canvas-midnight: #191a1b;
+  --wire-sidebar-midnight: #0f1011;
+  --wire-text-midnight: #f7f8f8;
+  --wire-muted-midnight: #62666d;
+  --wire-line-midnight: rgba(255, 255, 255, 0.08);
+  --wire-accent-midnight: #5b59dc;
+
+  --wire-canvas-river: #fffdf8;
+  --wire-sidebar-river: #1d2b25;
+  --wire-text-river: #20241f;
+  --wire-muted-river: #9ca39e;
+  --wire-line-river: #d5d0c5;
+  --wire-accent-river: #327a62;
+
+  --wire-canvas-parchment: #fff8e8;
+  --wire-sidebar-parchment: #4a3728;
+  --wire-text-parchment: #3d3024;
+  --wire-muted-parchment: #aa987f;
+  --wire-line-parchment: #cfb995;
+  --wire-accent-parchment: #b85c38;
+
+  --wire-canvas-cobalt: #ffffff;
+  --wire-sidebar-cobalt: #102a43;
+  --wire-text-cobalt: #102a43;
+  --wire-muted-cobalt: #91a4b7;
+  --wire-line-cobalt: #c8d9e9;
+  --wire-accent-cobalt: #1769c2;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -127,6 +158,7 @@
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   --shadow-popover: 0 18px 48px color-mix(in srgb, var(--shadow) 55%, transparent);
+  --dialog-backdrop: rgba(0, 0, 0, 0.72);
 }
 
 :root[data-theme="river"] {
@@ -148,6 +180,8 @@
   --accent-soft: #d8f0df;
   --accent-text: #173c2f;
   --success: #27a644;
+  --warning: #8c5800;
+  --warning-soft: #fbecc9;
   --danger: #bd493c;
   --danger-soft: #f2cbc2;
   --danger-text: #ffffff;
@@ -155,6 +189,7 @@
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.45);
   --shadow-popover: 0 18px 48px color-mix(in srgb, var(--shadow) 55%, transparent);
+  --dialog-backdrop: rgba(29, 43, 37, 0.48);
 }
 
 :root[data-theme="parchment"] {
@@ -176,6 +211,8 @@
   --accent-soft: #f3c7a8;
   --accent-text: #552514;
   --success: #27a644;
+  --warning: #8a4f08;
+  --warning-soft: #fae5b9;
   --danger: #9d3f28;
   --danger-soft: #efb8a3;
   --danger-text: #ffffff;
@@ -183,6 +220,7 @@
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.45);
   --shadow-popover: 0 18px 48px color-mix(in srgb, var(--shadow) 55%, transparent);
+  --dialog-backdrop: rgba(74, 55, 40, 0.48);
 }
 
 :root[data-theme="cobalt"] {
@@ -204,6 +242,8 @@
   --accent-soft: #d6e8ff;
   --accent-text: #123f78;
   --success: #27a644;
+  --warning: #945a00;
+  --warning-soft: #fdf0cd;
   --danger: #c94c42;
   --danger-soft: #ffd7d2;
   --danger-text: #ffffff;
@@ -211,4 +251,5 @@
   --shadow-panel: 0 1px 2px color-mix(in srgb, var(--shadow) 28%, transparent);
   --shadow-panel-inset: inset 0 1px 0 rgba(255, 255, 255, 0.45);
   --shadow-popover: 0 18px 48px color-mix(in srgb, var(--shadow) 55%, transparent);
+  --dialog-backdrop: rgba(16, 42, 67, 0.48);
 }

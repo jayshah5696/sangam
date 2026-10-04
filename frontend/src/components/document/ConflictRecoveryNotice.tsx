@@ -80,7 +80,7 @@ export function ConflictRecoveryNotice({
           </details>
         )}
         {error && (
-          <p className="error-text">
+          <p className="error-text" role="alert">
             Sangam could not load the latest server head. Your local draft is unchanged; retry before rebasing
             or discarding.
           </p>

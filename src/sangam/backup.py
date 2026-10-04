@@ -161,9 +161,24 @@ class BackupManager:
             source.close()
 
     def _archive_workspace(self, destination: Path) -> None:
+        def _add_path(archive: tarfile.TarFile, path: Path, arcname: str) -> None:
+            if path.name.startswith(".sangam-readiness-"):
+                return
+            try:
+                archive.add(str(path), arcname=arcname, recursive=False)
+            except OSError:
+                return
+            if path.is_dir():
+                try:
+                    children = sorted(path.iterdir(), key=lambda item: item.name)
+                except OSError:
+                    return
+                for child in children:
+                    _add_path(archive, child, f"{arcname}/{child.name}")
+
         with tarfile.open(destination, "w:gz", format=tarfile.PAX_FORMAT) as archive:
             for child in sorted(self.workspace_root.iterdir(), key=lambda item: item.name):
-                archive.add(child, arcname=child.name, recursive=True)
+                _add_path(archive, child, child.name)
 
     def get(self, backup_id: str) -> BackupSet:
         backup_dir = self._backup_dir(backup_id)

@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { z } from 'zod'
 import type { JsonPayload } from '../api'
 
@@ -50,12 +51,13 @@ export function ChatCreateConfirmation({
   onApprove: () => void
   onCancel: () => void
 }) {
+  const titleId = useId()
   const formatName = FORMAT_LABEL[request.contentType]
   return (
-    <section className="chat-effect-confirmation" role="alertdialog" aria-labelledby="create-confirm-title">
+    <section className="chat-effect-confirmation" role="alertdialog" aria-labelledby={titleId}>
       <div>
         <p className="eyebrow">Workspace write</p>
-        <strong id="create-confirm-title">
+        <strong id={titleId}>
           Create {formatName} document "{request.title}"?
         </strong>
         <span>
@@ -73,10 +75,14 @@ export function ChatCreateConfirmation({
           <code>{request.content}</code>
         </pre>
         <small>No document is created until you approve the content shown above.</small>
-        {error && <p className="error-text">Creation failed. Retry or cancel.</p>}
+        {error && (
+          <p className="error-text" role="alert">
+            Creation failed. Retry or cancel.
+          </p>
+        )}
       </div>
       <div className="chat-effect-actions">
-        <button type="button" className="primary-button" disabled={pending} onClick={onApprove}>
+        <button autoFocus type="button" className="primary-button" disabled={pending} onClick={onApprove}>
           {pending ? 'Creating…' : `Approve ${formatName} document creation`}
         </button>
         <button type="button" className="secondary-action" disabled={pending} onClick={onCancel}>

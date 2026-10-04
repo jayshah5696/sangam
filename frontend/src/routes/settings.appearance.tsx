@@ -666,7 +666,11 @@ function CreateThemeSection() {
               placeholder='{"id":"my-theme","name":"My theme","base":"midnight","colors":{"accent":"#ff8800"}}'
               onChange={(event) => setImportJson(event.target.value)}
             />
-            {importError && <p className="error-text">{importError}</p>}
+            {importError && (
+              <p className="error-text" role="alert">
+                {importError}
+              </p>
+            )}
             <button
               type="button"
               className="secondary-action"

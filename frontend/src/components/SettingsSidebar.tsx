@@ -135,12 +135,26 @@ const settingsSearchIndex: Array<{
     keywords: 'openrouter openai endpoint credential inference',
   },
   {
+    id: 'agent-permission-mode',
+    category: 'models',
+    label: 'Agent permission mode',
+    description: 'Review every effect or allow immediate execution',
+    keywords: 'agent permission mode autonomy yolo approval policy',
+  },
+  {
     id: 'agent-access',
     category: 'agents',
     label: 'Agent access',
     description: 'Issue scoped, expiring workspace tokens',
     keywords:
       'capability token prefix read write publish revoke revoked expired expiring scope permission denied access health',
+  },
+  {
+    id: 'access-health',
+    category: 'agents',
+    label: 'Access health',
+    description: 'Review attention items, token revocations, and rate limit health',
+    keywords: 'health audit attention rate limit revocations',
   },
   {
     id: 'agent-activity',
@@ -162,6 +176,13 @@ const settingsSearchIndex: Array<{
     label: 'Backups',
     description: 'Create and verify recovery sets',
     keywords: 'backup recovery restore verify archive',
+  },
+  {
+    id: 'karakeep-imports',
+    category: 'operations',
+    label: 'Karakeep imports',
+    description: 'Import archived sources while preserving provenance',
+    keywords: 'karakeep imports bookmarks archived provenance',
   },
   {
     id: 'maintenance',
@@ -199,12 +220,18 @@ export function SettingsSidebar({
     queryKey: ['activity-summary', 'access-health'],
     queryFn: () => api.activitySummary(),
   })
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: () => api.health(),
+  })
   const searchInputRef = useRef<HTMLInputElement>(null)
   const normalizedQuery = query.trim().toLowerCase()
   const searchResults = normalizedQuery
-    ? settingsSearchIndex.filter((item) =>
-        `${item.label} ${item.description} ${item.keywords}`.toLowerCase().includes(normalizedQuery),
-      )
+    ? settingsSearchIndex
+        .filter((item) => item.id !== 'karakeep-imports' || Boolean(health.data?.karakeep_configured))
+        .filter((item) =>
+          `${item.label} ${item.description} ${item.keywords}`.toLowerCase().includes(normalizedQuery),
+        )
     : []
 
   useEffect(() => {
