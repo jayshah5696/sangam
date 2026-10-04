@@ -477,10 +477,15 @@ class ProjectService:
         with self.database.connection() as conn:
             rows = conn.execute(
                 """SELECT pd.*, d.title AS document_title, d.path AS document_path,
-                d.content_type, d.current_revision_id, d.updated_at, r.content
+                d.content_type, d.current_revision_id, d.updated_at, r.content,
+                pdf_sup.document_id AS superseded_by_document_id,
+                d_sup.title AS superseded_by_title
                 FROM project_documents pd JOIN documents d
                     ON d.document_id=pd.document_id AND d.deleted=0
-                JOIN revisions r ON r.revision_id=d.current_revision_id
+                LEFT JOIN revisions r ON r.revision_id=d.current_revision_id
+                LEFT JOIN pdf_documents pdf_sup ON pdf_sup.supersedes_document_id=pd.document_id
+                LEFT JOIN documents d_sup
+                    ON d_sup.document_id=pdf_sup.document_id AND d_sup.deleted=0
                 WHERE pd.project_id=? ORDER BY pd.created_at, pd.document_id""",
                 (project_id,),
             ).fetchall()
@@ -501,10 +506,17 @@ class ProjectService:
                             "source_revision_id",
                             "current_revision_id",
                             "updated_at",
+                            "superseded_by_document_id",
+                            "superseded_by_title",
                         )
                     },
-                    source_updated=r["source_revision_id"] is not None
-                    and r["source_revision_id"] != r["current_revision_id"],
+                    source_updated=(
+                        (
+                            r["source_revision_id"] is not None
+                            and r["source_revision_id"] != r["current_revision_id"]
+                        )
+                        or bool(r["superseded_by_document_id"])
+                    ),
                     excerpt=" ".join(
                         line.strip()
                         for line in (r["content"] or "").splitlines()

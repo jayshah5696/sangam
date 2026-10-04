@@ -16,12 +16,11 @@ import { announceCitationNavigation } from '../../citationNavigation'
 import { citationHref } from '../../citationNavigation'
 import { chatNavigationState } from '../../chatNavigation'
 import { useDocumentSessions } from '../../documentSessions'
-import { itemToEvidenceReference, type EvidenceItem, remapEvidencePassage } from '../../evidenceCitation'
+import { itemToEvidenceReference, type EvidenceItem } from '../../evidenceCitation'
 import { shortRevision } from '../../evidenceCitation'
 import { useTheme } from '../../theme'
 import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
-import { MarkdownPreview } from '../MarkdownPreview'
-import { SelectableHtmlText } from '../SelectableHtmlText'
+import { SourceVersionComparisonModal } from './SourceVersionComparisonModal'
 import { ModalDialog } from '../ui/ModalDialog'
 import { StateMessage } from '../ui/StateMessage'
 
@@ -576,132 +575,6 @@ function ExcerptComparisonModal({
           <button type="button" className="secondary-action" onClick={onClose}>
             Close
           </button>
-        </footer>
-      </div>
-    </ModalDialog>
-  )
-}
-
-function SourceVersionComparisonModal({
-  item,
-  onClose,
-  onUpdateRevision,
-}: {
-  item: EvidenceItem
-  onClose: () => void
-  onUpdateRevision: (newRevisionId: string, content: string) => Promise<void>
-}) {
-  const [error, setError] = useState<string | null>(null)
-  const historyQuery = useQuery({
-    queryKey: ['revision', item.sourceDocumentId, item.pinnedRevisionId],
-    queryFn: () => api.revision(item.sourceDocumentId, item.pinnedRevisionId ?? ''),
-    enabled: Boolean(item.pinnedRevisionId),
-  })
-
-  const docQuery = useQuery({
-    queryKey: ['document', item.sourceDocumentId],
-    queryFn: () => api.getDocument(item.sourceDocumentId),
-  })
-
-  const pinnedRev = historyQuery.data
-  const currentDoc = docQuery.data
-  const currentRevId = currentDoc?.current_revision_id
-  const remapped = currentDoc && remapEvidencePassage(currentDoc.content, item)
-
-  return (
-    <ModalDialog className="evidence-modal-dialog wide" ariaLabel="Compare source versions" onClose={onClose}>
-      <div className="evidence-modal-content wide">
-        <header className="evidence-modal-header">
-          <div>
-            <strong>Compare source versions: {item.sourceTitle}</strong>
-            <p className="small-muted">
-              Pinned: {shortRevision(item.pinnedRevisionId)} &middot; Current head:{' '}
-              {shortRevision(currentRevId)}
-            </p>
-          </div>
-          <button type="button" className="icon-button-sm" onClick={onClose} aria-label="Close comparison">
-            <X size="var(--icon-control)" />
-          </button>
-        </header>
-
-        <div className="evidence-version-comparison-body">
-          <div className="evidence-version-column">
-            <h4>Pinned revision ({shortRevision(item.pinnedRevisionId)})</h4>
-            <div className="comparison-preview-container">
-              {pinnedRev ? (
-                item.sourceContentType === 'text/html' ? (
-                  <SelectableHtmlText content={pinnedRev.content} initiallyOpen />
-                ) : (
-                  <MarkdownPreview content={pinnedRev.content} />
-                )
-              ) : (
-                <StateMessage
-                  compact
-                  kind={historyQuery.isError || historyQuery.isSuccess ? 'error' : 'loading'}
-                  title={
-                    historyQuery.isError || historyQuery.isSuccess
-                      ? 'Pinned revision snapshot is unavailable'
-                      : 'Loading pinned revision snapshot'
-                  }
-                />
-              )}
-            </div>
-          </div>
-          <div className="evidence-version-column">
-            <h4>Current head revision ({shortRevision(currentRevId)})</h4>
-            <div className="comparison-preview-container">
-              {currentDoc ? (
-                item.sourceContentType === 'text/html' ? (
-                  <SelectableHtmlText content={currentDoc.content} initiallyOpen />
-                ) : (
-                  <MarkdownPreview content={currentDoc.content} />
-                )
-              ) : (
-                <StateMessage
-                  compact
-                  kind={docQuery.isError ? 'error' : 'loading'}
-                  title={docQuery.isError ? 'Current source could not be loaded' : 'Loading current source'}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-
-        <footer className="evidence-modal-footer">
-          {error && (
-            <StateMessage
-              compact
-              kind="error"
-              title="Evidence revision could not be replaced"
-              description={error}
-            />
-          )}
-          {currentDoc && !remapped && (
-            <StateMessage
-              compact
-              kind="empty"
-              title="The original passage cannot be located in the current revision"
-              description="Keep the original pin or capture a new passage from the updated source."
-            />
-          )}
-          <button type="button" className="secondary-action" onClick={onClose}>
-            Keep original pinned reference
-          </button>
-          {currentRevId && (
-            <button
-              type="button"
-              className="panel-button"
-              disabled={!remapped || !pinnedRev || item.sourceContentType === 'application/pdf'}
-              onClick={() => {
-                if (currentDoc)
-                  void onUpdateRevision(currentRevId, currentDoc.content).catch((error) =>
-                    setError(error instanceof Error ? error.message : String(error)),
-                  )
-              }}
-            >
-              Update to current head revision
-            </button>
-          )}
         </footer>
       </div>
     </ModalDialog>
