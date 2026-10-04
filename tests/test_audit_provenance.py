@@ -697,14 +697,70 @@ def test_hardened_security_sanitization_patterns() -> None:
 
     text_assignment = (
         "Config: signing_key='secret_sign_123' and encryption_key=\"enc_456\" "
-        "and account_key: acc_789 and id_token=id_tok_000"
+        "and account_key: acc_789 and id_token=id_tok_000 and ENV_VAR=my_env_secret "
+        "and AUTH_SECRET=my_auth_secret_val"
     )
     sanitized_text = sanitize_sensitive_text(text_assignment)
     assert "secret_sign_123" not in sanitized_text
     assert "enc_456" not in sanitized_text
     assert "acc_789" not in sanitized_text
     assert "id_tok_000" not in sanitized_text
+    assert "my_env_secret" not in sanitized_text
+    assert "my_auth_secret_val" not in sanitized_text
     assert "signing_key=[REDACTED]" in sanitized_text
     assert "encryption_key=[REDACTED]" in sanitized_text
     assert "account_key=[REDACTED]" in sanitized_text
     assert "id_token=[REDACTED]" in sanitized_text
+    assert "ENV_VAR=[REDACTED]" in sanitized_text
+    assert "AUTH_SECRET=[REDACTED]" in sanitized_text
+
+
+def test_audit_details_automatically_include_action_type_and_target_file(
+    client: TestClient,
+) -> None:
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Action Type Target File Doc",
+            "content": "# Test\nInitial.",
+            "path": "docs/action_type_target_file.md",
+        },
+        headers=headers("idemp_action_target_create"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "# Test\nModified.",
+        },
+        headers=headers("idemp_action_target_update"),
+    )
+    assert update_resp.status_code == 200
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = [e for e in activity_resp.json() if e["resource_id"] == doc_id]
+    actions = {e["action"]: e for e in events}
+
+    assert "create" in actions
+    assert actions["create"]["details"]["action_type"] == "create"
+    assert actions["create"]["details"]["target_file"] == "docs/action_type_target_file.md"
+
+    assert "update" in actions
+    assert actions["update"]["details"]["action_type"] == "update"
+    assert actions["update"]["details"]["target_file"] == "docs/action_type_target_file.md"
+
+    # Export JSONL and verify structured details carry action_type and target_file
+    jsonl_resp = client.get("/api/v1/activity/export.jsonl", params={"actor_kind": "human"})
+    assert jsonl_resp.status_code == 200
+    lines = [json.loads(line) for line in jsonl_resp.text.strip().split("\n") if line.strip()]
+    doc_jsonl_events = [line for line in lines if line.get("resource_id") == doc_id]
+    assert len(doc_jsonl_events) >= 2
+    for event in doc_jsonl_events:
+        assert "action_type" in event["details"]
+        assert "target_file" in event["details"]
