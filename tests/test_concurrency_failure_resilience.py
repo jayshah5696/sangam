@@ -2447,3 +2447,77 @@ def test_concurrent_folder_metadata_updates_preserve_latest_manifest(
 
     assert manifest_data["metadata_version"] == winner_folder["metadata_version"]
     assert manifest_data["category"] == winner_folder["category"]
+
+
+def test_concurrent_folder_move_and_metadata_update_preserves_manifest_consistency(
+    client: TestClient, settings
+) -> None:
+    source_path = "research/team"
+    sub_path = "research/team/docs"
+
+    # Create folder hierarchy
+    res_parent = client.post(
+        "/api/v1/folders",
+        json={"path": source_path, "category": "Team Folder"},
+        headers=headers("create-parent-folder"),
+    )
+    assert res_parent.status_code == 201
+    parent_folder = res_parent.json()
+    parent_id = parent_folder["folder_id"]
+
+    res_sub = client.post(
+        "/api/v1/folders",
+        json={"path": sub_path, "category": "Sub Docs"},
+        headers=headers("create-sub-folder"),
+    )
+    assert res_sub.status_code == 201
+    sub_folder = res_sub.json()
+    sub_id = sub_folder["folder_id"]
+    sub_version = sub_folder["metadata_version"]
+
+    target_path = "archive/team"
+
+    results = []
+
+    def op_move_parent():
+        resp = client.post(
+            f"/api/v1/folders/{parent_id}/move",
+            json={"path": target_path},
+            headers=headers("move-folder-race"),
+        )
+        results.append(("move", resp))
+
+    def op_update_sub_metadata():
+        resp = client.patch(
+            f"/api/v1/folders/{sub_id}",
+            json={
+                "expected_metadata_version": sub_version,
+                "category": "Updated Sub Category",
+            },
+            headers=headers("update-sub-folder-race"),
+        )
+        results.append(("update", resp))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(op_move_parent)
+        f2 = executor.submit(op_update_sub_metadata)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    # Verify created/moved folders have matching .sangam-folder.json manifests on disk
+    db = client.app.state.services.activity.database
+    with db.connection() as conn:
+        for folder_id in (parent_id, sub_id):
+            row = conn.execute(
+                "SELECT folder_id, path, category, metadata_version "
+                "FROM folders WHERE folder_id = ?",
+                (folder_id,),
+            ).fetchone()
+            assert row is not None
+            manifest_file = settings.workspace_root / row["path"] / ".sangam-folder.json"
+            assert manifest_file.is_file(), f"Manifest file missing for folder {row['path']}"
+            data = json.loads(manifest_file.read_text(encoding="utf-8"))
+            assert data["folder_id"] == row["folder_id"]
+            assert data["path"] == row["path"]
+            assert data["category"] == row["category"]
+            assert data["metadata_version"] == row["metadata_version"]
