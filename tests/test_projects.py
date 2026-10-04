@@ -527,6 +527,7 @@ def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters
 
 def test_project_pdf_document_and_superseded_source_update(client: TestClient) -> None:
     from test_phase_five_pdf_research import text_pdf
+
     pdf_bytes = text_pdf("Original research findings on efficiency.")
     create_pdf = client.post(
         "/api/v1/pdfs",
