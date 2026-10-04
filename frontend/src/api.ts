@@ -1633,6 +1633,23 @@ export const api = {
       }),
     )
   },
+  async captureUrl(
+    url: string,
+    options?: { title?: string; path?: string; projectId?: string; idempotencyKey?: string },
+  ): Promise<Document> {
+    return documentSchema.parse(
+      await request('/captures/url', {
+        method: 'POST',
+        headers: options?.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : undefined,
+        body: JSON.stringify({
+          url,
+          title: options?.title,
+          path: options?.path,
+          project_id: options?.projectId,
+        }),
+      }),
+    )
+  },
   async importPdf(file: File, title: string, path: string, supersedesDocumentId?: string): Promise<Document> {
     const params = new URLSearchParams({ title, path })
     if (supersedesDocumentId) params.set('supersedes_document_id', supersedesDocumentId)

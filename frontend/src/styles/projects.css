@@ -130,7 +130,8 @@
 }
 
 .project-modal-dialog::backdrop {
-  background: color-mix(in srgb, var(--text) 45%, transparent);
+  background: var(--dialog-backdrop);
+  backdrop-filter: blur(2px);
 }
 
 .project-modal-input,

@@ -533,7 +533,11 @@ function PdfReplacementControl({ document }: { document: Document }) {
         />
       </label>
       {replacement.isSuccess && <p className="operation-result">Replacement imported.</p>}
-      {replacement.isError && <p className="error-text">The replacement could not be imported.</p>}
+      {replacement.isError && (
+        <p className="error-text" role="alert">
+          The replacement could not be imported.
+        </p>
+      )}
     </section>
   )
 }

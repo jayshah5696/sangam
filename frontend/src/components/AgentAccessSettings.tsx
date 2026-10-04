@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Activity, AlertTriangle, Bot, KeyRound, Pencil, RefreshCw, ShieldOff, X } from 'lucide-react'
 import { api, type AgentToken, type IssuedAgentToken, type TokenScope } from '../api'
+import { ModalDialog } from './ui/ModalDialog'
 import { OneTimeSecret } from './OneTimeSecret'
 import { StateMessage } from './ui/StateMessage'
 
@@ -212,7 +213,6 @@ export function AgentAccessSettings() {
   const [editing, setEditing] = useState<AgentToken | null>(null)
   const [rotating, setRotating] = useState<AgentToken | null>(null)
   const [showRevoked, setShowRevoked] = useState(false)
-  const secretDialogRef = useRef<HTMLDialogElement>(null)
   const writePrefixRef = useRef<HTMLInputElement>(null)
   const sensitiveConfirmationRef = useRef<HTMLInputElement>(null)
 
@@ -223,13 +223,7 @@ export function AgentAccessSettings() {
   const sensitiveConfirmationMissing = selectedSensitiveCapabilities.length > 0 && !sensitiveConfirmed
   const capabilityMissing = selected.size === 0
 
-  useEffect(() => {
-    const dialog = secretDialogRef.current
-    if (issued && dialog && !dialog.open && dialog.showModal) dialog.showModal()
-  }, [issued])
-
   const closeIssuedSecret = () => {
-    secretDialogRef.current?.close()
     setIssued(null)
   }
 
@@ -320,17 +314,12 @@ export function AgentAccessSettings() {
         <span className="scope-badge workspace">Shared workspace</span>
       </header>
       <div className="settings-panel-body agent-access-settings">
-        <dialog
-          ref={secretDialogRef}
-          className="one-time-secret-dialog"
-          aria-label="New agent token secret"
-          onCancel={(event) => {
-            event.preventDefault()
-            closeIssuedSecret()
-          }}
-          onClose={() => setIssued(null)}
-        >
-          {issued && (
+        {issued && (
+          <ModalDialog
+            className="one-time-secret-dialog"
+            ariaLabel="New agent token secret"
+            onClose={closeIssuedSecret}
+          >
             <OneTimeSecret
               title={issued.rotated_from_token_id ? 'Token rotated' : 'Copy this token now'}
               description={
@@ -348,8 +337,8 @@ export function AgentAccessSettings() {
               dismissLabel="I saved it"
               onDismiss={closeIssuedSecret}
             />
-          )}
-        </dialog>
+          </ModalDialog>
+        )}
         {rotating && (
           <AgentTokenRotator
             token={rotating}
@@ -369,7 +358,12 @@ export function AgentAccessSettings() {
             onSave={(input) => update.mutate({ tokenId: editing.token_id, ...input })}
           />
         )}
-        <section className="agent-access-health" aria-labelledby="access-health-title">
+        <section
+          className="agent-access-health"
+          id="access-health"
+          tabIndex={-1}
+          aria-labelledby="access-health-title"
+        >
           <div className="settings-subtitle">
             <div>
               <ShieldOff size="var(--icon-control)" />
@@ -797,22 +791,10 @@ function AgentTokenRotator({
   onClose: () => void
   onRotate: () => void
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (dialog && !dialog.open && dialog.showModal) dialog.showModal()
-  }, [])
-
   return (
-    <dialog
-      ref={dialogRef}
+    <ModalDialog
       className="agent-token-rotate-dialog"
-      aria-label={`Rotate secret for ${token.label}`}
-      onCancel={(event) => {
-        event.preventDefault()
-        onClose()
-      }}
+      ariaLabel={`Rotate secret for ${token.label}`}
       onClose={onClose}
     >
       <header>
@@ -861,7 +843,7 @@ function AgentTokenRotator({
           </button>
         </div>
       </div>
-    </dialog>
+    </ModalDialog>
   )
 }
 
@@ -883,7 +865,6 @@ function AgentTokenEditor({
     expires_at: string | null
   }) => void
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
   const isCurrentlyExpired = token.expires_at ? new Date(token.expires_at) <= new Date() : false
   const [label, setLabel] = useState(token.label)
   const [expiresAt, setExpiresAt] = useState(() =>
@@ -900,20 +881,10 @@ function AgentTokenEditor({
   const writePrefixMissing = hasMutations && normalizePrefixInput(prefixes.write) === null
   const sensitiveConfirmationMissing = selectedSensitiveCapabilities.length > 0 && !sensitiveConfirmed
 
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (dialog && !dialog.open && dialog.showModal) dialog.showModal()
-  }, [])
-
   return (
-    <dialog
-      ref={dialogRef}
+    <ModalDialog
       className="agent-token-edit-dialog"
-      aria-label={isCurrentlyExpired ? `Renew ${token.label}` : `Edit ${token.label}`}
-      onCancel={(event) => {
-        event.preventDefault()
-        onClose()
-      }}
+      ariaLabel={isCurrentlyExpired ? `Renew ${token.label}` : `Edit ${token.label}`}
       onClose={onClose}
     >
       <header>
@@ -1085,7 +1056,11 @@ function AgentTokenEditor({
             </div>
           </div>
         )}
-        {selected.size === 0 && <p className="error-text">Choose at least one capability.</p>}
+        {selected.size === 0 && (
+          <p className="error-text" role="alert">
+            Choose at least one capability.
+          </p>
+        )}
         {error && (
           <p className="operation-result error-text" role="alert">
             {error}
@@ -1106,6 +1081,6 @@ function AgentTokenEditor({
           </button>
         </div>
       </form>
-    </dialog>
+    </ModalDialog>
   )
 }

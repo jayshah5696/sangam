@@ -229,7 +229,7 @@
   border: 1px solid color-mix(in srgb, var(--annotation-color) 76%, black);
   border-radius: 50%;
   background: var(--annotation-color);
-  color: #151515;
+  color: var(--annotation-badge-text);
   box-shadow: 0 var(--space-1) var(--space-2) var(--shadow);
 }
 
@@ -251,7 +251,7 @@
   border: 1px solid color-mix(in srgb, var(--annotation-color) 72%, black);
   border-radius: 50% 50% 50% var(--radius-control);
   background: var(--annotation-color);
-  color: #151515;
+  color: var(--annotation-badge-text);
   box-shadow: 0 var(--space-1) var(--space-2) var(--shadow);
 }
 
@@ -961,7 +961,29 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--dialog-backdrop);
+  backdrop-filter: blur(2px);
+}
+
+dialog.evidence-modal-dialog {
+  width: min(40rem, calc(100vw - var(--space-4) * 2));
+  max-height: 85vh;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: 0 var(--space-4) var(--space-5) var(--shadow);
+  overflow: hidden;
+}
+
+dialog.evidence-modal-dialog.wide {
+  width: min(60rem, calc(100vw - var(--space-4) * 2));
+}
+
+dialog.evidence-modal-dialog::backdrop {
+  background: var(--dialog-backdrop);
+  backdrop-filter: blur(2px);
 }
 
 .evidence-modal-content {

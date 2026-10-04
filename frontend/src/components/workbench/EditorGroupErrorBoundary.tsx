@@ -31,8 +31,8 @@ export class EditorGroupErrorBoundary extends Component<Props, State> {
   render() {
     if (!this.state.error) return this.props.children
     return (
-      <section className="editor-group group-error" role="alert">
-        <div className="center-message error-text">
+      <section className="editor-group group-error">
+        <div className="center-message error-text" role="alert">
           <strong>This editor group could not be rendered.</strong>
           <p>The rest of your workbench is still available.</p>
           <button onClick={this.props.onRecover}>Close this group</button>

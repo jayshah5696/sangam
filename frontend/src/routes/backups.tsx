@@ -126,8 +126,16 @@ function BackupCard({ backup }: { backup: BackupSet }) {
           SQLite integrity: {verify.data.database_integrity} · {verify.data.workspace_members} archive entries
         </p>
       )}
-      {verify.isError && <p className="error-text">Verification failed. Do not rely on this backup set.</p>}
-      {remove.isError && <p className="error-text">Backup deletion failed. The set was not removed.</p>}
+      {verify.isError && (
+        <p className="error-text" role="alert">
+          Verification failed. Do not rely on this backup set.
+        </p>
+      )}
+      {remove.isError && (
+        <p className="error-text" role="alert">
+          Backup deletion failed. The set was not removed.
+        </p>
+      )}
     </article>
   )
 }

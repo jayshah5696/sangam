@@ -21,6 +21,7 @@ from sangam import __version__
 from sangam.access import writes
 from sangam.agent_docs import agent_skill, llms_txt
 from sangam.api_assignments import create_assignments_router
+from sangam.api_capture import create_capture_router
 from sangam.api_chat import create_chat_router
 from sangam.api_comments import create_comments_router
 from sangam.api_karakeep import create_karakeep_router
@@ -1148,6 +1149,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         create_karakeep_router(
             karakeep=karakeep,
             workspace=workspace,
+            require_administrator=require_administrator,
+        )
+    )
+    app.include_router(
+        create_capture_router(
+            capture=services.capture,
             require_administrator=require_administrator,
         )
     )

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -22,6 +22,7 @@ import { useTheme } from '../../theme'
 import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { SelectableHtmlText } from '../SelectableHtmlText'
+import { ModalDialog } from '../ui/ModalDialog'
 import { StateMessage } from '../ui/StateMessage'
 
 export function WorkspaceEvidenceRail({ document }: { document?: Document | null }) {
@@ -536,18 +537,8 @@ function ExcerptComparisonModal({
   onClose: () => void
 }) {
   const [a, b] = pair
-  const dialogRef = useComparisonDialog(onClose)
   return (
-    <div
-      ref={dialogRef}
-      className="evidence-modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Compare evidence excerpts"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
+    <ModalDialog className="evidence-modal-dialog" ariaLabel="Compare evidence excerpts" onClose={onClose}>
       <div className="evidence-modal-content">
         <header className="evidence-modal-header">
           <strong>Compare excerpts</strong>
@@ -587,7 +578,7 @@ function ExcerptComparisonModal({
           </button>
         </footer>
       </div>
-    </div>
+    </ModalDialog>
   )
 }
 
@@ -600,7 +591,6 @@ function SourceVersionComparisonModal({
   onClose: () => void
   onUpdateRevision: (newRevisionId: string, content: string) => Promise<void>
 }) {
-  const dialogRef = useComparisonDialog(onClose)
   const [error, setError] = useState<string | null>(null)
   const historyQuery = useQuery({
     queryKey: ['revision', item.sourceDocumentId, item.pinnedRevisionId],
@@ -619,16 +609,7 @@ function SourceVersionComparisonModal({
   const remapped = currentDoc && remapEvidencePassage(currentDoc.content, item)
 
   return (
-    <div
-      ref={dialogRef}
-      className="evidence-modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Compare source versions"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
+    <ModalDialog className="evidence-modal-dialog wide" ariaLabel="Compare source versions" onClose={onClose}>
       <div className="evidence-modal-content wide">
         <header className="evidence-modal-header">
           <div>
@@ -723,49 +704,6 @@ function SourceVersionComparisonModal({
           )}
         </footer>
       </div>
-    </div>
+    </ModalDialog>
   )
-}
-
-function useComparisonDialog(onClose: () => void) {
-  const ref = useRef<HTMLDivElement>(null)
-  const closeRef = useRef(onClose)
-  useEffect(() => {
-    closeRef.current = onClose
-  }, [onClose])
-  useEffect(() => {
-    const trigger = globalThis.document.activeElement
-    const dialog = ref.current
-    if (!dialog) return
-    const controls = () =>
-      Array.from(
-        dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, [href], [tabindex="0"]'),
-      )
-    controls()[0]?.focus()
-    const keyboard = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        closeRef.current()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const items = controls()
-      const first = items[0],
-        last = items.at(-1)
-      if (event.shiftKey && globalThis.document.activeElement === first) {
-        event.preventDefault()
-        last?.focus()
-      } else if (!event.shiftKey && globalThis.document.activeElement === last) {
-        event.preventDefault()
-        first?.focus()
-      }
-    }
-    dialog.addEventListener('keydown', keyboard)
-    return () => {
-      dialog.removeEventListener('keydown', keyboard)
-      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus()
-    }
-  }, [])
-  return ref
 }
