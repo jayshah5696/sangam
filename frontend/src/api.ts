@@ -553,6 +553,21 @@ function activityParams(filters: ActivityFilters): URLSearchParams {
   return params
 }
 
+export const publishedEvidenceItemSchema = z.object({
+  id: z.string(),
+  claim: z.string().nullable().optional(),
+  selected_text: z.string(),
+  note: z.string().nullable().optional(),
+  source_title: z.string(),
+  source_document_id: z.string().nullable().optional(),
+  pinned_revision_id: z.string().nullable().optional(),
+  page_number: z.number().nullable().optional(),
+  source_is_public: z.boolean().default(false),
+  source_slug: z.string().nullable().optional(),
+})
+
+export type PublishedEvidenceItem = z.infer<typeof publishedEvidenceItemSchema>
+
 export const publicationSchema = z.object({
   publication_id: z.string(),
   document_id: z.string(),
@@ -570,6 +585,7 @@ export const publicationSchema = z.object({
   url: z.string(),
   revision_id: z.string(),
   document_revision_id: z.string(),
+  evidence: z.array(publishedEvidenceItemSchema).default([]),
 })
 
 export type Publication = z.infer<typeof publicationSchema>
@@ -653,6 +669,7 @@ export const publicationContentSchema = z.object({
   is_latest: z.boolean(),
   asset_base_url: z.string(),
   interactive_preview: trustedPreviewGrantSchema.nullable(),
+  evidence: z.array(publishedEvidenceItemSchema).default([]),
 })
 
 export type PublicationContent = z.infer<typeof publicationContentSchema>
@@ -1763,6 +1780,7 @@ export const api = {
     slug: string,
     accessPolicy: Publication['access_policy'],
     revisionId?: string,
+    evidence?: PublishedEvidenceItem[],
   ): Promise<IssuedPublication> {
     return issuedPublicationSchema.parse(
       await request('/publications', {
@@ -1772,6 +1790,7 @@ export const api = {
           slug,
           access_policy: accessPolicy,
           revision_id: revisionId ?? null,
+          evidence: evidence ?? null,
         }),
       }),
     )
@@ -1782,6 +1801,7 @@ export const api = {
     slug: string,
     accessPolicy: Publication['access_policy'],
     revisionId?: string,
+    evidence?: PublishedEvidenceItem[],
   ): Promise<IssuedPublication> {
     return issuedPublicationSchema.parse(
       await request(`/publications/${publication.publication_id}`, {
@@ -1791,6 +1811,7 @@ export const api = {
           slug,
           access_policy: accessPolicy,
           revision_id: revisionId ?? null,
+          evidence: evidence ?? null,
         }),
       }),
     )

@@ -73,6 +73,7 @@ from sangam.schemas import (
     PdfSearchResult,
     Publication,
     PublicationRevision,
+    PublishedEvidenceItem,
     ResolveDocumentCommentRequest,
     RestoreDocument,
     Revision,
@@ -1109,6 +1110,7 @@ class WorkspaceAccessService:
         access_policy: str,
         idempotency_key: str,
         revision_id: str | None = None,
+        evidence: list[PublishedEvidenceItem] | None = None,
     ) -> IssuedPublication:
         current = self.documents.get_document(document_id)
 
@@ -1121,6 +1123,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
                 revision_id=revision_id,
+                evidence=evidence,
             )
 
         details: dict[str, object] = {
@@ -1224,6 +1227,7 @@ class WorkspaceAccessService:
         access_policy: str,
         idempotency_key: str,
         revision_id: str | None = None,
+        evidence: list[PublishedEvidenceItem] | None = None,
     ) -> IssuedPublication:
         publication = self.publications.get_publication(publication_id)
         current = self.documents.get_document(publication.document_id)
@@ -1238,6 +1242,7 @@ class WorkspaceAccessService:
                 actor_id=principal.actor_id,
                 idempotency_key=idempotency_key,
                 revision_id=revision_id,
+                evidence=evidence,
             )
 
         details: dict[str, object] = {

@@ -6,8 +6,8 @@ describe('workspace layout presets', () => {
     expect(workspaceLayoutPresets.map((preset) => preset.id)).toEqual(['writing', 'research', 'review'])
     expect(workspaceLayoutPatch('writing')).toEqual({
       editorMode: 'edit',
-      rightVisible: false,
-      rightTab: 'properties',
+      rightVisible: true,
+      rightTab: 'research',
     })
     expect(workspaceLayoutPatch('research')).toEqual({
       editorMode: 'split',

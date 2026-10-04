@@ -147,9 +147,9 @@ remain the focus.
 New documents open in Edit mode. The document inspector provides three layout
 presets:
 
-- **Writing** selects Edit mode and hides the inspector.
-- **Research** selects Split mode and opens the Research tab.
-- **Review** selects Preview mode and opens revision history.
+- **Writing** selects Edit mode beside project sources, related notes, and citations in the right rail.
+- **Research** selects Split mode beside research tools and evidence capture.
+- **Review** selects Preview mode beside revision comparison history and supporting evidence.
 
 ## Search, saved views, and capture
 

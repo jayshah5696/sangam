@@ -1239,6 +1239,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             access_policy=body.access_policy,
             idempotency_key=idempotency_key,
             revision_id=body.revision_id,
+            evidence=body.evidence,
         )
 
     @app.patch("/api/v1/publications/{publication_id}", response_model=IssuedPublication)
@@ -1256,6 +1257,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             access_policy=body.access_policy,
             idempotency_key=idempotency_key,
             revision_id=body.revision_id,
+            evidence=body.evidence,
         )
 
     @app.delete("/api/v1/publications/{publication_id}", response_model=Publication)

@@ -16,13 +16,13 @@ type WorkspaceLayoutPatch = {
 }
 
 export const workspaceLayoutPresets: WorkspaceLayoutPreset[] = [
-  { id: 'writing', label: 'Writing', description: 'Focus on the editor' },
-  { id: 'research', label: 'Research', description: 'Edit beside research tools' },
-  { id: 'review', label: 'Review', description: 'Preview with revision history' },
+  { id: 'writing', label: 'Writing', description: 'Edit beside sources and related notes' },
+  { id: 'research', label: 'Research', description: 'Split editor beside research tools' },
+  { id: 'review', label: 'Review', description: 'Preview beside changes and evidence' },
 ]
 
 export function workspaceLayoutPatch(id: WorkspaceLayoutId): WorkspaceLayoutPatch {
-  if (id === 'writing') return { editorMode: 'edit', rightVisible: false, rightTab: 'properties' }
+  if (id === 'writing') return { editorMode: 'edit', rightVisible: true, rightTab: 'research' }
   if (id === 'research') return { editorMode: 'split', rightVisible: true, rightTab: 'research' }
   return { editorMode: 'preview', rightVisible: true, rightTab: 'history' }
 }

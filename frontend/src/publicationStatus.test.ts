@@ -19,6 +19,7 @@ const publication: Publication = {
   url: 'https://example.test/p/notes',
   revision_id: 'rev-1',
   document_revision_id: 'rev-1',
+  evidence: [],
 }
 
 describe('publicationStatus', () => {

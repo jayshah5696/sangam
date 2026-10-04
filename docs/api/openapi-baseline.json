@@ -3313,6 +3313,20 @@
             "title": "Document Id",
             "type": "string"
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PublishedEvidenceItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
           "revision_id": {
             "anyOf": [
               {
@@ -4387,6 +4401,13 @@
           "document_title": {
             "title": "Document Title",
             "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/PublishedEvidenceItem"
+            },
+            "title": "Evidence",
+            "type": "array"
           },
           "has_active_token": {
             "title": "Has Active Token",
@@ -6773,6 +6794,13 @@
             "title": "Document Title",
             "type": "string"
           },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/PublishedEvidenceItem"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
           "has_active_token": {
             "title": "Has Active Token",
             "type": "boolean"
@@ -6848,6 +6876,13 @@
           "document_id": {
             "title": "Document Id",
             "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/PublishedEvidenceItem"
+            },
+            "title": "Evidence",
+            "type": "array"
           },
           "interactive_preview": {
             "anyOf": [
@@ -6934,6 +6969,100 @@
           "exposed_at"
         ],
         "title": "PublicationRevision",
+        "type": "object"
+      },
+      "PublishedEvidenceItem": {
+        "properties": {
+          "claim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "page_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Number"
+          },
+          "pinned_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Revision Id"
+          },
+          "selected_text": {
+            "title": "Selected Text",
+            "type": "string"
+          },
+          "source_document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document Id"
+          },
+          "source_is_public": {
+            "default": false,
+            "title": "Source Is Public",
+            "type": "boolean"
+          },
+          "source_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Slug"
+          },
+          "source_title": {
+            "title": "Source Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "selected_text",
+          "source_title"
+        ],
+        "title": "PublishedEvidenceItem",
         "type": "object"
       },
       "ReconciliationConflict": {
@@ -8295,6 +8424,20 @@
             ],
             "title": "Access Policy",
             "type": "string"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PublishedEvidenceItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
           },
           "expected_version": {
             "minimum": 0.0,
@@ -35368,6 +35511,6 @@
   },
   "x-sangam-baseline-review": {
     "date": "2026-10-03",
-    "reason": "Add SSRF-guarded admin URL capture endpoint POST /api/v1/captures/url for Issue #371"
+    "reason": "Add optional evidence drawer to publication schemas (#329) and SSRF-guarded admin URL capture endpoint (#371)"
   }
 }

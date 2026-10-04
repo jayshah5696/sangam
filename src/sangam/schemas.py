@@ -744,6 +744,19 @@ class UpdateHtmlJavascriptSettings(BaseModel):
     enabled: bool
 
 
+class PublishedEvidenceItem(BaseModel):
+    id: str
+    claim: str | None = None
+    selected_text: str
+    note: str | None = None
+    source_title: str
+    source_document_id: str | None = None
+    pinned_revision_id: str | None = None
+    page_number: int | None = None
+    source_is_public: bool = False
+    source_slug: str | None = None
+
+
 class Publication(BaseModel):
     publication_id: str
     document_id: str
@@ -763,6 +776,7 @@ class Publication(BaseModel):
     revision_id: str
     # The document's current head, so clients can tell whether the draft moved on.
     document_revision_id: str
+    evidence: list[PublishedEvidenceItem] = Field(default_factory=list)
 
 
 class IssuedPublication(Publication):
@@ -775,6 +789,7 @@ class CreatePublication(MutationRequest):
     access_policy: Literal["private", "public", "unlisted"] = "private"
     # Defaults to the document's current revision.
     revision_id: str | None = None
+    evidence: list[PublishedEvidenceItem] | None = None
 
 
 class UpdatePublication(MutationRequest):
@@ -783,6 +798,7 @@ class UpdatePublication(MutationRequest):
     access_policy: Literal["private", "public", "unlisted"]
     # Omit to keep the published revision; pass a revision to publish it.
     revision_id: str | None = None
+    evidence: list[PublishedEvidenceItem] | None = None
 
 
 class PublicationRevision(BaseModel):
@@ -815,6 +831,7 @@ class PublicationContent(BaseModel):
     is_latest: bool
     asset_base_url: str
     interactive_preview: TrustedPreviewGrant | None = None
+    evidence: list[PublishedEvidenceItem] = Field(default_factory=list)
 
 
 class PdfRect(BaseModel):

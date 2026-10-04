@@ -30,6 +30,9 @@ import { workspaceLayoutPatch, workspaceLayoutPresets } from '../../workspaceLay
 
 import { WorkspaceEvidenceRail } from '../evidence/WorkspaceEvidenceRail'
 import { DocumentBacklinks } from './DocumentBacklinks'
+import { DocumentSourcesAndNotes } from './DocumentSourcesAndNotes'
+import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
+import type { PublishedEvidenceItem } from '../../api'
 import { DocumentCommentsRail } from './DocumentCommentsRail'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 
@@ -297,6 +300,7 @@ export function DocumentInspector({
         {tab === 'research' && (
           <>
             {pdf && <PdfResearchRail document={document} />}
+            <DocumentSourcesAndNotes document={document} enabled={tab === 'research'} />
             <WorkspaceEvidenceRail document={document} />
           </>
         )}
@@ -431,6 +435,15 @@ export function DocumentInspector({
               >
                 Load older revisions
               </button>
+            )}
+            {document.content_type !== 'application/pdf' && (
+              <section className="review-evidence-section" aria-label="Review evidence">
+                <div className="review-evidence-header">
+                  <h4>Supporting Evidence</h4>
+                  <p className="small-muted">Evidence citations collected for this draft</p>
+                </div>
+                <WorkspaceEvidenceRail document={document} />
+              </section>
             )}
           </>
         )}
@@ -645,18 +658,67 @@ function PublicationEditor({
     await queryClient.invalidateQueries({ queryKey: ['publication', document.document_id] })
   }
   const status = publicationStatus(publication, document.current_revision_id)
+  const { evidence: allEvidence } = useWorkspaceEvidence()
+  const availableEvidence = allEvidence.filter(
+    (item) => !item.claimTarget || item.claimTarget.documentId === document.document_id,
+  )
+  const [includeEvidence, setIncludeEvidence] = useState(
+    Boolean(publication?.evidence && publication.evidence.length > 0) || availableEvidence.length > 0,
+  )
+  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<Set<string>>(() => {
+    if (publication?.evidence && publication.evidence.length > 0) {
+      return new Set(publication.evidence.map((e) => e.id))
+    }
+    return new Set(availableEvidence.map((e) => e.id))
+  })
+
+  const getEvidencePayload = (): PublishedEvidenceItem[] | undefined => {
+    if (!includeEvidence) return []
+    const publishedMap = new Map(publication?.evidence?.map((e) => [e.id, e]) ?? [])
+    const items: PublishedEvidenceItem[] = []
+    for (const id of selectedEvidenceIds) {
+      const draftItem = availableEvidence.find((e) => e.id === id)
+      if (draftItem) {
+        items.push({
+          id: draftItem.id,
+          claim: draftItem.claim ?? null,
+          selected_text: draftItem.selectedText,
+          note: draftItem.note ?? null,
+          source_title: draftItem.sourceTitle,
+          source_document_id: draftItem.sourceDocumentId,
+          pinned_revision_id: draftItem.pinnedRevisionId ?? null,
+          page_number: draftItem.pageNumber ?? null,
+          source_is_public: false,
+          source_slug: null,
+        })
+      } else if (publishedMap.has(id)) {
+        items.push(publishedMap.get(id)!)
+      }
+    }
+    return items
+  }
+
   // Settings changes keep the published revision. Publishing for the first time,
   // republishing, or "Publish saved draft" names the exact revision readers get.
   const save = useMutation({
-    mutationFn: (publishDraft: boolean) =>
-      publication
+    mutationFn: (publishDraft: boolean) => {
+      const evidence = getEvidencePayload()
+      return publication
         ? api.updatePublication(
             publication,
             slug,
             accessPolicy,
             publishDraft || !publication.active ? document.current_revision_id : undefined,
+            evidence,
           )
-        : api.createPublication(document.document_id, slug, accessPolicy, document.current_revision_id),
+        : api.createPublication(
+            document.document_id,
+            slug,
+            accessPolicy,
+            document.current_revision_id,
+            evidence,
+          )
+    },
     onSuccess: async (result) => {
       setOneTimeToken(result.token)
       await refresh()
@@ -750,6 +812,54 @@ function PublicationEditor({
           <option value="public">Public</option>
         </select>
       </label>
+      {availableEvidence.length > 0 && (
+        <fieldset className="publication-evidence-settings">
+          <legend className="evidence-settings-legend">
+            <strong>Evidence Drawer</strong>
+          </legend>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={includeEvidence}
+              onChange={(event) => setIncludeEvidence(event.target.checked)}
+            />
+            <span>Include reader evidence drawer ({availableEvidence.length} citations)</span>
+          </label>
+          {includeEvidence && (
+            <div className="publication-evidence-preview">
+              <p className="small-muted">
+                Citations and passages are published for reader transparency. Private workspace sources remain
+                private.
+              </p>
+              <ul className="evidence-selection-list">
+                {availableEvidence.map((item) => (
+                  <li key={item.id} className="evidence-selection-item">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={selectedEvidenceIds.has(item.id)}
+                        onChange={(event) => {
+                          const next = new Set(selectedEvidenceIds)
+                          if (event.target.checked) next.add(item.id)
+                          else next.delete(item.id)
+                          setSelectedEvidenceIds(next)
+                        }}
+                      />
+                      <span className="evidence-preview-title">{item.sourceTitle}</span>
+                    </label>
+                    <blockquote className="evidence-preview-quote">
+                      <p>
+                        {item.selectedText.slice(0, 100)}
+                        {item.selectedText.length > 100 ? '…' : ''}
+                      </p>
+                    </blockquote>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </fieldset>
+      )}
       <button
         type="button"
         className="panel-button publication-save"

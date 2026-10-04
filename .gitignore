@@ -38,6 +38,7 @@ frontend/.vite/
 frontend/.eslintcache
 frontend/playwright-report/
 frontend/test-results/
+frontend/e2e/evidence-output/
 *.tsbuildinfo
 
 # Browser-test output when Playwright is run from the repository root
