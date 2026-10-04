@@ -134,6 +134,17 @@ def test_declared_type_must_match_the_bytes_and_svg_is_refused(client: TestClien
     assert svg.status_code == 422
 
 
+def test_filename_sanitization_rejects_null_bytes_and_control_characters(
+    client: TestClient,
+) -> None:
+    document = create(client, "asset-filename-sanitization")
+    invalid_filenames = ("bad\x00file.png", "bad\nfile.png", "bad\rfile.png", "bad\x1ffile.png")
+    for invalid_filename in invalid_filenames:
+        res = upload(client, document["document_id"], filename=invalid_filename)
+        assert res.status_code == 422, invalid_filename
+        assert "Image filename" in res.json()["error"]["message"]
+
+
 def test_oversized_images_are_refused(settings: Settings) -> None:
     limited = settings.model_copy(update={"max_publication_asset_bytes": 1_024})
     with TestClient(create_app(limited)) as client:
