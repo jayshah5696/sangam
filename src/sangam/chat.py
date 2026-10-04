@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from typing import cast
 
 from agents import Agent, ModelSettings, RunConfig, Runner, StopAtTools
+from agents.models.interface import ModelProvider
 from chatkit.agents import AgentContext, ThreadItemConverter, stream_agent_response
 from chatkit.errors import CustomStreamError
 from chatkit.server import ChatKitServer
@@ -109,12 +110,14 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         model_catalog: ChatModelCatalog,
         provider_connections: ProviderConnectionService,
         projects: ProjectService,
+        model_provider: ModelProvider | Callable[[str], ModelProvider] | None = None,
     ) -> None:
         self.workspace = workspace
         self.projects = projects
         self.config = config
         self.model_catalog = model_catalog
         self.provider_connections = provider_connections
+        self._model_provider = model_provider
         self.store_adapter = SQLiteChatKitStore[ChatRequestContext](database)
         super().__init__(self.store_adapter)
 
@@ -154,6 +157,13 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         )
         self.tools = self.toolset.as_agent_tools()
         self.item_converter = SangamThreadItemConverter()
+
+    def _resolve_model_provider(self, connection_id: str) -> ModelProvider:
+        if self._model_provider is not None:
+            if callable(self._model_provider):
+                return self._model_provider(connection_id)
+            return self._model_provider
+        return self.provider_connections.model_provider(connection_id)
 
     async def close(self, timeout: float = 35.0) -> None:
         try:
@@ -414,7 +424,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                 run_config=RunConfig(
                     model=selected_model.model_id,
                     model_provider=await self.admission.run_sync(
-                        self.provider_connections.model_provider, connection.connection_id
+                        self._resolve_model_provider, connection.connection_id
                     ),
                     model_settings=ModelSettings(
                         reasoning=reasoning,
@@ -475,10 +485,14 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
 
     def cancel_run(self, principal: Principal, *, thread_id: str) -> str | None:
         """Stop the thread's newest run and cancel its effects, in one transaction."""
-        with self.evidence.database.transaction():
-            run_id = self.evidence.request_cancel(principal, thread_id=thread_id)
+        with self.evidence.database.transaction() as connection:
+            cancellable = self.effects.cancellable_run_ids(connection, thread_id)
+            run_id = self.evidence.request_cancel(
+                principal, thread_id=thread_id, cancellable_run_ids=cancellable
+            )
             if run_id is not None:
                 self.effects.cancel_pending(run_id)
+                self.proposals.cancel_pending(run_id)
             return run_id
 
     async def app_context(self, context: ChatRequestContext, thread_id: str) -> str:

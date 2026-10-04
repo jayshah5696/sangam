@@ -22,6 +22,7 @@ from sangam.access import writes
 from sangam.agent_docs import agent_skill, llms_txt
 from sangam.api_assignments import create_assignments_router
 from sangam.api_chat import create_chat_router
+from sangam.api_comments import create_comments_router
 from sangam.api_karakeep import create_karakeep_router
 from sangam.api_pdf import create_pdf_router
 from sangam.api_projects import create_projects_router
@@ -331,6 +332,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Create a Markdown or HTML document. A path-scoped token must provide a "
                 "destination inside its allowed prefix. Requires a fresh Idempotency-Key for "
                 "the intended create."
+            ),
+            ("/api/v1/documents/{document_id}/comments", "get"): (
+                "List anchored comments on Markdown and HTML document passages."
+            ),
+            ("/api/v1/documents/{document_id}/comments", "post"): (
+                "Create an anchored comment on a document passage against a specific revision. "
+                "Requires UPDATE capability and an Idempotency-Key."
+            ),
+            ("/api/v1/documents/{document_id}/comments/{comment_id}/resolve", "post"): (
+                "Resolve or unresolve an anchored comment against expected_version. "
+                "Requires UPDATE capability."
             ),
             ("/api/v1/documents/{document_id}/backlinks", "get"): (
                 "List visible documents that link to this document via internal links, "
@@ -1117,6 +1129,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(
         create_projects_router(
             projects=projects,
+            resolve_principal=resolve_principal,
+        )
+    )
+    app.include_router(
+        create_comments_router(
+            workspace=workspace,
             resolve_principal=resolve_principal,
         )
     )

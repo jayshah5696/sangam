@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { z } from 'zod'
@@ -66,14 +66,22 @@ function Welcome() {
       }))
     }
   }
+  const createKeyRef = useRef<string | null>(null)
   const createDocument = useMutation({
-    mutationFn: (contentType: 'text/markdown' | 'text/html') =>
-      api.createDocument(
+    mutationFn: (contentType: 'text/markdown' | 'text/html') => {
+      if (!createKeyRef.current) {
+        createKeyRef.current = crypto.randomUUID()
+      }
+      return api.createDocument(
         contentType === 'text/html' ? 'Untitled HTML document' : 'Untitled document',
         undefined,
         contentType,
-      ),
+        undefined,
+        createKeyRef.current,
+      )
+    },
     onSuccess: async (document) => {
+      createKeyRef.current = null
       sessions.openForWriting(document)
       if (selected)
         await api.addProjectDocument(selected.project_id, {

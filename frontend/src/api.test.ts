@@ -399,3 +399,46 @@ describe('saved view requests', () => {
     })
   })
 })
+
+describe('document creation idempotency', () => {
+  it('forwards the specified idempotency key on create retry', async () => {
+    const doc = {
+      document_id: 'doc-1',
+      title: 'Untitled document',
+      path: null,
+      content: '# Untitled document\n\n',
+      content_type: 'text/markdown',
+      current_revision_id: 'rev-1',
+      content_hash: 'hash',
+      size_bytes: 18,
+      materialization_state: 'none',
+      file_hash: null,
+      deleted: false,
+      created_by: 'human:test',
+      created_at: '2026-07-19T00:00:00Z',
+      updated_at: '2026-07-19T00:00:00Z',
+      updated_by: 'human:test',
+      updated_by_name: 'Test',
+      revision_summary: '',
+      category: null,
+      metadata_version: 1,
+      trust_level: 'untrusted',
+      trust_version: 1,
+      tags: [],
+      search_snippet: null,
+      pdf_page_count: null,
+      pdf_extraction_status: null,
+      pdf_extraction_error: null,
+      supersedes_document_id: null,
+    }
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response(JSON.stringify(doc), { status: 200 }))
+
+    await api.createDocument('Untitled document', undefined, 'text/markdown', undefined, 'key-retry-1')
+    await api.createDocument('Untitled document', undefined, 'text/markdown', undefined, 'key-retry-1')
+
+    const keys = fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get('Idempotency-Key'))
+    expect(keys).toEqual(['key-retry-1', 'key-retry-1'])
+  })
+})
