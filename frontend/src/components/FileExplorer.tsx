@@ -38,6 +38,7 @@ import {
   type Tag,
 } from '../api'
 import { useDocumentSessions } from '../documentSessions'
+import { ModalDialog } from './ui/ModalDialog'
 import { preferredSplitDirection } from '../splitPolicy'
 import { findGroup, useWorkbench, useWorkbenchActions } from '../workbench'
 import {
@@ -1028,7 +1029,6 @@ function MetadataDialog({
   onCancel: () => void
   onApply: (tagIds: readonly string[], category: { change: boolean; value: string | null }) => void
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
   const targets = metadataTargetsForPaths(selectedPaths, adapter)
   const commonTagIds = targets.length
     ? targets
@@ -1040,21 +1040,11 @@ function MetadataDialog({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(commonTagIds)
   const [changeCategory, setChangeCategory] = useState(false)
   const [category, setCategory] = useState('')
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    dialog.showModal()
-    return () => dialog.close()
-  }, [])
-  return createPortal(
-    <dialog
-      ref={dialogRef}
+  return (
+    <ModalDialog
       className="move-destination-dialog metadata-dialog"
-      aria-labelledby="metadata-dialog-title"
-      onCancel={(event) => {
-        event.preventDefault()
-        onCancel()
-      }}
+      ariaLabelledBy="metadata-dialog-title"
+      onClose={onCancel}
     >
       <form
         method="dialog"
@@ -1129,8 +1119,7 @@ function MetadataDialog({
           </button>
         </footer>
       </form>
-    </dialog>,
-    globalThis.document.body,
+    </ModalDialog>
   )
 }
 
@@ -1147,7 +1136,6 @@ function MoveDestinationDialog({
   onCancel: () => void
   onMove: (destination: string) => void
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
   const [query, setQuery] = useState('')
   const [destination, setDestination] = useState('')
   const selectedFolders = selectedPaths.filter((path) => adapter.folderByTreePath.has(path))
@@ -1158,21 +1146,11 @@ function MoveDestinationDialog({
         (path || 'workspace root').toLowerCase().includes(query.trim().toLowerCase()),
     )
     .sort((left, right) => left.localeCompare(right))
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    dialog.showModal()
-    return () => dialog.close()
-  }, [])
-  return createPortal(
-    <dialog
-      ref={dialogRef}
+  return (
+    <ModalDialog
       className="move-destination-dialog"
-      aria-labelledby="move-destination-title"
-      onCancel={(event) => {
-        event.preventDefault()
-        onCancel()
-      }}
+      ariaLabelledBy="move-destination-title"
+      onClose={onCancel}
     >
       <form
         method="dialog"
@@ -1226,8 +1204,7 @@ function MoveDestinationDialog({
           </button>
         </footer>
       </form>
-    </dialog>,
-    globalThis.document.body,
+    </ModalDialog>
   )
 }
 

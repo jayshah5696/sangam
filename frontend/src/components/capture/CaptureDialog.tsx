@@ -142,7 +142,7 @@ export function CaptureDialog({
         </label>
         {parsedText?.kind === 'link' && (
           <p className="small-muted">
-            Sangam saves the link and when you captured it; it does not download the page.
+            Sangam securely fetches the page, extracts its readable content, and saves provenance.
           </p>
         )}
         <label className="capture-drop">
@@ -326,12 +326,22 @@ async function saveToInbox(item: CaptureItem): Promise<Document> {
   const suffix = captureSuffix()
   if (item.source === 'link') {
     const title = linkTitle(item.url)
-    return api.createDocument(
-      title,
-      inboxPath(title, 'md', now, suffix),
-      'text/markdown',
-      linkNoteContent(item.url, now),
-    )
+    try {
+      return await api.captureUrl(item.url, {
+        title,
+        path: inboxPath(title, 'md', now, suffix),
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('403')) {
+        return api.createDocument(
+          title,
+          inboxPath(title, 'md', now, suffix),
+          'text/markdown',
+          linkNoteContent(item.url, now),
+        )
+      }
+      throw error
+    }
   }
   if (item.source === 'text') {
     const title = textNoteTitle(item.text)

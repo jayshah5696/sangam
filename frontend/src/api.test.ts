@@ -90,6 +90,62 @@ describe('response handling', () => {
 
     await expect(api.listTags()).rejects.toMatchObject({ status, kind, code: 'example' })
   })
+
+  it('posts link capture request to /captures/url', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          document_id: 'doc-123',
+          path: 'inbox/page.md',
+          title: 'Captured Page',
+          content_type: 'text/markdown',
+          content: '# Captured Page\n\nContent',
+          current_revision_id: 'rev-1',
+          content_hash: 'hash-123',
+          size_bytes: 25,
+          materialization_state: 'none',
+          file_hash: null,
+          deleted: false,
+          created_by: 'human:test',
+          created_at: '2026-10-03T12:00:00Z',
+          updated_by: 'human:test',
+          updated_by_name: 'Test',
+          updated_at: '2026-10-03T12:00:00Z',
+          revision_summary: '',
+          category: null,
+          metadata_version: 1,
+          trust_level: 'untrusted',
+          trust_version: 1,
+          pdf_page_count: null,
+          pdf_extraction_status: null,
+          pdf_extraction_error: null,
+          supersedes_document_id: null,
+          archived: false,
+          favorite: false,
+          tags: [],
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    const doc = await api.captureUrl('https://example.com/test', {
+      title: 'Captured Page',
+      path: 'inbox/page.md',
+    })
+    expect(doc.document_id).toBe('doc-123')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/captures/url',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          url: 'https://example.com/test',
+          title: 'Captured Page',
+          path: 'inbox/page.md',
+          project_id: undefined,
+        }),
+      }),
+    )
+  })
 })
 
 describe('bounded document pages', () => {

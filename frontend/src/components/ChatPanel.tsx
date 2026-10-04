@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
@@ -752,28 +752,29 @@ export function PublishConfirmationCard({
   onApprove: () => void
   onCancel: () => void
 }) {
+  const titleId = useId()
   const reach = {
     private: 'Only authenticated Sangam users can open it.',
     unlisted: 'Anyone with the one-time access link can open it.',
     public: 'Anyone who knows or discovers the URL can open it.',
   }[request.accessPolicy]
   return (
-    <section className="chat-effect-confirmation" role="alertdialog" aria-labelledby="publish-confirm-title">
+    <section className="chat-effect-confirmation" role="alertdialog" aria-labelledby={titleId}>
       <div>
         <p className="eyebrow">External side effect</p>
-        <strong id="publish-confirm-title">Publish “{request.documentTitle}”?</strong>
+        <strong id={titleId}>Publish “{request.documentTitle}”?</strong>
         <span>
           Chat requested <b>{request.accessPolicy}</b> access at <code>/p/{request.slug}</code>. {reach}
         </span>
         <small>No publication is created unless you approve this exact request.</small>
         {error && (
-          <p className="error-text">
+          <p className="error-text" role="alert">
             Publishing failed. Nothing was confirmed to the assistant; retry or cancel.
           </p>
         )}
       </div>
       <div className="chat-effect-actions">
-        <button type="button" className="primary-button" disabled={publishing} onClick={onApprove}>
+        <button autoFocus type="button" className="primary-button" disabled={publishing} onClick={onApprove}>
           {publishing ? 'Publishing…' : `Approve ${request.accessPolicy} publication`}
         </button>
         <button type="button" className="secondary-action" disabled={publishing} onClick={onCancel}>
@@ -930,6 +931,7 @@ function OrganizationPlanConfirmation({
   onApprove: () => void
   onCancel: () => void
 }) {
+  const titleId = useId()
   const expires = new Date(effect.expires_at).toLocaleTimeString([], {
     hour: 'numeric',
     minute: '2-digit',
@@ -938,11 +940,11 @@ function OrganizationPlanConfirmation({
     <section
       className="chat-effect-confirmation organization-plan-review"
       role="alertdialog"
-      aria-labelledby="organization-plan-title"
+      aria-labelledby={titleId}
     >
       <header>
         <p className="eyebrow">Workspace effect</p>
-        <h3 id="organization-plan-title">
+        <h3 id={titleId}>
           Review {operations.length} organization change{operations.length === 1 ? '' : 's'}
         </h3>
         <p>
@@ -972,7 +974,7 @@ function OrganizationPlanConfirmation({
         <button type="button" className="secondary-action" disabled={pending} onClick={onCancel}>
           Cancel task
         </button>
-        <button type="button" className="primary-button" disabled={pending} onClick={onApprove}>
+        <button autoFocus type="button" className="primary-button" disabled={pending} onClick={onApprove}>
           {pending ? 'Applying…' : 'Approve exact plan'}
         </button>
       </div>
@@ -1215,7 +1217,7 @@ function ProposalReview({
       <RevisionMergeView original={document.content} modified={proposal.content} />
       {isStale && (
         <div className="chat-proposal-stale">
-          <p className="error-text">
+          <p className="error-text" role="alert">
             The document changed while you were reviewing, so this edit can no longer apply. Reload to see the
             current text, then ask again if you still want the change.
           </p>
@@ -1264,7 +1266,11 @@ function ProposalReview({
           </button>
         </div>
       )}
-      {dismiss.isError && <p className="error-text">The proposal could not be dismissed.</p>}
+      {dismiss.isError && (
+        <p className="error-text" role="alert">
+          The proposal could not be dismissed.
+        </p>
+      )}
     </article>
   )
 }

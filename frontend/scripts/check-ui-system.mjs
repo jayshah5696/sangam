@@ -18,6 +18,8 @@ const forbidden = [
     'use a semantic motion token (raw transition durations and delays are only allowed in tokens.css)',
   ],
   [/cubic-bezier\(/g, 'use a semantic easing token defined in tokens.css'],
+  [/#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g, 'use a semantic color token (raw hex colors are only allowed in tokens.css)'],
+  [/\brgba?\(/g, 'use a semantic color token (raw rgb/rgba colors are only allowed in tokens.css)'],
 ]
 
 const sources = new Map()
@@ -65,6 +67,14 @@ const knownHooks = new Set(
 for (const file of sourceFiles) {
   if (/\.(?:test|spec)\./.test(file)) continue
   const source = await readFile(new URL(file, sourceDirectory), 'utf8')
+  for (const match of source.matchAll(/<([a-zA-Z0-9]+)\s+([^>]*\berror-text\b[^>]*)>/g)) {
+    if (!/\brole=/.test(match[2])) {
+      const lineNumber = source.slice(0, match.index).split('\n').length
+      violations.push(
+        `${join('src', file)}:${lineNumber}: element with "error-text" must specify an accessible role (e.g. role="alert")`,
+      )
+    }
+  }
   for (const [index, line] of source.split('\n').entries()) {
     if (/\bsize=\{[^}\n]*\b\d+(?:\.\d+)?\b[^}\n]*\}/.test(line)) {
       violations.push(

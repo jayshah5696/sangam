@@ -478,3 +478,21 @@ textarea::placeholder {
 :where(.editor .cm-scroller, .markdown-preview code, .one-time-token code, .activity-event code, .trash-card code) {
   font-family: var(--font-mono);
 }
+
+/* Shared dialog anatomy */
+:where(dialog, .shared-dialog) {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-panel-inset), var(--shadow-popover);
+}
+
+:where(dialog, .shared-dialog)::backdrop {
+  background: var(--dialog-backdrop, color-mix(in srgb, var(--sidebar) 65%, transparent));
+  backdrop-filter: blur(2px);
+  animation: overlay-fade-in var(--motion-panel) var(--ease-ui-out);
+}

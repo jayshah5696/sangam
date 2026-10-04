@@ -229,7 +229,11 @@ export function ChatModelSettings() {
           </label>
         </div>
 
-        <div className={`setting-row chat-autonomy-setting mode-${autonomyMode}`}>
+        <div
+          className={`setting-row chat-autonomy-setting mode-${autonomyMode}`}
+          id="agent-permission-mode"
+          tabIndex={-1}
+        >
           <div>
             <strong>
               <ShieldAlert size="var(--icon-inline)" /> Agent permission mode
