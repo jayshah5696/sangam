@@ -25,7 +25,11 @@ function passageAt(content: string, exact: string, start: number): TextLocator {
 
 export function evidenceSourceText(content: string, contentType: string): string {
   if (contentType !== 'text/html') return content
-  if (!('DOMParser' in globalThis)) return content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!('DOMParser' in globalThis))
+    return content
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
   const parsed = new DOMParser().parseFromString(content, 'text/html')
   parsed.querySelectorAll('script, style, template, noscript').forEach((element) => element.remove())
   parsed

@@ -1,5 +1,8 @@
 import { extractDraftCitations, checkSourceChanged } from '../../evidenceDependencies'
-import { SourceVersionComparisonModal, type SourceComparisonTarget } from '../evidence/SourceVersionComparisonModal'
+import {
+  SourceVersionComparisonModal,
+  type SourceComparisonTarget,
+} from '../evidence/SourceVersionComparisonModal'
 import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -543,7 +546,9 @@ export function DocumentWorkspace({
               <div>
                 <strong>The source behind this paragraph has changed.</strong>
                 <p>
-                  {staleDraftCitations[0]?.sourceDoc.title}: {staleDraftCitations[0]?.reason}. Compare the old passage with the new one to decide whether to update the reference or revise your conclusion.
+                  {staleDraftCitations[0]?.sourceDoc.title}: {staleDraftCitations[0]?.reason}. Compare the old
+                  passage with the new one to decide whether to update the reference or revise your
+                  conclusion.
                 </p>
               </div>
             </div>
@@ -562,7 +567,10 @@ export function DocumentWorkspace({
                   claim: target.citation.claim || target.matchingEvidence?.claim || undefined,
                   sourceCurrentRevisionId: target.sourceDoc.current_revision_id,
                   // SAFETY: Document items may optionally include superseded_by_title from superseding joins.
-                  sourceSupersededByTitle: 'superseded_by_title' in target.sourceDoc ? (target.sourceDoc as { superseded_by_title?: string }).superseded_by_title : undefined,
+                  sourceSupersededByTitle:
+                    'superseded_by_title' in target.sourceDoc
+                      ? (target.sourceDoc as { superseded_by_title?: string }).superseded_by_title
+                      : undefined,
                   evidenceItem: target.matchingEvidence,
                 })
               }}

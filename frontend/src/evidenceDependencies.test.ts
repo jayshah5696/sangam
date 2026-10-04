@@ -29,9 +29,7 @@ Next section continues here.
     expect(citations[0]!.pinnedRevisionId).toBe('rev-100')
     expect(citations[0]!.sourceTitle).toBe('Solar Benchmark')
     expect(citations[0]!.claim).toBe('Efficiency increases across high temperature cycles')
-    expect(citations[0]!.selectedText).toBe(
-      'Recent trials showed that output improved by 14% across cycles.',
-    )
+    expect(citations[0]!.selectedText).toBe('Recent trials showed that output improved by 14% across cycles.')
   })
 
   it('formats short revision strings cleanly', () => {
@@ -42,18 +40,12 @@ Next section continues here.
 
   it('detects source revision updates and superseded PDFs', () => {
     // Markdown revision change
-    const revCheck = checkSourceChanged(
-      { current_revision_id: 'rev-200' },
-      'rev-100',
-    )
+    const revCheck = checkSourceChanged({ current_revision_id: 'rev-200' }, 'rev-100')
     expect(revCheck.changed).toBe(true)
     expect(revCheck.reason).toContain('updated from revision')
 
     // Same revision
-    const sameCheck = checkSourceChanged(
-      { current_revision_id: 'rev-100' },
-      'rev-100',
-    )
+    const sameCheck = checkSourceChanged({ current_revision_id: 'rev-100' }, 'rev-100')
     expect(sameCheck.changed).toBe(false)
 
     // Superseded PDF
@@ -77,7 +69,10 @@ Next section continues here.
     expect(analysisIdentical.summary).toContain('verbatim')
 
     const headModified = '# Results\n\nOutput improved by 12% across temperature tests.'
-    const analysisModified = analyzePassageRecheck('Output improved by 14% across temperature tests.', headModified)
+    const analysisModified = analyzePassageRecheck(
+      'Output improved by 14% across temperature tests.',
+      headModified,
+    )
     expect(analysisModified.status).toBe('modified')
 
     const headRemoved = '# Results\n\nCompletely rewritten conclusions with no mention.'
@@ -108,7 +103,8 @@ Next section continues here.
       {
         document_id: 'draft-synthesis',
         title: 'Synthesis Draft',
-        content: '# Synthesis\n\n> Output stable.\n> Claim: Heat tolerance maintained\n[Source: Solar Study](sangam://document/doc-solar?revision=rev-1)',
+        content:
+          '# Synthesis\n\n> Output stable.\n> Claim: Heat tolerance maintained\n[Source: Solar Study](sangam://document/doc-solar?revision=rev-1)',
       },
     ]
 

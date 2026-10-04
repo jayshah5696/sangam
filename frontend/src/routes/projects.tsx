@@ -684,9 +684,7 @@ function DocumentRow({
             onClick={() => setShowDependencies((prev) => !prev)}
             aria-expanded={showDependencies}
           >
-            <strong>
-              Which conclusions in this project depend on this paper? ({dependencies.length})
-            </strong>
+            <strong>Which conclusions in this project depend on this paper? ({dependencies.length})</strong>
           </button>
           {showDependencies && (
             <div className="dependent-conclusions-list">

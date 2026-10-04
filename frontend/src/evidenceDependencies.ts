@@ -51,7 +51,6 @@ export function shortRevision(value?: string | null): string {
   return originalShortRevision(value ?? undefined)
 }
 
-
 /**
  * Extracts citations and associated claims/passages from draft Markdown content.
  */
@@ -60,7 +59,8 @@ export function extractDraftCitations(content: string, draftDocumentId?: string)
   if (!content) return citations
 
   // Match Markdown citation links: [Source: ...](sangam://document/... or /documents/...)
-  const linkRegex = /\[(?:Source:\s*)?([^\]]+)\]\((?:sangam:\/\/document\/|\/documents\/)([^?)]+)(?:\?([^)]+))?\)/g
+  const linkRegex =
+    /\[(?:Source:\s*)?([^\]]+)\]\((?:sangam:\/\/document\/|\/documents\/)([^?)]+)(?:\?([^)]+))?\)/g
   let match: RegExpExecArray | null
 
   while ((match = linkRegex.exec(content)) !== null) {
@@ -125,19 +125,24 @@ export function extractDraftCitations(content: string, draftDocumentId?: string)
  * Checks whether a source has changed deterministically relative to a pinned version.
  */
 export function checkSourceChanged(
-  source: {
-    current_revision_id?: string | null
-    superseded_by_document_id?: string | null
-    superseded_by_title?: string | null
-    content_type?: string
-  } | null | undefined,
+  source:
+    | {
+        current_revision_id?: string | null
+        superseded_by_document_id?: string | null
+        superseded_by_title?: string | null
+        content_type?: string
+      }
+    | null
+    | undefined,
   pinnedRevisionId?: string | null,
 ): SourceChangeStatus {
   if (!source) return { changed: false }
 
   // PDF replacement check
   if (source.superseded_by_document_id) {
-    const replacement = source.superseded_by_title ? `"${source.superseded_by_title}"` : 'a newer replacement paper'
+    const replacement = source.superseded_by_title
+      ? `"${source.superseded_by_title}"`
+      : 'a newer replacement paper'
     return {
       changed: true,
       reason: `Source paper was superseded by ${replacement}`,
@@ -145,11 +150,7 @@ export function checkSourceChanged(
   }
 
   // Revision comparison for text/markdown/html
-  if (
-    source.current_revision_id &&
-    pinnedRevisionId &&
-    source.current_revision_id !== pinnedRevisionId
-  ) {
+  if (source.current_revision_id && pinnedRevisionId && source.current_revision_id !== pinnedRevisionId) {
     return {
       changed: true,
       reason: `Source document updated from revision ${shortRevision(pinnedRevisionId)} to ${shortRevision(source.current_revision_id)}`,
@@ -174,7 +175,8 @@ export function analyzePassageRecheck(
       status: 'removed',
       remappedText: null,
       summary: 'The original passage cannot be located in the current head revision.',
-      suggestion: 'Detecting a newer source revision is deterministic. Deciding whether the change invalidates a claim requires judgment and remains a suggestion.',
+      suggestion:
+        'Detecting a newer source revision is deterministic. Deciding whether the change invalidates a claim requires judgment and remains a suggestion.',
     }
   }
 
@@ -183,7 +185,8 @@ export function analyzePassageRecheck(
       status: 'identical',
       remappedText: trimmed,
       summary: 'The passage appears verbatim in the current head revision.',
-      suggestion: 'The source wording is identical. Check surrounding context if new findings qualify this conclusion.',
+      suggestion:
+        'The source wording is identical. Check surrounding context if new findings qualify this conclusion.',
     }
   }
 
@@ -197,7 +200,8 @@ export function analyzePassageRecheck(
       status: 'identical',
       remappedText: remapped.exact,
       summary: 'The passage appears in the current head revision at a shifted position.',
-      suggestion: 'The source wording is identical. Check surrounding context if new findings qualify this conclusion.',
+      suggestion:
+        'The source wording is identical. Check surrounding context if new findings qualify this conclusion.',
     }
   }
 
@@ -212,7 +216,8 @@ export function analyzePassageRecheck(
         status: 'modified',
         remappedText: null,
         summary: 'The passage was modified in the current head revision.',
-        suggestion: 'The text was updated. Compare the old and new phrasing to decide whether your conclusion holds.',
+        suggestion:
+          'The text was updated. Compare the old and new phrasing to decide whether your conclusion holds.',
       }
     }
   }
@@ -221,7 +226,8 @@ export function analyzePassageRecheck(
     status: 'removed',
     remappedText: null,
     summary: 'The original passage was removed or significantly rewritten in the current head revision.',
-    suggestion: 'The source passage is no longer present. Recheck your claim against the new revision content.',
+    suggestion:
+      'The source passage is no longer present. Recheck your claim against the new revision content.',
   }
 }
 

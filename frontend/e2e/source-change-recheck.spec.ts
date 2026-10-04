@@ -44,11 +44,7 @@ async function createDocument(
   return documentSchema.parse(await response.json())
 }
 
-async function updateDocument(
-  request: APIRequestContext,
-  documentId: string,
-  content: string,
-) {
+async function updateDocument(request: APIRequestContext, documentId: string, content: string) {
   const response = await request.patch(`/api/v1/documents/${documentId}`, {
     headers: {
       'Idempotency-Key': randomUUID(),
@@ -99,11 +95,7 @@ Cold storage efficiency reached 84% under tested ambient conditions.
 
 Safety margins were maintained across all cycles.
 `
-    const sourceDoc = await createDocument(
-      request,
-      'Cold Storage Protocol',
-      sourceV1Content,
-    )
+    const sourceDoc = await createDocument(request, 'Cold Storage Protocol', sourceV1Content)
     const rev1 = sourceDoc.current_revision_id!
 
     // 2. Create draft document citing source v1
@@ -119,16 +111,16 @@ Initial trials established the baseline efficiency.
 
 Future trials will assess thermal expansion across extended operations.
 `
-    const draftDoc = await createDocument(
-      request,
-      'Thermal Baseline Synthesis',
-      draftContent,
-    )
+    const draftDoc = await createDocument(request, 'Thermal Baseline Synthesis', draftContent)
 
     // 3. Create project with both documents
     const project = await createProject(request, 'Thermal Stability Investigation', [
       { document_id: sourceDoc.document_id, role: 'source', notes: 'Primary benchmark protocol' },
-      { document_id: draftDoc.document_id, role: 'draft', notes: 'Synthesis draft citing cold storage benchmark' },
+      {
+        document_id: draftDoc.document_id,
+        role: 'draft',
+        notes: 'Synthesis draft citing cold storage benchmark',
+      },
     ])
 
     // Verify before state: open draft when source has NOT changed
@@ -153,11 +145,7 @@ Cold storage efficiency updated to 78% after sensor recalibration.
 
 Safety margins were maintained across all cycles.
 `
-    const sourceV2 = await updateDocument(
-      request,
-      sourceDoc.document_id,
-      sourceV2Content,
-    )
+    const sourceV2 = await updateDocument(request, sourceDoc.document_id, sourceV2Content)
     expect(sourceV2.current_revision_id).not.toBe(rev1)
 
     // 5. Re-open draft document: Verify inline recheck notice appears!
@@ -191,7 +179,9 @@ Safety margins were maintained across all cycles.
       'Detecting a newer source revision is deterministic. Deciding whether the change invalidates a claim requires judgment and remains a suggestion.',
     )
     await expect(modal).toContainText('Cold storage efficiency reached 84%')
-    await expect(modal).toContainText('The original passage was removed or significantly rewritten in the current head revision.')
+    await expect(modal).toContainText(
+      'The original passage was removed or significantly rewritten in the current head revision.',
+    )
 
     // Capture modal screenshots across themes
     if (testInfo.project.name === 'chromium-desktop') {
@@ -216,9 +206,7 @@ Safety margins were maintained across all cycles.
 
     // 8. Test Project Dependencies Inspection View
     await page.goto(`/projects?project=${project.project_id}`)
-    await expect(page.getByRole('heading', { level: 1 })).toContainText(
-      'Thermal Stability Investigation',
-    )
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Thermal Stability Investigation')
 
     // The project doc row for Cold Storage Protocol should show source updated
     const sourceCard = page.locator('.project-doc-row', {
@@ -226,9 +214,7 @@ Safety margins were maintained across all cycles.
     })
     await expect(sourceCard).toBeVisible()
     await expect(sourceCard).toContainText('Source updated')
-    await expect(sourceCard).toContainText(
-      'Which conclusions in this project depend on this paper? (1)',
-    )
+    await expect(sourceCard).toContainText('Which conclusions in this project depend on this paper? (1)')
 
     // Expand dependent conclusions
     const toggleDependencies = sourceCard.getByRole('button', {

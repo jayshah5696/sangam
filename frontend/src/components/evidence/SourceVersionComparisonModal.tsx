@@ -58,7 +58,10 @@ export function SourceVersionComparisonModal({
   const currentDoc = docQuery.data
   const currentRevId = currentDoc?.current_revision_id || item.sourceCurrentRevisionId
   // SAFETY: content_type from API document is restricted to text/markdown, text/html, or application/pdf.
-  const contentType = item.sourceContentType || (currentDoc?.content_type as 'text/markdown' | 'text/html' | 'application/pdf') || 'text/markdown'
+  const contentType =
+    item.sourceContentType ||
+    (currentDoc?.content_type as 'text/markdown' | 'text/html' | 'application/pdf') ||
+    'text/markdown'
 
   const remapped = useMemo(() => {
     if (!currentDoc || !item.selectedText) return undefined
@@ -71,12 +74,7 @@ export function SourceVersionComparisonModal({
 
   const analysis = useMemo(() => {
     if (!item.selectedText || !currentDoc?.content) return null
-    return analyzePassageRecheck(
-      item.selectedText,
-      currentDoc.content,
-      contentType,
-      item.textLocator,
-    )
+    return analyzePassageRecheck(item.selectedText, currentDoc.content, contentType, item.textLocator)
   }, [currentDoc, item.selectedText, item.textLocator, contentType])
 
   const handleUpdate = async () => {
@@ -94,11 +92,7 @@ export function SourceVersionComparisonModal({
   }
 
   return (
-    <ModalDialog
-      className="evidence-modal-dialog wide"
-      ariaLabel="Compare source versions"
-      onClose={onClose}
-    >
+    <ModalDialog className="evidence-modal-dialog wide" ariaLabel="Compare source versions" onClose={onClose}>
       <div className="evidence-modal-content wide">
         <header className="evidence-modal-header">
           <div>
@@ -108,12 +102,7 @@ export function SourceVersionComparisonModal({
               {shortRevision(currentRevId)}
             </p>
           </div>
-          <button
-            type="button"
-            className="icon-button-sm"
-            onClick={onClose}
-            aria-label="Close comparison"
-          >
+          <button type="button" className="icon-button-sm" onClick={onClose} aria-label="Close comparison">
             <X size="var(--icon-control)" />
           </button>
         </header>
@@ -132,14 +121,22 @@ export function SourceVersionComparisonModal({
               {analysis?.suggestion || 'Recheck your claim against the new revision content.'}
             </p>
             <p className="small-muted" style={{ margin: 'var(--space-1) 0 0 0' }}>
-              Detecting a newer source revision is deterministic. Deciding whether the change invalidates a claim requires judgment and remains a suggestion.
+              Detecting a newer source revision is deterministic. Deciding whether the change invalidates a
+              claim requires judgment and remains a suggestion.
             </p>
           </div>
         </div>
 
         {item.selectedText && (
           <div style={{ padding: 'var(--space-2) var(--space-3)', borderBottom: '1px solid var(--line)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 'var(--space-1)',
+              }}
+            >
               <span className="evidence-meta-label">Original Pinned Excerpt:</span>
               {analysis && (
                 <span className={`recheck-status-badge ${analysis.status}`}>
@@ -202,11 +199,7 @@ export function SourceVersionComparisonModal({
                 <StateMessage
                   compact
                   kind={docQuery.isError ? 'error' : 'loading'}
-                  title={
-                    docQuery.isError
-                      ? 'Current source could not be loaded'
-                      : 'Loading current source'
-                  }
+                  title={docQuery.isError ? 'Current source could not be loaded' : 'Loading current source'}
                 />
               )}
             </div>
@@ -249,11 +242,7 @@ export function SourceVersionComparisonModal({
             <button
               type="button"
               className="panel-button"
-              disabled={
-                !currentDoc ||
-                contentType === 'application/pdf' ||
-                isUpdating
-              }
+              disabled={!currentDoc || contentType === 'application/pdf' || isUpdating}
               onClick={() => void handleUpdate()}
             >
               {isUpdating ? 'Updating...' : 'Update to current head revision'}
