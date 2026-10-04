@@ -505,6 +505,19 @@ class WorkspaceOrganizationService:
                     now,
                 ),
             )
+            tag_rows = connection.execute(
+                "SELECT tag_id FROM folder_tags WHERE folder_id = ? ORDER BY tag_id",
+                (row["folder_id"],),
+            ).fetchall()
+            tag_ids = [t["tag_id"] for t in tag_rows]
+            self._sync_folder_manifest(
+                folder_id=row["folder_id"],
+                path=new_path,
+                category=row["category"],
+                tag_ids=tag_ids,
+                metadata_version=row["metadata_version"],
+                updated_at=now,
+            )
         for row in document_rows:
             new_path = destination_path + row["path"][len(source_path) :]
             revision_id = str(uuid.uuid4())
@@ -658,20 +671,38 @@ class WorkspaceOrganizationService:
             ),
         )
 
-        # Sync folder metadata manifest `.sangam-folder.json` atomically
+        self._sync_folder_manifest(
+            folder_id=folder_id,
+            path=row["path"],
+            category=category,
+            tag_ids=tag_ids,
+            metadata_version=row["metadata_version"] + 1,
+            updated_at=now,
+        )
+
+    def _sync_folder_manifest(
+        self,
+        *,
+        folder_id: str,
+        path: str,
+        category: str | None,
+        tag_ids: list[str],
+        metadata_version: int,
+        updated_at: str,
+    ) -> None:
         if hasattr(self.workspace, "root"):
-            folder_dir = self.workspace.root.resolve() / row["path"]
+            folder_dir = self.workspace.root.resolve() / path
             folder_dir.mkdir(parents=True, exist_ok=True)
             destination = folder_dir / ".sangam-folder.json"
             content_bytes = (
                 json.dumps(
                     {
                         "folder_id": folder_id,
-                        "path": row["path"],
+                        "path": path,
                         "category": category,
                         "tag_ids": tag_ids,
-                        "metadata_version": row["metadata_version"] + 1,
-                        "updated_at": now,
+                        "metadata_version": metadata_version,
+                        "updated_at": updated_at,
                     },
                     indent=2,
                 )
