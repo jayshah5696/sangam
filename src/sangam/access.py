@@ -331,7 +331,10 @@ class WorkspaceAccessService:
         idempotency key returns the committed result without running storage again.
         """
         payload = body.model_dump()
-        details = {key: value for key, value in payload.items() if value is not None}
+        details = {
+            "action_type": action,
+            **{key: value for key, value in payload.items() if value is not None},
+        }
         admitted_bound = self.activity.estimate_payload_bytes(details) + 2048
         locked_document_ids = {document_id}
 
@@ -365,6 +368,9 @@ class WorkspaceAccessService:
                         path=destination,
                     )
                     details["destination_path"] = destination
+                    details["target_file"] = destination or current.path
+                elif current.path is not None:
+                    details["target_file"] = current.path
                 conditions = Preconditions.parse(if_match, if_none_match)
                 has_conditions = if_match is not None or if_none_match is not None
                 expected = payload.get("expected_revision_id")
@@ -621,7 +627,12 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        details: dict[str, object] = {"title": title, "content_type": "application/pdf"}
+        details: dict[str, object] = {
+            "action_type": "import",
+            "target_file": path,
+            "title": title,
+            "content_type": "application/pdf",
+        }
         if supersedes_document_id:
             details["supersedes_document_id"] = supersedes_document_id
         return self.audited(
@@ -1036,6 +1047,7 @@ class WorkspaceAccessService:
             tofile="current",
         )
         details: dict[str, object] = {
+            "action_type": "create",
             "title": title,
             "content_type": content_type,
             "diff": diff_text,
@@ -1043,6 +1055,8 @@ class WorkspaceAccessService:
             "lines_removed": lines_removed,
             **meta,
         }
+        if path is not None:
+            details["target_file"] = path
         return self.audited(
             principal, writes("create", "document"), operation, path=path, details=details
         )
