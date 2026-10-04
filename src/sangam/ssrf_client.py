@@ -258,9 +258,8 @@ class SafeCaptureClient:
                     )
 
                 if len(body) > self.max_bytes:
-                    raise ValidationError(
-                        f"Response exceeds max allowed size of {self.max_bytes} bytes."
-                    )
+                    msg = f"Response exceeds maximum allowed size of {self.max_bytes} bytes."
+                    raise ValidationError(msg)
 
                 title = self._extract_title(body) if media_type == "text/html" else None
                 content_hash = hashlib.sha256(body).hexdigest()
@@ -318,9 +317,10 @@ class SafeCaptureClient:
                     for chunk in response.iter_bytes():
                         total_bytes += len(chunk)
                         if total_bytes > self.max_bytes:
-                            raise ValidationError(
-                                f"Response exceeds max allowed size of {self.max_bytes} bytes."
+                            msg = (
+                                f"Response exceeds maximum allowed size of {self.max_bytes} bytes."
                             )
+                            raise ValidationError(msg)
                         chunks.append(chunk)
 
                     body = b"".join(chunks)
