@@ -170,3 +170,67 @@ def test_comment_authorization(client: TestClient) -> None:
         headers={**update_headers, **headers("ok-cmt")},
     )
     assert create_ok.status_code == 201
+
+
+def test_comment_input_sanitization(client: TestClient) -> None:
+    doc = create_doc(client, "Doc 4", "Sanitization test document.")
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Null byte in body
+    res_null_body = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization",
+            "start": 0,
+            "end": 12,
+            "body": "Comment with null \x00 byte",
+        },
+        headers=headers("null-body-cmt"),
+    )
+    assert res_null_body.status_code == 422 or res_null_body.status_code == 400
+
+    # Control char in exact
+    res_ctrl_exact = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization\x07text",
+            "start": 0,
+            "end": 12,
+            "body": "Valid body",
+        },
+        headers=headers("ctrl-exact-cmt"),
+    )
+    assert res_ctrl_exact.status_code == 422 or res_ctrl_exact.status_code == 400
+
+    # Null byte in prefix
+    res_null_prefix = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization",
+            "prefix": "test\x00prefix",
+            "start": 0,
+            "end": 12,
+            "body": "Valid body",
+        },
+        headers=headers("null-prefix-cmt"),
+    )
+    assert res_null_prefix.status_code == 422 or res_null_prefix.status_code == 400
+
+    # Control char in suffix
+    res_ctrl_suffix = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization",
+            "suffix": "suffix\x1f",
+            "start": 0,
+            "end": 12,
+            "body": "Valid body",
+        },
+        headers=headers("ctrl-suffix-cmt"),
+    )
+    assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
