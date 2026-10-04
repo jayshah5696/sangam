@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { FileText } from 'lucide-react'
+import { BookmarkCheck } from 'lucide-react'
 import { z } from 'zod'
 import { api } from '../api'
 import { HtmlPreview } from '../components/HtmlPreview'
@@ -66,10 +66,15 @@ function PublicationPage() {
 
   return (
     <main className={`publication-page ${isHtml ? 'html-publication-page' : ''}`}>
-      <header>
+      <header className="publication-header">
         <div className="publication-header-text">
+          <span className="publication-kicker">Published Document</span>
           <h1>{content.title}</h1>
-          <small>{content.is_latest ? 'Latest revision' : `Revision ${content.revision_id}`}</small>
+          <div className="publication-meta-row">
+            <span className="publication-revision-pill">
+              {content.is_latest ? 'Latest revision' : `Revision ${content.revision_id}`}
+            </span>
+          </div>
         </div>
         {hasEvidence && (
           <button
@@ -80,14 +85,14 @@ function PublicationPage() {
             aria-controls="publication-evidence-drawer"
             aria-label={`Evidence drawer (${evidenceCount})`}
           >
-            <FileText size="var(--icon-inline)" aria-hidden="true" />
+            <BookmarkCheck size="var(--icon-inline)" aria-hidden="true" />
             <span>Evidence</span>
             <span className="evidence-badge">{evidenceCount}</span>
           </button>
         )}
       </header>
 
-      <div className={`publication-content-layout ${evidenceDrawerOpen && hasEvidence ? 'with-drawer' : ''}`}>
+      <div className="publication-content-layout">
         <div className="publication-article-container">
           {isHtml ? (
             content.javascript_enabled && content.interactive_preview ? (
@@ -105,12 +110,21 @@ function PublicationPage() {
         </div>
 
         {hasEvidence && (
-          <PublicationEvidenceDrawer
-            evidence={content.evidence}
-            isOpen={evidenceDrawerOpen}
-            onClose={() => setEvidenceDrawerOpen(false)}
-            onHighlightPassage={handleHighlightPassage}
-          />
+          <>
+            {evidenceDrawerOpen && (
+              <div
+                className="publication-drawer-backdrop"
+                onClick={() => setEvidenceDrawerOpen(false)}
+                aria-hidden="true"
+              />
+            )}
+            <PublicationEvidenceDrawer
+              evidence={content.evidence}
+              isOpen={evidenceDrawerOpen}
+              onClose={() => setEvidenceDrawerOpen(false)}
+              onHighlightPassage={handleHighlightPassage}
+            />
+          </>
         )}
       </div>
     </main>

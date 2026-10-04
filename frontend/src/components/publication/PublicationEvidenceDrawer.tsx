@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { ExternalLink, FileText, Search, X } from 'lucide-react'
+import { ExternalLink, FileText, LocateFixed, Search, ShieldCheck, X } from 'lucide-react'
 import type { PublishedEvidenceItem } from '../../api'
 
 export interface PublicationEvidenceDrawerProps {
@@ -55,40 +55,55 @@ export function PublicationEvidenceDrawer({
       aria-labelledby={titleId}
     >
       <div className="drawer-header">
-        <div className="drawer-title-row">
-          <div className="drawer-title-group">
-            <FileText size="var(--icon-control)" className="drawer-icon" aria-hidden="true" />
-            <h2 id={titleId} className="drawer-title">
-              Evidence Drawer
-            </h2>
-            <span className="drawer-count-badge" aria-label={`${evidence.length} evidence items`}>
-              {evidence.length}
-            </span>
-          </div>
+        <div className="drawer-kicker-row">
+          <span className="drawer-kicker">Citations & Verification</span>
           <button
             type="button"
             className="drawer-close-button"
             onClick={onClose}
             aria-label="Close evidence drawer"
+            title="Close drawer (Esc)"
           >
             <X size="var(--icon-control)" aria-hidden="true" />
           </button>
         </div>
+
+        <div className="drawer-title-row">
+          <div className="drawer-title-group">
+            <h2 id={titleId} className="drawer-title">
+              Evidence Drawer
+            </h2>
+            <span className="drawer-count-badge" aria-label={`${evidence.length} evidence items`}>
+              {evidence.length} {evidence.length === 1 ? 'citation' : 'citations'}
+            </span>
+          </div>
+        </div>
+
         <p className="drawer-description">
-          Passages and citations supporting claims in this published article.
+          Verified assertions, verbatim excerpts, and primary sources cited in this article.
         </p>
 
-        {evidence.length > 2 && (
+        {evidence.length > 1 && (
           <div className="drawer-search-row">
             <Search size="var(--icon-detail)" className="drawer-search-icon" aria-hidden="true" />
             <input
               type="search"
               className="drawer-search-input"
-              placeholder="Filter claims or excerpts…"
+              placeholder="Filter claims, citations, or excerpts…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               aria-label="Filter evidence"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                className="drawer-search-clear"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear filter"
+              >
+                <X size="var(--icon-detail)" aria-hidden="true" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -96,7 +111,7 @@ export function PublicationEvidenceDrawer({
       <div className="drawer-body" role="list" aria-label="Published evidence list">
         {filteredEvidence.length === 0 ? (
           <div className="drawer-empty-state">
-            <p className="small-muted">No matching evidence found.</p>
+            <p className="small-muted">No matching citations found.</p>
           </div>
         ) : (
           filteredEvidence.map((item) => {
@@ -108,7 +123,7 @@ export function PublicationEvidenceDrawer({
                 className={`drawer-evidence-card ${isSelected ? 'selected' : ''}`}
                 onClick={() => setActiveItemId(item.id)}
               >
-                <div className="card-source-header">
+                <header className="card-source-header">
                   <div className="card-source-title" title={item.source_title}>
                     <FileText size="var(--icon-detail)" aria-hidden="true" />
                     <span>{item.source_title}</span>
@@ -137,32 +152,36 @@ export function PublicationEvidenceDrawer({
                         className="source-private-badge"
                         title="Private workspace source (content pinned at publication time)"
                       >
-                        Workspace source
+                        <ShieldCheck size="var(--icon-detail)" aria-hidden="true" />
+                        <span>Workspace source</span>
                       </span>
                     )}
                   </div>
-                </div>
+                </header>
 
                 {item.claim && (
-                  <div className="card-claim">
-                    <span className="claim-label">Claim:</span>
-                    <span className="claim-text">{item.claim}</span>
+                  <div className="card-claim-section">
+                    <span className="card-micro-label">Claim</span>
+                    <p className="card-claim-text">{item.claim}</p>
                   </div>
                 )}
 
-                <blockquote className="card-quote">
-                  <p>{item.selected_text}</p>
-                </blockquote>
+                <div className="card-quote-section">
+                  <span className="card-micro-label card-quote-label">Verbatim Excerpt</span>
+                  <blockquote className="card-quote">
+                    <p>{item.selected_text}</p>
+                  </blockquote>
+                </div>
 
                 {item.note && (
-                  <div className="card-note">
-                    <span className="note-label">Note:</span>
-                    <span className="note-text">{item.note}</span>
+                  <div className="card-note-section">
+                    <span className="card-micro-label">Context Note</span>
+                    <p className="card-note-text">{item.note}</p>
                   </div>
                 )}
 
                 {onHighlightPassage && (
-                  <div className="card-actions">
+                  <footer className="card-actions">
                     <button
                       type="button"
                       className="card-locate-button"
@@ -172,9 +191,10 @@ export function PublicationEvidenceDrawer({
                         onHighlightPassage(item.selected_text)
                       }}
                     >
-                      Find in text
+                      <LocateFixed size="var(--icon-detail)" aria-hidden="true" />
+                      <span>Find in text</span>
                     </button>
-                  </div>
+                  </footer>
                 )}
               </article>
             )

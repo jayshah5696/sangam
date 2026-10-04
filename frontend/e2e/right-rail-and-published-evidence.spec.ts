@@ -223,7 +223,8 @@ test('capture multi-theme visual evidence for before/after comparison', async ({
   if (testInfo.project.name !== 'chromium-desktop') return
 
   const { pubData } = await createPublicationWithEvidence(request)
-  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR || path.resolve(__dirname, 'evidence-output')
+  const artifactDir = '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/9772cd5b-e92c-4580-9237-d3959f025a20'
+  const evidenceDir = process.env.SANGAM_EVIDENCE_DIR || (fs.existsSync(artifactDir) ? artifactDir : path.resolve(process.cwd(), 'e2e/evidence-output'))
   fs.mkdirSync(evidenceDir, { recursive: true })
 
   // 1. Published evidence drawer across themes
