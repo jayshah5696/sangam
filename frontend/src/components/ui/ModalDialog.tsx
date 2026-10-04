@@ -27,7 +27,8 @@ export function ModalDialog({
   const headingId = ariaLabelledBy || (title ? generatedId : undefined)
 
   useEffect(() => {
-    const trigger = document.activeElement
+    const active = document.activeElement
+    const trigger = active instanceof HTMLElement ? active : null
     const dialog = dialogRef.current
     if (dialog && !dialog.open) {
       if (dialog.showModal) {
@@ -37,10 +38,26 @@ export function ModalDialog({
       }
     }
     const hasAutofocus = dialog?.querySelector<HTMLElement>('[autofocus], [data-autofocus]')
-    if (!hasAutofocus) {
-      dialog?.querySelector<HTMLElement>('input, select, textarea, button, a[href]')?.focus()
+    if (hasAutofocus) {
+      hasAutofocus.focus()
+    } else {
+      const firstFocusable = dialog?.querySelector<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+      )
+      firstFocusable?.focus()
     }
+
+    const handleNativeKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+      }
+    }
+    dialog?.addEventListener('keydown', handleNativeKeyDown)
+
     return () => {
+      dialog?.removeEventListener('keydown', handleNativeKeyDown)
       if (dialog && dialog.open) {
         if (dialog.close) {
           dialog.close()
@@ -48,11 +65,11 @@ export function ModalDialog({
           dialog.removeAttribute('open')
         }
       }
-      if (trigger instanceof HTMLElement && trigger.isConnected) {
+      if (trigger && trigger.isConnected) {
         trigger.focus()
       }
     }
-  }, [])
+  }, [onClose])
 
   return (
     <dialog
@@ -64,6 +81,7 @@ export function ModalDialog({
       aria-labelledby={headingId}
       onCancel={(event) => {
         event.preventDefault()
+        event.stopPropagation()
         onClose()
       }}
       onClick={(event) => {
@@ -72,6 +90,12 @@ export function ModalDialog({
         }
       }}
       onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          onClose()
+          return
+        }
         if (event.key !== 'Tab') return
         const controls = [
           ...event.currentTarget.querySelectorAll<HTMLElement>(

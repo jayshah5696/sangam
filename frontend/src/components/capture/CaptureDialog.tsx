@@ -19,7 +19,7 @@ import { StateMessage } from '../ui/StateMessage'
 
 type CaptureItem =
   | { id: string; source: 'text'; label: string; text: string }
-  | { id: string; source: 'link'; label: string; url: string }
+  | { id: string; source: 'link'; label: string; url: string; fetchContent?: boolean }
   | { id: string; source: 'file'; label: string; file: File; kind: CaptureKind }
 
 type CaptureOutcome = {
@@ -47,6 +47,7 @@ export function CaptureDialog({
   const queryClient = useQueryClient()
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
+  const [fetchContent, setFetchContent] = useState(false)
   const [projectId, setProjectId] = useState(defaultProjectId ?? '')
   const [outcomes, setOutcomes] = useState<CaptureOutcome[]>([])
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.health() })
@@ -85,6 +86,7 @@ export function CaptureDialog({
         source: 'link',
         label: linkTitle(parsedText.url),
         url: parsedText.url,
+        fetchContent,
       })
     if (parsedText?.kind === 'text')
       items.push({
@@ -100,6 +102,7 @@ export function CaptureDialog({
     if (!items.length) return
     setText('')
     setFiles([])
+    setFetchContent(false)
     run.mutate(items)
   }
 
@@ -141,9 +144,19 @@ export function CaptureDialog({
           />
         </label>
         {parsedText?.kind === 'link' && (
-          <p className="small-muted">
-            Sangam securely fetches the page, extracts its readable content, and saves provenance.
-          </p>
+          <div className="capture-link-options">
+            <p className="small-muted">
+              Sangam saves the link and when you captured it; it does not download the page.
+            </p>
+            <label className="capture-download-toggle">
+              <input
+                type="checkbox"
+                checked={fetchContent}
+                onChange={(event) => setFetchContent(event.target.checked)}
+              />
+              <span>Download page content securely (admin only)</span>
+            </label>
+          </div>
         )}
         <label className="capture-drop">
           <FileUp size="var(--icon-control)" aria-hidden="true" />
@@ -326,22 +339,18 @@ async function saveToInbox(item: CaptureItem): Promise<Document> {
   const suffix = captureSuffix()
   if (item.source === 'link') {
     const title = linkTitle(item.url)
-    try {
-      return await api.captureUrl(item.url, {
+    if (item.fetchContent) {
+      return api.captureUrl(item.url, {
         title,
         path: inboxPath(title, 'md', now, suffix),
       })
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('403')) {
-        return api.createDocument(
-          title,
-          inboxPath(title, 'md', now, suffix),
-          'text/markdown',
-          linkNoteContent(item.url, now),
-        )
-      }
-      throw error
     }
+    return api.createDocument(
+      title,
+      inboxPath(title, 'md', now, suffix),
+      'text/markdown',
+      linkNoteContent(item.url, now),
+    )
   }
   if (item.source === 'text') {
     const title = textNoteTitle(item.text)
