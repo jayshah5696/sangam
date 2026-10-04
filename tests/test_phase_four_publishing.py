@@ -847,3 +847,115 @@ def test_cloudflare_access_mode_maps_verified_assertion_to_local_human(
         )
         assert accepted.status_code == 200
         assert verified == ["verified-access-jwt"]
+
+
+def test_published_evidence_drawer_lifecycle_and_privacy(client: TestClient) -> None:
+    private_source = create_document(
+        client,
+        title="Internal Research Notes",
+        content="# Internal Data\nFound experimental evidence in lab logs.\n",
+        key="create-private-source",
+    )
+    public_source = create_document(
+        client,
+        title="Public Reference Document",
+        content="# Reference Material\nStandard benchmark established in 2024.\n",
+        key="create-public-source",
+    )
+    client.post(
+        "/api/v1/publications",
+        headers=mutation_headers("publish-public-source"),
+        json={
+            "document_id": public_source["document_id"],
+            "slug": "benchmark-reference",
+            "access_policy": "public",
+        },
+    )
+
+    article = create_document(
+        client,
+        title="Comprehensive Analysis",
+        content="# Findings\nThe experiments confirm our initial thesis.\n",
+        key="create-analysis-article",
+    )
+
+    evidence = [
+        {
+            "id": "ev_1",
+            "claim": "The experiment is reproducible",
+            "selected_text": "Found experimental evidence in lab logs.",
+            "note": "Laboratory run #42 verified with high precision.",
+            "source_title": "Internal Research Notes",
+            "source_document_id": private_source["document_id"],
+            "pinned_revision_id": private_source["current_revision_id"],
+        },
+        {
+            "id": "ev_2",
+            "claim": "Follows standard benchmark protocols",
+            "selected_text": "Standard benchmark established in 2024.",
+            "note": "Reference baseline methodology.",
+            "source_title": "Public Reference Document",
+            "source_document_id": public_source["document_id"],
+            "pinned_revision_id": public_source["current_revision_id"],
+        },
+    ]
+
+    pub_response = client.post(
+        "/api/v1/publications",
+        headers=mutation_headers("publish-article-with-evidence"),
+        json={
+            "document_id": article["document_id"],
+            "slug": "comprehensive-analysis",
+            "access_policy": "public",
+            "evidence": evidence,
+        },
+    )
+    assert pub_response.status_code == 201
+    pub_data = pub_response.json()
+    assert len(pub_data["evidence"]) == 2
+
+    ev1 = next(item for item in pub_data["evidence"] if item["id"] == "ev_1")
+    assert ev1["source_is_public"] is False
+    assert ev1["source_slug"] is None
+    assert ev1["source_title"] == "Internal Research Notes"
+    assert ev1["selected_text"] == "Found experimental evidence in lab logs."
+
+    ev2 = next(item for item in pub_data["evidence"] if item["id"] == "ev_2")
+    assert ev2["source_is_public"] is True
+    assert ev2["source_slug"] == "benchmark-reference"
+
+    content_resp = client.get("/api/v1/publications/comprehensive-analysis/content")
+    assert content_resp.status_code == 200
+    content_data = content_resp.json()
+    assert len(content_data["evidence"]) == 2
+    assert content_data["evidence"][0]["claim"] == "The experiment is reproducible"
+
+    updated_evidence = [
+        {
+            "id": "ev_1",
+            "claim": "The experiment is reproducible across 3 trials",
+            "selected_text": "Found experimental evidence in lab logs.",
+            "note": "Updated after multi-trial replication.",
+            "source_title": "Internal Research Notes",
+            "source_document_id": private_source["document_id"],
+            "pinned_revision_id": private_source["current_revision_id"],
+        }
+    ]
+    update_resp = client.patch(
+        f"/api/v1/publications/{pub_data['publication_id']}",
+        headers=mutation_headers("update-article-evidence"),
+        json={
+            "expected_version": pub_data["version"],
+            "slug": "comprehensive-analysis",
+            "access_policy": "public",
+            "evidence": updated_evidence,
+        },
+    )
+    assert update_resp.status_code == 200
+    updated_pub = update_resp.json()
+    assert len(updated_pub["evidence"]) == 1
+    assert updated_pub["evidence"][0]["claim"] == "The experiment is reproducible across 3 trials"
+
+    refetched = client.get("/api/v1/publications/comprehensive-analysis/content").json()
+    assert len(refetched["evidence"]) == 1
+    assert refetched["evidence"][0]["claim"] == "The experiment is reproducible across 3 trials"

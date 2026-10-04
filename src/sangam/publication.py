@@ -24,6 +24,7 @@ from sangam.schemas import (
     Publication,
     PublicationContent,
     PublicationRevision,
+    PublishedEvidenceItem,
     TrustedPreviewGrant,
 )
 from sangam.service import DocumentService
@@ -167,6 +168,7 @@ class PublicationService:
         actor_id: str,
         idempotency_key: str,
         revision_id: str | None = None,
+        evidence: list[PublishedEvidenceItem] | None = None,
     ) -> IssuedPublication:
         normalized_slug = self._normalize_slug(slug)
         self._validate_policy(access_policy)
@@ -182,6 +184,8 @@ class PublicationService:
         # Only explicit revisions join the fingerprint so earlier retries still match.
         if revision_id is not None:
             fingerprint_fields["revision_id"] = revision_id
+        if evidence is not None:
+            fingerprint_fields["evidence"] = [item.model_dump() for item in evidence]
         fingerprint = request_hash(fingerprint_fields)
         with self.database.transaction() as connection:
             duplicate = self._idempotent_resource(
@@ -200,13 +204,18 @@ class PublicationService:
                 )
                 publication_id = str(uuid.uuid4())
                 now = utc_now()
+                evidence_json = None
+                if evidence:
+                    sanitized = self._sanitize_evidence(connection, evidence)
+                    evidence_json = json.dumps([item.model_dump() for item in sanitized])
                 try:
                     connection.execute(
                         """
                         INSERT INTO publications(
                             publication_id, document_id, slug, access_policy, version, active,
-                            created_by, updated_by, created_at, updated_at, revision_id
-                        ) VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
+                            created_by, updated_by, created_at, updated_at,
+                            revision_id, evidence_json
+                        ) VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             publication_id,
@@ -218,6 +227,7 @@ class PublicationService:
                             now,
                             now,
                             published_revision,
+                            evidence_json,
                         ),
                     )
                 except sqlite3.IntegrityError as error:
@@ -259,6 +269,7 @@ class PublicationService:
         actor_id: str,
         idempotency_key: str,
         revision_id: str | None = None,
+        evidence: list[PublishedEvidenceItem] | None = None,
     ) -> IssuedPublication:
         normalized_slug = self._normalize_slug(slug)
         self._validate_policy(access_policy)
@@ -270,6 +281,8 @@ class PublicationService:
         }
         if revision_id is not None:
             fingerprint_fields["revision_id"] = revision_id
+        if evidence is not None:
+            fingerprint_fields["evidence"] = [item.model_dump() for item in evidence]
         fingerprint = request_hash(fingerprint_fields)
         raw_token: str | None = None
         with self.database.transaction() as connection:
@@ -296,12 +309,18 @@ class PublicationService:
                     connection, document_id=current["document_id"], revision_id=published_revision
                 )
                 now = utc_now()
+                if evidence is not None:
+                    sanitized = self._sanitize_evidence(connection, evidence)
+                    evidence_json = json.dumps([item.model_dump() for item in sanitized])
+                else:
+                    evidence_json = current["evidence_json"]
                 try:
                     connection.execute(
                         """
                         UPDATE publications
                         SET slug = ?, access_policy = ?, version = version + 1,
-                            active = 1, updated_by = ?, updated_at = ?, revision_id = ?
+                            active = 1, updated_by = ?, updated_at = ?, revision_id = ?,
+                            evidence_json = ?
                         WHERE publication_id = ?
                         """,
                         (
@@ -310,6 +329,7 @@ class PublicationService:
                             actor_id,
                             now,
                             published_revision,
+                            evidence_json,
                             publication_id,
                         ),
                     )
@@ -607,6 +627,15 @@ class PublicationService:
                 trust_version=document.trust_version,
                 assets=assets,
             )
+        raw_evidence = row["evidence_json"]
+        evidence_items: list[PublishedEvidenceItem] = []
+        if raw_evidence:
+            try:
+                evidence_items = [
+                    PublishedEvidenceItem.model_validate(item) for item in json.loads(raw_evidence)
+                ]
+            except Exception:
+                evidence_items = []
         return PublicationContent(
             publication_id=row["publication_id"],
             document_id=row["document_id"],
@@ -622,6 +651,7 @@ class PublicationService:
                 f"/api/v1/publications/{row['slug']}/asset?revision={resolved_revision}&path="
             ),
             interactive_preview=interactive_preview,
+            evidence=evidence_items,
         )
 
     def get_asset(
@@ -717,7 +747,45 @@ class PublicationService:
         values["active"] = bool(values["active"])
         values["has_active_token"] = bool(values["has_active_token"])
         values["url"] = f"{self.publication_base_url}/{values['slug']}"
+        raw_evidence = values.pop("evidence_json", None)
+        if raw_evidence:
+            try:
+                values["evidence"] = json.loads(raw_evidence)
+            except Exception:
+                values["evidence"] = []
+        else:
+            values["evidence"] = []
         return Publication.model_validate(values)
+
+    @staticmethod
+    def _sanitize_evidence(
+        connection: sqlite3.Connection,
+        evidence: list[PublishedEvidenceItem],
+    ) -> list[PublishedEvidenceItem]:
+        sanitized: list[PublishedEvidenceItem] = []
+        for item in evidence:
+            source_is_public = False
+            source_slug = None
+            if item.source_document_id:
+                row = connection.execute(
+                    """
+                    SELECT slug, access_policy, active FROM publications
+                    WHERE document_id = ? AND active = 1
+                    """,
+                    (item.source_document_id,),
+                ).fetchone()
+                if row and row["access_policy"] == "public":
+                    source_is_public = True
+                    source_slug = row["slug"]
+            sanitized.append(
+                item.model_copy(
+                    update={
+                        "source_is_public": source_is_public,
+                        "source_slug": source_slug,
+                    }
+                )
+            )
+        return sanitized
 
     @staticmethod
     def _require_document_revision(
