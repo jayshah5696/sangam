@@ -8482,7 +8482,7 @@
   "info": {
     "description": "Revision-aware document workspace API for humans and scoped agents. Read a document immediately before changing it, send its current revision as expected_revision_id, and give every intended mutation an Idempotency-Key.",
     "title": "Sangam API",
-    "version": "0.13.2"
+    "version": "0.13.3"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -35510,7 +35510,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-10-03",
-    "reason": "Add optional evidence drawer to publication schemas (#329) and SSRF-guarded admin URL capture endpoint (#371)"
+    "date": "2026-10-04",
+    "reason": "Release v0.13.3"
   }
 }

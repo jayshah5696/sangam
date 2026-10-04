@@ -177,7 +177,11 @@ class WorkspaceOrganizationService:
                 "tag_ids": sorted(set(tag_ids)),
             }
         )
-        with self.mutations.path(normalized_path), self.database.transaction() as connection:
+        with (
+            self.mutations.mutation(),
+            self.mutations.path(normalized_path),
+            self.database.transaction() as connection,
+        ):
             self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
@@ -269,7 +273,11 @@ class WorkspaceOrganizationService:
                 raise NotFoundError(f"Folder not found: {folder_id}")
             folder_path = row["path"]
 
-        with self.mutations.path(folder_path), self.database.transaction() as connection:
+        with (
+            self.mutations.mutation(),
+            self.mutations.path(folder_path),
+            self.database.transaction() as connection,
+        ):
             self.actors.require_known(connection, actor_id)
             duplicate = self.idempotency.mutation_record(
                 connection,
@@ -692,7 +700,11 @@ class WorkspaceOrganizationService:
     ) -> None:
         if hasattr(self.workspace, "root"):
             folder_dir = self.workspace.root.resolve() / path
-            folder_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                folder_dir.mkdir(parents=True, exist_ok=True)
+            except FileExistsError:
+                if not folder_dir.is_dir():
+                    raise
             destination = folder_dir / ".sangam-folder.json"
             content_bytes = (
                 json.dumps(

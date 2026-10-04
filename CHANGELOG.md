@@ -7,6 +7,41 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.3] - 2026-10-04
+
+### Added
+
+- Right rail question presets and published evidence drawer: connects workspace layouts to inspector presets (Writing, Research, Review); published reader evidence slide-over drawer with zero reading space intrusion, claim / verbatim excerpt / context notes, privacy chips, search filter, and pulse glow locator (#309, #329, #401).
+- Passage-anchored comments on Markdown and HTML documents: persistent passage locators (`exact`, `prefix`, `suffix`), detached state detection across revisions, resolution status filter tabs (`Open`, `Resolved`, `All`), and selection toolbar integration (#370, #397).
+- Unified reviewed action state machines: consolidated proposal and effect lifecycle handling, canonical payload verification via `ActionDigest`, actor ownership validation, retry safety classification, and atomic run cancellation (#388, #389, #396).
+- Scriptable model provider test harness (`ScriptedModelProvider`, `ScriptedModel`, `Say`, `Call`, `Step`) for deterministic multi-turn agent simulation and chat policy evals (#388, #396).
+- Simplified Workspace Home: unified "New document" action with Markdown and HTML choices, co-located project context and recent/pinned documents, and capture integration inside Inbox (#375, #394).
+- Configurable sidebar footer navigation: granular visibility toggle controls for all 6 sidebar footer tools in Settings -> Workbench with dynamic responsive layout (#374, #395).
+- Chat capabilities and parity expansion: requester authority, project and tag tools, annotations, publications, chat-origin activity filter (`via=chat`), and pathless document creation retry idempotency (#376, #379, #382, #383, #384, #385, #386, #387, #391, #393, #395).
+- Database migrations: chat effect requester token `030`, document comments `031`, and publication evidence `032` (#393, #397, #401).
+
+### Security
+
+- Server-side request forgery (SSRF) client protections: DNS-pinned connections, prohibited IP ranges (loopbacks, RFC1918, RFC6598, link-local, cloud metadata, IPv6/IPv4-mapped), redirect hop revalidation, 10MB streaming size limits, and `POST /api/v1/captures/url` endpoint (#371, #400).
+- Enforced agent path scoping and structured audit logging on trusted preview token issuance (#381).
+- Document asset filename sanitization against ASCII control characters and null bytes in `DocumentAssetService.store` (#398).
+- Sensitive data sanitization hardening: stripped sensitive headers, key-value secret redaction, and pattern matching in `security.py` (#379, #392).
+
+### Fixed
+
+- Folder manifest synchronization across folder hierarchy moves (`rename_folder`), ensuring `.sangam-folder.json` manifests stay consistent for moved descendant folders (#399).
+- Backup archive reliability: excluded ephemeral readiness probe files and handled transient files gracefully during workspace tar archiving (#400).
+- Unified modal dialog anatomy: created shared `ModalDialog` component (`<dialog>` semantics, Escape dismiss, focus trapping/restoration) and eliminated off-token colors/radii across all stylesheets (#390, #400).
+- HTML preview layout and navigation: fixed collapsed disclosure height, preserved split-pane alignment, restored Settings Operations navigation, and resolved Files sidebar search button redundancy (#373, #377, #378, #380).
+- Chat cancellation scope: scoped cancellable run IDs strictly to pending chat effects and uncommitted proposals (#396, #397).
+- Coordinated folder mutations with generation barriers in `create_folder` and `update_folder_metadata` to prevent filesystem race conditions with folder moves and backups (#399).
+
+### Changed
+
+- Unified workspace write path and ledger architecture: single `audited` entry point and single document write path replacing duplicated methods; chat feature parity with app capabilities; revoked-token rejection mid-run; UI stylesheet class validation in `check-ui-system` (#379).
+- Dependency audit policy: ignore unpatched dev-dependency advisory GHSA-vfj7-8cjw-p6xm in `pnpm audit` (#395).
+
+
 ## [0.13.2] - 2026-10-01
 
 ### Added
@@ -489,7 +524,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/jayshah5696/sangam/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/jayshah5696/sangam/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/jayshah5696/sangam/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/jayshah5696/sangam/compare/v0.12.3...v0.13.0
