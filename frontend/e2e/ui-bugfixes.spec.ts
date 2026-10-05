@@ -193,12 +193,18 @@ for (const destination of [
     await revealSidebar(page)
     await capture(page, testInfo, `operations-${destination.route.slice(1)}`)
     await expect(settingsNav).toBeVisible()
-    await expect(settingsNav.getByRole('button', { name: /^Operations/ })).toHaveAttribute('aria-current', 'page')
+    await expect(settingsNav.getByRole('button', { name: /^Operations/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
     await expect(page.getByRole('tab', { name: 'Files', exact: true })).toHaveCount(0)
     await expectNoHorizontalOverflow(page)
     await page.reload()
     await revealSidebar(page)
-    await expect(settingsNav.getByRole('button', { name: /^Operations/ })).toHaveAttribute('aria-current', 'page')
+    await expect(settingsNav.getByRole('button', { name: /^Operations/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
     await page.getByRole('button', { name: 'Back to workspace', exact: true }).click()
     await expect(page).toHaveURL(/\/publications$/)
     await page.goto(destination.route)
@@ -337,18 +343,18 @@ test('mobile treats split workbench as single surface switcher with companion ba
   await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
 })
 
-test("mobile screen polish: left sidebar, right inspector sheet, chat, and settings (Issue 312)", async ({
+test('mobile screen polish: left sidebar, right inspector sheet, chat, and settings (Issue 312)', async ({
   page,
   seededWorkspace,
 }, testInfo) => {
-  test.skip(testInfo.project.name !== "chromium-touch-mobile", "touch-mobile validation")
+  test.skip(testInfo.project.name !== 'chromium-touch-mobile', 'touch-mobile validation')
 
   const artifactDir =
-    "/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595"
+    '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595'
 
   // 1. Workspace with Left Sidebar reveal
   await page.goto(`/documents/${seededWorkspace.documentId}`)
-  const revealButton = page.getByRole("button", { name: "Show workspace sidebar" })
+  const revealButton = page.getByRole('button', { name: 'Show workspace sidebar' })
   await expect(revealButton).toBeVisible()
   const revealBox = await revealButton.boundingBox()
   expect(revealBox).not.toBeNull()
@@ -357,28 +363,28 @@ test("mobile screen polish: left sidebar, right inspector sheet, chat, and setti
 
   // Open left sidebar drawer
   await revealButton.click()
-  const sidebar = page.getByRole("dialog", { name: "Workspace sidebar" })
+  const sidebar = page.getByRole('dialog', { name: 'Workspace sidebar' })
   await expect(sidebar).toBeVisible()
   await page.screenshot({
     path: `${artifactDir}/mobile-left-sidebar.png`,
-    animations: "disabled",
-    scale: "css",
+    animations: 'disabled',
+    scale: 'css',
   })
 
   // Close sidebar drawer via hide button
-  await sidebar.getByRole("button", { name: "Hide workspace sidebar" }).click()
+  await sidebar.getByRole('button', { name: 'Hide workspace sidebar' }).click()
   await expect(sidebar).not.toBeVisible()
 
   // 2. Right Sidebar / Document Inspector Bottom Sheet
-  const inspectorToggle = page.getByRole("button", { name: "Open document inspector" })
+  const inspectorToggle = page.getByRole('button', { name: 'Open document inspector' })
   await expect(inspectorToggle).toBeVisible()
   await inspectorToggle.click()
 
-  const inspector = page.getByRole("dialog", { name: "Document inspector" })
+  const inspector = page.getByRole('dialog', { name: 'Document inspector' })
   await expect(inspector).toBeVisible()
-  const inspectorTablist = inspector.getByRole("tablist", { name: "Document inspector" })
+  const inspectorTablist = inspector.getByRole('tablist', { name: 'Document inspector' })
   await expect(inspectorTablist).toBeVisible()
-  const inspectorTabs = inspectorTablist.getByRole("tab")
+  const inspectorTabs = inspectorTablist.getByRole('tab')
   await expect(inspectorTabs).toHaveCount(6)
 
   // Check tab touch target height >= 44px
@@ -388,40 +394,40 @@ test("mobile screen polish: left sidebar, right inspector sheet, chat, and setti
 
   await page.screenshot({
     path: `${artifactDir}/mobile-right-inspector.png`,
-    animations: "disabled",
-    scale: "css",
+    animations: 'disabled',
+    scale: 'css',
   })
 
   // Close inspector
-  await inspector.getByRole("button", { name: "Collapse document inspector" }).click()
+  await inspector.getByRole('button', { name: 'Collapse document inspector' }).click()
   await expect(inspector).not.toBeVisible()
 
   // 3. Chat UI on mobile
-  await page.goto("/chat")
-  const chatHeader = page.locator(".workspace-chat-header")
+  await page.goto('/chat')
+  const chatHeader = page.locator('.workspace-chat-header')
   await expect(chatHeader).toBeVisible()
-  await expect(page.getByRole("button", { name: "Return to workspace" })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Return to workspace' })).toBeVisible()
   await page.screenshot({
     path: `${artifactDir}/mobile-chat.png`,
-    animations: "disabled",
-    scale: "css",
+    animations: 'disabled',
+    scale: 'css',
   })
 
   // 4. Settings UI on mobile
-  await page.goto("/settings")
-  const mobileNav = page.locator(".settings-mobile-category-bar")
+  await page.goto('/settings')
+  const mobileNav = page.locator('.settings-mobile-category-bar')
   await expect(mobileNav).toBeVisible()
-  const mobileCategoryTabs = mobileNav.locator(".settings-mobile-category-tab")
+  const mobileCategoryTabs = mobileNav.locator('.settings-mobile-category-tab')
   await expect(mobileCategoryTabs).toHaveCount(6)
 
   // Click on "AI & models" category tab in the mobile bar
-  await mobileCategoryTabs.filter({ hasText: "AI & models" }).click()
+  await mobileCategoryTabs.filter({ hasText: 'AI & models' }).click()
   await expect(page).toHaveURL(/category=models/)
-  await expect(page.getByRole("heading", { level: 1, name: "AI & models" })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'AI & models' })).toBeVisible()
 
   await page.screenshot({
     path: `${artifactDir}/mobile-settings.png`,
-    animations: "disabled",
-    scale: "css",
+    animations: 'disabled',
+    scale: 'css',
   })
 })

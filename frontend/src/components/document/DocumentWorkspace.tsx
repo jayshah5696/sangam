@@ -24,7 +24,14 @@ import { StateMessage } from '../ui/StateMessage'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 import { TextSelectionToolbar } from './TextSelectionToolbar'
 import { useSourceSelection } from './useSourceSelection'
-import { api, SUPPORTED_IMAGE_TYPES, writeFailureMessage, type Document, type ProjectDetail, type Revision } from '../../api'
+import {
+  api,
+  SUPPORTED_IMAGE_TYPES,
+  writeFailureMessage,
+  type Document,
+  type ProjectDetail,
+  type Revision,
+} from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
   CITATION_PARAM_KEYS,
@@ -1149,11 +1156,7 @@ function DocumentToolbar({
   )
 }
 
-export function MobileCompanionBar({
-  currentDocument,
-}: {
-  currentDocument: Document
-}) {
+export function MobileCompanionBar({ currentDocument }: { currentDocument: Document }) {
   const workbench = useWorkbench()
   const navigate = useNavigate()
   const groups = collectGroups(workbench.root)
@@ -1169,7 +1172,8 @@ export function MobileCompanionBar({
 
   const candidateDocQuery = useQuery({
     queryKey: ['document', candidateDocId],
-    queryFn: () => (candidateDocId ? api.getDocument(candidateDocId) : Promise.reject(new Error('No candidate document'))),
+    queryFn: () =>
+      candidateDocId ? api.getDocument(candidateDocId) : Promise.reject(new Error('No candidate document')),
     enabled: Boolean(candidateDocId),
   })
 
@@ -1185,14 +1189,15 @@ export function MobileCompanionBar({
   const projectDocs = projectQuery.data?.documents ?? []
   const connectedProjectDoc = isCurrentDraft
     ? projectDocs.find((d) => d.role === 'source' && d.document_id !== currentDocument.document_id)
-    : projectDocs.find((d) => (d.role === 'draft' || d.role === 'note') && d.document_id !== currentDocument.document_id)
+    : projectDocs.find(
+        (d) => (d.role === 'draft' || d.role === 'note') && d.document_id !== currentDocument.document_id,
+      )
 
   const targetDoc = candidateDocQuery.data
   const targetId = targetDoc?.document_id ?? connectedProjectDoc?.document_id
   const targetTitle = targetDoc?.title ?? connectedProjectDoc?.document_title ?? ''
   const targetPath = targetDoc?.path ?? connectedProjectDoc?.document_path ?? ''
-  const targetIsPdf =
-    targetDoc?.content_type === 'application/pdf' || targetPath.endsWith('.pdf')
+  const targetIsPdf = targetDoc?.content_type === 'application/pdf' || targetPath.endsWith('.pdf')
   const targetLabel = targetIsPdf || targetPath.startsWith('sources/') ? 'source' : 'draft'
 
   if (!targetId) return null
@@ -1218,7 +1223,11 @@ export function MobileCompanionBar({
         onClick={handleSwitch}
         aria-label={`Switch to connected ${targetLabel}: ${targetTitle || 'Untitled'}`}
       >
-        <ArrowRightLeft size="var(--icon-inline)" className="mobile-companion-icon-switch" aria-hidden="true" />
+        <ArrowRightLeft
+          size="var(--icon-inline)"
+          className="mobile-companion-icon-switch"
+          aria-hidden="true"
+        />
         <span className="mobile-companion-meta">Switch to {targetLabel}:</span>
         <span className="mobile-companion-title">{targetTitle || targetPath || 'Untitled'}</span>
       </button>

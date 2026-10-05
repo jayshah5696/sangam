@@ -123,7 +123,7 @@ export function WorkspaceSettings() {
               <button
                 key={category.id}
                 type="button"
-                className={`settings-mobile-category-tab ${active ? "active" : ""}`}
+                className={`settings-mobile-category-tab ${active ? 'active' : ''}`}
                 aria-pressed={active}
                 onClick={() => void navigate({ search: { category: category.id } })}
               >

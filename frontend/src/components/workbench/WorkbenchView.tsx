@@ -53,9 +53,7 @@ export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) 
   const { ensureDocumentOpen } = useWorkbenchActions()
   const isMobile = useMediaQuery('(max-width: 768px)')
   const groups = collectGroups(workbench.root)
-  const isHydrated = groups.some((group) =>
-    group.tabs.some((tab) => tab.documentId === routeDocumentId),
-  )
+  const isHydrated = groups.some((group) => group.tabs.some((tab) => tab.documentId === routeDocumentId))
 
   useEffect(() => ensureDocumentOpen(routeDocumentId), [ensureDocumentOpen, routeDocumentId])
 
@@ -707,13 +705,7 @@ function DocumentLoader({
   )
 }
 
-function MobileSurfaceSwitcher({
-  groups,
-  activeGroupId,
-}: {
-  groups: GroupNode[]
-  activeGroupId: string
-}) {
+function MobileSurfaceSwitcher({ groups, activeGroupId }: { groups: GroupNode[]; activeGroupId: string }) {
   return (
     <header className="mobile-surface-switcher" role="tablist" aria-label="Working surfaces">
       <div className="mobile-surface-tabs">
@@ -744,7 +736,8 @@ function MobileSurfaceTabItem({
   const activeDocId = group.activeTabId
   const docQuery = useQuery({
     queryKey: ['document', activeDocId],
-    queryFn: () => (activeDocId ? api.getDocument(activeDocId) : Promise.reject(new Error('No active document'))),
+    queryFn: () =>
+      activeDocId ? api.getDocument(activeDocId) : Promise.reject(new Error('No active document')),
     enabled: Boolean(activeDocId),
   })
 
