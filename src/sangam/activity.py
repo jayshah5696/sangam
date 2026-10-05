@@ -671,9 +671,15 @@ class ActivityService:
         revision_id: str | None = None,
         details: dict[str, object] | None = None,
     ) -> tuple[tuple[object, ...], int]:
+        event_details = dict(details or {})
+        if "action_type" not in event_details:
+            event_details["action_type"] = action
+        if "target_file" not in event_details and path is not None:
+            event_details["target_file"] = path
+
         safe_details = {
             key: sanitize_sensitive_data(value)
-            for key, value in (details or {}).items()
+            for key, value in event_details.items()
             if key in ALLOWED_AUDIT_DETAIL_KEYS
         }
 

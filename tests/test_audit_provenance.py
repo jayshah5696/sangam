@@ -708,3 +708,29 @@ def test_hardened_security_sanitization_patterns() -> None:
     assert "encryption_key=[REDACTED]" in sanitized_text
     assert "account_key=[REDACTED]" in sanitized_text
     assert "id_token=[REDACTED]" in sanitized_text
+
+
+def test_auto_populated_action_type_and_target_file(client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Auto Detail Audit Doc",
+            "content": "# Test\nAuto populated details.",
+            "path": "docs/auto_detail_test.md",
+        },
+        headers=headers("idemp_auto_detail_create"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    doc_events = [e for e in events if e["resource_id"] == doc_id]
+    assert len(doc_events) >= 1
+    create_event = next(e for e in doc_events if e["action"] == "create")
+
+    assert create_event["details"]["action_type"] == "create"
+    assert create_event["details"]["target_file"] == "docs/auto_detail_test.md"
