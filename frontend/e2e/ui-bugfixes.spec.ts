@@ -233,13 +233,14 @@ test('mobile treats split workbench as single surface switcher with companion ba
   test.skip(testInfo.project.name !== 'chromium-touch-mobile', 'touch-mobile validation')
 
   // Create a second document (source)
+  const sourcePath = `sources/findings-${randomUUID().slice(0, 8)}.md`
   const sourceResponse = await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': randomUUID() },
     data: {
       title: 'Research Source Note',
       content: '# Research Findings\n\nDirect evidence from the initial interview.',
       content_type: 'text/markdown',
-      path: 'sources/findings.md',
+      path: sourcePath,
     },
   })
   expect(sourceResponse.ok(), await sourceResponse.text()).toBeTruthy()
@@ -286,11 +287,6 @@ test('mobile treats split workbench as single surface switcher with companion ba
     document.querySelector('.mobile-companion-bar')?.setAttribute('style', 'display: none !important')
   })
   await capture(page, testInfo, 'mobile-312-before')
-  await page.screenshot({
-    path: '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595/mobile-before.png',
-    animations: 'disabled',
-    scale: 'css',
-  })
   await page.evaluate(() => {
     document.querySelector('.mobile-surface-switcher')?.removeAttribute('style')
     document.querySelector('.mobile-companion-bar')?.removeAttribute('style')
@@ -314,11 +310,6 @@ test('mobile treats split workbench as single surface switcher with companion ba
 
   // Capture "after" state on draft surface
   await capture(page, testInfo, 'mobile-312-after-draft')
-  await page.screenshot({
-    path: '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595/mobile-after-draft.png',
-    animations: 'disabled',
-    scale: 'css',
-  })
 
   // Tap second tab in switcher -> switches to source
   await tabs.nth(1).click()
@@ -331,11 +322,6 @@ test('mobile treats split workbench as single surface switcher with companion ba
 
   // Capture "after" state on source surface
   await capture(page, testInfo, 'mobile-312-after-source')
-  await page.screenshot({
-    path: '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595/mobile-after-source.png',
-    animations: 'disabled',
-    scale: 'css',
-  })
 
   // Tap companion button -> switches back to draft
   await companionBar.getByRole('button').click()
@@ -348,9 +334,6 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
   seededWorkspace,
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-touch-mobile', 'touch-mobile validation')
-
-  const artifactDir =
-    '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595'
 
   // 1. Workspace with Left Sidebar reveal
   await page.goto(`/documents/${seededWorkspace.documentId}`)
@@ -365,11 +348,7 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
   await revealButton.click()
   const sidebar = page.getByRole('dialog', { name: 'Workspace sidebar' })
   await expect(sidebar).toBeVisible()
-  await page.screenshot({
-    path: `${artifactDir}/mobile-left-sidebar.png`,
-    animations: 'disabled',
-    scale: 'css',
-  })
+  await capture(page, testInfo, 'mobile-left-sidebar')
 
   // Close sidebar drawer via hide button
   await sidebar.getByRole('button', { name: 'Hide workspace sidebar' }).click()
@@ -392,11 +371,7 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
   expect(firstTabBox).not.toBeNull()
   expect(firstTabBox!.height).toBeGreaterThanOrEqual(44)
 
-  await page.screenshot({
-    path: `${artifactDir}/mobile-right-inspector.png`,
-    animations: 'disabled',
-    scale: 'css',
-  })
+  await capture(page, testInfo, 'mobile-right-inspector')
 
   // Close inspector
   await inspector.getByRole('button', { name: 'Collapse document inspector' }).click()
@@ -407,27 +382,21 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
   const chatHeader = page.locator('.workspace-chat-header')
   await expect(chatHeader).toBeVisible()
   await expect(page.getByRole('button', { name: 'Return to workspace' })).toBeVisible()
-  await page.screenshot({
-    path: `${artifactDir}/mobile-chat.png`,
-    animations: 'disabled',
-    scale: 'css',
-  })
+  await capture(page, testInfo, 'mobile-chat')
 
   // 4. Settings UI on mobile
   await page.goto('/settings')
-  const mobileNav = page.locator('.settings-mobile-category-bar')
-  await expect(mobileNav).toBeVisible()
-  const mobileCategoryTabs = mobileNav.locator('.settings-mobile-category-tab')
-  await expect(mobileCategoryTabs).toHaveCount(6)
+  const revealSettingsSidebar = page.getByRole('button', { name: 'Show settings sidebar' })
+  await expect(revealSettingsSidebar).toBeVisible()
+  await revealSettingsSidebar.click()
 
-  // Click on "AI & models" category tab in the mobile bar
-  await mobileCategoryTabs.filter({ hasText: 'AI & models' }).click()
+  const settingsSidebar = page.getByRole('dialog', { name: 'Settings sidebar' })
+  await expect(settingsSidebar).toBeVisible()
+
+  // Click on "AI & models" category button in the settings sidebar drawer
+  await settingsSidebar.getByRole('button', { name: /AI & models/ }).click()
   await expect(page).toHaveURL(/category=models/)
   await expect(page.getByRole('heading', { level: 1, name: 'AI & models' })).toBeVisible()
 
-  await page.screenshot({
-    path: `${artifactDir}/mobile-settings.png`,
-    animations: 'disabled',
-    scale: 'css',
-  })
+  await capture(page, testInfo, 'mobile-settings')
 })

@@ -196,8 +196,7 @@
   .sidebar-mode-switch button {
     min-height: var(--control-touch);
   }
-  .sidebar-brandbar .quiet-icon,
-  .sidebar-reveal {
+  .sidebar-brandbar .quiet-icon {
     width: var(--control-touch);
     height: var(--control-touch);
     min-width: var(--control-touch);
@@ -428,27 +427,16 @@
     overscroll-behavior: contain;
   }
   .sidebar-backdrop { position: absolute; z-index: 10; inset: 0; border: 0; background: var(--dialog-backdrop); animation: overlay-fade-in var(--motion-panel) var(--ease-ui-out); }
-  .sidebar-reveal {
-    position: absolute;
-    z-index: 12;
-    top: max(var(--space-2), env(safe-area-inset-top, 0px));
-    left: max(var(--space-2), env(safe-area-inset-left, 0px));
-    width: var(--control-touch);
-    height: var(--control-touch);
-    min-width: var(--control-touch);
-    min-height: var(--control-touch);
-    display: grid;
-    place-items: center;
-  }
-  .sidebar-collapsed .editor-tabbar { padding-left: calc(var(--control-touch) + var(--space-3)); }
-  .sidebar-collapsed .document-header { padding-left: calc(var(--control-touch) + var(--space-3)); }
-  .sidebar-collapsed .welcome { padding-left: calc(var(--control-touch) + var(--space-4)); }
-  .sidebar-collapsed .review-page { padding-left: calc(var(--control-touch) + var(--space-4)); }
-  .sidebar-collapsed .utility-header { padding-left: calc(var(--control-touch) + var(--space-3)); }
-  .sidebar-collapsed .activity-page > header, .sidebar-collapsed .workspace-chat-page > header, .sidebar-collapsed .publications-dashboard > header, .sidebar-collapsed .settings-compact-header { padding-left: calc(var(--control-touch) + var(--space-3)); }
-  .sidebar-collapsed .reconciliation-header { padding-left: calc(var(--control-touch) + var(--space-3)); }
-  .sidebar-collapsed .karakeep-header { padding-left: calc(var(--control-touch) + var(--space-3)); }
-  .sidebar-collapsed .html-publication-page > header { padding-left: calc(var(--control-touch) + var(--space-3)); }
+  .sidebar-reveal { position: absolute; z-index: 12; top: 0; left: 0; }
+  .sidebar-collapsed .editor-tabbar { padding-left: calc(var(--control-height) + var(--space-3)); }
+  .sidebar-collapsed .document-header { padding-left: calc(var(--control-height) + var(--space-3)); }
+  .sidebar-collapsed .welcome { padding-left: calc(var(--control-height) + var(--space-4)); }
+  .sidebar-collapsed .review-page { padding-left: calc(var(--control-height) + var(--space-4)); }
+  .sidebar-collapsed .utility-header { padding-left: calc(var(--control-height) + var(--space-3)); }
+  .sidebar-collapsed .activity-page > header, .sidebar-collapsed .workspace-chat-page > header, .sidebar-collapsed .publications-dashboard > header, .sidebar-collapsed .settings-compact-header { padding-left: calc(var(--control-height) + var(--space-3)); }
+  .sidebar-collapsed .reconciliation-header { padding-left: calc(var(--control-height) + var(--space-3)); }
+  .sidebar-collapsed .karakeep-header { padding-left: calc(var(--control-height) + var(--space-3)); }
+  .sidebar-collapsed .html-publication-page > header { padding-left: calc(var(--control-height) + var(--space-3)); }
   .workbench-shell > .resize-handle { display: none; }
   .sidebar-footer-nav a { min-height: var(--control-touch); }
   .sidebar-mode-switch button { min-height: var(--control-touch); }
