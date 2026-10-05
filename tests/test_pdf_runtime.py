@@ -150,3 +150,82 @@ def test_pdf_parser_limits_fail_durably_without_partial_pages(client, limit):
     current = service.documents.get_document(document.document_id)
     assert current.pdf_extraction_status == "failed"
     assert service.pages(document.document_id) == []
+
+
+def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
+    service = client.app.state.services.pdf_research
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    source = io.BytesIO()
+    writer.write(source)
+    document = service.import_pdf(
+        title="Atomic Test",
+        path="atomic.pdf",
+        content=source,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="atomic-test",
+    )
+
+    concurrent_errors = []
+    real_parse_pages = service._parse_pages
+
+    # Simulate simultaneous read while subprocess writes output file
+    def check_no_partial_reads(doc_id, cancel_event):
+        # Call subprocess extraction
+        pages = real_parse_pages(doc_id, cancel_event)
+
+        # Execute direct python entry point to test atomic replace behavior
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_pdf = Path(tmpdir) / "source.pdf"
+            src_pdf.write_bytes(source.getvalue())
+            out_json = Path(tmpdir) / "pages.json"
+
+            # Launch subprocess
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "sangam.pdf_parser",
+                    str(src_pdf),
+                    str(out_json),
+                    "100",
+                    "100000",
+                ]
+            )
+
+            # Attempt to read output file concurrently in a loop until done
+            for _ in range(50):
+                if out_json.exists():
+                    try:
+                        data = out_json.read_text(encoding="utf-8")
+                        if data == "":
+                            concurrent_errors.append(
+                                "Read zero bytes from output file during write!"
+                            )
+                    except Exception as err:
+                        concurrent_errors.append(f"Read error during write: {err}")
+                time.sleep(0.001)
+
+            proc.wait()
+            assert proc.returncode == 0
+            assert out_json.exists()
+            assert out_json.read_text(encoding="utf-8").startswith("[")
+            # Verify no temp artifacts were left in tmpdir
+            leftover = [p for p in Path(tmpdir).iterdir() if ".sangam-" in p.name]
+            if leftover:
+                concurrent_errors.append(f"Orphaned temp files found: {leftover}")
+
+        return pages
+
+    monkeypatch.setattr(service, "_parse_pages", check_no_partial_reads)
+    assert service.extract_text(document.document_id) is True
+    assert concurrent_errors == []
+    assert service.documents.get_document(document.document_id).pdf_extraction_status == "ready"

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -24,7 +26,21 @@ def main() -> None:
             if total > max_bytes:
                 raise ValueError("PDF exceeds the extracted text byte limit")
             pages.append(text)
-    Path(output).write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
+
+    destination = Path(output)
+    payload = json.dumps(pages, ensure_ascii=False).encode("utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.sangam-", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
