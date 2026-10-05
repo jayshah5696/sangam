@@ -166,6 +166,7 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
       {inspectingChangeItem && (
         <SourceVersionComparisonModal
           item={inspectingChangeItem}
+          requirePassageRemap
           onClose={() => setInspectingChangeItem(null)}
           onUpdateRevision={async (newRevisionId, content) => {
             await replaceEvidenceRevision(inspectingChangeItem.id, newRevisionId, content)

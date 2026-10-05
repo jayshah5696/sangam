@@ -326,7 +326,11 @@ export function DocumentWorkspace({
     if (!recheckComparisonItem) return
 
     if (recheckComparisonItem.evidenceItem) {
-      await replaceEvidenceRevision(recheckComparisonItem.evidenceItem.id, newRevisionId, newContent)
+      try {
+        await replaceEvidenceRevision(recheckComparisonItem.evidenceItem.id, newRevisionId, newContent)
+      } catch {
+        // If the passage text cannot be remapped, keep the original evidence item pinned
+      }
     }
 
     const oldRev = recheckComparisonItem.pinnedRevisionId

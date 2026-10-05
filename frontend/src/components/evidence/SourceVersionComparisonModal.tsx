@@ -32,6 +32,7 @@ interface SourceVersionComparisonModalProps {
   onClose: () => void
   onUpdateRevision?: (newRevisionId: string, content: string) => Promise<void>
   onReviseConclusion?: () => void
+  requirePassageRemap?: boolean
 }
 
 export function SourceVersionComparisonModal({
@@ -39,6 +40,7 @@ export function SourceVersionComparisonModal({
   onClose,
   onUpdateRevision,
   onReviseConclusion,
+  requirePassageRemap = false,
 }: SourceVersionComparisonModalProps) {
   const [error, setError] = useState<string | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -242,7 +244,12 @@ export function SourceVersionComparisonModal({
             <button
               type="button"
               className="panel-button"
-              disabled={!currentDoc || contentType === 'application/pdf' || isUpdating}
+              disabled={
+                !currentDoc ||
+                (requirePassageRemap && (!remapped || !pinnedRev)) ||
+                contentType === 'application/pdf' ||
+                isUpdating
+              }
               onClick={() => void handleUpdate()}
             >
               {isUpdating ? 'Updating...' : 'Update to current head revision'}
