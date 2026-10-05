@@ -710,7 +710,7 @@ def test_hardened_security_sanitization_patterns() -> None:
     assert "id_token=[REDACTED]" in sanitized_text
 
 
-def test_auto_populated_action_type_and_target_file(client: TestClient) -> None:
+def test_operation_event_action_and_path_provenance(client: TestClient) -> None:
     create_resp = client.post(
         "/api/v1/documents",
         json={
@@ -732,5 +732,5 @@ def test_auto_populated_action_type_and_target_file(client: TestClient) -> None:
     assert len(doc_events) >= 1
     create_event = next(e for e in doc_events if e["action"] == "create")
 
-    assert create_event["details"]["action_type"] == "create"
-    assert create_event["details"]["target_file"] == "docs/auto_detail_test.md"
+    assert create_event["action"] == "create"
+    assert create_event["path"] == "docs/auto_detail_test.md"
