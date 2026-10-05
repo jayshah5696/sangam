@@ -70,3 +70,6 @@ pnpm-debug.log*
 !/data/workspace/.gitkeep
 /data/backups/*
 !/data/backups/.gitkeep
+
+output/
+frontend/output/

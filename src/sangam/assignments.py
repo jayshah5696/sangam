@@ -908,7 +908,7 @@ class AssignmentService:
                             kind="source_changed" if doc.role == "source" else "document_changed",
                             document_id=doc.document_id,
                             title=doc.document_title,
-                            revision_id=doc.current_revision_id,
+                            revision_id=doc.current_revision_id or "",
                             previous_revision_id=old.get(doc.document_id),
                             occurred_at=doc.updated_at,
                         )

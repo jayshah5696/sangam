@@ -1,7 +1,14 @@
+import { extractDraftCitations, checkSourceChanged } from '../../evidenceDependencies'
+import {
+  SourceVersionComparisonModal,
+  type SourceComparisonTarget,
+} from '../evidence/SourceVersionComparisonModal'
+import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
+  AlertTriangle,
   BookmarkCheck,
   Columns2,
   ImagePlus,
@@ -252,6 +259,90 @@ export function DocumentWorkspace({
     return () => window.removeEventListener('beforeunload', warn)
   }, [content, document.content])
 
+  const { evidence, replaceEvidenceRevision } = useWorkspaceEvidence()
+  const [recheckComparisonItem, setRecheckComparisonItem] = useState<SourceComparisonTarget | null>(null)
+
+  const staleDraftCitations = useMemo(() => {
+    if (document.content_type === 'application/pdf') return []
+    const allCitations = extractDraftCitations(content, documentId)
+    const docs = documentsQuery.data ?? []
+
+    const staleList: Array<{
+      citation: ReturnType<typeof extractDraftCitations>[number]
+      sourceDoc: (typeof docs)[number]
+      reason: string
+      matchingEvidence?: (typeof evidence)[number]
+    }> = []
+
+    for (const cite of allCitations) {
+      const sourceDoc = docs.find((d) => d.document_id === cite.sourceDocumentId)
+      if (!sourceDoc) continue
+      const change = checkSourceChanged(sourceDoc, cite.pinnedRevisionId)
+      if (change.changed) {
+        const matchingEvidence = evidence.find(
+          (e) =>
+            e.sourceDocumentId === cite.sourceDocumentId &&
+            (!e.pinnedRevisionId || e.pinnedRevisionId === cite.pinnedRevisionId),
+        )
+        staleList.push({
+          citation: cite,
+          sourceDoc,
+          reason: change.reason || 'Source has updated',
+          matchingEvidence,
+        })
+      }
+    }
+
+    for (const item of evidence) {
+      if (item.claimTarget?.documentId !== documentId) continue
+      if (staleList.some((s) => s.citation.sourceDocumentId === item.sourceDocumentId)) continue
+      const sourceDoc = docs.find((d) => d.document_id === item.sourceDocumentId)
+      if (!sourceDoc) continue
+      const change = checkSourceChanged(sourceDoc, item.pinnedRevisionId)
+      if (change.changed) {
+        staleList.push({
+          citation: {
+            id: item.id,
+            sourceDocumentId: item.sourceDocumentId,
+            sourceTitle: item.sourceTitle,
+            pinnedRevisionId: item.pinnedRevisionId,
+            claim: item.claim,
+            selectedText: item.selectedText,
+            startOffset: 0,
+            endOffset: 0,
+            rawCitation: '',
+          },
+          sourceDoc,
+          reason: change.reason || 'Source has updated',
+          matchingEvidence: item,
+        })
+      }
+    }
+
+    return staleList
+  }, [content, document.content_type, documentId, documentsQuery.data, evidence])
+
+  const handleUpdateDraftCitationRevision = async (newRevisionId: string, newContent: string) => {
+    if (!recheckComparisonItem) return
+
+    if (recheckComparisonItem.evidenceItem) {
+      try {
+        await replaceEvidenceRevision(recheckComparisonItem.evidenceItem.id, newRevisionId, newContent)
+      } catch {
+        // If the passage text cannot be remapped, keep the original evidence item pinned
+      }
+    }
+
+    const oldRev = recheckComparisonItem.pinnedRevisionId
+    if (oldRev && content.includes(oldRev)) {
+      const updatedContent = content.replaceAll(
+        new RegExp('([?&]revision=)' + oldRev, 'g'),
+        '' + newRevisionId,
+      )
+      handleEditorChange(updatedContent)
+    }
+  }
+
   const conflictHeadQuery = useQuery({
     queryKey: ['document-conflict-head', documentId],
     queryFn: () => api.getDocument(documentId),
@@ -449,6 +540,56 @@ export function DocumentWorkspace({
             window.history.replaceState(window.history.state, '', url)
             setCitationTarget(null)
           }}
+        />
+      )}
+      {staleDraftCitations.length > 0 && (
+        <aside className="source-recheck-callout" role="alert" aria-label="Source changed alert">
+          <div className="source-recheck-callout-header">
+            <div className="source-recheck-callout-title">
+              <AlertTriangle size="var(--icon-control)" style={{ flexShrink: 0 }} />
+              <div>
+                <strong>The source behind this paragraph has changed.</strong>
+                <p>
+                  {staleDraftCitations[0]?.sourceDoc.title}: {staleDraftCitations[0]?.reason}. Compare the old
+                  passage with the new one to decide whether to update the reference or revise your
+                  conclusion.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="panel-button"
+              onClick={() => {
+                const target = staleDraftCitations[0]
+                if (!target) return
+                setRecheckComparisonItem({
+                  id: target.citation.id,
+                  sourceDocumentId: target.citation.sourceDocumentId,
+                  sourceTitle: target.citation.sourceTitle,
+                  pinnedRevisionId: target.citation.pinnedRevisionId,
+                  selectedText: target.citation.selectedText || target.matchingEvidence?.selectedText || '',
+                  claim: target.citation.claim || target.matchingEvidence?.claim || undefined,
+                  sourceCurrentRevisionId: target.sourceDoc.current_revision_id,
+                  // SAFETY: Document items may optionally include superseded_by_title from superseding joins.
+                  sourceSupersededByTitle:
+                    'superseded_by_title' in target.sourceDoc
+                      ? (target.sourceDoc as { superseded_by_title?: string }).superseded_by_title
+                      : undefined,
+                  evidenceItem: target.matchingEvidence,
+                })
+              }}
+            >
+              Compare the old passage with the new one
+            </button>
+          </div>
+        </aside>
+      )}
+      {recheckComparisonItem && (
+        <SourceVersionComparisonModal
+          item={recheckComparisonItem}
+          onClose={() => setRecheckComparisonItem(null)}
+          onUpdateRevision={handleUpdateDraftCitationRevision}
+          onReviseConclusion={() => sessions.updateSession(documentId, { mode: 'edit' })}
         />
       )}
       <div className={`editing-surface mode-${mode}`}>

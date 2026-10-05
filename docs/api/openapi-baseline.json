@@ -6367,8 +6367,15 @@
             "type": "string"
           },
           "current_revision_id": {
-            "title": "Current Revision Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Revision Id"
           },
           "document_id": {
             "title": "Document Id",
@@ -6447,6 +6454,28 @@
             "title": "Source Updated",
             "type": "boolean"
           },
+          "superseded_by_document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By Document Id"
+          },
+          "superseded_by_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By Title"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -6459,7 +6488,6 @@
           "document_path",
           "content_type",
           "role",
-          "current_revision_id",
           "updated_at",
           "created_at"
         ],
@@ -35511,6 +35539,6 @@
   },
   "x-sangam-baseline-review": {
     "date": "2026-10-04",
-    "reason": "Release v0.13.3"
+    "reason": "#323: support PDF members and superseded source updates in project documents"
   }
 }

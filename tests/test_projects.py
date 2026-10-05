@@ -523,3 +523,60 @@ def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters
     assert bad_update_notes_ctrl.status_code == 422
     msg = bad_update_notes_ctrl.json()["error"]["message"]
     assert "Document notes cannot contain control characters" in msg
+
+
+def test_project_pdf_document_and_superseded_source_update(client: TestClient) -> None:
+    from test_phase_five_pdf_research import text_pdf
+
+    pdf_bytes = text_pdf("Original research findings on efficiency.")
+    create_pdf = client.post(
+        "/api/v1/pdfs",
+        params={"title": "Original Study", "path": "research/study.pdf"},
+        content=pdf_bytes,
+        headers={**headers("pdf-orig"), "Content-Type": "application/pdf"},
+    )
+    assert create_pdf.status_code == 201
+    orig_id = create_pdf.json()["document_id"]
+
+    # Create project and add original PDF as source
+    proj = client.post(
+        "/api/v1/projects", json={"name": "Paper Review", "create_brief": False}
+    ).json()
+    proj_id = proj["project_id"]
+
+    add_res = client.post(
+        f"/api/v1/projects/{proj_id}/documents",
+        json={"document_id": orig_id, "role": "source", "pinned_page": 1},
+    )
+    assert add_res.status_code == 201
+
+    # Project detail has the PDF, not updated
+    p_detail = client.get(f"/api/v1/projects/{proj_id}").json()
+    assert p_detail["document_count"] == 1
+    doc_item = p_detail["documents"][0]
+    assert doc_item["document_id"] == orig_id
+    assert doc_item["content_type"] == "application/pdf"
+    assert doc_item["source_updated"] is False
+    assert doc_item["superseded_by_document_id"] is None
+
+    # Now upload replacement PDF superseding the original
+    rep_bytes = text_pdf("Updated research findings with new benchmark.")
+    create_rep = client.post(
+        "/api/v1/pdfs",
+        params={
+            "title": "Revised Study",
+            "path": "research/study-v2.pdf",
+            "supersedes_document_id": orig_id,
+        },
+        content=rep_bytes,
+        headers={**headers("pdf-rep"), "Content-Type": "application/pdf"},
+    )
+    assert create_rep.status_code == 201
+    rep_id = create_rep.json()["document_id"]
+
+    # Project detail now detects source_updated=True and records superseded_by
+    p_detail_updated = client.get(f"/api/v1/projects/{proj_id}").json()
+    doc_item_updated = p_detail_updated["documents"][0]
+    assert doc_item_updated["source_updated"] is True
+    assert doc_item_updated["superseded_by_document_id"] == rep_id
+    assert doc_item_updated["superseded_by_title"] == "Revised Study"

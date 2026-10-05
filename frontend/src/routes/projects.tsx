@@ -1,4 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { findSourceDependencies, shortRevision } from '../evidenceDependencies'
+import {
+  SourceVersionComparisonModal,
+  type SourceComparisonTarget,
+} from '../components/evidence/SourceVersionComparisonModal'
+import { useWorkspaceEvidence } from '../workspaceEvidenceState'
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { z } from 'zod'
@@ -186,6 +194,8 @@ function ProjectView({ projectId }: { projectId: string }) {
   const sessions = useDocumentSessions()
   const { resume, openDocument, openConversation } = useProjectResume()
   const navigate = useNavigate()
+  const { evidence, replaceEvidenceRevision } = useWorkspaceEvidence()
+  const [comparisonTarget, setComparisonTarget] = useState<SourceComparisonTarget | null>(null)
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState<string | null>(null)
   const [description, setDescription] = useState('')
@@ -203,6 +213,30 @@ function ProjectView({ projectId }: { projectId: string }) {
             .map((d) => api.listAnnotations(d.document_id)),
         )
       ).flat(),
+    enabled: Boolean(detail.data),
+  })
+  const draftContents = useQuery({
+    queryKey: [
+      'project-drafts-content',
+      projectId,
+      detail.data?.documents
+        .filter((d) => d.role === 'draft')
+        .map((d) => `${d.document_id}:${d.current_revision_id ?? ''}`)
+        .join(','),
+    ],
+    queryFn: async () => {
+      const drafts = (detail.data?.documents ?? []).filter((d) => d.role === 'draft')
+      return Promise.all(
+        drafts.map(async (d) => {
+          try {
+            const fullDoc = await api.getDocument(d.document_id)
+            return { document_id: d.document_id, title: d.document_title, content: fullDoc.content }
+          } catch {
+            return { document_id: d.document_id, title: d.document_title, content: d.excerpt ?? '' }
+          }
+        }),
+      )
+    },
     enabled: Boolean(detail.data),
   })
   const refresh = async () => {
@@ -420,6 +454,8 @@ function ProjectView({ projectId }: { projectId: string }) {
             <DocumentRow
               key={doc.document_id}
               doc={doc}
+              drafts={draftContents.data ?? []}
+              evidence={evidence}
               active={project.active_document_id === doc.document_id}
               onOpen={() => action.mutate(() => openDocument(doc, undefined, projectId))}
               onUpdate={(updates) =>
@@ -431,6 +467,7 @@ function ProjectView({ projectId }: { projectId: string }) {
                 )
               }
               onRemove={() => action.mutate(() => api.removeProjectDocument(projectId, doc.document_id))}
+              onCompare={(target) => setComparisonTarget(target)}
             />
           ))}
         </div>
@@ -548,26 +585,65 @@ function ProjectView({ projectId }: { projectId: string }) {
           }}
         />
       )}
+      {comparisonTarget && (
+        <SourceVersionComparisonModal
+          item={comparisonTarget}
+          onClose={() => setComparisonTarget(null)}
+          onUpdateRevision={async (newRevisionId, newContent) => {
+            await api.updateProjectDocument(projectId, comparisonTarget.sourceDocumentId, {
+              source_revision_id: newRevisionId,
+              expected_version: project.version,
+            })
+            if (comparisonTarget.evidenceItem) {
+              try {
+                await replaceEvidenceRevision(comparisonTarget.evidenceItem.id, newRevisionId, newContent)
+              } catch {
+                // If evidence excerpt cannot be remapped, project document revision still updates
+              }
+            }
+            await refresh()
+          }}
+        />
+      )}
     </section>
   )
 }
 
 function DocumentRow({
   doc,
+  drafts,
+  evidence,
   active,
   onOpen,
   onUpdate,
   onRemove,
+  onCompare,
 }: {
   doc: ProjectDocumentItem
+  drafts: Array<{ document_id: string; title: string; content?: string }>
+  evidence: ReturnType<typeof useWorkspaceEvidence>['evidence']
   active: boolean
   onOpen: () => void
   onUpdate: (updates: Parameters<typeof api.updateProjectDocument>[2]) => void
   onRemove: () => void
+  onCompare: (target: SourceComparisonTarget) => void
 }) {
   const [editing, setEditing] = useState(false)
+  const [showDependencies, setShowDependencies] = useState(Boolean(doc.source_updated))
   const [notes, setNotes] = useState(doc.notes ?? '')
   const [page, setPage] = useState(doc.pinned_page?.toString() ?? '')
+
+  const dependencies = useMemo(() => {
+    return findSourceDependencies({
+      sourceDocumentId: doc.document_id,
+      sourceTitle: doc.document_title,
+      sourceCurrentRevisionId: doc.current_revision_id,
+      sourceSupersededByTitle: doc.superseded_by_title,
+      evidenceItems: evidence,
+      drafts,
+    })
+  }, [doc, evidence, drafts])
+
   return (
     <article className="project-doc-row">
       <div className="project-doc-main">
@@ -581,13 +657,95 @@ function DocumentRow({
         </span>
         <p>{doc.notes}</p>
         {doc.source_updated && (
-          <div>
-            <span>Source has a newer revision</span>
-            <button onClick={() => onUpdate({ source_revision_id: doc.current_revision_id })}>
-              Mark source reviewed
-            </button>
+          <div className="source-recheck-callout" style={{ margin: 'var(--space-2) 0' }}>
+            <div className="source-recheck-callout-header">
+              <div className="source-recheck-callout-title">
+                <AlertTriangle size="var(--icon-control)" />
+                <div>
+                  <strong>Source updated</strong>
+                  <p>
+                    {doc.superseded_by_title
+                      ? `Superseded by "${doc.superseded_by_title}".`
+                      : `Newer revision ${shortRevision(doc.current_revision_id)} available.`}{' '}
+                    Conclusions citing this paper should be rechecked.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="secondary-action button-sm"
+                onClick={() => onUpdate({ source_revision_id: doc.current_revision_id })}
+              >
+                Mark source reviewed
+              </button>
+            </div>
           </div>
         )}
+        <div className="source-dependencies-section">
+          <button
+            type="button"
+            className="source-dependencies-toggle"
+            onClick={() => setShowDependencies((prev) => !prev)}
+            aria-expanded={showDependencies}
+          >
+            <strong>Which conclusions in this project depend on this paper? ({dependencies.length})</strong>
+          </button>
+          {showDependencies && (
+            <div className="dependent-conclusions-list">
+              {dependencies.length === 0 ? (
+                <p className="small-muted">No conclusions in this project currently depend on this paper.</p>
+              ) : (
+                dependencies.map((dep) => (
+                  <div key={dep.id} className="dependent-conclusion-card">
+                    <div className="dependent-conclusion-header">
+                      <strong className="dependent-conclusion-claim">{dep.claim}</strong>
+                      {dep.needsRechecking ? (
+                        <span className="recheck-status-badge modified">
+                          <AlertTriangle size="12" /> Needs rechecking · Source updated
+                        </span>
+                      ) : (
+                        <span className="recheck-status-badge identical">
+                          <CheckCircle2 size="12" /> Up to date
+                        </span>
+                      )}
+                    </div>
+                    {dep.draftDocumentTitle && (
+                      <span className="small-muted">In draft: {dep.draftDocumentTitle}</span>
+                    )}
+                    {dep.selectedText && (
+                      <blockquote className="dependent-conclusion-quote">
+                        <p>{dep.selectedText}</p>
+                      </blockquote>
+                    )}
+                    {dep.needsRechecking && (
+                      <div style={{ marginTop: 'var(--space-1)' }}>
+                        <button
+                          type="button"
+                          className="secondary-action button-sm"
+                          onClick={() =>
+                            onCompare({
+                              id: dep.id,
+                              sourceDocumentId: dep.sourceDocumentId,
+                              sourceTitle: dep.sourceTitle,
+                              pinnedRevisionId: dep.pinnedRevisionId,
+                              selectedText: dep.selectedText,
+                              claim: dep.claim,
+                              sourceCurrentRevisionId: dep.sourceCurrentRevisionId,
+                              sourceSupersededByTitle: dep.sourceSupersededByTitle,
+                              evidenceItem: dep.evidenceItem,
+                            })
+                          }
+                        >
+                          Compare old and new evidence
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
         {editing && (
           <div className="project-modal-form">
             <label>

@@ -1247,8 +1247,10 @@ class ProjectDocumentItem(BaseModel):
     pinned_page: int | None = None
     notes: str | None = None
     source_revision_id: str | None = None
-    current_revision_id: str
+    current_revision_id: str | None = None
     source_updated: bool = False
+    superseded_by_document_id: str | None = None
+    superseded_by_title: str | None = None
     excerpt: str = ""
     updated_at: str
     created_at: str
