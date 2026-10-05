@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
+  BookOpen,
   Columns2,
+  FileText,
   History,
   ListTree,
   MessageSquare,
@@ -49,13 +51,36 @@ import { EditorGroupErrorBoundary } from './EditorGroupErrorBoundary'
 export function WorkbenchView({ routeDocumentId }: { routeDocumentId: string }) {
   const workbench = useWorkbench()
   const { ensureDocumentOpen } = useWorkbenchActions()
-  const isHydrated = collectGroups(workbench.root).some((group) =>
-    group.tabs.some((tab) => tab.documentId === routeDocumentId),
-  )
+  const isMobile = useMediaQuery('(max-width: 768px)')
+  const groups = collectGroups(workbench.root)
+  const isHydrated = groups.some((group) => group.tabs.some((tab) => tab.documentId === routeDocumentId))
 
   useEffect(() => ensureDocumentOpen(routeDocumentId), [ensureDocumentOpen, routeDocumentId])
 
   if (!isHydrated) return <div className="center-message">Opening document…</div>
+
+  if (isMobile && groups.length > 1) {
+    return (
+      <div className="document-workbench mobile-workbench-single-surface">
+        <MobileSurfaceSwitcher groups={groups} activeGroupId={workbench.activeGroupId} />
+        <div className="mobile-working-surfaces">
+          {groups.map((group) => {
+            const isActive = group.id === workbench.activeGroupId
+            return (
+              <div
+                key={group.id}
+                className={isActive ? 'mobile-surface-active' : 'mobile-surface-inactive'}
+                aria-hidden={!isActive}
+              >
+                <EditorGroupView group={group} />
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="document-workbench split-workbench">
       <LayoutRenderer node={workbench.root} />
@@ -110,10 +135,11 @@ function LayoutRenderer({ node }: { node: LayoutNode }) {
 function EditorGroupView({ group }: { group: GroupNode }) {
   const navigate = useNavigate()
   const workbench = useWorkbench()
+  const isMobile = useMediaQuery('(max-width: 768px)')
   const groups = collectGroups(workbench.root)
-  const showTabStrip = group.tabs.length > 1 || groups.length > 1
+  const showTabStrip = group.tabs.length > 1 || (!isMobile && groups.length > 1)
   const activeDocumentId = group.activeTabId
-  const showInspector = group.id === workbench.activeGroupId && groups.length === 1
+  const showInspector = group.id === workbench.activeGroupId && (groups.length === 1 || isMobile)
   const activeDocumentQuery = useQuery({
     queryKey: ['document', activeDocumentId],
     queryFn: () =>
@@ -676,5 +702,73 @@ function DocumentLoader({
       onCloseGroup={onCloseGroup}
       onDeleted={onDeleted}
     />
+  )
+}
+
+function MobileSurfaceSwitcher({ groups, activeGroupId }: { groups: GroupNode[]; activeGroupId: string }) {
+  return (
+    <header className="mobile-surface-switcher" role="tablist" aria-label="Working surfaces">
+      <div className="mobile-surface-tabs">
+        {groups.map((group, index) => (
+          <MobileSurfaceTabItem
+            key={group.id}
+            group={group}
+            index={index}
+            isActive={group.id === activeGroupId}
+          />
+        ))}
+      </div>
+    </header>
+  )
+}
+
+function MobileSurfaceTabItem({
+  group,
+  index,
+  isActive,
+}: {
+  group: GroupNode
+  index: number
+  isActive: boolean
+}) {
+  const workbench = useWorkbench()
+  const navigate = useNavigate()
+  const activeDocId = group.activeTabId
+  const docQuery = useQuery({
+    queryKey: ['document', activeDocId],
+    queryFn: () =>
+      activeDocId ? api.getDocument(activeDocId) : Promise.reject(new Error('No active document')),
+    enabled: Boolean(activeDocId),
+  })
+
+  const doc = docQuery.data
+  const isPdf = doc?.content_type === 'application/pdf'
+  const isDraft = !isPdf && (doc?.path?.startsWith('drafts/') || !doc?.path?.startsWith('sources/'))
+  const roleLabel = isPdf ? 'Source' : isDraft ? 'Draft' : `Surface ${index + 1}`
+  const title = doc?.title || doc?.path || `Surface ${index + 1}`
+
+  const handleClick = () => {
+    workbench.setActiveGroup(group.id)
+    if (activeDocId) {
+      void navigate({ to: '/documents/$documentId', params: { documentId: activeDocId } })
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={isActive}
+      className={`mobile-surface-tab ${isActive ? 'active' : ''}`}
+      onClick={handleClick}
+    >
+      {isPdf ? (
+        <BookOpen size="var(--icon-detail)" aria-hidden="true" />
+      ) : (
+        <FileText size="var(--icon-detail)" aria-hidden="true" />
+      )}
+      <span className="mobile-surface-role">{roleLabel}:</span>
+      <span className="mobile-surface-title">{title}</span>
+    </button>
   )
 }

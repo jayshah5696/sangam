@@ -6,9 +6,10 @@ import {
 import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import {
   AlertTriangle,
+  ArrowRightLeft,
   BookmarkCheck,
   Columns2,
   ImagePlus,
@@ -23,7 +24,14 @@ import { StateMessage } from '../ui/StateMessage'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 import { TextSelectionToolbar } from './TextSelectionToolbar'
 import { useSourceSelection } from './useSourceSelection'
-import { api, SUPPORTED_IMAGE_TYPES, writeFailureMessage, type Document, type Revision } from '../../api'
+import {
+  api,
+  SUPPORTED_IMAGE_TYPES,
+  writeFailureMessage,
+  type Document,
+  type ProjectDetail,
+  type Revision,
+} from '../../api'
 import {
   CITATION_NAVIGATION_EVENT,
   CITATION_PARAM_KEYS,
@@ -40,7 +48,7 @@ import {
 } from '../../documentSessions'
 import { internalDocumentMarkdown } from '../../internalLinks'
 import { useTheme } from '../../theme'
-import { useWorkbenchActions } from '../../workbench'
+import { collectGroups, useWorkbench, useWorkbenchActions } from '../../workbench'
 import { canSplitActiveGroup } from '../../splitPolicy'
 import { initialDocumentMode, saveLabel } from '../../documentWorkspaceState'
 import { DocumentLocationControl } from './DocumentLocationControl'
@@ -466,6 +474,7 @@ export function DocumentWorkspace({
           </div>
         </div>
       </header>
+      <MobileCompanionBar currentDocument={document} />
       {document.content_type === 'application/pdf' && <MobileInspectorToggle />}
       {document.content_type !== 'application/pdf' && saveState === 'conflict' && (
         <ConflictRecoveryNotice
@@ -1143,6 +1152,85 @@ function DocumentToolbar({
           <PanelRightOpen size="var(--icon-control)" />
         </button>
       </div>
+    </div>
+  )
+}
+
+export function MobileCompanionBar({ currentDocument }: { currentDocument: Document }) {
+  const workbench = useWorkbench()
+  const navigate = useNavigate()
+  const groups = collectGroups(workbench.root)
+  const isPdf = currentDocument.content_type === 'application/pdf'
+  const isCurrentDraft =
+    !isPdf && (currentDocument.path?.startsWith('drafts/') || !currentDocument.path?.startsWith('sources/'))
+
+  // 1. Check if another group or another tab in workbench has an active document
+  const currentGroup = groups.find((g) => g.tabs.some((t) => t.documentId === currentDocument.document_id))
+  const otherGroup = groups.find((g) => g.activeTabId && g.activeTabId !== currentDocument.document_id)
+  const otherTabInGroup = currentGroup?.tabs.find((t) => t.documentId !== currentDocument.document_id)
+  const candidateDocId = otherGroup?.activeTabId ?? otherTabInGroup?.documentId
+
+  const candidateDocQuery = useQuery({
+    queryKey: ['document', candidateDocId],
+    queryFn: () =>
+      candidateDocId ? api.getDocument(candidateDocId) : Promise.reject(new Error('No candidate document')),
+    enabled: Boolean(candidateDocId),
+  })
+
+  // 2. Check project documents for companion source/draft
+  // SAFETY: In non-strict router context, search params may contain an optional project query parameter.
+  const search = useSearch({ strict: false }) as { project?: string }
+  const projectQuery = useQuery<ProjectDetail | null>({
+    queryKey: ['project', search?.project],
+    queryFn: () => (search?.project ? api.getProject(search.project) : null),
+    enabled: Boolean(search?.project),
+  })
+
+  const projectDocs = projectQuery.data?.documents ?? []
+  const connectedProjectDoc = isCurrentDraft
+    ? projectDocs.find((d) => d.role === 'source' && d.document_id !== currentDocument.document_id)
+    : projectDocs.find(
+        (d) => (d.role === 'draft' || d.role === 'note') && d.document_id !== currentDocument.document_id,
+      )
+
+  const targetDoc = candidateDocQuery.data
+  const targetId = targetDoc?.document_id ?? connectedProjectDoc?.document_id
+  const targetTitle = targetDoc?.title ?? connectedProjectDoc?.document_title ?? ''
+  const targetPath = targetDoc?.path ?? connectedProjectDoc?.document_path ?? ''
+  const targetIsPdf = targetDoc?.content_type === 'application/pdf' || targetPath.endsWith('.pdf')
+  const targetLabel = targetIsPdf || targetPath.startsWith('sources/') ? 'source' : 'draft'
+
+  if (!targetId) return null
+
+  const handleSwitch = () => {
+    if (otherGroup && otherGroup.activeTabId === targetId) {
+      workbench.setActiveGroup(otherGroup.id)
+    } else if (currentGroup && otherTabInGroup?.documentId === targetId) {
+      workbench.activateTab(currentGroup.id, targetId)
+    }
+    void navigate({
+      to: '/documents/$documentId',
+      params: { documentId: targetId },
+      search: (prev) => prev,
+    })
+  }
+
+  return (
+    <div className="mobile-companion-bar" role="region" aria-label="Connected companion surface">
+      <button
+        type="button"
+        className="mobile-companion-button"
+        onClick={handleSwitch}
+        aria-label={`Switch to connected ${targetLabel}: ${targetTitle || 'Untitled'}`}
+      >
+        <ArrowRightLeft
+          size="var(--icon-inline)"
+          className="mobile-companion-icon-switch"
+          aria-hidden="true"
+        />
+        <span className="mobile-companion-meta">Switch to {targetLabel}:</span>
+        <span className="mobile-companion-title">{targetTitle || targetPath || 'Untitled'}</span>
+      </button>
     </div>
   )
 }

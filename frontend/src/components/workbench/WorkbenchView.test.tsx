@@ -28,6 +28,7 @@ const state = vi.hoisted(() => {
   return {
     root,
     activeGroupId: 'group-1',
+    isMobile: false,
     preferences: {
       rightVisible: false,
       rightWidth: 320,
@@ -63,7 +64,7 @@ vi.mock('../document/DocumentWorkspace', () => ({
 }))
 
 vi.mock('../../useMediaQuery', () => ({
-  useMediaQuery: () => false,
+  useMediaQuery: (query: string) => (query.includes('max-width: 768px') ? state.isMobile : false),
 }))
 
 vi.mock('@tanstack/react-query', () => ({
@@ -202,5 +203,33 @@ describe('WorkbenchView - Issue #62 & #74', () => {
     }
     render(<WorkbenchView routeDocumentId="doc-1" />)
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' })
+  })
+
+  it('renders single working surface switcher on mobile when multiple groups exist', () => {
+    state.isMobile = true
+    state.root = {
+      kind: 'split',
+      id: 'split-1',
+      direction: 'horizontal',
+      ratio: 50,
+      first: {
+        kind: 'group',
+        id: 'group-1',
+        activeTabId: 'doc-1',
+        tabs: [{ documentId: 'doc-1', title: 'Draft Doc', pinned: false }],
+      },
+      second: {
+        kind: 'group',
+        id: 'group-2',
+        activeTabId: 'doc-2',
+        tabs: [{ documentId: 'doc-2', title: 'Source PDF', pinned: false }],
+      },
+    }
+    render(<WorkbenchView routeDocumentId="doc-1" />)
+    expect(screen.getByRole('tablist', { name: 'Working surfaces' })).toBeDefined()
+    const surfaceTabs = screen.getAllByRole('tab')
+    expect(surfaceTabs.length).toBe(2)
+    expect(surfaceTabs[0]?.getAttribute('aria-selected')).toBe('true')
+    expect(surfaceTabs[1]?.getAttribute('aria-selected')).toBe('false')
   })
 })
