@@ -7,6 +7,50 @@
  * radius, spacing, or control-height values.
  */
 
+/* Mobile native platform baseline */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+:where(
+  .search-results,
+  .sheet-content,
+  .inspector-sheet,
+  .drawer-content,
+  .markdown-preview,
+  .cm-scroller,
+  .pdf-page-scroll,
+  .project-modal-form,
+  .action-menu-popover,
+  .review-inbox,
+  .dialog-body,
+  .mobile-surface-switcher
+) {
+  overscroll-behavior: contain;
+}
+
+:where(
+  button,
+  [role="button"],
+  [role="tab"],
+  .tab,
+  .chip,
+  .mobile-surface-tab,
+  .mobile-companion-button,
+  .drag-handle
+) {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 :where(body, button, input, select, textarea) {
   font-family: var(--font-ui);
 }
@@ -448,8 +492,22 @@ textarea::placeholder {
   :where(button, a, input, select, summary, [role="button"], [role="option"]),
   .welcome-create,
   .action-menu-popover > button,
-  .action-menu-popover .document-layout-actions > button {
+  .action-menu-popover .document-layout-actions > button,
+  .mobile-surface-tab,
+  .mobile-companion-button {
     min-height: var(--control-touch);
+  }
+
+  :where(
+    button:not(.cm-button),
+    [role="button"],
+    .tab,
+    .chip,
+    .mobile-surface-tab,
+    .mobile-companion-button
+  ):active {
+    transform: scale(0.98);
+    transition: transform var(--motion-fast) var(--ease-ui-out);
   }
 }
 

@@ -217,3 +217,121 @@ test('Operations rail stays correct on both sides of the sidebar breakpoint', as
     await expectNoHorizontalOverflow(page)
   }
 })
+
+test('mobile treats split workbench as single surface switcher with companion bar (Issue 312)', async ({
+  page,
+  request,
+  seededWorkspace,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-touch-mobile', 'touch-mobile validation')
+
+  // Create a second document (source)
+  const sourceResponse = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: 'Research Source Note',
+      content: '# Research Findings\n\nDirect evidence from the initial interview.',
+      content_type: 'text/markdown',
+      path: 'sources/findings.md',
+    },
+  })
+  expect(sourceResponse.ok(), await sourceResponse.text()).toBeTruthy()
+  // SAFETY: POST /api/v1/documents returns document entity containing document_id
+  const sourceData = (await sourceResponse.json()) as { document_id: string }
+
+  // Seed localStorage workbench layout before navigation
+  await page.addInitScript(
+    ({ draftId, sourceId }) => {
+      localStorage.setItem(
+        'sangam.workbench.v1',
+        JSON.stringify({
+          schemaVersion: 1,
+          activeGroupId: 'group-1',
+          root: {
+            kind: 'split',
+            id: 'split-root',
+            direction: 'horizontal',
+            ratio: 50,
+            first: {
+              kind: 'group',
+              id: 'group-1',
+              activeTabId: draftId,
+              tabs: [{ documentId: draftId, title: 'Crisp workspace', pinned: false }],
+            },
+            second: {
+              kind: 'group',
+              id: 'group-2',
+              activeTabId: sourceId,
+              tabs: [{ documentId: sourceId, title: 'Research Source Note', pinned: false }],
+            },
+          },
+        }),
+      )
+    },
+    { draftId: seededWorkspace.documentId, sourceId: sourceData.document_id },
+  )
+
+  await page.goto(`/documents/${seededWorkspace.documentId}`)
+
+  // Capture "before" state (simulating workbench without mobile surface switcher and companion bar)
+  await page.evaluate(() => {
+    document.querySelector('.mobile-surface-switcher')?.setAttribute('style', 'display: none !important')
+    document.querySelector('.mobile-companion-bar')?.setAttribute('style', 'display: none !important')
+  })
+  await capture(page, testInfo, 'mobile-312-before')
+  await page.screenshot({
+    path: '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595/mobile-before.png',
+    animations: 'disabled',
+    scale: 'css',
+  })
+  await page.evaluate(() => {
+    document.querySelector('.mobile-surface-switcher')?.removeAttribute('style')
+    document.querySelector('.mobile-companion-bar')?.removeAttribute('style')
+  })
+
+  // Verify surface switcher is visible with role="tablist"
+  const switcher = page.getByRole('tablist', { name: 'Working surfaces' })
+  await expect(switcher).toBeVisible()
+
+  // Verify tabs
+  const tabs = switcher.getByRole('tab')
+  await expect(tabs).toHaveCount(2)
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'false')
+
+  // Verify companion bar
+  const companionBar = page.getByRole('region', { name: 'Connected companion surface' })
+  await expect(companionBar).toBeVisible()
+  const companionButton = companionBar.getByRole('button')
+  await expect(companionButton).toContainText('Switch to source:')
+
+  // Capture "after" state on draft surface
+  await capture(page, testInfo, 'mobile-312-after-draft')
+  await page.screenshot({
+    path: '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595/mobile-after-draft.png',
+    animations: 'disabled',
+    scale: 'css',
+  })
+
+  // Tap second tab in switcher -> switches to source
+  await tabs.nth(1).click()
+  await expect(page).toHaveURL(new RegExp(`/documents/${sourceData.document_id}`))
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'false')
+
+  // Verify companion button on source now offers to switch to draft
+  await expect(companionBar.getByRole('button')).toContainText('Switch to draft:')
+
+  // Capture "after" state on source surface
+  await capture(page, testInfo, 'mobile-312-after-source')
+  await page.screenshot({
+    path: '/home/jshah/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/6cd1d6de-e226-4928-97b8-44433ac1f595/mobile-after-source.png',
+    animations: 'disabled',
+    scale: 'css',
+  })
+
+  // Tap companion button -> switches back to draft
+  await companionBar.getByRole('button').click()
+  await expect(page).toHaveURL(new RegExp(`/documents/${seededWorkspace.documentId}`))
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
+})
