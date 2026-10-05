@@ -554,3 +554,11 @@ textarea::placeholder {
   backdrop-filter: blur(2px);
   animation: overlay-fade-in var(--motion-panel) var(--ease-ui-out);
 }
+
+@media (max-width: 768px) {
+  :where(dialog, .shared-dialog) {
+    max-width: min(calc(100vw - 1.5rem), 38rem);
+    max-height: min(calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem), 90dvh);
+    overscroll-behavior: contain;
+  }
+}

@@ -115,6 +115,25 @@ export function WorkspaceSettings() {
           <ScopeBadge scope={activeCategory === 'appearance' ? 'browser' : 'workspace'} />
         </header>
 
+        <nav className="settings-mobile-category-bar" aria-label="Settings categories">
+          {settingsCategories.map((category) => {
+            const Icon = category.icon
+            const active = category.id === activeCategory
+            return (
+              <button
+                key={category.id}
+                type="button"
+                className={`settings-mobile-category-tab ${active ? "active" : ""}`}
+                aria-pressed={active}
+                onClick={() => void navigate({ search: { category: category.id } })}
+              >
+                <Icon size="var(--icon-inline)" aria-hidden="true" />
+                <span>{category.label}</span>
+              </button>
+            )
+          })}
+        </nav>
+
         <main className="settings-main-pane" aria-label={`${activeDefinition.label} settings`}>
           {activeCategory === 'appearance' && (
             <SettingsSection
