@@ -36,6 +36,57 @@ def test_invalid_scopes_never_issue_global_grants(client: TestClient, scope):
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "prefix,path,expected",
+    [
+        (None, "docs/item.md", True),
+        ("docs", None, False),
+        ("", "docs/item.md", True),
+        ("/", "docs/item.md", True),
+        ("docs", "docs", True),
+        ("docs", "docs/", True),
+        ("docs/", "docs", True),
+        ("docs", "docs/item.md", True),
+        ("docs/", "docs/item.md", True),
+        ("docs", "docs-private/secret.md", False),
+        ("docs", "docs_extra/item.md", False),
+        ("docs/sub", "docs/sub/item.md", True),
+        ("docs/sub", "docs/sub_extra/item.md", False),
+    ],
+)
+def test_path_matches_component_boundaries(prefix, path, expected):
+    from sangam.security import path_matches
+
+    assert path_matches(prefix, path) is expected
+
+
+def test_agent_scope_boundary_enforcement(client: TestClient):
+    token = issue_agent_token(
+        client,
+        actor_id="agent:boundary",
+        display_name="Boundary Agent",
+        capabilities=("read", "create"),
+        path_prefix="docs",
+    )
+    auth = {"Authorization": f"Bearer {token}"}
+
+    # Allowed in docs/
+    allowed = client.post(
+        "/api/v1/documents",
+        json=dict(title="Allowed", content="ok", path="docs/item.md"),
+        headers={**auth, **headers("boundary-allowed")},
+    )
+    assert allowed.status_code == 201
+
+    # Denied in docs-private/
+    denied = client.post(
+        "/api/v1/documents",
+        json=dict(title="Denied", content="secret", path="docs-private/secret.md"),
+        headers={**auth, **headers("boundary-denied")},
+    )
+    assert denied.status_code == 403
+
+
 @pytest.mark.parametrize("scope", ["docs/*", "docs/**", "/*", "/**", "*", "**"])
 def test_wildcard_issuance_and_recursive_access(client: TestClient, scope):
     token = issue_agent_token(client, capabilities=("read", "create"), path_prefix=scope)
