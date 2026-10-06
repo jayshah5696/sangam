@@ -376,7 +376,11 @@ def path_matches(prefix: str | None, path: str | None) -> bool:
         return True
     if path is None:
         return False
-    return path == prefix or path.startswith(f"{prefix}/")
+    norm_prefix = prefix.strip().rstrip("/")
+    if not norm_prefix:
+        return True
+    norm_path = path.strip().rstrip("/")
+    return norm_path == norm_prefix or norm_path.startswith(f"{norm_prefix}/")
 
 
 class IdentityService:
