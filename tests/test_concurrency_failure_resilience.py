@@ -2566,9 +2566,7 @@ def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestCl
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
 
 
-def test_simultaneous_reads_and_writes_concurrency_resilience(
-    client: TestClient, settings
-) -> None:
+def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient, settings) -> None:
     target_path = "research/simultaneous_rw.md"
 
     # Create initial document
@@ -2610,9 +2608,7 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(
         with rev_lock:
             latest_expected = expected_rev[0]
 
-        new_content = (
-            f"Updated revision content from worker {worker_id} iteration {write_idx}\n"
-        )
+        new_content = f"Updated revision content from worker {worker_id} iteration {write_idx}\n"
         resp = client.patch(
             f"/api/v1/documents/{doc_id}",
             json={
@@ -2628,9 +2624,7 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(
                 expected_rev[0] = new_rev
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        reader_futures = [
-            executor.submit(continuous_reader, idx) for idx in range(4)
-        ]
+        reader_futures = [executor.submit(continuous_reader, idx) for idx in range(4)]
         time.sleep(0.01)
 
         writer_futures = []
