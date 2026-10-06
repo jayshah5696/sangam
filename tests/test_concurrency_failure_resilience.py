@@ -2564,3 +2564,116 @@ def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestCl
     temp_dir = Path(tempfile.gettempdir())
     orphaned_temp_files = list(temp_dir.glob(".pages.json.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
+
+
+def test_simultaneous_reads_and_writes_concurrency_resilience(
+    client: TestClient, settings
+) -> None:
+    target_path = "research/simultaneous_rw.md"
+
+    # Create initial document
+    res = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Simultaneous R/W Test Doc",
+            "content": "Initial revision content 0\n",
+            "path": target_path,
+        },
+        headers=headers("create-simultaneous-rw"),
+    )
+    assert res.status_code == 201
+    doc = res.json()
+    doc_id = doc["document_id"]
+    current_rev = doc["current_revision_id"]
+
+    stop_flag = threading.Event()
+    read_results: list[tuple[int, str, bytes]] = []
+    write_results: list[tuple[int, str]] = []
+    rev_lock = threading.Lock()
+    expected_rev = [current_rev]
+
+    def continuous_reader(worker_id: int):
+        while not stop_flag.is_set():
+            res_doc = client.get(
+                f"/api/v1/documents/{doc_id}",
+                headers=headers(f"reader-{worker_id}-doc"),
+            )
+            res_raw = client.get(
+                f"/api/v1/documents/{doc_id}/raw",
+                headers=headers(f"reader-{worker_id}-raw"),
+            )
+            read_results.append((res_doc.status_code, "doc", res_doc.content))
+            read_results.append((res_raw.status_code, "raw", res_raw.content))
+            time.sleep(0.001)
+
+    def writer(worker_id: int, write_idx: int):
+        with rev_lock:
+            latest_expected = expected_rev[0]
+
+        new_content = (
+            f"Updated revision content from worker {worker_id} iteration {write_idx}\n"
+        )
+        resp = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={
+                "content": new_content,
+                "expected_revision_id": latest_expected,
+            },
+            headers=headers(f"writer-{worker_id}-{write_idx}"),
+        )
+        write_results.append((resp.status_code, resp.text))
+        if resp.status_code == 200:
+            new_rev = resp.json()["current_revision_id"]
+            with rev_lock:
+                expected_rev[0] = new_rev
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        reader_futures = [
+            executor.submit(continuous_reader, idx) for idx in range(4)
+        ]
+        time.sleep(0.01)
+
+        writer_futures = []
+        for w_idx in range(4):
+            for i_idx in range(3):
+                writer_futures.append(executor.submit(writer, w_idx, i_idx))
+                time.sleep(0.002)
+
+        for wf in writer_futures:
+            wf.result(timeout=10)
+
+        stop_flag.set()
+        for rf in reader_futures:
+            rf.result(timeout=10)
+
+    # Validate reader results: NO zero-byte reads or error statuses
+    assert len(read_results) > 0, "Readers should have executed reads"
+    for status_code, kind, content in read_results:
+        assert status_code == 200, f"Reader received unexpected status code: {status_code}"
+        assert len(content) > 0, f"Zero-byte read detected for {kind} endpoint!"
+        text = content.decode("utf-8")
+        assert "revision content" in text or "Updated revision content" in text, (
+            f"Corrupted or invalid read content detected: {text!r}"
+        )
+
+    # Validate writer results: at least one update succeeded,
+    # and conflicting updates failed cleanly (409)
+    status_codes = [code for code, _ in write_results]
+    assert 200 in status_codes, "At least one update write should have succeeded"
+    for code in status_codes:
+        assert code in (200, 409), f"Writer encountered unexpected status code: {code}"
+
+    # Verify final winning revision on disk matches database
+    fetch_resp = client.get(f"/api/v1/documents/{doc_id}", headers=headers("fetch-final"))
+    assert fetch_resp.status_code == 200
+    final_doc = fetch_resp.json()
+
+    file_path = settings.workspace_root / target_path
+    assert file_path.is_file(), "Workspace file missing!"
+    disk_content = file_path.read_text(encoding="utf-8")
+    assert disk_content == final_doc["content"]
+
+    # Verify no orphaned temporary files exist in the parent directory
+    parent_dir = file_path.parent
+    orphaned_temp_files = list(parent_dir.glob(".simultaneous_rw.md.sangam-*"))
+    assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"

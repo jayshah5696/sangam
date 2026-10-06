@@ -207,12 +207,17 @@ class DiskWorkspaceFilesystem:
         temporary = Path(temporary_name)
         try:
             digest = hashlib.sha256()
-            with os.fdopen(descriptor, "wb") as output:
-                while chunk := content.read(65536):
-                    output.write(chunk)
-                    digest.update(chunk)
-                output.flush()
-                os.fsync(output.fileno())
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    descriptor = -1
+                    while chunk := content.read(65536):
+                        output.write(chunk)
+                        digest.update(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
             with temporary.open("rb") as written:
                 actual_hash = hashlib.file_digest(written, "sha256").hexdigest()
             expected_hash = digest.hexdigest()
@@ -300,10 +305,15 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(source.read_bytes())
-                output.flush()
-                os.fsync(output.fileno())
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    descriptor = -1
+                    output.write(source.read_bytes())
+                    output.flush()
+                    os.fsync(output.fileno())
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
             retained_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
             if retained_hash != content_hash:
                 raise OSError("Retained trash file hash does not match expected content hash")
@@ -341,10 +351,15 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(retained.read_bytes())
-                output.flush()
-                os.fsync(output.fileno())
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    descriptor = -1
+                    output.write(retained.read_bytes())
+                    output.flush()
+                    os.fsync(output.fileno())
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
             restored_hash = hashlib.sha256(temporary.read_bytes()).hexdigest()
             if restored_hash != content_hash:
                 raise OSError("Restored document hash does not match expected content hash")

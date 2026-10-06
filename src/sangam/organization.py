@@ -724,10 +724,15 @@ class WorkspaceOrganizationService:
             descriptor, temporary_name = tempfile.mkstemp(prefix=".sangam-folder-", dir=folder_dir)
             temporary = Path(temporary_name)
             try:
-                with os.fdopen(descriptor, "wb") as output:
-                    output.write(content_bytes)
-                    output.flush()
-                    os.fsync(output.fileno())
+                try:
+                    with os.fdopen(descriptor, "wb") as output:
+                        descriptor = -1
+                        output.write(content_bytes)
+                        output.flush()
+                        os.fsync(output.fileno())
+                finally:
+                    if descriptor >= 0:
+                        os.close(descriptor)
                 if (
                     hashlib.sha256(temporary.read_bytes()).digest()
                     != hashlib.sha256(content_bytes).digest()

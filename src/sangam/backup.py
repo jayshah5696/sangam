@@ -38,10 +38,15 @@ def _write_manifest(path: Path, backup: BackupSet) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.sangam-", dir=path.parent)
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content_bytes)
-            handle.flush()
-            os.fsync(handle.fileno())
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                descriptor = -1
+                handle.write(content_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
         if (
             hashlib.sha256(temporary.read_bytes()).digest()
             != hashlib.sha256(content_bytes).digest()
