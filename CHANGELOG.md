@@ -7,6 +7,26 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.4] - 2026-10-06
+
+### Added
+
+- Source change detection and passage recheck analysis: automatic detection when a cited source document or paper changes revision, inline warning callout (`<aside className="source-recheck-callout">`), accessible side-by-side comparison modal (`SourceVersionComparisonModal`) showing pinned vs. current head passages, and project-level dependent conclusion listings (#323, #406).
+- Dedicated mobile single working surface workflow: replaced cramped multi-pane split layouts on mobile viewports (<= 768px or coarse pointer) with a focused single working surface, tactile pill switcher tabs (`Draft` vs. `Source`), and DOM-preserved mounting to maintain cursors, selections, undo/redo history, scroll positions, and PDF canvases (#312, #408).
+- Mobile companion bar and navigation polish: connected companion bar with instant one-tap switching between draft and source surfaces, touch manipulation ergonomics (`touch-action: manipulation`, `viewport-fit=cover`, overscroll prevention), and restored drawer navigation for settings (#312, #408).
+
+### Security
+
+- Input sanitization for document comment fields: enforced `validate_metadata_text` on `CreateDocumentCommentRequest` fields (`exact`, `prefix`, `suffix`, `body`) in `DocumentCommentService.create_comment` to reject null bytes and ASCII control characters (#402, #412).
+- Hardened agent token path scope matching: normalized path scope prefixes and target paths by stripping trailing slashes in `path_matches` (`src/sangam/security.py`), enforcing strict directory component boundary matching to prevent trailing-slash anomalies and partial directory prefix bypasses (#407, #412).
+- Hardened activity audit provenance and sensitive parameter sanitization: auto-populated `action_type` and `target_file` across structured mutation audit events in `ActivityService` and `WorkspaceAccessService`, and expanded regex redaction for environment variable assignments and sensitive credential keys in audit logs and traces (#404, #409, #412).
+
+### Fixed
+
+- Resilient and atomic PDF text extraction: refactored PDF parser script output writer in `src/sangam/pdf_parser.py` using `tempfile.mkstemp`, `os.fsync`, and atomic `os.replace` with cleanup in a `finally` block to prevent partial JSON writes and eliminate extraction race conditions (#403, #410, #411, #412).
+- Passage remapping and pin safety: enforced passage remapping for evidence rail citations and handled unmapped pins gracefully (#406).
+- Type tightening on briefing changes: strengthened `BriefingChange` `revision_id` typing and project testing assertions (#406).
+
 ## [0.13.3] - 2026-10-04
 
 ### Added
@@ -524,7 +544,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.4...HEAD
+[0.13.4]: https://github.com/jayshah5696/sangam/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/jayshah5696/sangam/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/jayshah5696/sangam/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/jayshah5696/sangam/compare/v0.13.0...v0.13.1
