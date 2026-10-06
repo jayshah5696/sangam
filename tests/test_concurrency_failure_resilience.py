@@ -2521,3 +2521,46 @@ def test_concurrent_folder_move_and_metadata_update_preserves_manifest_consisten
             assert data["path"] == row["path"]
             assert data["category"] == row["category"]
             assert data["metadata_version"] == row["metadata_version"]
+
+
+def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestClient) -> None:
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
+    pdf_service = client.app.state.services.pdf_research
+    source_pdf = text_pdf("Atomic PDF Extraction Test Content")
+    document = pdf_service.import_pdf(
+        title="Atomic Extract Test PDF",
+        path="research/atomic_extract.pdf",
+        content=source_pdf,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="pdf-extract-concurrency-key",
+    )
+    doc_id = document.document_id
+
+    # Run simultaneous extractions
+    results = []
+
+    def run_extraction():
+        res = pdf_service.extract_text(doc_id)
+        results.append(res)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(run_extraction) for _ in range(3)]
+        for f in futures:
+            f.result(timeout=10)
+
+    # Exactly one extraction attempt claims and completes, returning True; others return False
+    assert sorted(results) == [False, False, True]
+
+    # Verify pages extracted cleanly
+    pages = pdf_service.pages(doc_id)
+    assert len(pages) == 1
+    assert "Atomic PDF Extraction Test Content" in pages[0].text
+
+    # Verify no orphan temporary files exist in system temp directory or workspace
+    import tempfile
+    from pathlib import Path
+
+    temp_dir = Path(tempfile.gettempdir())
+    orphaned_temp_files = list(temp_dir.glob(".pages.json.sangam-*"))
+    assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"

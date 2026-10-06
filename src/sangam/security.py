@@ -167,7 +167,7 @@ _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+")
 
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(api_key|api_token|api_secret|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass|signing_key|encryption_key|account_key|id_token)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
+    r"(?i)\b(api_key|api_token|api_secret|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass|signing_key|encryption_key|account_key|id_token|env_var|env_val|secret_env|sangam_secret|auth_secret|token_secret|app_secret|user_key)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
 )
 
 _RESERVED_NAMES: set[str] = {
@@ -376,7 +376,11 @@ def path_matches(prefix: str | None, path: str | None) -> bool:
         return True
     if path is None:
         return False
-    return path == prefix or path.startswith(f"{prefix}/")
+    norm_prefix = prefix.strip().rstrip("/")
+    if not norm_prefix:
+        return True
+    norm_path = path.strip().rstrip("/")
+    return norm_path == norm_prefix or norm_path.startswith(f"{norm_prefix}/")
 
 
 class IdentityService:

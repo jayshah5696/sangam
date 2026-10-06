@@ -5,7 +5,12 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sangam.db import Database, utc_now
-from sangam.errors import ConflictError, NotFoundError, ValidationError
+from sangam.errors import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+    validate_metadata_text,
+)
 from sangam.idempotency import request_hash
 from sangam.schemas import (
     CreateDocumentCommentRequest,
@@ -42,6 +47,11 @@ class DocumentCommentService:
         actor_id: str,
         idempotency_key: str | None = None,
     ) -> DocumentComment:
+        validate_metadata_text(request.exact, "Comment exact passage")
+        validate_metadata_text(request.prefix, "Comment prefix")
+        validate_metadata_text(request.suffix, "Comment suffix")
+        validate_metadata_text(request.body, "Comment body")
+
         self.documents.get_document(document_id)
         revision = self.documents.get_revision(document_id, request.revision_id)
         if revision.document_id != document_id:
