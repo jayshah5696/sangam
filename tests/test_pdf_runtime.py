@@ -150,3 +150,61 @@ def test_pdf_parser_limits_fail_durably_without_partial_pages(client, limit):
     current = service.documents.get_document(document.document_id)
     assert current.pdf_extraction_status == "failed"
     assert service.pages(document.document_id) == []
+
+
+def test_pdf_parser_writes_atomically_and_cleans_temp_files(tmp_path, monkeypatch):
+    import json
+    import sys
+
+    from sangam import pdf_parser
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    source_file = tmp_path / "source.pdf"
+    output_file = tmp_path / "pages.json"
+    with source_file.open("wb") as f:
+        writer.write(f)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pdf_parser", str(source_file), str(output_file), "10", "10000"],
+    )
+    pdf_parser.main()
+
+    assert output_file.is_file()
+    data = json.loads(output_file.read_text(encoding="utf-8"))
+    assert isinstance(data, list)
+    temp_files = list(tmp_path.glob(".*.sangam-*"))
+    assert temp_files == []
+
+
+def test_pdf_parser_unlinks_temp_file_on_failure(tmp_path, monkeypatch):
+    import os
+    import sys
+
+    from sangam import pdf_parser
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    source_file = tmp_path / "source.pdf"
+    output_file = tmp_path / "pages.json"
+    with source_file.open("wb") as f:
+        writer.write(f)
+
+    def mock_replace(src, dst):
+        raise OSError("Disk failure during replace")
+
+    monkeypatch.setattr(os, "replace", mock_replace)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pdf_parser", str(source_file), str(output_file), "10", "10000"],
+    )
+
+    with pytest.raises(OSError, match="Disk failure during replace"):
+        pdf_parser.main()
+
+    assert not output_file.exists()
+    temp_files = list(tmp_path.glob(".*.sangam-*"))
+    assert temp_files == []
