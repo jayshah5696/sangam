@@ -764,3 +764,29 @@ def test_audit_details_automatically_include_action_type_and_target_file(
     for event in doc_jsonl_events:
         assert "action_type" in event["details"]
         assert "target_file" in event["details"]
+
+
+def test_operation_event_action_and_path_provenance(client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Auto Detail Audit Doc",
+            "content": "# Test\nAuto populated details.",
+            "path": "docs/auto_detail_test.md",
+        },
+        headers=headers("idemp_auto_detail_create"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    doc_events = [e for e in events if e["resource_id"] == doc_id]
+    assert len(doc_events) >= 1
+    create_event = next(e for e in doc_events if e["action"] == "create")
+
+    assert create_event["action"] == "create"
+    assert create_event["path"] == "docs/auto_detail_test.md"
