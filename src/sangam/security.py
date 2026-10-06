@@ -84,6 +84,9 @@ _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
     "proxy-authenticate",
     "cert",
     "signature",
+    "env",
+    "dsn",
+    "connection",
 )
 
 _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
@@ -134,6 +137,9 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "signing_key",
     "encryption_key",
     "user_key",
+    "dotenv",
+    "environment_variable",
+    "env_secret",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -167,7 +173,7 @@ _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+")
 
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(api_key|api_token|api_secret|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass|signing_key|encryption_key|account_key|id_token|env_var|env_val|secret_env|sangam_secret|auth_secret|token_secret|app_secret|user_key)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
+    r"(?i)\b(api_key|api_token|api_secret|secret_key|secret_val|client_secret|access_token|refresh_token|passphrase|private_key|aws_secret_access_key|password|passwd|db_pass|signing_key|encryption_key|account_key|id_token|env_var|env_val|secret_env|env_secret|sangam_secret|auth_secret|token_secret|app_secret|user_key|bearer_token|auth_token|tls_key|priv_key|oauth_token|slack_token|environment_variable|dotenv|credentials|credential|connection_string|secret|token)\s*[:=]\s*['\"]?([^\s'\"\\,{}]+)"
 )
 
 _RESERVED_NAMES: set[str] = {

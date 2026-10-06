@@ -887,6 +887,8 @@ class WorkspaceAccessService:
             raise ServiceUnavailableError("Document comments are not configured")
         current = self.documents.get_document(document_id)
         details: dict[str, object] = {
+            "action_type": "comment",
+            "target_file": current.path,
             "revision_id": request.revision_id,
             "exact": request.exact,
             "start": request.start,
@@ -920,6 +922,8 @@ class WorkspaceAccessService:
         if comment.document_id != document_id:
             raise NotFoundError(f"Comment not found: {comment_id}")
         details: dict[str, object] = {
+            "action_type": "resolve_comment",
+            "target_file": current.path,
             "comment_id": comment_id,
             "resolved": request.resolved,
             "expected_version": request.expected_version,
@@ -1081,7 +1085,13 @@ class WorkspaceAccessService:
             operation=lambda: self.assets.store(
                 document=current, filename=filename, media_type=media_type, content=content
             ),
-            details={"filename": filename, "media_type": media_type, "size_bytes": len(content)},
+            details={
+                "action_type": "attach_asset",
+                "target_file": current.path,
+                "filename": filename,
+                "media_type": media_type,
+                "size_bytes": len(content),
+            },
         )
 
     def read_document_asset(
@@ -1815,7 +1825,11 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        details: dict[str, object] = {"tag_ids": tag_ids}
+        details: dict[str, object] = {
+            "action_type": "create",
+            "target_file": path,
+            "tag_ids": tag_ids,
+        }
         if category:
             details["category"] = category
         return self.audited(
@@ -1832,11 +1846,12 @@ class WorkspaceAccessService:
         tag_ids: list[str],
         idempotency_key: str,
     ) -> Folder:
+        folder = next(
+            (item for item in self.organization.list_folders() if item.folder_id == folder_id),
+            None,
+        )
+
         def operation() -> Folder:
-            folder = next(
-                (item for item in self.organization.list_folders() if item.folder_id == folder_id),
-                None,
-            )
             if folder is None:
                 raise ConflictError(f"Folder no longer exists: {folder_id}")
             self.policy.require(principal, Capability.TAG, folder.path)
@@ -1850,6 +1865,8 @@ class WorkspaceAccessService:
             )
 
         details: dict[str, object] = {
+            "action_type": "tag",
+            "target_file": folder.path if folder else None,
             "expected_metadata_version": expected_metadata_version,
             "tag_ids": tag_ids,
         }
@@ -1884,8 +1901,18 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "action_type": "move",
+            "target_file": path,
+            "destination_path": path,
+        }
         return self.audited(
-            principal, writes("move", "folder"), operation, resource_id=folder_id, path=path
+            principal,
+            writes("move", "folder"),
+            operation,
+            resource_id=folder_id,
+            path=path,
+            details=details,
         )
 
     def _normalize_organization_plan(self, plan: ApplyOrganizationPlan) -> ApplyOrganizationPlan:

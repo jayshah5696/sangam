@@ -790,3 +790,95 @@ def test_operation_event_action_and_path_provenance(client: TestClient) -> None:
 
     assert create_event["action"] == "create"
     assert create_event["path"] == "docs/auto_detail_test.md"
+
+
+def test_comment_and_asset_audit_provenance(client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Comment and Asset Doc",
+            "content": "# Heading\nSample paragraph text for commenting.",
+            "path": "docs/comment_asset_audit.md",
+        },
+        headers=headers("idemp_comment_asset_doc"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # 1. Attach asset
+    asset_resp = client.post(
+        f"/api/v1/documents/{doc_id}/assets?filename=figure.png",
+        content=b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4",
+        headers={"Content-Type": "image/png"},
+    )
+    assert asset_resp.status_code == 201
+
+    # 2. Add comment
+    comment_resp = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sample paragraph text",
+            "start": 10,
+            "end": 31,
+            "body": "Need to expand this section.",
+        },
+        headers=headers("idemp_comment_create"),
+    )
+    assert comment_resp.status_code == 201
+    comment_data = comment_resp.json()
+    comment_id = comment_data["comment_id"]
+
+    # 3. Resolve comment
+    resolve_resp = client.post(
+        f"/api/v1/documents/{doc_id}/comments/{comment_id}/resolve",
+        json={"resolved": True, "expected_version": comment_data["version"]},
+    )
+    assert resolve_resp.status_code == 200
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = [e for e in activity_resp.json() if e["resource_id"] == doc_id]
+    actions = {e["action"]: e for e in events}
+
+    assert "attach_asset" in actions
+    assert actions["attach_asset"]["details"]["action_type"] == "attach_asset"
+    assert actions["attach_asset"]["details"]["target_file"] == "docs/comment_asset_audit.md"
+    assert actions["attach_asset"]["details"]["filename"] == "figure.png"
+    assert actions["attach_asset"]["details"]["media_type"] == "image/png"
+
+    assert "comment" in actions
+    assert actions["comment"]["details"]["action_type"] == "comment"
+    assert actions["comment"]["details"]["target_file"] == "docs/comment_asset_audit.md"
+    assert actions["comment"]["details"]["exact"] == "Sample paragraph text"
+
+    assert "resolve_comment" in actions
+    assert actions["resolve_comment"]["details"]["action_type"] == "resolve_comment"
+    assert actions["resolve_comment"]["details"]["target_file"] == "docs/comment_asset_audit.md"
+    assert actions["resolve_comment"]["details"]["comment_id"] == comment_id
+    assert actions["resolve_comment"]["details"]["resolved"] is True
+
+
+def test_dotenv_and_secret_assignment_sanitization() -> None:
+    sensitive_assignments = (
+        "ENV_SECRET=super_secret_val "
+        "DOTENV=my_dotenv_file_val "
+        "CREDENTIALS=user_credentials_123 "
+        "TOKEN=my_bearer_token_val "
+        "SECRET=top_secret_code "
+        "CONNECTION_STRING=Server=myServer;Uid=admin;Pwd=secret_pwd;"
+    )
+    sanitized = sanitize_sensitive_text(sensitive_assignments)
+    assert "super_secret_val" not in sanitized
+    assert "my_dotenv_file_val" not in sanitized
+    assert "user_credentials_123" not in sanitized
+    assert "my_bearer_token_val" not in sanitized
+    assert "top_secret_code" not in sanitized
+    assert "secret_pwd" not in sanitized
+    assert "ENV_SECRET=[REDACTED]" in sanitized
+    assert "DOTENV=[REDACTED]" in sanitized
+    assert "CREDENTIALS=[REDACTED]" in sanitized
+    assert "TOKEN=[REDACTED]" in sanitized
+    assert "SECRET=[REDACTED]" in sanitized
