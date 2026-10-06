@@ -2524,18 +2524,18 @@ def test_concurrent_folder_move_and_metadata_update_preserves_manifest_consisten
 
 
 def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestClient) -> None:
-    source_pdf = text_pdf("Atomic PDF Extraction Test Content")
-    imported = import_pdf(
-        client,
-        content=source_pdf,
-        key="pdf-extract-concurrency-key",
-        path="research/atomic_extract.pdf",
-        title="Atomic Extract Test PDF",
-    ).json()
-    doc_id = imported["document_id"]
-
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
     pdf_service = client.app.state.services.pdf_research
-    pdf_service.retry_extraction(doc_id)
+    source_pdf = text_pdf("Atomic PDF Extraction Test Content")
+    document = pdf_service.import_pdf(
+        title="Atomic Extract Test PDF",
+        path="research/atomic_extract.pdf",
+        content=source_pdf,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="pdf-extract-concurrency-key",
+    )
+    doc_id = document.document_id
 
     # Run simultaneous extractions
     results = []
