@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, type KeyboardEvent } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { ArrowRight, Maximize2, NotebookTabs, Upload } from 'lucide-react'
+import { ArrowRight, GitFork, Maximize2, NotebookTabs, Upload } from 'lucide-react'
 import {
   api,
   writeFailureMessage,
@@ -35,6 +35,9 @@ import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
 import type { PublishedEvidenceItem } from '../../api'
 import { DocumentCommentsRail } from './DocumentCommentsRail'
 import { SelectableHtmlText } from '../SelectableHtmlText'
+import { AlternativeDraftsModal } from './AlternativeDraftsModal'
+import { InteractiveExplanationRail } from './InteractiveExplanationRail'
+import { DocumentAssignmentsRail } from './DocumentAssignmentsRail'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'research', 'outline', 'history', 'chat', 'comments'] as const
@@ -77,6 +80,7 @@ export function DocumentInspector({
     enabled: Boolean(documentId),
   })
   const unresolvedCommentsCount = commentsQuery.data?.filter((c) => !c.resolved_at).length ?? 0
+  const [showAlternativeDrafts, setShowAlternativeDrafts] = useState(false)
   const pdf = document.content_type === 'application/pdf'
   const inspectorTabs = standardInspectorTabs
   const preferredTab = preferences.rightTab
@@ -301,7 +305,9 @@ export function DocumentInspector({
           <>
             {pdf && <PdfResearchRail document={document} />}
             <DocumentSourcesAndNotes document={document} enabled={tab === 'research'} />
+            <InteractiveExplanationRail document={document} />
             <WorkspaceEvidenceRail document={document} />
+            <DocumentAssignmentsRail documentId={documentId} />
           </>
         )}
         {tab === 'outline' && (
@@ -335,6 +341,26 @@ export function DocumentInspector({
         )}
         {tab === 'history' && (
           <>
+            {document.content_type !== 'application/pdf' && (
+              <div className="alternative-conclusions-trigger-bar">
+                <button
+                  type="button"
+                  className="secondary-action button-sm"
+                  onClick={() => setShowAlternativeDrafts(true)}
+                  title="Explore alternative conclusions without overwriting the original"
+                  aria-label="Explore alternative conclusions"
+                >
+                  <GitFork size="var(--icon-detail)" />
+                  <span>Explore another conclusion</span>
+                </button>
+              </div>
+            )}
+            <AlternativeDraftsModal
+              document={document}
+              open={showAlternativeDrafts}
+              onClose={() => setShowAlternativeDrafts(false)}
+              onDocumentUpdated={(updated) => onUpdated(updated)}
+            />
             {historyQuery.isLoading && <StateMessage kind="loading" title="Loading history" />}
             {(historyQuery.isError || readRevision.isError || fromQuery.isError || toQuery.isError) && (
               <StateMessage kind="error" title="Could not load revision" />

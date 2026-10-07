@@ -38,6 +38,15 @@ export function evidenceSourceText(content: string, contentType: string): string
   return (parsed.body.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim()
 }
 
+export const claimClassificationSchema = z.enum([
+  'Supports',
+  'Challenges',
+  'Not checked',
+  'Assumption',
+  'No evidence',
+])
+export type ClaimClassification = z.infer<typeof claimClassificationSchema>
+
 export type EvidenceReference = {
   documentId: string
   title?: string
@@ -47,6 +56,7 @@ export type EvidenceReference = {
   selectedText: string
   note?: string
   claim?: string
+  claimClassification?: ClaimClassification
   textLocator?: TextLocator
 }
 
@@ -127,6 +137,7 @@ export const evidenceItemSchema = z
     selectedText: z.string().min(1),
     note: z.string().nullable().optional(),
     claim: z.string().nullable().optional(),
+    claimClassification: claimClassificationSchema.optional().default('Supports'),
     claimTarget: z
       .object({
         documentId: z.string().min(1),
@@ -172,7 +183,8 @@ export function evidenceCitationMarkdown(reference: EvidenceReference): string {
 
   if (claimText) {
     if (lines.length > 0) lines.push('> ')
-    lines.push(`> Claim: ${claimText}`)
+    const stance = reference.claimClassification ? ` [${reference.claimClassification}]` : ''
+    lines.push(`> Claim${stance}: ${claimText}`)
   }
 
   if (lines.length === 0) {
@@ -239,6 +251,7 @@ export function itemToEvidenceReference(item: EvidenceItem): EvidenceReference {
     selectedText: item.selectedText,
     note: item.note ?? undefined,
     claim: item.claim ?? undefined,
+    claimClassification: item.claimClassification,
     textLocator: item.textLocator,
   }
 }

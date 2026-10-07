@@ -1243,3 +1243,393 @@ dialog.evidence-modal-dialog::backdrop {
   margin: 0;
   font-style: italic;
 }
+
+/* Issue 324: Claim-versus-source matrix */
+.evidence-view-toggle {
+  display: flex;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 2px;
+  gap: 2px;
+}
+
+.evidence-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-control);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--motion-control) var(--ease-ui-out), color var(--motion-control) var(--ease-ui-out);
+}
+
+.evidence-view-btn:hover {
+  color: var(--text);
+}
+
+.evidence-view-btn.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+.claim-matrix-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.claim-matrix-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.claim-matrix-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 160px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 0 var(--space-2);
+}
+
+.claim-matrix-search input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-compact);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-control);
+  outline: none;
+}
+
+.claim-matrix-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-compact);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-control);
+  cursor: pointer;
+}
+
+.claim-matrix-export-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.claim-matrix-export-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.claim-matrix-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-control);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+
+.claim-matrix-add-form {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.claim-matrix-add-form input {
+  flex: 1;
+  height: var(--control-compact);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: var(--text-control);
+}
+
+.claim-matrix-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-compact);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-control);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.claim-matrix-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.claim-matrix-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5) var(--space-2);
+  text-align: center;
+  color: var(--muted);
+  gap: var(--space-1);
+  font-size: var(--text-control);
+}
+
+.claim-matrix-table-wrap {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.claim-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-control);
+}
+
+.matrix-th-claim,
+.matrix-th-source {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.matrix-th-claim {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 180px;
+}
+
+.source-header-title {
+  display: inline-block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.matrix-td-claim {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 500;
+  max-width: 220px;
+  word-break: break-word;
+}
+
+.matrix-td-cell {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.claim-cell-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-control);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform var(--motion-control) var(--ease-ui-out);
+}
+
+.claim-cell-badge:hover {
+  transform: translateY(-1px);
+}
+
+.claim-cell-empty {
+  font-size: var(--text-meta);
+  color: var(--muted);
+  font-style: italic;
+}
+
+.status-supports {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.status-challenges {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.status-assumption {
+  background: var(--warning-soft);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.status-no-evidence {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.status-not-checked {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.claim-matrix-dialog {
+  max-width: 540px;
+}
+
+.claim-cell-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.claim-modal-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.claim-modal-label {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.claim-modal-claim-text {
+  font-size: var(--text-control);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.claim-modal-source-meta {
+  font-size: var(--text-control);
+  color: var(--text);
+}
+
+.claim-stance-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.stance-btn {
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-control);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--line);
+}
+
+.stance-btn.active {
+  border-width: 2px;
+  font-weight: 700;
+}
+
+.claim-modal-passage {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: var(--text-control);
+  font-style: italic;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.claim-modal-note {
+  margin: 0;
+  font-size: var(--text-control);
+  color: var(--muted);
+}
+
+.claim-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.claim-modal-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-control);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.claim-modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-control);
+  cursor: pointer;
+}

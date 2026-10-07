@@ -39,13 +39,13 @@ describe('evidenceCitationMarkdown', () => {
       pinnedRevisionId: 'rev-789',
       selectedText: 'Throughput improved by 42% after batching pipeline stages.',
       claim: 'Pipelining improves throughput without increasing tail latency.',
+      claimClassification: 'Supports',
       createdAt: '2026-03-30T10:00:00.000Z',
     }
 
     const citation = evidenceCitationMarkdown(itemToEvidenceReference(item))
-
     expect(citation).toBe(
-      '\n\n> Throughput improved by 42% after batching pipeline stages.\n> \n> Claim: Pipelining improves throughput without increasing tail latency.\n\n[Source: System Benchmarks](sangam://document/doc-markdown-2?revision=rev-789)\n',
+      '\n\n> Throughput improved by 42% after batching pipeline stages.\n> \n> Claim [Supports]: Pipelining improves throughput without increasing tail latency.\n\n[Source: System Benchmarks](sangam://document/doc-markdown-2?revision=rev-789)\n',
     )
   })
 })

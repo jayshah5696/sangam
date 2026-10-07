@@ -21,6 +21,7 @@ import { shortRevision } from '../../evidenceCitation'
 import { useTheme } from '../../theme'
 import { useWorkspaceEvidence } from '../../workspaceEvidenceState'
 import { SourceVersionComparisonModal } from './SourceVersionComparisonModal'
+import { ClaimMatrixView } from './ClaimMatrixView'
 import { ModalDialog } from '../ui/ModalDialog'
 import { StateMessage } from '../ui/StateMessage'
 
@@ -32,6 +33,7 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
     useWorkspaceEvidence()
   const documentsQuery = useQuery({ queryKey: ['documents', 'all'], queryFn: api.listDocuments })
 
+  const [viewMode, setViewMode] = useState<'list' | 'matrix'>('list')
   const [filterQuery, setFilterQuery] = useState('')
   const [comparingPair, setComparingPair] = useState<[EvidenceItem, EvidenceItem] | null>(null)
   const [comparingWithId, setComparingWithId] = useState<string | null>(null)
@@ -106,6 +108,24 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
           <strong>Workspace evidence</strong>
         </div>
         <div className="evidence-rail-meta">
+          <div className="evidence-view-toggle" role="group" aria-label="Evidence display mode">
+            <button
+              type="button"
+              className={`evidence-view-btn ${viewMode === 'list' ? 'active' : ''}`}
+              onClick={() => setViewMode('list')}
+              aria-label="List view"
+            >
+              List
+            </button>
+            <button
+              type="button"
+              className={`evidence-view-btn ${viewMode === 'matrix' ? 'active' : ''}`}
+              onClick={() => setViewMode('matrix')}
+              aria-label="Claim matrix view"
+            >
+              Matrix
+            </button>
+          </div>
           <span className="scope-badge">{evidence.length} kept</span>
           {evidence.length > 0 && (
             <button
@@ -138,101 +158,112 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
         />
       )}
 
-      {evidence.length > 3 && (
-        <div className="evidence-filter-bar">
-          <input
-            type="search"
-            aria-label="Filter evidence"
-            placeholder="Search kept evidence…"
-            value={filterQuery}
-            onChange={(event) => setFilterQuery(event.target.value)}
-          />
-        </div>
-      )}
-
-      {comparingWithId && (
-        <div className="evidence-compare-prompt" role="status">
-          <span>Select another excerpt below to compare side by side.</span>
-          <button type="button" className="secondary-action" onClick={() => setComparingWithId(null)}>
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {comparingPair && (
-        <ExcerptComparisonModal pair={comparingPair} onClose={() => setComparingPair(null)} />
-      )}
-
-      {inspectingChangeItem && (
-        <SourceVersionComparisonModal
-          item={inspectingChangeItem}
-          requirePassageRemap
-          onClose={() => setInspectingChangeItem(null)}
-          onUpdateRevision={async (newRevisionId, content) => {
-            await replaceEvidenceRevision(inspectingChangeItem.id, newRevisionId, content)
-            setInspectingChangeItem(null)
-          }}
+      {viewMode === 'matrix' ? (
+        <ClaimMatrixView
+          evidence={evidence}
+          onOpenPassage={openSource}
+          onUpdateClassification={(id, status) => void updateEvidence(id, { claimClassification: status })}
         />
-      )}
-
-      {filteredEvidence.length === 0 ? (
-        error ? null : (
-          <StateMessage
-            compact
-            kind="empty"
-            title={evidence.length === 0 ? 'No evidence kept yet' : 'No evidence matches your search'}
-            description={
-              evidence.length === 0
-                ? 'Select a passage in a PDF, imported article, or document and choose Keep as evidence.'
-                : undefined
-            }
-          />
-        )
       ) : (
-        <div className="evidence-items-list" role="feed" aria-label="Kept evidence list">
-          {filteredEvidence.map((item) => (
-            <EvidenceCard
-              key={item.id}
-              item={item}
-              activeDraftId={activeDraftId}
-              availableDrafts={availableDrafts}
-              isComparingTarget={comparingWithId === item.id}
-              onInsert={async (targetDraftId) => {
-                const [inserted] = await Promise.all([
-                  sessions.insertEvidence(targetDraftId, itemToEvidenceReference(item)),
-                  navigate({ to: '/documents/$documentId', params: { documentId: targetDraftId } }),
-                ])
-                updatePreferences({ rightVisible: !matchMedia('(max-width: 900px)').matches })
-                if (!inserted)
-                  throw new Error('The destination editor did not insert the passage. Try again.')
+        <>
+          {evidence.length > 3 && (
+            <div className="evidence-filter-bar">
+              <input
+                type="search"
+                aria-label="Filter evidence"
+                placeholder="Search kept evidence…"
+                value={filterQuery}
+                onChange={(event) => setFilterQuery(event.target.value)}
+              />
+            </div>
+          )}
+
+          {comparingWithId && (
+            <div className="evidence-compare-prompt" role="status">
+              <span>Select another excerpt below to compare side by side.</span>
+              <button type="button" className="secondary-action" onClick={() => setComparingWithId(null)}>
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {comparingPair && (
+            <ExcerptComparisonModal pair={comparingPair} onClose={() => setComparingPair(null)} />
+          )}
+
+          {inspectingChangeItem && (
+            <SourceVersionComparisonModal
+              item={inspectingChangeItem}
+              requirePassageRemap
+              onClose={() => setInspectingChangeItem(null)}
+              onUpdateRevision={async (newRevisionId, content) => {
+                await replaceEvidenceRevision(inspectingChangeItem.id, newRevisionId, content)
+                setInspectingChangeItem(null)
               }}
-              onOpenSource={() => openSource(item)}
-              onAskInChat={() => askInChat(item)}
-              onCompare={() => handleStartCompare(item)}
-              onInspectSourceChange={() => setInspectingChangeItem(item)}
-              onUpdateClaim={async (claim, targetDraftId) => {
-                if (!targetDraftId) throw new Error('Choose a destination draft before attaching a claim.')
-                const existing = sessions.getSession(targetDraftId)
-                if (existing.content === undefined || existing.draftPersistenceOperation === 'read')
-                  await sessions.initializeDocument(await api.getDocument(targetDraftId))
-                const target = sessions.getSession(targetDraftId)
-                if (target.draftPersistenceState === 'failed')
-                  throw new Error('Recover the destination draft before attaching a claim.')
-                return updateEvidence(item.id, {
-                  claim,
-                  claimTarget: {
-                    documentId: targetDraftId,
-                    anchor: target.viewState?.anchor ?? 0,
-                    head: target.viewState?.head ?? 0,
-                    revisionId: target.baseRevisionId,
-                  },
-                })
-              }}
-              onUpdateNote={(note) => updateEvidence(item.id, { note })}
-              onRemove={() => removeEvidence(item.id)}
             />
-          ))}
-        </div>
+          )}
+
+          {filteredEvidence.length === 0 ? (
+            error ? null : (
+              <StateMessage
+                compact
+                kind="empty"
+                title={evidence.length === 0 ? 'No evidence kept yet' : 'No evidence matches your search'}
+                description={
+                  evidence.length === 0
+                    ? 'Select a passage in a PDF, imported article, or document and choose Keep as evidence.'
+                    : undefined
+                }
+              />
+            )
+          ) : (
+            <div className="evidence-items-list" role="feed" aria-label="Kept evidence list">
+              {filteredEvidence.map((item) => (
+                <EvidenceCard
+                  key={item.id}
+                  item={item}
+                  activeDraftId={activeDraftId}
+                  availableDrafts={availableDrafts}
+                  isComparingTarget={comparingWithId === item.id}
+                  onInsert={async (targetDraftId) => {
+                    const [inserted] = await Promise.all([
+                      sessions.insertEvidence(targetDraftId, itemToEvidenceReference(item)),
+                      navigate({ to: '/documents/$documentId', params: { documentId: targetDraftId } }),
+                    ])
+                    updatePreferences({ rightVisible: !matchMedia('(max-width: 900px)').matches })
+                    if (!inserted)
+                      throw new Error('The destination editor did not insert the passage. Try again.')
+                  }}
+                  onOpenSource={() => openSource(item)}
+                  onAskInChat={() => askInChat(item)}
+                  onCompare={() => handleStartCompare(item)}
+                  onInspectSourceChange={() => setInspectingChangeItem(item)}
+                  onUpdateClaim={async (claim, targetDraftId) => {
+                    if (!targetDraftId)
+                      throw new Error('Choose a destination draft before attaching a claim.')
+                    const existing = sessions.getSession(targetDraftId)
+                    if (existing.content === undefined || existing.draftPersistenceOperation === 'read')
+                      await sessions.initializeDocument(await api.getDocument(targetDraftId))
+                    const target = sessions.getSession(targetDraftId)
+                    if (target.draftPersistenceState === 'failed')
+                      throw new Error('Recover the destination draft before attaching a claim.')
+                    return updateEvidence(item.id, {
+                      claim,
+                      claimTarget: {
+                        documentId: targetDraftId,
+                        anchor: target.viewState?.anchor ?? 0,
+                        head: target.viewState?.head ?? 0,
+                        revisionId: target.baseRevisionId,
+                      },
+                    })
+                  }}
+                  onUpdateNote={(note) => updateEvidence(item.id, { note })}
+                  onRemove={() => removeEvidence(item.id)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </section>
   )

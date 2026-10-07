@@ -1,6 +1,11 @@
 import { useSyncExternalStore } from 'react'
 import { z } from 'zod'
-import { evidenceItemSchema, remapEvidencePassage, type EvidenceItem } from './evidenceCitation'
+import {
+  evidenceItemSchema,
+  remapEvidencePassage,
+  type ClaimClassification,
+  type EvidenceItem,
+} from './evidenceCitation'
 
 export const EVIDENCE_STORAGE_KEY = 'sangam-workspace-evidence'
 export const EVIDENCE_UPDATED_EVENT = 'sangam-evidence-updated'
@@ -10,7 +15,6 @@ let cachedItems: EvidenceItem[] = []
 let storageError: string | null = null
 const listeners = new Set<() => void>()
 const notify = () => listeners.forEach((listener) => listener())
-
 function readItems(): EvidenceItem[] {
   const raw = localStorage.getItem(EVIDENCE_STORAGE_KEY)
   if (raw === cachedRaw) return cachedItems
@@ -64,9 +68,14 @@ async function mutate<T>(
     throw error
   }
 }
+
+export type KeepEvidenceInput = Omit<EvidenceItem, 'id' | 'createdAt' | 'claimClassification'> & {
+  claimClassification?: ClaimClassification
+}
+
 export const workspaceEvidenceStore = {
   getEvidence: readItems,
-  keepEvidence: async (item: Omit<EvidenceItem, 'id' | 'createdAt'>): Promise<EvidenceItem> => {
+  keepEvidence: async (item: KeepEvidenceInput): Promise<EvidenceItem> => {
     const created = evidenceItemSchema.parse({
       ...item,
       id: crypto.randomUUID(),
@@ -76,7 +85,7 @@ export const workspaceEvidenceStore = {
   },
   updateEvidence: async (
     id: string,
-    patch: Partial<Pick<EvidenceItem, 'claim' | 'note' | 'claimTarget'>>,
+    patch: Partial<Pick<EvidenceItem, 'claim' | 'note' | 'claimTarget' | 'claimClassification'>>,
   ): Promise<void> =>
     mutate((items) => ({
       items: items.map((item) =>
