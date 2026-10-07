@@ -1,10 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Check, Copy, ExternalLink, Filter, Plus, X } from 'lucide-react'
-import {
-  type ClaimClassification,
-  type EvidenceItem,
-  shortRevision,
-} from '../../evidenceCitation'
+import { type ClaimClassification, type EvidenceItem, shortRevision } from '../../evidenceCitation'
 import { ModalDialog } from '../ui/ModalDialog'
 
 const CLASSIFICATIONS: ClaimClassification[] = [
@@ -27,11 +23,7 @@ interface SourceColumn {
   title: string
 }
 
-export function ClaimMatrixView({
-  evidence,
-  onOpenPassage,
-  onUpdateClassification,
-}: ClaimMatrixViewProps) {
+export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassification }: ClaimMatrixViewProps) {
   const [filterQuery, setFilterQuery] = useState('')
   const [customClaims, setCustomClaims] = useState<string[]>([])
   const [newClaimInput, setNewClaimInput] = useState('')
@@ -264,10 +256,7 @@ export function ClaimMatrixView({
                             {classification}
                           </button>
                         ) : (
-                          <span
-                            className="claim-cell-empty"
-                            title="Not checked for this source"
-                          >
+                          <span className="claim-cell-empty" title="Not checked for this source">
                             Not checked
                           </span>
                         )}
@@ -308,7 +297,11 @@ export function ClaimMatrixView({
 
             <div className="claim-modal-row">
               <span className="claim-modal-label">Classification Stance</span>
-              <div className="claim-stance-selector" role="radiogroup" aria-label="Change classification stance">
+              <div
+                className="claim-stance-selector"
+                role="radiogroup"
+                aria-label="Change classification stance"
+              >
                 {CLASSIFICATIONS.map((status) => (
                   <button
                     key={status}
@@ -318,9 +311,7 @@ export function ClaimMatrixView({
                     }`}
                     onClick={() => {
                       onUpdateClassification(activeCellItem.id, status)
-                      setActiveCellItem((prev) =>
-                        prev ? { ...prev, claimClassification: status } : null,
-                      )
+                      setActiveCellItem((prev) => (prev ? { ...prev, claimClassification: status } : null))
                     }}
                   >
                     {status}
@@ -331,9 +322,7 @@ export function ClaimMatrixView({
 
             <div className="claim-modal-row">
               <span className="claim-modal-label">Verbatim Passage Excerpt</span>
-              <blockquote className="claim-modal-passage">
-                {activeCellItem.selectedText}
-              </blockquote>
+              <blockquote className="claim-modal-passage">{activeCellItem.selectedText}</blockquote>
             </div>
 
             {activeCellItem.note && (
@@ -355,11 +344,7 @@ export function ClaimMatrixView({
                 <ExternalLink size="var(--icon-detail)" />
                 <span>Open passage in source</span>
               </button>
-              <button
-                type="button"
-                className="claim-modal-close-btn"
-                onClick={() => setActiveCellItem(null)}
-              >
+              <button type="button" className="claim-modal-close-btn" onClick={() => setActiveCellItem(null)}>
                 Done
               </button>
             </div>

@@ -49,23 +49,13 @@ describe('ClaimMatrixView', () => {
   ]
 
   it('renders empty notice when evidence has no sources', () => {
-    render(
-      <ClaimMatrixView
-        evidence={[]}
-        onOpenPassage={vi.fn()}
-        onUpdateClassification={vi.fn()}
-      />,
-    )
+    render(<ClaimMatrixView evidence={[]} onOpenPassage={vi.fn()} onUpdateClassification={vi.fn()} />)
     expect(screen.getByText('No sources found in kept evidence.')).toBeTruthy()
   })
 
   it('renders matrix headers and claim rows with stance badges', () => {
     render(
-      <ClaimMatrixView
-        evidence={mockEvidence}
-        onOpenPassage={vi.fn()}
-        onUpdateClassification={vi.fn()}
-      />,
+      <ClaimMatrixView evidence={mockEvidence} onOpenPassage={vi.fn()} onUpdateClassification={vi.fn()} />,
     )
 
     // Table column headers
@@ -89,11 +79,7 @@ describe('ClaimMatrixView', () => {
 
   it('filters claims based on search input', () => {
     render(
-      <ClaimMatrixView
-        evidence={mockEvidence}
-        onOpenPassage={vi.fn()}
-        onUpdateClassification={vi.fn()}
-      />,
+      <ClaimMatrixView evidence={mockEvidence} onOpenPassage={vi.fn()} onUpdateClassification={vi.fn()} />,
     )
 
     const searchInput = screen.getByPlaceholderText('Filter claims or sources...')
@@ -105,11 +91,7 @@ describe('ClaimMatrixView', () => {
 
   it('allows adding a new custom claim to evaluate', () => {
     render(
-      <ClaimMatrixView
-        evidence={mockEvidence}
-        onOpenPassage={vi.fn()}
-        onUpdateClassification={vi.fn()}
-      />,
+      <ClaimMatrixView evidence={mockEvidence} onOpenPassage={vi.fn()} onUpdateClassification={vi.fn()} />,
     )
 
     const addInput = screen.getByPlaceholderText('Add a new claim to evaluate...')
@@ -138,9 +120,7 @@ describe('ClaimMatrixView', () => {
 
     // Modal dialog opens
     expect(screen.getByText('Evidence & Stance Details')).toBeTruthy()
-    expect(
-      screen.getByText('In local inference, the smaller model diverged on complex math.'),
-    ).toBeTruthy()
+    expect(screen.getByText('In local inference, the smaller model diverged on complex math.')).toBeTruthy()
     expect(screen.getByText('Divergence observed on GSM8K prompts.')).toBeTruthy()
 
     // Update stance to Assumption
@@ -153,9 +133,7 @@ describe('ClaimMatrixView', () => {
     const openPassageBtn = screen.getByRole('button', { name: 'Open passage in source' })
     fireEvent.click(openPassageBtn)
 
-    expect(onOpenPassage).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'item-2' }),
-    )
+    expect(onOpenPassage).toHaveBeenCalledWith(expect.objectContaining({ id: 'item-2' }))
   })
 
   it('copies Markdown matrix table to clipboard', async () => {
@@ -167,11 +145,7 @@ describe('ClaimMatrixView', () => {
     })
 
     render(
-      <ClaimMatrixView
-        evidence={mockEvidence}
-        onOpenPassage={vi.fn()}
-        onUpdateClassification={vi.fn()}
-      />,
+      <ClaimMatrixView evidence={mockEvidence} onOpenPassage={vi.fn()} onUpdateClassification={vi.fn()} />,
     )
 
     const copyBtn = screen.getByRole('button', { name: 'Copy markdown matrix' })

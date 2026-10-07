@@ -1,20 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import {
-  ArrowLeftRight,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  ExternalLink,
-  GitFork,
-  Trash2,
-} from 'lucide-react'
+import { ArrowLeftRight, Check, ChevronDown, ChevronUp, ExternalLink, GitFork, Trash2 } from 'lucide-react'
 import { api, type Document } from '../../api'
-import {
-  useAlternativeCandidates,
-  type AlternativeCandidate,
-} from '../../alternativeDrafts'
+import { useAlternativeCandidates, type AlternativeCandidate } from '../../alternativeDrafts'
 import { shortRevision } from '../../evidenceCitation'
 import { RevisionMergeView } from '../RevisionMergeView'
 import { ModalDialog } from '../ui/ModalDialog'
@@ -35,9 +24,7 @@ export function AlternativeDraftsModal({
 }: AlternativeDraftsModalProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { candidates, registerCandidate, removeCandidate } = useAlternativeCandidates(
-    document.document_id,
-  )
+  const { candidates, registerCandidate, removeCandidate } = useAlternativeCandidates(document.document_id)
 
   const [newConclusionNote, setNewConclusionNote] = useState('')
   const [creating, setCreating] = useState(false)
@@ -108,17 +95,12 @@ export function AlternativeDraftsModal({
     >
       <div className="alternative-drafts-content">
         <p className="alternative-drafts-lead">
-          Branch into a separate candidate draft using the same sources. Compare assumptions and
-          arguments side by side, then bring selected changes back to the original draft.
+          Branch into a separate candidate draft using the same sources. Compare assumptions and arguments
+          side by side, then bring selected changes back to the original draft.
         </p>
 
         {createError && (
-          <StateMessage
-            compact
-            kind="error"
-            title="Candidate operation failed"
-            description={createError}
-          />
+          <StateMessage compact kind="error" title="Candidate operation failed" description={createError} />
         )}
 
         {appliedSuccess && (
@@ -246,7 +228,11 @@ function CandidateCard({
           >
             <ArrowLeftRight size="var(--icon-detail)" />
             <span>{isComparing ? 'Hide diff' : 'Compare diff'}</span>
-            {isComparing ? <ChevronUp size="var(--icon-detail)" /> : <ChevronDown size="var(--icon-detail)" />}
+            {isComparing ? (
+              <ChevronUp size="var(--icon-detail)" />
+            ) : (
+              <ChevronDown size="var(--icon-detail)" />
+            )}
           </button>
 
           <button
@@ -280,8 +266,8 @@ function CandidateCard({
             <>
               <div className="candidate-diff-header">
                 <span className="diff-legend">
-                  Left: <strong>Original ({shortRevision(parentDocument.current_revision_id)})</strong> &middot; Right:{' '}
-                  <strong>Candidate conclusion</strong>
+                  Left: <strong>Original ({shortRevision(parentDocument.current_revision_id)})</strong>{' '}
+                  &middot; Right: <strong>Candidate conclusion</strong>
                 </span>
                 <button
                   type="button"
@@ -295,10 +281,7 @@ function CandidateCard({
                 </button>
               </div>
               <div className="candidate-diff-wrap">
-                <RevisionMergeView
-                  original={parentDocument.content}
-                  modified={candidateDoc.content}
-                />
+                <RevisionMergeView original={parentDocument.content} modified={candidateDoc.content} />
               </div>
             </>
           ) : (

@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import {
-  EXPLANATION_TEMPLATES,
-  interactiveExplanationsStore,
-} from './interactiveExplanations'
+import { EXPLANATION_TEMPLATES, interactiveExplanationsStore } from './interactiveExplanations'
 
 class MemoryStorage {
   data = new Map<string, string>()

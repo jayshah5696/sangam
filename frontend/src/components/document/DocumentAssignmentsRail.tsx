@@ -5,11 +5,7 @@ import { AssignmentStatus } from '../projects/ProjectAssignments'
 import { StateMessage } from '../ui/StateMessage'
 import { Bot, Play } from 'lucide-react'
 
-export function DocumentAssignmentsRail({
-  documentId,
-}: {
-  documentId: string
-}) {
+export function DocumentAssignmentsRail({ documentId }: { documentId: string }) {
   const queryClient = useQueryClient()
   const [starting, setStarting] = useState(false)
   const [instructions, setInstructions] = useState('Verify key claims and evidence consistency.')
@@ -85,11 +81,7 @@ export function DocumentAssignmentsRail({
             >
               Run review
             </button>
-            <button
-              className="secondary-action"
-              type="button"
-              onClick={() => setStarting(false)}
-            >
+            <button className="secondary-action" type="button" onClick={() => setStarting(false)}>
               Cancel
             </button>
           </div>

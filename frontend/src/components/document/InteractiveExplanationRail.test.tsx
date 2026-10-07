@@ -15,9 +15,7 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('../HtmlPreview', () => ({
-  HtmlPreview: ({ content }: { content: string }) => (
-    <div data-testid="mock-html-preview">{content}</div>
-  ),
+  HtmlPreview: ({ content }: { content: string }) => <div data-testid="mock-html-preview">{content}</div>,
 }))
 
 class MemoryStorage {

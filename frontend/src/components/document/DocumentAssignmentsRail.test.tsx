@@ -8,9 +8,7 @@ import { DocumentAssignmentsRail } from './DocumentAssignmentsRail'
 import { api } from '../../api'
 
 vi.mock('@tanstack/react-router', () => ({
-  Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
-    <a href={to}>{children}</a>
-  ),
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
 }))
 
 vi.mock('../../api', async (importOriginal) => {
@@ -119,9 +117,7 @@ describe('DocumentAssignmentsRail', () => {
     expect(screen.getByText('Working on')).toBeDefined()
     expect(screen.getByText('Checking long-document retrieval')).toBeDefined()
     expect(screen.getByText('Needs your judgment')).toBeDefined()
-    expect(
-      screen.getByText('Is a 5% quality drop acceptable for twice the speed?'),
-    ).toBeDefined()
+    expect(screen.getByText('Is a 5% quality drop acceptable for twice the speed?')).toBeDefined()
     expect(screen.getByText('comparison.md')).toBeDefined()
     expect(screen.getByText('benchmark-results.csv')).toBeDefined()
     expect(screen.getByText('Pause')).toBeDefined()

@@ -75,7 +75,9 @@ export function AssignmentStatus({ assignment }: { assignment: Assignment }) {
           <span>
             Attempt {assignment.steps} of {assignment.max_steps} · {Math.round(assignment.elapsed_seconds)}s
             of {assignment.max_seconds}s{tokens > 0 && ` · ${tokens.toLocaleString()} tokens`}
-            {assignment.max_budget_cents ? ` · $${(assignment.consumed_budget_cents / 100).toFixed(2)} of $${(assignment.max_budget_cents / 100).toFixed(2)}` : ''}
+            {assignment.max_budget_cents
+              ? ` · $${(assignment.consumed_budget_cents / 100).toFixed(2)} of $${(assignment.max_budget_cents / 100).toFixed(2)}`
+              : ''}
           </span>
         </p>
 
@@ -115,10 +117,7 @@ export function AssignmentStatus({ assignment }: { assignment: Assignment }) {
           <div className="assignment-judgment-box">
             <h4 className="assignment-section-label">Needs your judgment</h4>
             <p className="assignment-section-body">{assignment.needs_judgment}</p>
-            <button
-              className="secondary-action"
-              onClick={() => setSteering((s) => (s === null ? '' : null))}
-            >
+            <button className="secondary-action" onClick={() => setSteering((s) => (s === null ? '' : null))}>
               Respond
             </button>
           </div>
@@ -127,9 +126,7 @@ export function AssignmentStatus({ assignment }: { assignment: Assignment }) {
         {assignment.child_assignments.length > 0 && (
           <div className="assignment-section">
             <h4 className="assignment-section-label">Child work</h4>
-            <p className="assignment-section-body">
-              {assignment.child_assignments.length} delegated task(s)
-            </p>
+            <p className="assignment-section-body">{assignment.child_assignments.length} delegated task(s)</p>
           </div>
         )}
       </div>

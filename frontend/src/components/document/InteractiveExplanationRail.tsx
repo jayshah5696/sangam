@@ -34,12 +34,11 @@ export function InteractiveExplanationRail({
   onNavigateSource?: (documentId: string, revisionId?: string) => void
 }) {
   const navigate = useNavigate()
-  const { explanations, addExplanation, updateExplanation, removeExplanation } =
-    useInteractiveExplanations(document.document_id)
+  const { explanations, addExplanation, updateExplanation, removeExplanation } = useInteractiveExplanations(
+    document.document_id,
+  )
 
-  const [activeTabMap, setActiveTabMap] = useState<
-    Record<string, 'preview' | 'assumptions' | 'code'>
-  >({})
+  const [activeTabMap, setActiveTabMap] = useState<Record<string, 'preview' | 'assumptions' | 'code'>>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedKind, setSelectedKind] = useState<ExplanationKind>('calculator')
@@ -150,19 +149,17 @@ export function InteractiveExplanationRail({
             description="Turn document sections into interactive calculators, comparison tools, timelines, or diagrams."
             action={
               <div className="template-quick-buttons">
-                {QUICK_TEMPLATE_KINDS.map(
-                  (kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      className="secondary-action button-sm"
-                      onClick={() => handleOpenCreateModal(kind)}
-                    >
-                      {getKindIcon(kind)}
-                      <span className="capitalize">{kind}</span>
-                    </button>
-                  ),
-                )}
+                {QUICK_TEMPLATE_KINDS.map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className="secondary-action button-sm"
+                    onClick={() => handleOpenCreateModal(kind)}
+                  >
+                    {getKindIcon(kind)}
+                    <span className="capitalize">{kind}</span>
+                  </button>
+                ))}
               </div>
             }
           />
@@ -326,23 +323,21 @@ export function InteractiveExplanationRail({
               <div className="form-group">
                 <label>Template Type</label>
                 <div className="kind-picker" role="radiogroup" aria-label="Template type">
-                  {ALL_EXPLANATION_KINDS.map(
-                    (kind) => (
-                      <button
-                        key={kind}
-                        type="button"
-                        className={`kind-picker-btn ${selectedKind === kind ? 'active' : ''}`}
-                        onClick={() => {
-                          setSelectedKind(kind)
-                          setFormTitle(EXPLANATION_TEMPLATES[kind].defaultTitle)
-                          setFormHtml(EXPLANATION_TEMPLATES[kind].sampleHtml)
-                        }}
-                      >
-                        {getKindIcon(kind)}
-                        <span className="capitalize">{kind}</span>
-                      </button>
-                    ),
-                  )}
+                  {ALL_EXPLANATION_KINDS.map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      className={`kind-picker-btn ${selectedKind === kind ? 'active' : ''}`}
+                      onClick={() => {
+                        setSelectedKind(kind)
+                        setFormTitle(EXPLANATION_TEMPLATES[kind].defaultTitle)
+                        setFormHtml(EXPLANATION_TEMPLATES[kind].sampleHtml)
+                      }}
+                    >
+                      {getKindIcon(kind)}
+                      <span className="capitalize">{kind}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -382,11 +377,7 @@ export function InteractiveExplanationRail({
             </div>
 
             <div className="modal-actions">
-              <button
-                type="button"
-                className="secondary-action"
-                onClick={() => setModalOpen(false)}
-              >
+              <button type="button" className="secondary-action" onClick={() => setModalOpen(false)}>
                 Cancel
               </button>
               <button type="submit" className="panel-button">

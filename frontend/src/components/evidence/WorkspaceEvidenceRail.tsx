@@ -162,9 +162,7 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
         <ClaimMatrixView
           evidence={evidence}
           onOpenPassage={openSource}
-          onUpdateClassification={(id, status) =>
-            void updateEvidence(id, { claimClassification: status })
-          }
+          onUpdateClassification={(id, status) => void updateEvidence(id, { claimClassification: status })}
         />
       ) : (
         <>
@@ -241,7 +239,8 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
                   onCompare={() => handleStartCompare(item)}
                   onInspectSourceChange={() => setInspectingChangeItem(item)}
                   onUpdateClaim={async (claim, targetDraftId) => {
-                    if (!targetDraftId) throw new Error('Choose a destination draft before attaching a claim.')
+                    if (!targetDraftId)
+                      throw new Error('Choose a destination draft before attaching a claim.')
                     const existing = sessions.getSession(targetDraftId)
                     if (existing.content === undefined || existing.draftPersistenceOperation === 'read')
                       await sessions.initializeDocument(await api.getDocument(targetDraftId))

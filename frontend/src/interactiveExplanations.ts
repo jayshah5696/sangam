@@ -12,13 +12,7 @@ export const assumptionReferenceSchema = z.object({
 
 export type AssumptionReference = z.infer<typeof assumptionReferenceSchema>
 
-export const explanationKindSchema = z.enum([
-  'calculator',
-  'comparison',
-  'timeline',
-  'diagram',
-  'custom',
-])
+export const explanationKindSchema = z.enum(['calculator', 'comparison', 'timeline', 'diagram', 'custom'])
 
 export type ExplanationKind = z.infer<typeof explanationKindSchema>
 
