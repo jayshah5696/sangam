@@ -790,3 +790,120 @@ def test_operation_event_action_and_path_provenance(client: TestClient) -> None:
 
     assert create_event["action"] == "create"
     assert create_event["path"] == "docs/auto_detail_test.md"
+
+
+def test_comprehensive_audit_provenance_and_env_sanitization(client: TestClient) -> None:
+    # 1. Test environment variable assignment sanitization in text
+    env_text = (
+        "SANGAM_OPENROUTER_API_KEY=sk-or-v1-secret-openrouter-key "
+        "OPENROUTER_API_KEY=sk-or-secret-val "
+        "SANGAM_SECRET=super_secret_value "
+        "ENV_VAR=my_env_var_secret"
+    )
+    sanitized_env = sanitize_sensitive_text(env_text)
+    assert "sk-or-v1-secret-openrouter-key" not in sanitized_env
+    assert "sk-or-secret-val" not in sanitized_env
+    assert "super_secret_value" not in sanitized_env
+    assert "my_env_var_secret" not in sanitized_env
+    assert "SANGAM_OPENROUTER_API_KEY=[REDACTED]" in sanitized_env
+    assert "OPENROUTER_API_KEY=[REDACTED]" in sanitized_env
+    assert "SANGAM_SECRET=[REDACTED]" in sanitized_env
+    assert "ENV_VAR=[REDACTED]" in sanitized_env
+
+    # 2. Test document mutations provenance for human actor
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Comprehensive Provenance Doc",
+            "content": "line1\nline2",
+            "path": "docs/comp_provenance.md",
+        },
+        headers=headers("idemp_comp_prov_create"),
+    )
+    assert create_resp.status_code == 201
+    doc = create_resp.json()
+    doc_id = doc["document_id"]
+    rev1 = doc["current_revision_id"]
+
+    # Patch document
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "line1\nline2_modified\nline3_new",
+        },
+        headers=headers("idemp_comp_prov_update"),
+    )
+    assert update_resp.status_code == 200
+    rev2 = update_resp.json()["current_revision_id"]
+
+    # Rename / move document
+    move_resp = client.post(
+        f"/api/v1/documents/{doc_id}/move",
+        json={
+            "expected_revision_id": rev2,
+            "path": "docs/comp_provenance_moved.md",
+        },
+        headers=headers("idemp_comp_prov_move"),
+    )
+    assert move_resp.status_code == 200
+    rev3 = move_resp.json()["current_revision_id"]
+
+    # Delete document
+    delete_resp = client.request(
+        "DELETE",
+        f"/api/v1/documents/{doc_id}",
+        json={"expected_revision_id": rev3},
+        headers=headers("idemp_comp_prov_delete"),
+    )
+    assert delete_resp.status_code == 200
+    rev4 = delete_resp.json()["current_revision_id"]
+
+    # Restore document
+    restore_resp = client.post(
+        f"/api/v1/documents/{doc_id}/restore",
+        json={
+            "expected_revision_id": rev4,
+            "revision_id": rev3,
+        },
+        headers=headers("idemp_comp_prov_restore"),
+    )
+    assert restore_resp.status_code == 200
+
+    # Query activity log in JSONL format
+    jsonl_resp = client.get("/api/v1/activity/export.jsonl", params={"actor_kind": "human"})
+    assert jsonl_resp.status_code == 200
+    lines = [json.loads(line) for line in jsonl_resp.text.strip().split("\n") if line.strip()]
+    doc_events = [line for line in lines if line.get("resource_id") == doc_id]
+
+    actions = {e["action"]: e for e in doc_events}
+    assert "create" in actions
+    assert actions["create"]["actor_kind"] == "human"
+    assert actions["create"]["path"] == "docs/comp_provenance.md"
+    assert actions["create"]["details"]["action_type"] == "create"
+    assert actions["create"]["details"]["target_file"] == "docs/comp_provenance.md"
+
+    assert "update" in actions
+    assert actions["update"]["actor_kind"] == "human"
+    assert actions["update"]["path"] == "docs/comp_provenance.md"
+    assert actions["update"]["details"]["action_type"] == "update"
+    assert actions["update"]["details"]["target_file"] == "docs/comp_provenance.md"
+    assert actions["update"]["details"]["lines_added"] == 2
+    assert actions["update"]["details"]["lines_removed"] == 1
+    assert "diff" in actions["update"]["details"]
+
+    assert "move" in actions
+    assert actions["move"]["actor_kind"] == "human"
+    assert actions["move"]["path"] == "docs/comp_provenance_moved.md"
+    assert actions["move"]["details"]["action_type"] == "move"
+    assert actions["move"]["details"]["target_file"] == "docs/comp_provenance_moved.md"
+
+    assert "delete" in actions
+    assert actions["delete"]["actor_kind"] == "human"
+    assert actions["delete"]["path"] == "docs/comp_provenance_moved.md"
+    assert actions["delete"]["details"]["action_type"] == "delete"
+
+    assert "restore" in actions
+    assert actions["restore"]["actor_kind"] == "human"
+    assert actions["restore"]["path"] == "docs/comp_provenance_moved.md"
+    assert actions["restore"]["details"]["action_type"] == "restore"
