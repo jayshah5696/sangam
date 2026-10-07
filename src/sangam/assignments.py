@@ -303,9 +303,7 @@ class AssignmentService:
                         "Child assignment max_seconds cannot exceed parent remaining seconds"
                     )
                 if body.max_budget_cents is not None and parent.max_budget_cents is not None:
-                    parent_remaining_cents = (
-                        parent.max_budget_cents - parent.consumed_budget_cents
-                    )
+                    parent_remaining_cents = parent.max_budget_cents - parent.consumed_budget_cents
                     if body.max_budget_cents > parent_remaining_cents:
                         raise ValidationError(
                             "Child assignment budget cannot exceed parent remaining budget"
@@ -783,7 +781,7 @@ class AssignmentService:
                 assignment.proposal_ids.append(proposal.proposal_id)
             else:
                 lines = [
-                    f"# {('Project review' if assignment.project_id else 'Document review')}", 
+                    f"# {('Project review' if assignment.project_id else 'Document review')}",
                     "",
                     "These findings are suggestions. "
                     "Inspect the cited evidence before changing a draft.",

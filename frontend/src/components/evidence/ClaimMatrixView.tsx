@@ -272,7 +272,6 @@ export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassificatio
 
       {activeCellItem && (
         <ModalDialog
-          open={Boolean(activeCellItem)}
           onClose={() => setActiveCellItem(null)}
           title="Evidence & Stance Details"
           className="claim-matrix-dialog"

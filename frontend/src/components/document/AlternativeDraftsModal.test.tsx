@@ -68,6 +68,21 @@ describe('AlternativeDraftsModal', () => {
     materialization_state: 'clean',
     created_at: '2026-10-06T10:00:00Z',
     updated_at: '2026-10-06T10:00:00Z',
+    file_hash: null,
+    deleted: false,
+    created_by: 'user-1',
+    updated_by: 'user-1',
+    updated_by_name: 'User One',
+    revision_summary: null,
+    tags: [],
+    category: null,
+    metadata_version: 1,
+    trust_level: 'untrusted',
+    trust_version: 1,
+    pdf_page_count: null,
+    pdf_extraction_status: null,
+    pdf_extraction_error: null,
+    supersedes_document_id: null,
   }
 
   beforeEach(async () => {
@@ -163,11 +178,7 @@ describe('AlternativeDraftsModal', () => {
     fireEvent.click(applyBtn)
 
     await waitFor(() => {
-      expect(updateDocSpy).toHaveBeenCalledWith(
-        mockParentDoc.document_id,
-        '# Candidate content\n\nAlternative findings.',
-        mockParentDoc.current_revision_id,
-      )
+      expect(updateDocSpy).toHaveBeenCalledWith(mockParentDoc, '# Candidate content\n\nAlternative findings.')
       expect(onDocumentUpdated).toHaveBeenCalled()
     })
   })

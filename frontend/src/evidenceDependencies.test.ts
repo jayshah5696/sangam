@@ -90,6 +90,7 @@ Next section continues here.
         pinnedRevisionId: 'rev-1',
         selectedText: 'Efficiency grew by 14%.',
         claim: 'Photovoltaic cells exceed target efficiency',
+        claimClassification: 'Supports',
         claimTarget: {
           documentId: 'draft-synthesis',
           anchor: 10,

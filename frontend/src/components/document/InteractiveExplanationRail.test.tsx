@@ -47,6 +47,21 @@ describe('InteractiveExplanationRail', () => {
     materialization_state: 'clean',
     created_at: '2026-10-06T10:00:00Z',
     updated_at: '2026-10-06T10:00:00Z',
+    file_hash: null,
+    deleted: false,
+    created_by: 'user-1',
+    updated_by: 'user-1',
+    updated_by_name: 'User One',
+    revision_summary: null,
+    tags: [],
+    category: null,
+    metadata_version: 1,
+    trust_level: 'untrusted',
+    trust_version: 1,
+    pdf_page_count: null,
+    pdf_extraction_status: null,
+    pdf_extraction_error: null,
+    supersedes_document_id: null,
   }
 
   beforeEach(async () => {

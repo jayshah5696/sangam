@@ -301,7 +301,6 @@ export function InteractiveExplanationRail({
 
       {modalOpen && (
         <ModalDialog
-          open={modalOpen}
           onClose={() => setModalOpen(false)}
           title={editingId ? 'Edit Interactive Explanation' : 'Attach Interactive Explanation'}
           className="explanation-edit-dialog"

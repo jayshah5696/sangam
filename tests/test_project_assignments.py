@@ -362,10 +362,7 @@ def test_assignment_activity_and_judgment_state(settings: Settings):
     expected_judgment = "Is 10ms measured on warm cache?"
     claimed.needs_judgment = expected_judgment
     service._save(claimed)
-    assert (
-        service.get(principal, assignment.assignment_id).needs_judgment
-        == expected_judgment
-    )
+    assert service.get(principal, assignment.assignment_id).needs_judgment == expected_judgment
 
     # Steering resolves needs_judgment and records current direction
     service.control(principal, assignment.assignment_id, "steer", "Yes, warm cache", "steer-warm")

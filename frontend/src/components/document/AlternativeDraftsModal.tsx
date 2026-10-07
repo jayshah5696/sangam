@@ -70,11 +70,7 @@ export function AlternativeDraftsModal({
   const handleApplyChanges = async (candidate: AlternativeCandidate, candidateContent: string) => {
     setApplyingCandidateId(candidate.candidateDocumentId)
     try {
-      const updated = await api.updateDocument(
-        document.document_id,
-        candidateContent,
-        document.current_revision_id,
-      )
+      const updated = await api.updateDocument(document, candidateContent)
       onDocumentUpdated?.(updated)
       setAppliedSuccess(candidate.candidateDocumentId)
       setTimeout(() => setAppliedSuccess(null), 3000)
@@ -86,9 +82,10 @@ export function AlternativeDraftsModal({
     }
   }
 
+  if (!open) return null
+
   return (
     <ModalDialog
-      open={open}
       onClose={onClose}
       title="Explore Alternative Conclusions"
       className="alternative-drafts-modal"
