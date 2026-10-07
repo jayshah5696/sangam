@@ -19,11 +19,13 @@ Every change to Sangam must be proven through observable evidence against a real
 
 ## 2. Launch
 
-Launch an isolated instance using the repository control harness:
+Use `just` for every verification command. `just verify-control` forwards arguments to the isolated control harness without changing their quoting. The feature recipes use the same interface.
 
 ```bash
-./scripts/control-sangam.sh launch [PORT]
+just verify-control launch 8999
 ```
+
+Use a private `TMPDIR` when another verification run may be active, and keep that value for driving and cleanup. For owner-mode CLI checks, clear any inherited `SANGAM_TOKEN` from a deployed workspace. Use only tokens minted by this isolated instance for scoped-token checks.
 
 - **Default Port:** `8765` (configurable, e.g. `8999`).
 - **Isolation:** Creates a temporary state root in `/tmp/sangam-verify-<RUN_ID>` containing disposable `database/`, `workspace/`, and `backups/` directories.
@@ -43,7 +45,7 @@ Launch an isolated instance using the repository control harness:
 Before driving, run `doctor` to ensure the instance is running and fully healthy:
 
 ```bash
-./scripts/control-sangam.sh doctor
+just verify-doctor
 ```
 
 Doctor confirms:
@@ -59,23 +61,23 @@ Drive Sangam using user-facing entry points (CLI, API, Playwright, or Benchmark)
 
 ### A. CLI Driving
 ```bash
-./scripts/control-sangam.sh cli list
-./scripts/control-sangam.sh cli create --title "My Doc" --content "Hello World"
-./scripts/control-sangam.sh cli search "Hello"
-./scripts/control-sangam.sh cli history <DOC_ID>
+just verify-control cli list
+just verify-control cli create --title "My Doc" --content "Hello World"
+just verify-control cli search "Hello"
+just verify-control cli history <DOC_ID>
 ```
 
 ### B. REST API Driving
 ```bash
-./scripts/control-sangam.sh api GET /documents
-./scripts/control-sangam.sh api POST /documents '{"title":"API Doc","content":"API text"}'
-./scripts/control-sangam.sh api GET /search?q=API
+just verify-control api GET /documents
+just verify-control api POST /documents '{"title":"API Doc","content":"API text"}'
+just verify-control api GET '/search?q=API'
 ```
 
 ### C. Performance & Latency Benchmarks
 Exercise load and verify latency budgets:
 ```bash
-./scripts/control-sangam.sh benchmark [COUNT]
+just verify-control benchmark 25
 ```
 Measures:
 - Readiness check response latency (target: < 25ms)
@@ -86,8 +88,6 @@ Measures:
 ### D. Deterministic Data Seeding
 Populate the instance with multi-modal verification assets (Markdown, HTML widgets, binary PDFs, and scoped agent tokens):
 ```bash
-./scripts/control-sangam.sh seed
-# Or via Justfile:
 just verify-seed
 ```
 Generates verifiable proof and FTS5 search verification manifest to `artifacts/verify-sangam/<RUN_ID>/seed.json`.
@@ -97,20 +97,20 @@ Run the dedicated browser test suite:
 ```bash
 just test-e2e
 # Or focused:
-pnpm --dir frontend exec playwright test e2e/workspace-organizer.spec.ts
+just test-e2e 'e2e/workspace-organizer.spec.ts'
 ```
 
 ### F. Chat Agent Evaluation & Autonomy Policy
 Verify deterministic approval policies, replay lifecycles, and empirical OpenRouter tool-calling accuracy:
 ```bash
-./scripts/control-sangam.sh eval [MODEL] [LIMIT]
-# Examples:
-./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" 3
-./scripts/control-sangam.sh eval "openai/gpt-5.6-luna"
-# Or via Justfile:
-just verify-eval
+just eval-chat-policy
+# Opt-in live provider checks:
+just verify-eval 'openai/gpt-5.6-luna' 3
+just verify-assignments
 ```
-Evaluates 17 standardized workspace benchmark tasks (document mutations, multi-hop search, organization plans, and safety gates). Generates empirical eval manifest at `artifacts/verify-sangam/<RUN_ID>/agent-eval.json`.
+Live evaluations require a configured provider and may incur charges. Without credentials, `just verify-eval` runs deterministic policy checks and reports the live evaluation as skipped. Do not describe that result as model verification. The unified `just verify-behavior` gate also benchmarks live streaming and fails without a provider. `just verify-assignments` checks real inference and restart recovery; it requires a live provider.
+
+The evaluation suite covers 17 standardized workspace benchmark tasks (document mutations, multi-hop search, organization plans, and safety gates). It writes `artifacts/verify-sangam/<RUN_ID>/agent-eval.json`.
 
 
 ## 5. Evidence
@@ -131,7 +131,7 @@ Required proof standards:
 Tear down the instance after driving:
 
 ```bash
-./scripts/control-sangam.sh cleanup
+just verify-control cleanup
 ```
 
 - **Invariant:** Cleanup terminates the recorded process PID and deletes `/tmp/sangam-verify-<RUN_ID>`, but **never deletes** `artifacts/verify-sangam/<RUN_ID>`.

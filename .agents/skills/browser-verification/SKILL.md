@@ -37,7 +37,7 @@ For a defect, first add or identify a Playwright assertion that fails for the re
 - Wait for observable UI, network, or application state. A larger timeout or arbitrary sleep is not a synchronization fix.
 - Keep live ChatKit, OpenRouter, Karakeep, tunnels, and physical-device checks outside deterministic CI. Report them as separate opt-in checks.
 
-Run the smallest relevant spec and configured project while iterating. If a required surface has no project, add focused coverage or report it as `unverified`; never substitute narrow desktop for touch-mobile. Inspect the Playwright trace, DOM snapshot, network, console, screenshot, video, and server log before changing code after a failure.
+Run the smallest relevant spec and configured project while iterating. Do not rebuild the same checkout while its browser run is serving `frontend/dist`; finish or stop that run before rebuilding. If a required surface has no project, add focused coverage or report it as `unverified`; never substitute narrow desktop for touch-mobile. Inspect the Playwright trace, DOM snapshot, network, console, screenshot, video, and server log before changing code after a failure.
 
 Completion criterion: the focused regression passes on every selected deterministic surface and fails for the intended reason when the defect is reintroduced.
 

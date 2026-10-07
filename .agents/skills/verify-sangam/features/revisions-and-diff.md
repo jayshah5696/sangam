@@ -18,24 +18,24 @@ Sangam enforces immutable revision histories for all document mutations. Concurr
 ## Driving it with control-sangam
 
 Preconditions:
-- Instance is healthy via `./scripts/control-sangam.sh doctor`.
+- Instance is healthy via `just verify-doctor`.
 - A target document exists with revision `r1`.
 
 - **Perform Valid Update:**
   ```bash
-  ./scripts/control-sangam.sh cli update <DOC_ID> --expected-revision <REV_1> --content "Version 2 Content"
+  just verify-control cli update <DOC_ID> --expected-revision <REV_1> --content "Version 2 Content"
   ```
   Expected: Success, returns new `current_revision_id: <REV_2>`.
 
 - **Provoke Concurrency Conflict:**
   ```bash
-  ./scripts/control-sangam.sh cli update <DOC_ID> --expected-revision <REV_1> --content "Conflicting Content"
+  just verify-control cli update <DOC_ID> --expected-revision <REV_1> --content "Conflicting Content"
   ```
   Expected: Command fails with exit code `1` and error payload indicating revision mismatch (HTTP 409 Conflict).
 
 - **Diff Verification:**
   ```bash
-  ./scripts/control-sangam.sh cli diff <DOC_ID> --from-revision <REV_1> --to-revision <REV_2>
+  just verify-control cli diff <DOC_ID> --from-revision <REV_1> --to-revision <REV_2>
   ```
   Expected: Returns unified diff showing modifications between revisions.
 

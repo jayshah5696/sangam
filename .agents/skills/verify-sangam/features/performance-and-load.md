@@ -11,20 +11,20 @@ Verifiable behavior is not limited to functional correctness. For self-hosted sy
 
 ## How to get to it (user POV)
 
-- Run `./scripts/control-sangam.sh benchmark [COUNT]` from the repository root.
+- Run `just verify-control benchmark [COUNT]` from the repository root.
 - Check saved metrics in `artifacts/verify-sangam/<RUN_ID>/benchmark.json`.
 
 ## Driving it with control-sangam
 
 Preconditions:
-- Clean isolated instance launched with `./scripts/control-sangam.sh launch [PORT]`.
+- Clean isolated instance launched with `just verify-control launch [PORT]`.
 - System is idle (no conflicting heavy background builds).
 
 ### Benchmark Execution
 
 Run 50 iterations:
 ```bash
-./scripts/control-sangam.sh benchmark 50
+just verify-control benchmark 50
 ```
 
 ### Performance Budgets (Thresholds)

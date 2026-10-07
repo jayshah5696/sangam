@@ -17,11 +17,11 @@ Sangam supports scoped agent bearer tokens with time-to-live (TTL) limits and gr
 ## Driving it with control-sangam
 
 Preconditions:
-- Instance is healthy via `./scripts/control-sangam.sh doctor`.
+- Instance is healthy via `just verify-doctor`.
 
 ### 1. Issue a Read-Only Token
 ```bash
-./scripts/control-sangam.sh api POST /agent-tokens '{"name":"readonly-agent","role":"read_only","ttl_seconds":3600}'
+just verify-control api POST /agent-tokens '{"name":"readonly-agent","role":"read_only","ttl_seconds":3600}'
 ```
 Expected: HTTP 200/201 returning token details and secret `token`.
 

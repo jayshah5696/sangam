@@ -17,12 +17,12 @@ Sangam stores documents in SQLite with immutable revision trees, but also allows
 ## Driving it with control-sangam
 
 Preconditions:
-- Instance is healthy via `./scripts/control-sangam.sh doctor`.
+- Instance is healthy via `just verify-doctor`.
 - Ephemeral workspace root exists at `$SANGAM_WORKSPACE_ROOT`.
 
 ### 1. Create a Document with a Disk Path
 ```bash
-./scripts/control-sangam.sh cli create --title "Architecture Overview" --path "docs/arch.md" --content "# Architecture\n\nVerified file materialization."
+just verify-control cli create --title "Architecture Overview" --path "docs/arch.md" --content "# Architecture\n\nVerified file materialization."
 ```
 
 ### 2. Verify File On Disk
@@ -41,7 +41,7 @@ echo -e "\nAdded via external editor." >> "$SANGAM_WORKSPACE_ROOT/docs/arch.md"
 ```
 Trigger workspace reconciliation and verify that Sangam records a new revision attributing the external modification:
 ```bash
-./scripts/control-sangam.sh api POST /workspace/reconcile
+just verify-control api POST /workspace/reconcile
 ```
 Expected: HTTP 200 with reconciliation summary listing `docs/arch.md` updated.
 

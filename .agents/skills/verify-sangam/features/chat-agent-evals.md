@@ -18,7 +18,7 @@ Sangam embeds an AI chat agent capable of reading documents, proposing structure
 ## Driving it with control-sangam
 
 Preconditions:
-- Instance is healthy via `./scripts/control-sangam.sh doctor`.
+- Instance is healthy via `just verify-doctor`.
 
 ### 1. Run Unified Verification with Agent Eval
 ```bash
@@ -29,10 +29,10 @@ just verify-behavior 8765 15 3
 ### 2. Run Dedicated Agent Evaluation via Harness
 ```bash
 # Evaluates using the default model openai/gpt-5.6-luna
-./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" 5
+just verify-eval 'openai/gpt-5.6-luna' 5
 
 # Or run full 17-item evaluation suite:
-./scripts/control-sangam.sh eval "openai/gpt-5.6-luna"
+just verify-eval 'openai/gpt-5.6-luna'
 ```
 
 Evidence output is captured in JSON at:

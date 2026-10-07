@@ -4,17 +4,17 @@ This directory is the maintained source for verifying user-facing Sangam behavio
 
 ## Baseline Preconditions
 
-- Launch an isolated Sangam instance using `./scripts/control-sangam.sh launch <PORT>`.
+- Launch an isolated Sangam instance using `just verify-control launch <PORT>`.
 - Set an ephemeral data directory in `/tmp/sangam-verify-<RUN_ID>` so runs never touch developer workspace data.
-- Run `./scripts/control-sangam.sh doctor` and require HTTP 200 health, ready status, and passing SQLite `PRAGMA quick_check;`.
+- Run `just verify-doctor` and require HTTP 200 health, ready status, and passing SQLite `PRAGMA quick_check;`.
 - Never drive an instance not owned by the current verification run.
 
 ## Driving Conventions
 
 - Start every recipe from the baseline state unless preconditions specify otherwise.
-- CLI commands are run through `./scripts/control-sangam.sh cli <command> [args...]`.
-- API requests are run through `./scripts/control-sangam.sh api <method> <path> [data]`.
-- Performance benchmarks are run through `./scripts/control-sangam.sh benchmark [count]`.
+- CLI commands are run through `just verify-control cli <command> [args...]`.
+- API requests are run through `just verify-control api <method> <path> [data]`.
+- Performance benchmarks are run through `just verify-control benchmark [count]`.
 - Browser UI interactions are run through Playwright (`just test-e2e` or focused spec).
 
 ## Proof Standards

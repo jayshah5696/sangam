@@ -16,7 +16,7 @@ Sangam allows previewing rich HTML, interactive widgets, and rendered Markdown d
 ## Driving it with control-sangam
 
 Preconditions:
-- Instance is healthy via `./scripts/control-sangam.sh doctor`.
+- Instance is healthy via `just verify-doctor`.
 - `SANGAM_TRUSTED_PREVIEW_HOST` and `SANGAM_TRUSTED_PREVIEW_PARENT_ORIGINS` are set (configured automatically by `control-sangam.sh`).
 
 ### 1. Verify Preview Headers
@@ -29,7 +29,7 @@ Ensure proper CORS and frame ancestor restrictions exist between `127.0.0.1` and
 ### 2. Browser Verification (Playwright)
 Run the dedicated Playwright spec exercising preview isolation:
 ```bash
-pnpm --dir frontend exec playwright test e2e/html-javascript.spec.ts
+just test-e2e 'e2e/html-javascript.spec.ts'
 ```
 Expected: All preview sandboxing tests pass without leaking cookies or auth headers to iframe content.
 

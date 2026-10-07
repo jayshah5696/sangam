@@ -64,7 +64,8 @@ Documentation screenshots and PR evidence are not test baselines.
 - Ordinary `test:e2e` must not write tracked documentation assets.
 - Generate documentation assets only with the explicit screenshot update command.
 - Keep PR-only captures outside tracked product assets.
-- UI changes should show before and after images when a before state is available.
+- Capture before and after images from the base and changed revisions with matching fixtures, browser profiles, viewports, and themes. Record the revision for each capture.
+- Label mockups and simulated DOM states explicitly. Hiding new controls in the changed application does not capture the base revision and does not satisfy a request for application before/after screenshots.
 - Motion and timing changes should include a short video.
 
 ## Inspection checklist

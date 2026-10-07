@@ -80,10 +80,10 @@ test-e2e-webkit-local args="":
 test:
     uv run ruff check .
     uv run ruff format --check .
+    pnpm --dir frontend run format:check
     just typecheck
     uv run python scripts/verify_openapi_contract.py
     uv run pytest
-    pnpm --dir frontend run format:check
     pnpm --dir frontend run build
     pnpm --dir frontend run lint
     pnpm --dir frontend run test
@@ -146,8 +146,9 @@ typecheck:
         src/sangam/assignments.py \
         src/sangam/api_assignments.py
 
-# Run only the browser client build, lint, and unit tests.
+# Check browser client formatting, build, lint, and unit tests.
 test-frontend:
+    pnpm --dir frontend run format:check
     pnpm --dir frontend run build
     pnpm --dir frontend run lint
     pnpm --dir frontend run test
@@ -254,6 +255,11 @@ verify-negative port="8995":
     fi
     echo "Negative verification proof passed: invalid count, wrong document identity, and SSE stream errors rejected."
     echo "  Evidence saved to: $invalid_report, $mismatch_report, and $stream_error_report"
+
+# Drive the isolated verification harness without bypassing the canonical interface.
+[positional-arguments]
+verify-control +args:
+    ./scripts/control-sangam.sh "$@"
 
 # Run a read-only doctor health and integrity check on the active verification instance.
 verify-doctor:
