@@ -36,6 +36,7 @@ import type { PublishedEvidenceItem } from '../../api'
 import { DocumentCommentsRail } from './DocumentCommentsRail'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 import { AlternativeDraftsModal } from './AlternativeDraftsModal'
+import { InteractiveExplanationRail } from './InteractiveExplanationRail'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'research', 'outline', 'history', 'chat', 'comments'] as const
@@ -303,6 +304,7 @@ export function DocumentInspector({
           <>
             {pdf && <PdfResearchRail document={document} />}
             <DocumentSourcesAndNotes document={document} enabled={tab === 'research'} />
+            <InteractiveExplanationRail document={document} />
             <WorkspaceEvidenceRail document={document} />
           </>
         )}
