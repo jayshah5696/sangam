@@ -1045,6 +1045,7 @@ export type ProjectDetail = z.infer<typeof projectDetailSchema>
 export const assignmentSchema = z.object({
   assignment_id: z.string(),
   project_id: z.string().nullable(),
+  parent_assignment_id: z.string().nullable().optional(),
   thread_id: z.string(),
   status: z.enum(['queued', 'running', 'paused', 'stopped', 'completed', 'failed', 'exhausted']),
   instructions: z.string(),
@@ -1057,6 +1058,13 @@ export const assignmentSchema = z.object({
   output_tokens: z.number(),
   artifact_ids: z.array(z.string()),
   proposal_ids: z.array(z.string()),
+  current_finding: z.string().nullable().optional(),
+  working_on: z.string().nullable().optional(),
+  needs_judgment: z.string().nullable().optional(),
+  produced_artifacts: z.array(z.string()).default([]),
+  child_assignments: z.array(z.string()).default([]),
+  max_budget_cents: z.number().nullable().optional(),
+  consumed_budget_cents: z.number().default(0),
   error: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -1218,6 +1226,9 @@ export const api = {
   async listAssignments(projectId: string) {
     return z.array(assignmentSchema).parse(await request(`/projects/${projectId}/assignments`))
   },
+  async listDocumentAssignments(documentId: string) {
+    return z.array(assignmentSchema).parse(await request(`/documents/${documentId}/assignments`))
+  },
   async getAssignment(id: string) {
     return assignmentSchema.parse(await request(`/assignments/${id}`))
   },
@@ -1237,6 +1248,25 @@ export const api = {
   ) {
     return assignmentSchema.parse(
       await request(`/projects/${projectId}/assignments`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': key },
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async createDocumentAssignment(
+    documentId: string,
+    input: {
+      instructions: string
+      document_ids: string[]
+      max_steps: number
+      max_seconds: number
+      resume_after_restart: boolean
+    },
+    key: string,
+  ) {
+    return assignmentSchema.parse(
+      await request(`/documents/${documentId}/assignments`, {
         method: 'POST',
         headers: { 'Idempotency-Key': key },
         body: JSON.stringify(input),

@@ -37,6 +37,7 @@ import { DocumentCommentsRail } from './DocumentCommentsRail'
 import { SelectableHtmlText } from '../SelectableHtmlText'
 import { AlternativeDraftsModal } from './AlternativeDraftsModal'
 import { InteractiveExplanationRail } from './InteractiveExplanationRail'
+import { DocumentAssignmentsRail } from './DocumentAssignmentsRail'
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const standardInspectorTabs = ['properties', 'research', 'outline', 'history', 'chat', 'comments'] as const
@@ -306,6 +307,7 @@ export function DocumentInspector({
             <DocumentSourcesAndNotes document={document} enabled={tab === 'research'} />
             <InteractiveExplanationRail document={document} />
             <WorkspaceEvidenceRail document={document} />
+            <DocumentAssignmentsRail documentId={documentId} />
           </>
         )}
         {tab === 'outline' && (

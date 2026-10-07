@@ -43,6 +43,8 @@ class CreateAssignment(StrictModel):
     max_steps: int = Field(default=3, ge=1, le=10)
     max_seconds: int = Field(default=180, ge=10, le=600)
     resume_after_restart: bool = True
+    parent_assignment_id: str | None = None
+    max_budget_cents: int | None = Field(default=None, ge=1, le=100_000)
 
 
 class ReviewCitation(StrictModel):
@@ -100,6 +102,14 @@ class Assignment(StrictModel):
     refresh_proposal_id: str | None = None
     target_revision_id: str | None = None
     reviewed_content: str | None = None
+    current_finding: str | None = None
+    working_on: str | None = None
+    needs_judgment: str | None = None
+    produced_artifacts: list[str] = Field(default_factory=list)
+    child_assignments: list[str] = Field(default_factory=list)
+    parent_assignment_id: str | None = None
+    max_budget_cents: int | None = None
+    consumed_budget_cents: int = 0
     error: str | None = None
     created_at: str
     updated_at: str
@@ -228,6 +238,22 @@ class AssignmentService:
             ).fetchall()
         return [self.get(principal, row["assignment_id"]) for row in rows]
 
+    def list_for_document(self, principal: Principal, document_id: str) -> list[Assignment]:
+        AuthorizationPolicy.require_administrator(principal)
+        self.chat.workspace.get_document(principal, document_id)
+        with self.database.connection() as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM assignments WHERE actor_id=? "
+                "ORDER BY created_at DESC LIMIT 50",
+                (principal.actor_id,),
+            ).fetchall()
+        matching = []
+        for row in rows:
+            assignment = Assignment.model_validate_json(row["data_json"])
+            if document_id in assignment.document_ids:
+                matching.append(assignment)
+        return matching
+
     def create(
         self,
         principal: Principal,
@@ -259,6 +285,32 @@ class AssignmentService:
                 return self.get(
                     principal, Assignment.model_validate_json(previous["data_json"]).assignment_id
                 )
+            parent = None
+            if body.parent_assignment_id:
+                parent = self.get(principal, body.parent_assignment_id)
+                if parent.status not in ("queued", "running"):
+                    raise ConflictError("Parent assignment is not active")
+                if not set(body.document_ids) <= set(parent.document_ids):
+                    raise ValidationError(
+                        "Child assignment sources must be a subset of parent sources"
+                    )
+                if body.max_steps > parent.max_steps - parent.steps:
+                    raise ValidationError(
+                        "Child assignment max_steps cannot exceed parent remaining steps"
+                    )
+                if body.max_seconds > parent.max_seconds - int(parent.elapsed_seconds):
+                    raise ValidationError(
+                        "Child assignment max_seconds cannot exceed parent remaining seconds"
+                    )
+                if body.max_budget_cents is not None and parent.max_budget_cents is not None:
+                    parent_remaining_cents = (
+                        parent.max_budget_cents - parent.consumed_budget_cents
+                    )
+                    if body.max_budget_cents > parent_remaining_cents:
+                        raise ValidationError(
+                            "Child assignment budget cannot exceed parent remaining budget"
+                        )
+
             if project_id:
                 project = self.projects.get_project(project_id, principal)
                 members = {doc.document_id for doc in project.documents}
@@ -299,6 +351,7 @@ class AssignmentService:
                 token_id=principal.token_id,
                 thread_id=thread.id,
                 status="queued",
+                working_on="Queued for execution",
                 **body.model_dump(),
                 refresh_proposal_id=proposal.proposal_id if proposal else None,
                 target_revision_id=target.current_revision_id if target else None,
@@ -322,6 +375,9 @@ class AssignmentService:
                     now,
                 ),
             )
+            if parent:
+                parent.child_assignments.append(assignment_id)
+                self._save(parent)
             if project_id:
                 self.projects._audit(principal, "assignment:start", project_id)
         return assignment
@@ -371,16 +427,33 @@ class AssignmentService:
                     if assignment.status not in {"queued", "running"}:
                         raise ConflictError("Only queued or running assignments can pause")
                     assignment.status = "paused"
+                    assignment.working_on = "Paused by user"
                 elif action == "resume":
                     assignment.status = "queued"
+                    assignment.working_on = "Queued to resume"
                     if assignment.refresh_proposal_id:
                         assignment.result = None
                 else:
                     assignment.status = "stopped"
+                    assignment.working_on = "Stopped"
                     assignment.error = None
-            elif action == "steer" and assignment.status in {"completed", "failed"}:
-                assignment.status = "queued"
-                assignment.result = None
+                for child_id in assignment.child_assignments:
+                    try:
+                        child = self.get(principal, child_id)
+                        if child.status in {"queued", "running"}:
+                            child.status = "paused" if action == "pause" else "stopped"
+                            child.working_on = (
+                                "Paused by parent" if action == "pause" else "Stopped by parent"
+                            )
+                            self._save(child)
+                    except NotFoundError:
+                        pass
+            elif action == "steer":
+                if assignment.status in {"completed", "failed"}:
+                    assignment.status = "queued"
+                    assignment.result = None
+                assignment.needs_judgment = None
+                assignment.working_on = f"Steered: {content[:100]}"
             conn.execute(
                 "INSERT INTO assignment_inputs(assignment_id,request_key,kind,content,created_at) "
                 "VALUES (?,?,?,?,?)",
@@ -432,6 +505,7 @@ class AssignmentService:
                 return None
             assignment = Assignment.model_validate_json(row["data_json"])
             assignment.status = "running"
+            assignment.working_on = "Checking claims against workspace sources"
             self._save(assignment)
             return assignment
 
@@ -481,7 +555,7 @@ class AssignmentService:
                 (assignment.assignment_id,),
             ).fetchall()
         text = assignment.instructions + "\n" + "\n".join(row["content"] for row in inputs)
-        return sources, text, inputs[-1]["input_id"] if inputs else 0
+        return sources, text, inputs[-1][["input_id"]] if inputs else 0
 
     def validate_result(
         self, principal: Principal, assignment: Assignment, result: ReviewResult
@@ -680,6 +754,12 @@ class AssignmentService:
                 assignment.status = "queued"
                 self._save(assignment)
                 return
+            if assignment.result and assignment.result.findings:
+                assignment.current_finding = assignment.result.findings[0].explanation
+                for finding in assignment.result.findings:
+                    if finding.missing_evidence:
+                        assignment.needs_judgment = f"Evidence gap: {finding.missing_evidence}"
+                        break
             if assignment.refresh_proposal_id:
                 original = self.chat.proposals.repository.get_owned(
                     principal, assignment.refresh_proposal_id
@@ -702,10 +782,8 @@ class AssignmentService:
                 )
                 assignment.proposal_ids.append(proposal.proposal_id)
             else:
-                if assignment.project_id is None:
-                    raise ValidationError("Project review has no project")
                 lines = [
-                    "# Project review",
+                    f"# {('Project review' if assignment.project_id else 'Document review')}", 
                     "",
                     "These findings are suggestions. "
                     "Inspect the cited evidence before changing a draft.",
@@ -734,24 +812,37 @@ class AssignmentService:
                                 "",
                             ]
                         )
+                doc_title = "Project review" if assignment.project_id else "Document review"
                 document = self.chat.workspace.create_document(
                     principal,
-                    title="Project review",
+                    title=doc_title,
                     content="\n".join(lines),
                     path=None,
                     idempotency_key=f"{assignment.assignment_id}:result:{assignment.steps}",
                 )
-                members = self.projects.get_project(assignment.project_id, principal).documents
-                if not any(member.document_id == document.document_id for member in members):
-                    self.projects.add_document_once(
-                        principal,
-                        f"{assignment.assignment_id}:result-member:{assignment.steps}",
-                        assignment.project_id,
-                        AddProjectDocument(document_id=document.document_id, role="output"),
-                    )
+                if assignment.project_id:
+                    members = self.projects.get_project(assignment.project_id, principal).documents
+                    if not any(member.document_id == document.document_id for member in members):
+                        self.projects.add_document_once(
+                            principal,
+                            f"{assignment.assignment_id}:result-member:{assignment.steps}",
+                            assignment.project_id,
+                            AddProjectDocument(document_id=document.document_id, role="output"),
+                        )
                 assignment.artifact_ids.append(document.document_id)
+                assignment.produced_artifacts.append(f"{document.title} ({document.document_id})")
             assignment.status = "completed"
+            assignment.working_on = None
             assignment.error = None
+            if assignment.parent_assignment_id:
+                try:
+                    parent = self.get(principal, assignment.parent_assignment_id)
+                    parent.consumed_budget_cents += assignment.consumed_budget_cents
+                    parent.input_tokens += assignment.input_tokens
+                    parent.output_tokens += assignment.output_tokens
+                    self._save(parent)
+                except NotFoundError:
+                    pass
             self._save(assignment)
 
     async def execute(self, assignment: Assignment) -> None:
@@ -879,13 +970,13 @@ class AssignmentService:
         with self.database.transaction() as conn:
             project = self.projects.get_project(project_id, principal)
             if visit_key:
-                replay = conn.execute(
+                recorded = conn.execute(
                     "SELECT result_json FROM project_visit_results "
                     "WHERE project_id=? AND actor_id=? AND request_key=?",
                     (project_id, principal.actor_id, visit_key),
                 ).fetchone()
-                if replay:
-                    return ProjectBriefing.model_validate_json(replay["result_json"])
+                if recorded:
+                    return ProjectBriefing.model_validate_json(recorded["result_json"])
             visit = conn.execute(
                 "SELECT * FROM project_visits WHERE project_id=? AND actor_id=?",
                 (project_id, principal.actor_id),

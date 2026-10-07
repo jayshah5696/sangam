@@ -55,6 +55,7 @@ export function AssignmentStatus({ assignment }: { assignment: Assignment }) {
       setSteering(null)
       await client.invalidateQueries({ queryKey: ['assignments'] })
       await client.invalidateQueries({ queryKey: ['assignment'] })
+      await client.invalidateQueries({ queryKey: ['document-assignments'] })
     },
   })
   const active = assignment.status === 'running' || assignment.status === 'queued'
@@ -64,16 +65,73 @@ export function AssignmentStatus({ assignment }: { assignment: Assignment }) {
   return (
     <article className="assignment-row">
       <div className="assignment-row-main">
-        <p className="assignment-row-title">{assignment.instructions}</p>
-        <p className="assignment-row-meta">
+        <div className="assignment-row-header">
+          <p className="assignment-row-title">{assignment.instructions}</p>
           <span className={`scope-badge assignment-status ${assignment.status}`}>
             {statusLabel[assignment.status]}
           </span>
+        </div>
+        <p className="assignment-row-meta">
           <span>
             Attempt {assignment.steps} of {assignment.max_steps} · {Math.round(assignment.elapsed_seconds)}s
             of {assignment.max_seconds}s{tokens > 0 && ` · ${tokens.toLocaleString()} tokens`}
+            {assignment.max_budget_cents ? ` · $${(assignment.consumed_budget_cents / 100).toFixed(2)} of $${(assignment.max_budget_cents / 100).toFixed(2)}` : ''}
           </span>
         </p>
+
+        {assignment.current_finding && (
+          <div className="assignment-section">
+            <h4 className="assignment-section-label">Current finding</h4>
+            <p className="assignment-section-body">{assignment.current_finding}</p>
+          </div>
+        )}
+
+        {(assignment.produced_artifacts.length > 0 || assignment.artifact_ids.length > 0) && (
+          <div className="assignment-section">
+            <h4 className="assignment-section-label">Produced</h4>
+            <ul className="assignment-produced-list">
+              {assignment.produced_artifacts.map((name, i) => (
+                <li key={i}>{name}</li>
+              ))}
+              {assignment.artifact_ids.map((id) => (
+                <li key={id}>
+                  <Link to="/documents/$documentId" params={{ documentId: id }}>
+                    Project review ({id.slice(0, 8)})
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {assignment.working_on && (
+          <div className="assignment-section">
+            <h4 className="assignment-section-label">Working on</h4>
+            <p className="assignment-section-body">{assignment.working_on}</p>
+          </div>
+        )}
+
+        {assignment.needs_judgment && (
+          <div className="assignment-judgment-box">
+            <h4 className="assignment-section-label">Needs your judgment</h4>
+            <p className="assignment-section-body">{assignment.needs_judgment}</p>
+            <button
+              className="secondary-action"
+              onClick={() => setSteering((s) => (s === null ? '' : null))}
+            >
+              Respond
+            </button>
+          </div>
+        )}
+
+        {assignment.child_assignments.length > 0 && (
+          <div className="assignment-section">
+            <h4 className="assignment-section-label">Child work</h4>
+            <p className="assignment-section-body">
+              {assignment.child_assignments.length} delegated task(s)
+            </p>
+          </div>
+        )}
       </div>
       <div className="assignment-row-actions">
         {assignment.artifact_ids.map((id) => (

@@ -34,6 +34,23 @@ def create_assignments_router(
     ) -> list[Assignment]:
         return service.list_for_project(principal, project_id)
 
+    @router.get("/documents/{document_id}/assignments", response_model=list[Assignment])
+    def document_assignments(
+        document_id: str, principal: Principal = principal_dependency
+    ) -> list[Assignment]:
+        return service.list_for_document(principal, document_id)
+
+    @router.post("/documents/{document_id}/assignments", response_model=Assignment, status_code=201)
+    def create_document_assignment(
+        document_id: str,
+        body: CreateAssignment,
+        principal: Principal = principal_dependency,
+        key: str = Header(alias="Idempotency-Key", max_length=200),
+    ) -> Assignment:
+        if document_id not in body.document_ids:
+            body.document_ids = [document_id, *body.document_ids]
+        return service.create(principal, None, body, key)
+
     @router.get("/assignments/{assignment_id}", response_model=Assignment)
     def get(assignment_id: str, principal: Principal = principal_dependency) -> Assignment:
         return service.get(principal, assignment_id)

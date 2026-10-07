@@ -1068,3 +1068,69 @@
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
+
+.document-assignments-rail {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+}
+
+.document-assignments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.document-assignments-title-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.document-assignments-icon {
+  width: var(--icon-inline);
+  height: var(--icon-inline);
+  color: var(--accent);
+}
+
+.document-assignments-title {
+  margin: 0;
+  font-size: var(--text-control);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.document-assignments-start-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.document-assignments-form {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.document-assignments-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.document-assignments-empty {
+  margin: 0;
+  padding: var(--space-2) 0;
+  color: var(--muted);
+  font-size: var(--text-control);
+}
+
+.document-assignments-btn-icon {
+  width: var(--icon-detail);
+  height: var(--icon-detail);
+}
