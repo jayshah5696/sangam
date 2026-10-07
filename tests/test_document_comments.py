@@ -234,3 +234,66 @@ def test_comment_input_sanitization(client: TestClient) -> None:
         headers=headers("ctrl-suffix-cmt"),
     )
     assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
+
+
+def test_agent_comment_read_audit_provenance(client: TestClient) -> None:
+    doc = create_doc(
+        client, "Doc 5", "Audited comments passage text.", path="docs/audited_comments.md"
+    )
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Post a comment
+    post_res = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Audited comments",
+            "start": 0,
+            "end": 16,
+            "body": "Check audit provenance for comment reads",
+        },
+        headers=headers("create-audit-comment"),
+    )
+    assert post_res.status_code == 201
+    comment_id = post_res.json()["comment_id"]
+
+    # Issue an agent token
+    agent_token = issue_agent_token(
+        client,
+        actor_id="agent:comment-reader",
+        display_name="Comment Reader Agent",
+        capabilities=("read",),
+        path_prefix="docs",
+    )
+    agent_headers = {"Authorization": f"Bearer {agent_token}"}
+
+    # Agent lists comments
+    list_res = client.get(f"/api/v1/documents/{doc_id}/comments", headers=agent_headers)
+    assert list_res.status_code == 200
+    assert len(list_res.json()) == 1
+
+    # Agent gets single comment
+    get_res = client.get(f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=agent_headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["comment_id"] == comment_id
+
+    # Verify agent activity audit logs record list_comments and get_comment
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
+    assert activity_resp.status_code == 200
+    agent_events = [
+        e
+        for e in activity_resp.json()
+        if e["actor_id"] == "agent:comment-reader" and e["resource_id"] == doc_id
+    ]
+    actions = {e["action"]: e for e in agent_events}
+
+    assert "list_comments" in actions
+    assert actions["list_comments"]["actor_kind"] == "agent"
+    assert actions["list_comments"]["outcome"] == "accepted"
+    assert actions["list_comments"]["path"] == "docs/audited_comments.md"
+
+    assert "get_comment" in actions
+    assert actions["get_comment"]["actor_kind"] == "agent"
+    assert actions["get_comment"]["outcome"] == "accepted"
+    assert actions["get_comment"]["path"] == "docs/audited_comments.md"
