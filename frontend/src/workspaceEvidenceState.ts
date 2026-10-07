@@ -10,7 +10,6 @@ let cachedItems: EvidenceItem[] = []
 let storageError: string | null = null
 const listeners = new Set<() => void>()
 const notify = () => listeners.forEach((listener) => listener())
-
 function readItems(): EvidenceItem[] {
   const raw = localStorage.getItem(EVIDENCE_STORAGE_KEY)
   if (raw === cachedRaw) return cachedItems
@@ -76,7 +75,7 @@ export const workspaceEvidenceStore = {
   },
   updateEvidence: async (
     id: string,
-    patch: Partial<Pick<EvidenceItem, 'claim' | 'note' | 'claimTarget'>>,
+    patch: Partial<Pick<EvidenceItem, 'claim' | 'note' | 'claimTarget' | 'claimClassification'>>,
   ): Promise<void> =>
     mutate((items) => ({
       items: items.map((item) =>
