@@ -234,3 +234,72 @@ def test_comment_input_sanitization(client: TestClient) -> None:
         headers=headers("ctrl-suffix-cmt"),
     )
     assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
+
+
+def test_concurrent_comment_resolution_version_precondition(client: TestClient) -> None:
+    import concurrent.futures
+
+    doc = create_doc(client, "Doc Concurrency", "Concurrent comment resolution test text.")
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Issue tokens for two separate agent identities
+    token_agent1 = issue_agent_token(
+        client, actor_id="agent:one", capabilities=("read", "update"), path_prefix="notes.md"
+    )
+    token_agent2 = issue_agent_token(
+        client, actor_id="agent:two", capabilities=("read", "update"), path_prefix="notes.md"
+    )
+
+    # Create a comment
+    create_res = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Concurrent",
+            "start": 0,
+            "end": 10,
+            "body": "Comment for concurrent resolve test",
+        },
+        headers=headers("create-cmt-conc"),
+    )
+    assert create_res.status_code == 201, create_res.text
+    comment = create_res.json()
+    comment_id = comment["comment_id"]
+    assert comment["version"] == 1
+
+    results = []
+
+    def resolve_agent(agent_idx: int, token: str, resolve_val: bool):
+        agent_headers = {
+            "Authorization": f"Bearer {token}",
+            **headers(f"agent-{agent_idx}-resolve"),
+        }
+        res = client.post(
+            f"/api/v1/documents/{doc_id}/comments/{comment_id}/resolve",
+            json={"resolved": resolve_val, "expected_version": 1},
+            headers=agent_headers,
+        )
+        results.append(res)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(resolve_agent, 1, token_agent1, True)
+        f2 = executor.submit(resolve_agent, 2, token_agent2, False)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    status_codes = sorted(r.status_code for r in results)
+    assert status_codes == [200, 409], (
+        f"Expected exactly one winner (200) and one conflict (409), got: {status_codes}"
+    )
+
+    winning_resp = next(r for r in results if r.status_code == 200)
+    winning_comment = winning_resp.json()
+    assert winning_comment["version"] == 2
+
+    losing_resp = next(r for r in results if r.status_code == 409)
+    assert losing_resp.json()["error"]["code"] in (
+        "revision_conflict",
+        "comment_version_mismatch",
+        "conflict",
+    )
