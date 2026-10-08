@@ -36,8 +36,8 @@ importers:
         specifier: 6.43.11
         version: 6.43.11
       '@openai/chatkit':
-        specifier: ^1.5.1
-        version: 1.7.0
+        specifier: ^1.9.0
+        version: 1.9.0
       '@openai/chatkit-react':
         specifier: ^1.6.1
         version: 1.6.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -556,9 +556,6 @@ packages:
     peerDependencies:
       react: '>=18'
       react-dom: '>=18'
-
-  '@openai/chatkit@1.7.0':
-    resolution: {integrity: sha512-uCUsShQO8PamPXt1gcFc8dbyV9Vic0yUgoUrEo7NT6z00azba8nU20rchVFHvjdgQsxgE/+BtsDtYoOVcq5Jjw==}
 
   '@openai/chatkit@1.9.0':
     resolution: {integrity: sha512-AbqNYaCkQfOauFIk/xL3LFmZ/zIBJuvV71EMUK1o1Tu3/qCG5qRjuDnTUVLkkX9Al2ZYQ6yB1oyWN0jNhoBRMQ==}
@@ -3211,8 +3208,6 @@ snapshots:
       '@openai/chatkit': 1.9.0
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
-
-  '@openai/chatkit@1.7.0': {}
 
   '@openai/chatkit@1.9.0': {}
 
