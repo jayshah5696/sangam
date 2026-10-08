@@ -560,7 +560,9 @@
 
 /* Issue 325: Explore alternative drafts */
 .alternative-drafts-modal {
-  max-width: 640px;
+  box-sizing: border-box;
+  width: min(640px, calc(100vw - var(--space-3) * 2));
+  max-width: calc(100vw - var(--space-3) * 2);
 }
 
 .alternative-drafts-content {
@@ -585,12 +587,14 @@
 
 .candidate-input-wrap {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
 }
 
 .candidate-input-wrap input {
-  flex: 1;
+  flex: 1 1 50%;
+  min-width: 0;
   height: var(--control-compact);
   padding: 0 var(--space-2);
   border: 1px solid var(--line);
@@ -664,6 +668,7 @@
 
 .candidate-card-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
@@ -673,9 +678,11 @@
 
 .candidate-meta {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+  max-width: 100%;
 }
 
 .candidate-title {
@@ -708,6 +715,8 @@
 
 .candidate-note-chip {
   display: inline-flex;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   align-items: center;
   padding: 1px var(--space-2);
   border-radius: var(--radius-control);
@@ -719,6 +728,8 @@
 
 .candidate-actions {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   align-items: center;
   gap: var(--space-1);
   flex-shrink: 0;
@@ -743,6 +754,7 @@
 
 .candidate-diff-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);

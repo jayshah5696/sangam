@@ -4,10 +4,14 @@ import { z } from 'zod'
 import { assignmentSchema, documentSchema } from '../src/api'
 import { expect, test } from './fixtures'
 
-async function createDocument(request: APIRequestContext, content: string) {
+async function createDocument(
+  request: APIRequestContext,
+  content: string,
+  title = `Workflow ${randomUUID().slice(0, 8)}`,
+) {
   const response = await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': randomUUID() },
-    data: { title: `Workflow ${randomUUID().slice(0, 8)}`, content },
+    data: { title, content },
   })
   expect(response.ok(), await response.text()).toBeTruthy()
   return documentSchema.parse(await response.json())
@@ -81,6 +85,7 @@ test('claim matrix inspects passages, persists stance and exports the actual tab
 test('alternative candidate preserves the original and applies a new persisted revision', async ({
   page,
   request,
+  browserName,
 }, testInfo) => {
   const original = await createDocument(request, '# Original\n\nRetain this conclusion until reviewed.')
   await page.goto(`/documents/${original.document_id}`)
@@ -107,7 +112,14 @@ test('alternative candidate preserves the original and applies a new persisted r
     await sheet.getByRole('button', { name: 'Collapse document inspector' }).click()
   await page.getByRole('radio', { name: 'edit', exact: true }).click()
   const candidateContent = '# Alternative\n\nThe lower-cost option needs another experiment.'
-  await page.locator('.cm-content').fill(candidateContent)
+  const editor = page.locator('.cm-content')
+  await expect(editor).toContainText('Retain this conclusion until reviewed.')
+  await editor.click()
+  await editor.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A')
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toContain('Retain this conclusion until reviewed.')
+  await page.keyboard.insertText(candidateContent)
   await expect
     .poll(async () => (await readDocument(request, candidate.document_id)).content)
     .toBe(candidateContent)
@@ -208,4 +220,66 @@ test('document assignment start and stop persist through the real HTTP service',
     animations: 'disabled',
     scale: 'css',
   })
+})
+
+test('alternative draft controls fit narrow dialogs with long labels and comfortable typography', async ({
+  page,
+  request,
+}, testInfo) => {
+  const original = await createDocument(
+    request,
+    '# Original\n\nKeep this draft.',
+    `Long candidate ${'Title'.repeat(20)}`,
+  )
+  await page.goto(`/documents/${original.document_id}`)
+  await inspectorTab(page, 'history')
+  await page.evaluate(() => {
+    document.documentElement.setAttribute('data-ui-font', 'serif')
+    document.documentElement.setAttribute('data-ui-density', 'comfortable')
+  })
+  await page.getByRole('button', { name: 'Explore alternative conclusions', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Explore Alternative Conclusions' })
+  await dialog.getByLabel('Alternative conclusion hypothesis').fill('Hypothesis'.repeat(7))
+  await dialog.getByRole('button', { name: 'Create candidate draft' }).click()
+  const open = dialog.getByRole('button', { name: 'Open candidate', exact: true })
+  await expect(open).toBeVisible()
+  for (const width of [769, 767, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 })
+    await expect
+      .poll(() =>
+        dialog.evaluate((element) => {
+          const box = element.getBoundingClientRect()
+          return box.left >= 0 && box.right <= innerWidth && element.scrollWidth <= element.clientWidth + 1
+        }),
+      )
+      .toBe(true)
+    for (const name of [
+      'Create candidate draft',
+      'Compare assumptions and arguments',
+      'Open candidate',
+      'Discard candidate',
+    ]) {
+      const control = dialog.getByRole('button', { name, exact: true })
+      await control.scrollIntoViewIfNeeded()
+      await expect
+        .poll(() =>
+          control.evaluate((element) => {
+            const box = element.getBoundingClientRect()
+            return box.left >= 0 && box.right <= innerWidth
+          }),
+        )
+        .toBe(true)
+    }
+    await dialog.screenshot({
+      path: testInfo.outputPath(`alternative-layout-${width}.png`),
+      animations: 'disabled',
+      scale: 'css',
+    })
+  }
+  await open.click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('textbox', { name: 'Document title', exact: true })).toHaveValue(
+    `${original.title} (${'Hypothesis'.repeat(7)})`,
+  )
+  expect((await readDocument(request, original.document_id)).content).toBe(original.content)
 })
