@@ -167,7 +167,7 @@ _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+")
 
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b([a-z0-9_]*(?:secret|token|password|passwd|passphrase|db_pass|pass_|private_key|api_key|auth_key|access_key|credentials|priv_key|tls_key|env_var|env_val|key)[a-z0-9_]*)\s*[:=]\s*(?:'[^']*'|\"[^\"]*\"|[^\s'\"\\,{}]+)"
+    r"(?i)\b([a-z0-9_]*(?:secret|token|password|passwd|passphrase|db_pass|pass_|private_key|api_key|auth_key|access_key|credentials|priv_key|tls_key|env_var|env_val|key)[a-z0-9_]*)\s*[:=]\s*('(?:\\[\s\S]|[^'])*'|\"(?:\\[\s\S]|[^\"])*\"|[^\s'\"\\,{}]+)"
 )
 
 _RESERVED_NAMES: set[str] = {
