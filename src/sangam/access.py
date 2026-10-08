@@ -860,9 +860,11 @@ class WorkspaceAccessService:
             capability=Capability.READ,
             action=reads("list_comments", "document"),
             current=current,
-            operation=lambda: []
-            if self.comments is None
-            else self.comments.list_comments(document_id, include_resolved=include_resolved),
+            operation=lambda: (
+                []
+                if self.comments is None
+                else self.comments.list_comments(document_id, include_resolved=include_resolved)
+            ),
         )
 
     def get_comment(
