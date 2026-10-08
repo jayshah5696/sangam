@@ -31,7 +31,7 @@ sangam = "sangam.cli:app"
 [dependency-groups]
 dev = [
   "httpx2>=2.13.1,<3",
-  "mypy>=2.3,<3",
+  "mypy>=2.4.0,<3",
   "pytest>=9.1,<10",
   "pytest-cov>=6.2,<7",
   "ruff>=0.16.8,<1",
