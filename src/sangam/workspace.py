@@ -207,7 +207,12 @@ class DiskWorkspaceFilesystem:
         temporary = Path(temporary_name)
         try:
             digest = hashlib.sha256()
-            with os.fdopen(descriptor, "wb") as output:
+            try:
+                output = os.fdopen(descriptor, "wb")
+            except Exception:
+                os.close(descriptor)
+                raise
+            with output:
                 while chunk := content.read(65536):
                     output.write(chunk)
                     digest.update(chunk)
@@ -300,7 +305,12 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "wb") as output:
+            try:
+                output = os.fdopen(descriptor, "wb")
+            except Exception:
+                os.close(descriptor)
+                raise
+            with output:
                 output.write(source.read_bytes())
                 output.flush()
                 os.fsync(output.fileno())
@@ -341,7 +351,12 @@ class DiskWorkspaceFilesystem:
         )
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "wb") as output:
+            try:
+                output = os.fdopen(descriptor, "wb")
+            except Exception:
+                os.close(descriptor)
+                raise
+            with output:
                 output.write(retained.read_bytes())
                 output.flush()
                 os.fsync(output.fileno())
