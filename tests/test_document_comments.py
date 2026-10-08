@@ -234,3 +234,58 @@ def test_comment_input_sanitization(client: TestClient) -> None:
         headers=headers("ctrl-suffix-cmt"),
     )
     assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
+
+
+def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
+    doc = create_doc(client, "Audit Doc", "Document for comment audit testing.", path="notes.md")
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Post a comment as human
+    comment_res = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "comment audit",
+            "start": 13,
+            "end": 26,
+            "body": "Audit test comment",
+        },
+        headers=headers("audit-cmt-1"),
+    )
+    assert comment_res.status_code == 201
+    comment_id = comment_res.json()["comment_id"]
+
+    # Issue agent token scoped to notes.md
+    agent_token = issue_agent_token(client, capabilities=("read",), path_prefix="notes.md")
+    agent_headers = {"Authorization": f"Bearer {agent_token}"}
+
+    # List comments as agent
+    list_res = client.get(f"/api/v1/documents/{doc_id}/comments", headers=agent_headers)
+    assert list_res.status_code == 200
+    assert len(list_res.json()) == 1
+
+    # Get single comment as agent
+    get_res = client.get(f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=agent_headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["comment_id"] == comment_id
+
+    # Check activity ledger for agent events
+    activity_res = client.get("/api/v1/activity?actor_kind=agent")
+    assert activity_res.status_code == 200
+    events = activity_res.json()
+    actions = [e["action"] for e in events]
+    assert "list_comments" in actions
+    assert "get_comment" in actions
+
+    # Agent with different path prefix scope is denied
+    other_token = issue_agent_token(client, capabilities=("read",), path_prefix="other")
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    denied_list = client.get(f"/api/v1/documents/{doc_id}/comments", headers=other_headers)
+    assert denied_list.status_code == 403
+
+    denied_get = client.get(
+        f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=other_headers
+    )
+    assert denied_get.status_code == 403
