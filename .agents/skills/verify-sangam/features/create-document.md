@@ -17,27 +17,27 @@ Create document enables humans and agents to persist Markdown notes, specify ini
 ## Driving it with control-sangam
 
 Preconditions:
-- Sangam instance is healthy via `./scripts/control-sangam.sh doctor`.
+- Sangam instance is healthy via `just verify-doctor`.
 - No document with title `Verification Note` exists.
 
 - **CLI Creation:**
   Run:
   ```bash
-  ./scripts/control-sangam.sh cli create --title "Verification Note" --content "Testing verifiable behavior"
+  just verify-control cli create --title "Verification Note" --content "Testing verifiable behavior"
   ```
   Expected: Exit code `0`, JSON response containing `document_id`, `current_revision_id`, `title: "Verification Note"`.
 
 - **Second Read Verification:**
   Run:
   ```bash
-  ./scripts/control-sangam.sh cli read <DOCUMENT_ID>
+  just verify-control cli read <DOCUMENT_ID>
   ```
   Expected: Returns content matching `"Testing verifiable behavior"` and matching revision.
 
 - **API Creation with Idempotency:**
   Run:
   ```bash
-  ./scripts/control-sangam.sh api POST /documents '{"title":"API Spec","content":"Immutable spec content"}'
+  just verify-control api POST /documents '{"title":"API Spec","content":"Immutable spec content"}'
   ```
   Expected: HTTP 200/201 response with newly assigned `document_id`.
 

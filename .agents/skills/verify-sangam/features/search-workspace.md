@@ -17,23 +17,23 @@ Search workspace allows users and agents to query across document titles, Markdo
 ## Driving it with control-sangam
 
 Preconditions:
-- Instance is healthy via `./scripts/control-sangam.sh doctor`.
+- Instance is healthy via `just verify-doctor`.
 - Seeded document exists containing keyword `quantum_verifiable_proof`.
 
 - **Seed Document:**
   ```bash
-  ./scripts/control-sangam.sh cli create --title "Physics Notes" --content "Notes discussing quantum_verifiable_proof in distributed systems."
+  just verify-control cli create --title "Physics Notes" --content "Notes discussing quantum_verifiable_proof in distributed systems."
   ```
 
 - **Execute Search:**
   ```bash
-  ./scripts/control-sangam.sh cli search "quantum_verifiable_proof"
+  just verify-control cli search "quantum_verifiable_proof"
   ```
   Expected: Non-empty JSON array with `Physics Notes`, and `search_snippet` containing `"[[quantum_verifiable_proof]]"`.
 
 - **Verify Negative Search:**
   ```bash
-  ./scripts/control-sangam.sh cli search "nonexistent_token_xyz"
+  just verify-control cli search "nonexistent_token_xyz"
   ```
   Expected: Empty JSON array `[]`.
 

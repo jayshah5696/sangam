@@ -281,12 +281,12 @@ test('mobile treats split workbench as single surface switcher with companion ba
 
   await page.goto(`/documents/${seededWorkspace.documentId}`)
 
-  // Capture "before" state (simulating workbench without mobile surface switcher and companion bar)
+  // This simulated state is not a capture of the base revision.
   await page.evaluate(() => {
     document.querySelector('.mobile-surface-switcher')?.setAttribute('style', 'display: none !important')
     document.querySelector('.mobile-companion-bar')?.setAttribute('style', 'display: none !important')
   })
-  await capture(page, testInfo, 'mobile-312-before')
+  await capture(page, testInfo, 'mobile-312-simulated-controls-hidden')
   await page.evaluate(() => {
     document.querySelector('.mobile-surface-switcher')?.removeAttribute('style')
     document.querySelector('.mobile-companion-bar')?.removeAttribute('style')

@@ -2,12 +2,17 @@
 
 - Always use `just` recipes as the canonical interface for testing, formatting, linting, building, and running Sangam. Do not assemble ad-hoc shell commands or bypass `justfile`.
 
+## Merge rules
+
+- Merge through the PR only after required checks pass for its current head commit. If auto-merge is unavailable, use the host's PR watcher and wait; do not substitute a direct push to protected `main`.
+
 ## Verifiable behavior rules
 
 - For backend, CLI, API, data-integrity, or performance changes, use the project `verify-sangam` skill (`just verify-behavior`) to establish empirical proof against an isolated instance before calling the work verified.
 - Do not rely on mocked units or unexercised assertions when live driving against an ephemeral instance is available.
 - For user-visible browser changes or browser defect reviews, use the project `browser-verification` skill (`just test-e2e`) before calling the work verified. It defines the desktop, narrow-desktop, true touch-mobile, affected-breakpoint, and visual evidence gates.
 - Run `just format`, `just test`, and `just test-e2e` before updating verified screenshots.
+- Report the tested commit and any uncommitted changes, exact check results, and required checks that failed or were not run. An earlier baseline run does not verify later changes.
 
 ## Chat parity rules
 
