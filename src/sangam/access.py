@@ -739,6 +739,8 @@ class WorkspaceAccessService:
     ) -> Annotation:
         current = self.documents.get_document(document_id)
         details: dict[str, object] = {
+            "action_type": "annotate",
+            "target_file": current.path,
             "annotation_type": str(annotation_type),
             "page_number": page_number,
             "color": color,
@@ -782,6 +784,8 @@ class WorkspaceAccessService:
         annotation = self.pdf_research.get_annotation(annotation_id)
         current = self.documents.get_document(annotation.document_id)
         details: dict[str, object] = {
+            "action_type": "annotate",
+            "target_file": current.path,
             "annotation_type": str(annotation.annotation_type),
             "page_number": annotation.page_number,
             "color": color,
@@ -819,6 +823,8 @@ class WorkspaceAccessService:
         annotation = self.pdf_research.get_annotation(annotation_id)
         current = self.documents.get_document(annotation.document_id)
         details: dict[str, object] = {
+            "action_type": "annotate",
+            "target_file": current.path,
             "annotation_type": str(annotation.annotation_type),
             "page_number": annotation.page_number,
         }
@@ -855,10 +861,17 @@ class WorkspaceAccessService:
         include_resolved: bool = True,
     ) -> list[DocumentComment]:
         current = self.documents.get_document(document_id)
-        self.policy.require(principal, Capability.READ, current.path)
-        if self.comments is None:
-            return []
-        return self.comments.list_comments(document_id, include_resolved=include_resolved)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action=reads("list_comments", "document"),
+            current=current,
+            operation=lambda: (
+                []
+                if self.comments is None
+                else self.comments.list_comments(document_id, include_resolved=include_resolved)
+            ),
+        )
 
     def get_comment(
         self,
@@ -867,13 +880,22 @@ class WorkspaceAccessService:
         comment_id: str,
     ) -> DocumentComment:
         current = self.documents.get_document(document_id)
-        self.policy.require(principal, Capability.READ, current.path)
-        if self.comments is None:
-            raise NotFoundError(f"Comment not found: {comment_id}")
-        comment = self.comments.get_comment(comment_id)
-        if comment.document_id != document_id:
-            raise NotFoundError(f"Comment not found: {comment_id}")
-        return comment
+
+        def operation() -> DocumentComment:
+            if self.comments is None:
+                raise NotFoundError(f"Comment not found: {comment_id}")
+            comment = self.comments.get_comment(comment_id)
+            if comment.document_id != document_id:
+                raise NotFoundError(f"Comment not found: {comment_id}")
+            return comment
+
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action=reads("get_comment", "document"),
+            current=current,
+            operation=operation,
+        )
 
     def create_comment(
         self,
@@ -887,6 +909,8 @@ class WorkspaceAccessService:
             raise ServiceUnavailableError("Document comments are not configured")
         current = self.documents.get_document(document_id)
         details: dict[str, object] = {
+            "action_type": "comment",
+            "target_file": current.path,
             "revision_id": request.revision_id,
             "exact": request.exact,
             "start": request.start,
@@ -920,6 +944,8 @@ class WorkspaceAccessService:
         if comment.document_id != document_id:
             raise NotFoundError(f"Comment not found: {comment_id}")
         details: dict[str, object] = {
+            "action_type": "resolve_comment",
+            "target_file": current.path,
             "comment_id": comment_id,
             "resolved": request.resolved,
             "expected_version": request.expected_version,
@@ -1081,7 +1107,13 @@ class WorkspaceAccessService:
             operation=lambda: self.assets.store(
                 document=current, filename=filename, media_type=media_type, content=content
             ),
-            details={"filename": filename, "media_type": media_type, "size_bytes": len(content)},
+            details={
+                "action_type": "attach_asset",
+                "target_file": current.path,
+                "filename": filename,
+                "media_type": media_type,
+                "size_bytes": len(content),
+            },
         )
 
     def read_document_asset(
@@ -1815,7 +1847,11 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        details: dict[str, object] = {"tag_ids": tag_ids}
+        details: dict[str, object] = {
+            "action_type": "create",
+            "target_file": path,
+            "tag_ids": tag_ids,
+        }
         if category:
             details["category"] = category
         return self.audited(
@@ -1884,8 +1920,17 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
+        details: dict[str, object] = {
+            "action_type": "move",
+            "target_file": path,
+        }
         return self.audited(
-            principal, writes("move", "folder"), operation, resource_id=folder_id, path=path
+            principal,
+            writes("move", "folder"),
+            operation,
+            resource_id=folder_id,
+            path=path,
+            details=details,
         )
 
     def _normalize_organization_plan(self, plan: ApplyOrganizationPlan) -> ApplyOrganizationPlan:

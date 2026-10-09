@@ -724,7 +724,12 @@ class WorkspaceOrganizationService:
             descriptor, temporary_name = tempfile.mkstemp(prefix=".sangam-folder-", dir=folder_dir)
             temporary = Path(temporary_name)
             try:
-                with os.fdopen(descriptor, "wb") as output:
+                try:
+                    output = os.fdopen(descriptor, "wb")
+                except Exception:
+                    os.close(descriptor)
+                    raise
+                with output:
                     output.write(content_bytes)
                     output.flush()
                     os.fsync(output.fileno())

@@ -211,14 +211,23 @@ class DocumentCommentService:
             now = utc_now()
             resolved_at = now if resolved else None
 
-            connection.execute(
+            updated = connection.execute(
                 """
                 UPDATE document_comments
                 SET resolved_at = ?, version = ?
-                WHERE comment_id = ?
+                WHERE comment_id = ? AND version = ?
                 """,
-                (resolved_at, next_version, comment_id),
+                (resolved_at, next_version, comment_id, expected_version),
             )
+            if updated.rowcount != 1:
+                raise ConflictError(
+                    "Comment version mismatch",
+                    details={
+                        "comment_id": comment_id,
+                        "current_version": current_version,
+                        "expected_version": expected_version,
+                    },
+                )
 
             return DocumentComment(
                 comment_id=comment_id,

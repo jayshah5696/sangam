@@ -234,3 +234,127 @@ def test_comment_input_sanitization(client: TestClient) -> None:
         headers=headers("ctrl-suffix-cmt"),
     )
     assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
+
+
+def test_concurrent_comment_resolution_version_precondition(client: TestClient) -> None:
+    import concurrent.futures
+
+    doc = create_doc(client, "Doc Concurrency", "Concurrent comment resolution test text.")
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Issue tokens for two separate agent identities
+    token_agent1 = issue_agent_token(
+        client, actor_id="agent:one", capabilities=("read", "update"), path_prefix="notes.md"
+    )
+    token_agent2 = issue_agent_token(
+        client, actor_id="agent:two", capabilities=("read", "update"), path_prefix="notes.md"
+    )
+
+    # Create a comment
+    create_res = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Concurrent",
+            "start": 0,
+            "end": 10,
+            "body": "Comment for concurrent resolve test",
+        },
+        headers=headers("create-cmt-conc"),
+    )
+    assert create_res.status_code == 201, create_res.text
+    comment = create_res.json()
+    comment_id = comment["comment_id"]
+    assert comment["version"] == 1
+
+    results = []
+
+    def resolve_agent(agent_idx: int, token: str, resolve_val: bool):
+        agent_headers = {
+            "Authorization": f"Bearer {token}",
+            **headers(f"agent-{agent_idx}-resolve"),
+        }
+        res = client.post(
+            f"/api/v1/documents/{doc_id}/comments/{comment_id}/resolve",
+            json={"resolved": resolve_val, "expected_version": 1},
+            headers=agent_headers,
+        )
+        results.append(res)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(resolve_agent, 1, token_agent1, True)
+        f2 = executor.submit(resolve_agent, 2, token_agent2, False)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    status_codes = sorted(r.status_code for r in results)
+    assert status_codes == [200, 409], (
+        f"Expected exactly one winner (200) and one conflict (409), got: {status_codes}"
+    )
+
+    winning_resp = next(r for r in results if r.status_code == 200)
+    winning_comment = winning_resp.json()
+    assert winning_comment["version"] == 2
+
+    losing_resp = next(r for r in results if r.status_code == 409)
+    assert losing_resp.json()["error"]["code"] in (
+        "revision_conflict",
+        "comment_version_mismatch",
+        "conflict",
+    )
+
+
+def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
+    doc = create_doc(client, "Audit Doc", "Document for comment audit testing.", path="notes.md")
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Post a comment as human
+    comment_res = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "comment audit",
+            "start": 13,
+            "end": 26,
+            "body": "Audit test comment",
+        },
+        headers=headers("audit-cmt-1"),
+    )
+    assert comment_res.status_code == 201
+    comment_id = comment_res.json()["comment_id"]
+
+    # Issue agent token scoped to notes.md
+    agent_token = issue_agent_token(client, capabilities=("read",), path_prefix="notes.md")
+    agent_headers = {"Authorization": f"Bearer {agent_token}"}
+
+    # List comments as agent
+    list_res = client.get(f"/api/v1/documents/{doc_id}/comments", headers=agent_headers)
+    assert list_res.status_code == 200
+    assert len(list_res.json()) == 1
+
+    # Get single comment as agent
+    get_res = client.get(f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=agent_headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["comment_id"] == comment_id
+
+    # Check activity ledger for agent events
+    activity_res = client.get("/api/v1/activity?actor_kind=agent")
+    assert activity_res.status_code == 200
+    events = activity_res.json()
+    actions = [e["action"] for e in events]
+    assert "list_comments" in actions
+    assert "get_comment" in actions
+
+    # Agent with different path prefix scope is denied
+    other_token = issue_agent_token(client, capabilities=("read",), path_prefix="other")
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    denied_list = client.get(f"/api/v1/documents/{doc_id}/comments", headers=other_headers)
+    assert denied_list.status_code == 403
+
+    denied_get = client.get(
+        f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=other_headers
+    )
+    assert denied_get.status_code == 403

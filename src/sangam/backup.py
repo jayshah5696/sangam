@@ -38,7 +38,12 @@ def _write_manifest(path: Path, backup: BackupSet) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.sangam-", dir=path.parent)
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "wb") as handle:
+        try:
+            output = os.fdopen(descriptor, "wb")
+        except Exception:
+            os.close(descriptor)
+            raise
+        with output as handle:
             handle.write(content_bytes)
             handle.flush()
             os.fsync(handle.fileno())

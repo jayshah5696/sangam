@@ -790,3 +790,121 @@ def test_operation_event_action_and_path_provenance(client: TestClient) -> None:
 
     assert create_event["action"] == "create"
     assert create_event["path"] == "docs/auto_detail_test.md"
+
+
+def test_chronicle_provenance_and_structured_patch_events(client: TestClient) -> None:
+    """Verify write, patch, rename, and delete operations log actor identity and change details."""
+    # 1. Issue token for agent:chronicle-bot
+    issue_resp = client.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:chronicle-bot",
+            "display_name": "Chronicle Bot",
+            "label": "Chronicle Token",
+            "scopes": [
+                {"capability": "read", "path_prefix": "chronicle"},
+                {"capability": "create", "path_prefix": "chronicle"},
+                {"capability": "update", "path_prefix": "chronicle"},
+                {"capability": "move", "path_prefix": "chronicle"},
+                {"capability": "delete", "path_prefix": "chronicle"},
+            ],
+        },
+        headers=headers("idemp_chronicle_bot_token"),
+    )
+    assert issue_resp.status_code == 201
+    agent_token = issue_resp.json()["token"]
+
+    bot_headers = {
+        "Authorization": f"Bearer {agent_token}",
+        "X-Sangam-Operation-Id": "chronicle_op_100",
+    }
+
+    # 2. Agent creates a document
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Chronicle Doc",
+            "content": "# Line 1\n# Line 2",
+            "path": "chronicle/provenance_doc.md",
+        },
+        headers={**bot_headers, **headers("idemp_chronicle_create")},
+    )
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    doc_id = created["document_id"]
+    rev1 = created["current_revision_id"]
+
+    # 3. Agent patches (updates) document
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "# Line 1\n# Line 2 modified\n# Line 3 added",
+            "title": "Chronicle Doc (Updated)",
+        },
+        headers={**bot_headers, **headers("idemp_chronicle_update")},
+    )
+    assert update_resp.status_code == 200
+    rev2 = update_resp.json()["current_revision_id"]
+
+    # 4. Agent renames/moves document
+    move_resp = client.post(
+        f"/api/v1/documents/{doc_id}/move",
+        json={
+            "expected_revision_id": rev2,
+            "path": "chronicle/moved_provenance_doc.md",
+        },
+        headers={**bot_headers, **headers("idemp_chronicle_move")},
+    )
+    assert move_resp.status_code == 200
+    rev3 = move_resp.json()["current_revision_id"]
+
+    # 5. Agent deletes document
+    delete_resp = client.request(
+        "DELETE",
+        f"/api/v1/documents/{doc_id}",
+        json={"expected_revision_id": rev3},
+        headers={**bot_headers, **headers("idemp_chronicle_delete")},
+    )
+    assert delete_resp.status_code == 200
+
+    # Query activity log for agent
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    agent_events = [e for e in events if e["resource_id"] == doc_id]
+    actions = {e["action"]: e for e in agent_events}
+
+    for action_key in ("create", "update", "move", "delete"):
+        assert action_key in actions
+        event = actions[action_key]
+        assert event["actor_id"] == "agent:chronicle-bot"
+        assert event["actor_kind"] == "agent"
+        assert event["created_at"] is not None
+        assert "action_type" in event["details"]
+        assert "target_file" in event["details"]
+
+    assert actions["create"]["details"]["target_file"] == "chronicle/provenance_doc.md"
+    assert actions["update"]["details"]["lines_added"] == 2
+    assert actions["update"]["details"]["lines_removed"] == 1
+    assert "diff" in actions["update"]["details"]
+    assert actions["move"]["details"]["target_file"] == "chronicle/moved_provenance_doc.md"
+    assert actions["delete"]["details"]["target_file"] == "chronicle/moved_provenance_doc.md"
+
+
+def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
+    """Verify sensitive environment variables and credentials are sanitized."""
+    text_assignment = (
+        "ENV_SECRET=secret_value_123 "
+        "SANGAM_TOKEN=sgm_agt_99999.secret_token_data "
+        "PASSWD='my_db_password' "
+        "TLS_KEY=my_tls_key "
+        'CLIENT_SECRET="client_secret_data"'
+    )
+    sanitized = sanitize_sensitive_text(text_assignment)
+    assert "secret_value_123" not in sanitized
+    assert "secret_token_data" not in sanitized
+    assert "my_db_password" not in sanitized
+    assert "my_tls_key" not in sanitized
+    assert "client_secret_data" not in sanitized
