@@ -1839,6 +1839,8 @@ else fetch('/api/v1/trusted-previews/content', {
             principal,
             writes("reconcile_reindex", "document"),
             lambda: reconciliation.reindex_path(body.path),
+            path=body.path,
+            details={"action_type": "reconcile_reindex", "target_file": body.path},
         )
 
     @app.post("/api/v1/reconciliation/{conflict_id}/accept-disk", response_model=Document)
@@ -1850,6 +1852,8 @@ else fetch('/api/v1/trusted-previews/content', {
             principal,
             writes("reconcile_accept_disk", "document"),
             lambda: reconciliation.accept_disk_content(conflict_id),
+            resource_id=conflict_id,
+            details={"action_type": "reconcile_accept_disk"},
         )
 
     @app.post("/api/v1/reconciliation/{conflict_id}/restore-database", response_model=Document)
@@ -1861,6 +1865,8 @@ else fetch('/api/v1/trusted-previews/content', {
             principal,
             writes("reconcile_restore_database", "document"),
             lambda: reconciliation.restore_database_content(conflict_id),
+            resource_id=conflict_id,
+            details={"action_type": "reconcile_restore_database"},
         )
 
     @app.post("/api/v1/reconciliation/{conflict_id}/recognize-move", response_model=Document)
@@ -1872,6 +1878,8 @@ else fetch('/api/v1/trusted-previews/content', {
             principal,
             writes("reconcile_recognize_move", "document"),
             lambda: reconciliation.recognize_move(conflict_id),
+            resource_id=conflict_id,
+            details={"action_type": "reconcile_recognize_move"},
         )
 
     @app.post("/api/v1/reconciliation/{conflict_id}/ignore", response_model=ReconciliationReport)
@@ -1884,6 +1892,7 @@ else fetch('/api/v1/trusted-previews/content', {
             writes("reconcile_ignore", "reconciliation_conflict"),
             lambda: reconciliation.ignore_unknown_file(conflict_id),
             resource_id=conflict_id,
+            details={"action_type": "reconcile_ignore"},
         )
 
     @app.get("/api/v1/backups", response_model=list[BackupSet])
