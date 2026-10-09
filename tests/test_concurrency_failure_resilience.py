@@ -2621,9 +2621,7 @@ def test_concurrent_document_asset_uploads_atomic_write_and_cleanup(
         assert len(temp_files) == 0, f"Found orphaned temp files in attachments: {temp_files}"
 
 
-def test_simultaneous_reads_and_writes_concurrency_resilience(
-    client: TestClient, settings
-) -> None:
+def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient, settings) -> None:
     target_path = "research/simultaneous_rw.md"
 
     # Create initial document
@@ -2728,4 +2726,3 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(
     parent_dir = file_path.parent
     orphaned_temp_files = list(parent_dir.glob(".simultaneous_rw.md.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
-
