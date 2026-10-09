@@ -568,7 +568,7 @@ def test_organization_plan_audit_provenance(client: TestClient) -> None:
 
 def test_uri_credentials_and_bearer_text_sanitization() -> None:
     text_with_secrets = (
-        "Config: DATABASE_URL=postgresql://dbuser:super_secret_password@db.local:5432/sangam "
+        "Config: URI=postgresql://dbuser:super_secret_password@db.local:5432/sangam "
         "and Auth: Bearer my_custom_bearer_token_abc123 and API_KEY=secret_key_778899 "
         "and db_pass: my_database_pass_123"
     )
@@ -908,3 +908,102 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
     assert "my_db_password" not in sanitized
     assert "my_tls_key" not in sanitized
     assert "client_secret_data" not in sanitized
+
+
+def test_chronicle_publication_folder_reconciliation_audit_provenance(client: TestClient) -> None:
+    """Verify publication, folder, and reconciliation actions log action_type and target_file."""
+    # 1. Create document to publish
+    doc_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Publication Provenance Doc",
+            "content": "# Public Info",
+            "path": "docs/public_doc.md",
+        },
+        headers=headers("idemp_pub_prov_create"),
+    )
+    assert doc_resp.status_code == 201
+    doc_id = doc_resp.json()["document_id"]
+    rev_id = doc_resp.json()["current_revision_id"]
+
+    # 2. Create publication
+    pub_resp = client.post(
+        "/api/v1/publications",
+        json={
+            "document_id": doc_id,
+            "slug": "public-doc-slug",
+            "access_policy": "public",
+            "revision_id": rev_id,
+        },
+        headers=headers("idemp_pub_create"),
+    )
+    assert pub_resp.status_code == 201
+    pub_id = pub_resp.json()["publication_id"]
+    pub_version = pub_resp.json()["version"]
+
+    # 3. Update publication
+    update_pub_resp = client.patch(
+        f"/api/v1/publications/{pub_id}",
+        json={
+            "expected_version": pub_version,
+            "slug": "public-doc-slug-v2",
+            "access_policy": "unlisted",
+        },
+        headers=headers("idemp_pub_update"),
+    )
+    assert update_pub_resp.status_code == 200
+
+    # 4. Expose publication revision
+    expose_resp = client.post(
+        f"/api/v1/publications/{pub_id}/revisions",
+        json={"revision_id": rev_id},
+        headers=headers("idemp_pub_expose"),
+    )
+    assert expose_resp.status_code == 200
+
+    # 5. Unpublish
+    unpub_resp = client.delete(
+        f"/api/v1/publications/{pub_id}",
+        params={"expected_version": update_pub_resp.json()["version"]},
+        headers=headers("idemp_pub_unpublish"),
+    )
+    assert unpub_resp.status_code == 200
+
+    # Verify publication events carry action_type and target_file
+    act_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert act_resp.status_code == 200
+    events = act_resp.json()
+
+    pub_events = [e for e in events if e["resource_id"] in (doc_id, pub_id)]
+    pub_actions = {e["action"]: e for e in pub_events}
+
+    assert "publish" in pub_actions
+    assert pub_actions["publish"]["details"]["action_type"] == "publish"
+    assert pub_actions["publish"]["details"]["target_file"] == "docs/public_doc.md"
+
+    assert "unpublish" in pub_actions
+    assert pub_actions["unpublish"]["details"]["action_type"] == "unpublish"
+    assert pub_actions["unpublish"]["details"]["target_file"] == "docs/public_doc.md"
+
+    assert "expose_revision" in pub_actions
+    assert pub_actions["expose_revision"]["details"]["action_type"] == "expose_revision"
+    assert pub_actions["expose_revision"]["details"]["target_file"] == "docs/public_doc.md"
+
+
+def test_chronicle_database_connection_string_sanitization() -> None:
+    """Verify DSNs, database URLs, and connection strings are sanitized in text assignments."""
+    text_assignments = (
+        "DATABASE_URL=postgres://dbuser:super_secret_password@db.local:5432/sangam "
+        "CONN_STR='Server=myServerAddress;Database=db;Uid=usr;Pwd=secret_pwd;' "
+        "DSN=sqlite:///data/private.db "
+        'CONNECTION_STRING="mysql://root:secret@127.0.0.1/prod"'
+    )
+    sanitized = sanitize_sensitive_text(text_assignments)
+    assert "super_secret_password" not in sanitized
+    assert "secret_pwd" not in sanitized
+    assert "sqlite:///data/private.db" not in sanitized
+    assert "secret@127.0.0.1" not in sanitized
+    assert "DATABASE_URL=[REDACTED]" in sanitized
+    assert "CONN_STR=[REDACTED]" in sanitized
+    assert "DSN=[REDACTED]" in sanitized
+    assert "CONNECTION_STRING=[REDACTED]" in sanitized

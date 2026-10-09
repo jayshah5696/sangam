@@ -1173,6 +1173,8 @@ class WorkspaceAccessService:
             )
 
         details: dict[str, object] = {
+            "action_type": "publish",
+            "target_file": current.path,
             "slug": slug,
             "access_policy": access_policy,
             "revision_id": revision_id or current.current_revision_id,
@@ -1292,6 +1294,8 @@ class WorkspaceAccessService:
             )
 
         details: dict[str, object] = {
+            "action_type": "publish",
+            "target_file": current.path,
             "expected_metadata_version": expected_version,
             "slug": slug,
             "access_policy": access_policy,
@@ -1326,7 +1330,11 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        details: dict[str, object] = {"expected_metadata_version": expected_version}
+        details: dict[str, object] = {
+            "action_type": "unpublish",
+            "target_file": current.path,
+            "expected_metadata_version": expected_version,
+        }
         return self.audited(
             principal,
             writes("unpublish", "publication"),
@@ -1356,7 +1364,11 @@ class WorkspaceAccessService:
                 idempotency_key=idempotency_key,
             )
 
-        details: dict[str, object] = {"revision_id": revision_id}
+        details: dict[str, object] = {
+            "action_type": "expose_revision",
+            "target_file": current.path,
+            "revision_id": revision_id,
+        }
         return self.audited(
             principal,
             writes("expose_revision", "publication"),
@@ -1868,11 +1880,13 @@ class WorkspaceAccessService:
         tag_ids: list[str],
         idempotency_key: str,
     ) -> Folder:
+        folder = next(
+            (item for item in self.organization.list_folders() if item.folder_id == folder_id),
+            None,
+        )
+        folder_path = folder.path if folder else None
+
         def operation() -> Folder:
-            folder = next(
-                (item for item in self.organization.list_folders() if item.folder_id == folder_id),
-                None,
-            )
             if folder is None:
                 raise ConflictError(f"Folder no longer exists: {folder_id}")
             self.policy.require(principal, Capability.TAG, folder.path)
@@ -1886,13 +1900,21 @@ class WorkspaceAccessService:
             )
 
         details: dict[str, object] = {
+            "action_type": "tag",
             "expected_metadata_version": expected_metadata_version,
             "tag_ids": tag_ids,
         }
+        if folder_path:
+            details["target_file"] = folder_path
         if category:
             details["category"] = category
         return self.audited(
-            principal, writes("tag", "folder"), operation, resource_id=folder_id, details=details
+            principal,
+            writes("tag", "folder"),
+            operation,
+            resource_id=folder_id,
+            path=folder_path,
+            details=details,
         )
 
     def move_folder(
