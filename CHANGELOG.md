@@ -7,6 +7,32 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.5] - 2026-10-08
+
+### Added
+
+- Claim versus source matrix view: project-level evidence synthesis table displaying claims against referenced sources with confidence badges, inline verification, and direct citation navigation (#324, #416).
+- Alternative draft exploration: branching workflow to explore alternative conclusions, drafts, or counter-hypotheses without overwriting the original document (#325, #416).
+- Interactive explorables: capability to attach rich interactive simulations, explorable explanations, and widgets directly to documents (#327, #416).
+- Composable workspace agent primitives: decomposed workspace agent capabilities into modular, reusable primitives for inspection, generation, and multi-step tasks (#341, #416).
+
+### Security
+
+- Hardened activity audit provenance and detail tracking: auto-populated `action_type`, `target_file`, and diff metrics (lines added/removed) across document operations, with expanded regex sanitization for credentials, environment variables, and connection secrets (#436, #438).
+- Agent document comment read auditing: wrapped `list_comments` and `get_comment` operations in `WorkspaceAccessService` under audited execution and enforced path-scope authorization (403 forbidden) for scoped agent tokens (#424, #438).
+
+### Fixed
+
+- Exception-safe file descriptor cleanup: ensured file descriptors from `tempfile.mkstemp` are reliably closed on failure before re-raising exceptions across workspace files, backup archives, folder manifests, and PDF text extraction (#435, #438).
+- Comment resolution optimistic concurrency control: enforced atomic database precondition (`WHERE comment_id = ? AND version = ?`) on comment resolution to prevent concurrent resolution races from silently succeeding without conflict (#422, #438).
+- Published HTML viewport scaling: resolved publication display defect so published HTML pages expand to fill the full viewport height (#437).
+- Alternative draft dialog layout: ensured modal dialog and form controls stay within viewport bounds on narrow screens (#420).
+
+### Dependencies
+
+- Consolidated backend dependency upgrades: bumped FastAPI to 0.143.0, openai-agents to 0.23.1, PyJWT[crypto] to 2.15.1, MyPy to 2.4.0, and Ruff to 0.16.10 (#439).
+- Consolidated frontend dependency upgrades: bumped lucide-react to 1.52.0, @openai/chatkit to 1.9.0, @codemirror/view to 6.43.13, react-resizable-panels to 4.14.3, and ESLint to 10.12.0 (#439).
+
 ## [0.13.4] - 2026-10-06
 
 ### Added
@@ -544,7 +570,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.4...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.5...HEAD
+[0.13.5]: https://github.com/jayshah5696/sangam/compare/v0.13.4...v0.13.5
 [0.13.4]: https://github.com/jayshah5696/sangam/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/jayshah5696/sangam/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/jayshah5696/sangam/compare/v0.13.1...v0.13.2
