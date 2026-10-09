@@ -52,6 +52,11 @@ class DocumentCommentService:
         validate_metadata_text(request.suffix, "Comment suffix")
         validate_metadata_text(request.body, "Comment body")
 
+        if request.start > request.end:
+            raise ValidationError("Comment start offset cannot be greater than end offset")
+        if not request.body.strip():
+            raise ValidationError("Comment body cannot be blank")
+
         self.documents.get_document(document_id)
         revision = self.documents.get_revision(document_id, request.revision_id)
         if revision.document_id != document_id:

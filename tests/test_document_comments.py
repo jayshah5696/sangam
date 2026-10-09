@@ -154,8 +154,28 @@ def test_comment_authorization(client: TestClient) -> None:
     )
     assert create_res.status_code == 403
 
-    # Issue token with update capability
-    update_token = issue_agent_token(client, capabilities=("read", "update"))
+    # Issue token with update capability on wrong path prefix -> 403
+    wrong_path_token = issue_agent_token(
+        client, capabilities=("read", "update"), path_prefix="other"
+    )
+    wrong_path_headers = {"Authorization": f"Bearer {wrong_path_token}"}
+    create_wrong_path = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Security",
+            "start": 0,
+            "end": 8,
+            "body": "Comment attempt on wrong path",
+        },
+        headers={**wrong_path_headers, **headers("wrong-path-cmt")},
+    )
+    assert create_wrong_path.status_code == 403
+
+    # Issue token with update capability on matching path prefix
+    update_token = issue_agent_token(
+        client, capabilities=("read", "update"), path_prefix="notes.md"
+    )
     update_headers = {"Authorization": f"Bearer {update_token}"}
 
     create_ok = client.post(
@@ -170,6 +190,23 @@ def test_comment_authorization(client: TestClient) -> None:
         headers={**update_headers, **headers("ok-cmt")},
     )
     assert create_ok.status_code == 201
+    cmt_id = create_ok.json()["comment_id"]
+
+    # Resolving comment on wrong path prefix -> 403
+    resolve_wrong_path = client.post(
+        f"/api/v1/documents/{doc_id}/comments/{cmt_id}/resolve",
+        json={"resolved": True, "expected_version": 1},
+        headers={**wrong_path_headers, **headers("wrong-path-resolve")},
+    )
+    assert resolve_wrong_path.status_code == 403
+
+    # Resolving comment with matching path prefix -> 200
+    resolve_ok = client.post(
+        f"/api/v1/documents/{doc_id}/comments/{cmt_id}/resolve",
+        json={"resolved": True, "expected_version": 1},
+        headers={**update_headers, **headers("ok-resolve")},
+    )
+    assert resolve_ok.status_code == 200
 
 
 def test_comment_input_sanitization(client: TestClient) -> None:
@@ -234,6 +271,34 @@ def test_comment_input_sanitization(client: TestClient) -> None:
         headers=headers("ctrl-suffix-cmt"),
     )
     assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
+
+    # Start greater than end offset
+    res_invalid_offsets = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization",
+            "start": 12,
+            "end": 5,
+            "body": "Valid body",
+        },
+        headers=headers("invalid-offsets-cmt"),
+    )
+    assert res_invalid_offsets.status_code == 422 or res_invalid_offsets.status_code == 400
+
+    # Blank comment body
+    res_blank_body = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization",
+            "start": 0,
+            "end": 12,
+            "body": "    ",
+        },
+        headers=headers("blank-body-cmt"),
+    )
+    assert res_blank_body.status_code == 422 or res_blank_body.status_code == 400
 
 
 def test_concurrent_comment_resolution_version_precondition(client: TestClient) -> None:
