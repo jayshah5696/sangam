@@ -2564,3 +2564,58 @@ def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestCl
     temp_dir = Path(tempfile.gettempdir())
     orphaned_temp_files = list(temp_dir.glob(".pages.json.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
+
+
+def test_concurrent_document_asset_uploads_atomic_write_and_cleanup(
+    client: TestClient, settings
+) -> None:
+    # Create Markdown document
+    res_doc = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Asset Test Doc",
+            "content": "# Document with images\n",
+            "path": "research/asset_test.md",
+        },
+        headers=headers("asset-doc-k1"),
+    )
+    assert res_doc.status_code == 201
+    doc_id = res_doc.json()["document_id"]
+
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc` \x05\x00\x00\x04"
+        b"\x00\x01\x140\x7e\xb5\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    results = []
+
+    def upload_asset(worker_idx: int):
+        resp = client.post(
+            f"/api/v1/documents/{doc_id}/assets",
+            params={"filename": f"diagram_{worker_idx}.png"},
+            content=png_bytes,
+            headers={"Content-Type": "image/png", **headers(f"upload-asset-{worker_idx}")},
+        )
+        results.append(resp)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(upload_asset, i) for i in range(3)]
+        for f in futures:
+            f.result(timeout=10)
+
+    for resp in results:
+        assert resp.status_code == 201
+        asset = resp.json()
+        assert asset["media_type"] == "image/png"
+        assert asset["size_bytes"] == len(png_bytes)
+        ref_path = asset["reference"].lstrip("/")
+        asset_file = settings.workspace_root / ref_path
+        assert asset_file.is_file()
+        assert asset_file.read_bytes() == png_bytes
+
+    # Check attachments directory for orphaned temporary files
+    attachments_dir = settings.workspace_root / "attachments"
+    if attachments_dir.is_dir():
+        temp_files = list(attachments_dir.glob(".*.sangam-*"))
+        assert len(temp_files) == 0, f"Found orphaned temp files in attachments: {temp_files}"
