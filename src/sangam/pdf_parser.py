@@ -34,7 +34,12 @@ def main() -> None:
     )
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "wb") as handle:
+        try:
+            output = os.fdopen(descriptor, "wb")
+        except Exception:
+            os.close(descriptor)
+            raise
+        with output as handle:
             handle.write(content_bytes)
             handle.flush()
             os.fsync(handle.fileno())
