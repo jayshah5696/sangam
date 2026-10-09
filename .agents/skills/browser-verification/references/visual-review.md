@@ -73,6 +73,7 @@ Documentation screenshots and PR evidence are not test baselines.
 Inspect each image at its native size. Record the result for every applicable item:
 
 - no unintended clipping or overlap;
+- full-height surfaces and reader views (e.g. published HTML documents) fill the full viewport below chrome with zero dead-space gaps or clamped height cutoffs;
 - no page-level horizontal overflow;
 - expected scroll container owns overflow;
 - headings, labels, values, and controls wrap or truncate deliberately;

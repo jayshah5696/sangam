@@ -75,6 +75,66 @@ test('interactive HTML publications use the isolated runtime', async ({ page, re
   )
 })
 
+test('published HTML pages fill the full viewport without half-height clipping', async ({
+  page,
+  request,
+}, testInfo) => {
+  const document = await createHtml(request)
+  const slug = `html-full-viewport-${randomUUID().slice(0, 8)}`
+  const publication = await request.post('/api/v1/publications', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { document_id: document.document_id, slug, access_policy: 'public' },
+  })
+  expect(publication.ok(), await publication.text()).toBeTruthy()
+
+  await page.goto(`/p/${slug}`)
+  const pageContainer = page.locator('.html-publication-page')
+  await expect(pageContainer).toBeVisible()
+
+  const header = page.locator('.html-publication-page > header')
+  const iframe = page.locator('.html-publication-page .html-preview')
+  await expect(header).toBeVisible()
+  await expect(iframe).toBeVisible()
+
+  await page.waitForLoadState('networkidle')
+  await page.evaluate(() => document.fonts.ready)
+
+  const { headerBox, iframeBox, pageBox } = await page.evaluate(() => {
+    const pageEl = document.querySelector('.html-publication-page')!
+    const headerEl = pageEl.querySelector('header')!
+    const iframeEl = pageEl.querySelector('.html-preview')!
+    return {
+      headerBox: headerEl.getBoundingClientRect(),
+      iframeBox: iframeEl.getBoundingClientRect(),
+      pageBox: pageEl.getBoundingClientRect(),
+    }
+  })
+
+  // On desktop (1440x900), header is ~124px, so iframe must fill ~774px, NOT be clamped to 620px
+  if (testInfo.project.name === 'chromium-desktop') {
+    expect(iframeBox.height).toBeGreaterThan(700)
+  } else if (testInfo.project.name === 'chromium-touch-mobile') {
+    expect(iframeBox.height).toBeGreaterThan(600)
+  }
+
+  // The iframe top must touch the header bottom with no vertical gap
+  expect(Math.abs(iframeBox.y - (headerBox.y + headerBox.height))).toBeLessThanOrEqual(2)
+
+  // The iframe bottom must touch the page container bottom
+  expect(Math.abs(iframeBox.y + iframeBox.height - (pageBox.y + pageBox.height))).toBeLessThanOrEqual(4)
+
+  // Combined height of header and iframe must fill the full page container
+  expect(Math.abs(headerBox.height + iframeBox.height - pageBox.height)).toBeLessThanOrEqual(4)
+
+  // Verify no page-level horizontal overflow
+  const horizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  )
+  expect(horizontalOverflow).toBeLessThanOrEqual(1)
+
+  await page.screenshot({ path: testInfo.outputPath('published-html-full-viewport.png') })
+})
+
 test('HTML JavaScript setting remains usable without horizontal overflow on touch mobile', async ({
   page,
   request,
