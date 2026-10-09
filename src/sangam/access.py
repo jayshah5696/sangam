@@ -861,10 +861,17 @@ class WorkspaceAccessService:
         include_resolved: bool = True,
     ) -> list[DocumentComment]:
         current = self.documents.get_document(document_id)
-        self.policy.require(principal, Capability.READ, current.path)
-        if self.comments is None:
-            return []
-        return self.comments.list_comments(document_id, include_resolved=include_resolved)
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action=reads("list_comments", "document"),
+            current=current,
+            operation=lambda: (
+                []
+                if self.comments is None
+                else self.comments.list_comments(document_id, include_resolved=include_resolved)
+            ),
+        )
 
     def get_comment(
         self,
@@ -873,13 +880,22 @@ class WorkspaceAccessService:
         comment_id: str,
     ) -> DocumentComment:
         current = self.documents.get_document(document_id)
-        self.policy.require(principal, Capability.READ, current.path)
-        if self.comments is None:
-            raise NotFoundError(f"Comment not found: {comment_id}")
-        comment = self.comments.get_comment(comment_id)
-        if comment.document_id != document_id:
-            raise NotFoundError(f"Comment not found: {comment_id}")
-        return comment
+
+        def operation() -> DocumentComment:
+            if self.comments is None:
+                raise NotFoundError(f"Comment not found: {comment_id}")
+            comment = self.comments.get_comment(comment_id)
+            if comment.document_id != document_id:
+                raise NotFoundError(f"Comment not found: {comment_id}")
+            return comment
+
+        return self._document_operation(
+            principal,
+            capability=Capability.READ,
+            action=reads("get_comment", "document"),
+            current=current,
+            operation=operation,
+        )
 
     def create_comment(
         self,
