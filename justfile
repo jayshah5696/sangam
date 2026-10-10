@@ -356,6 +356,21 @@ docker-serve: docker-build
 docker-smoke:
     ./scripts/docker-smoke.sh
 
+# Block until the required CI checks are green for one commit. Used by the tag workflow.
+release-wait-for-ci repository sha:
+    uv run --frozen --no-dev python scripts/wait_for_ci.py --repository "{{ repository }}" --sha "{{ sha }}"
+
+# Check release-only invariants for a tag and build the wheel, sdist, and checksums.
+release-artifacts tag:
+    uv run python scripts/verify-release-config.py
+    pnpm --dir frontend run build
+    uv run python scripts/verify-version.py --expected "{{ tag }}" --frontend-dist
+    ./scripts/audit-dependencies.sh
+    ./scripts/smoke-package.sh
+    rm -rf dist
+    uv build
+    cd dist && sha256sum sangam-* > SHA256SUMS
+
 # Run the release checklist's automatable gates for a SemVer version.
 release-check version:
     ./scripts/release-preflight.sh "{{ version }}"
