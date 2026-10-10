@@ -45,8 +45,18 @@ separate copy and restore evidence.
 
 ## Tag workflow evidence
 
-- [ ] The tag workflow re-ran every source, docs, package, migration, container,
-  and vulnerability gate successfully.
+The tag workflow starts the image build and scan while it waits for CI. It pushes,
+signs, and attests the image only when CI is green for the tagged commit. If a later
+commit to `main` cancels CI for the tagged commit, the gate fails closed. Run
+`ci.yml` on the tag with `workflow_dispatch` and re-run the release workflow.
+
+- [ ] The tag workflow's `ci-gate` job confirmed that all three required CI checks
+  passed on the exact tagged commit. The tag workflow does not repeat the test
+  suite.
+- [ ] The tag workflow re-checked the tag against `pyproject.toml`, the settings
+  inventory, runtime dependency audits, and wheel and sdist clean installs, then
+  built the image, ran the production-image smoke, and scanned it for
+  vulnerabilities before any push.
 - [ ] GHCR contains `linux/amd64` and `linux/arm64` manifests for the version.
 - [ ] Deployment uses `ghcr.io/jayshah5696/sangam@sha256:...`, not a mutable tag.
 - [ ] `cosign verify` succeeds for that digest and the release workflow identity.
