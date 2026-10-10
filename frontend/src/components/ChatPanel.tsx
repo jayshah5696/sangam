@@ -25,7 +25,7 @@ import {
   type CitationDataPayload,
   type CitationTarget,
 } from '../citationNavigation'
-import { uiFonts, useTheme } from '../theme'
+import { themeMode, uiFonts, useTheme } from '../theme'
 import { OneTimeSecret } from './OneTimeSecret'
 import { StateMessage } from './ui/StateMessage'
 import { RevisionMergeView } from './RevisionMergeView'
@@ -666,7 +666,7 @@ export function ChatPanel({
             <WorkspaceChatSurface
               key={chatEpoch}
               liveRef={liveRef}
-              theme={preferences.theme === 'midnight' ? 'dark' : 'light'}
+              theme={themeMode(preferences)}
               typography={chatTypography}
               density={chatDensity}
               domainKey={configQuery.data.domain_key}

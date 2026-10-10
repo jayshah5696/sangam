@@ -200,7 +200,13 @@
 }
 
 [data-theme='midnight'] .pdf-annotation-mark.text_highlight,
-[data-theme='cobalt'] .pdf-annotation-mark.text_highlight {
+[data-theme='cobalt'] .pdf-annotation-mark.text_highlight,
+[data-theme='indigo-dark'] .pdf-annotation-mark.text_highlight,
+[data-theme='moss-dark'] .pdf-annotation-mark.text_highlight,
+[data-theme='ember-dark'] .pdf-annotation-mark.text_highlight,
+[data-theme='lagoon-dark'] .pdf-annotation-mark.text_highlight,
+[data-theme='plum-dark'] .pdf-annotation-mark.text_highlight,
+[data-theme='brass-dark'] .pdf-annotation-mark.text_highlight {
   background: color-mix(in srgb, var(--annotation-color, var(--accent)) 38%, transparent);
   mix-blend-mode: screen;
 }

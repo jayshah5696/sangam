@@ -44,10 +44,29 @@ place raw font values are allowed. Density multiplies the chrome text tokens;
 it never scales `--text-editor`, which has its own control. Touch targets stay
 at least `--control-touch` tall in every density.
 
+### Theme picker and contrast
+
+Settings > Appearance > Theme lists 16 built-in palettes: the original Midnight,
+River, Parchment, and Cobalt, plus dark and light variants of Indigo Ink, Moss,
+Ember, Lagoon, Plum, and Brass. A Dark/Light/All switch filters the cards.
+Each card renders its real colors and its text contrast ratio.
+
+Contrast drives the palettes. Each palette uses one hue, and its neutrals carry
+a small tint of it. Body, muted, and sidebar text must reach 4.5:1 and the
+accent 3:1 against the surface, using the WCAG 2 ratio. The contrast report
+under the grid checks the active theme against these rules. The Create theme
+editor shows the same report live for custom colors. `themeContrastChecks` in
+`theme.tsx` holds the rules. `themeMode` reports whether a theme is dark,
+including custom themes, so code blocks and diffs follow the theme.
+
+Add a palette with a `data-theme` block in `tokens.css`, entries in `themeIds`,
+`baseThemeColors`, and `themes` in `theme.tsx`, and its id in
+`typography-bootstrap.js`.
+
 ### Create theme
 
 Settings > Appearance > Create theme is a theme studio: start a theme from one
-of the four base palettes, edit its color roles (app background, surface,
+of the built-in base palettes, edit its color roles (app background, surface,
 raised surface, text, muted text, sidebar, sidebar text, accent) with live
 preview on the real workspace, then keep editing or export it as JSON for
 sharing. Import theme JSON recreates a shared theme. Custom themes are stored

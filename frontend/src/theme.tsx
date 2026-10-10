@@ -2,7 +2,27 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { z } from 'zod'
 import type { EditorMode } from './documentSessions'
 
-export type ThemeId = 'river' | 'midnight' | 'parchment' | 'cobalt'
+export const themeIds = [
+  'midnight',
+  'river',
+  'parchment',
+  'cobalt',
+  'indigo-dark',
+  'indigo-light',
+  'moss-dark',
+  'moss-light',
+  'ember-dark',
+  'ember-light',
+  'lagoon-dark',
+  'lagoon-light',
+  'plum-dark',
+  'plum-light',
+  'brass-dark',
+  'brass-light',
+] as const
+
+export type ThemeId = (typeof themeIds)[number]
+export type ThemeMode = 'dark' | 'light'
 
 export type UiFontId = 'system' | 'inter' | 'geist' | 'plex' | 'serif'
 export type UiDensity = 'compact' | 'default' | 'comfortable'
@@ -102,6 +122,138 @@ export const baseThemeColors = {
     sidebarText: '#f4f9ff',
     accent: '#1769c2',
   },
+  'indigo-dark': {
+    appBg: '#0b0c12',
+    surface: '#151722',
+    surfaceSoft: '#1e2130',
+    text: '#f4f5fb',
+    muted: '#8d93ad',
+    line: 'rgba(255, 255, 255, 0.09)',
+    sidebar: '#10111a',
+    sidebarText: '#f4f5fb',
+    accent: '#9a99ff',
+  },
+  'indigo-light': {
+    appBg: '#f5f5f9',
+    surface: '#ffffff',
+    surfaceSoft: '#e9e9f2',
+    text: '#16172a',
+    muted: '#5d6082',
+    line: '#d1d1d8',
+    sidebar: '#1c1d2e',
+    sidebarText: '#f6f6f7',
+    accent: '#4b49d4',
+  },
+  'moss-dark': {
+    appBg: '#0a0d0b',
+    surface: '#141a16',
+    surfaceSoft: '#1d2620',
+    text: '#f2f7f3',
+    muted: '#85998b',
+    line: 'rgba(255, 255, 255, 0.09)',
+    sidebar: '#0e1210',
+    sidebarText: '#f2f7f3',
+    accent: '#6fd0a6',
+  },
+  'moss-light': {
+    appBg: '#f2f4ee',
+    surface: '#fcfdf9',
+    surfaceSoft: '#e4e8dd',
+    text: '#1a211c',
+    muted: '#5a685f',
+    line: '#cfd2cc',
+    sidebar: '#1d2a23',
+    sidebarText: '#f6f6f6',
+    accent: '#2b7458',
+  },
+  'ember-dark': {
+    appBg: '#0d0a09',
+    surface: '#1a1412',
+    surfaceSoft: '#261d19',
+    text: '#f9f3ef',
+    muted: '#9c8a80',
+    line: 'rgba(255, 255, 255, 0.09)',
+    sidebar: '#120e0c',
+    sidebarText: '#f9f3ef',
+    accent: '#f0997a',
+  },
+  'ember-light': {
+    appBg: '#f7f1ea',
+    surface: '#fffcf8',
+    surfaceSoft: '#ede2d5',
+    text: '#2a1f18',
+    muted: '#725d4c',
+    line: '#d6cfc8',
+    sidebar: '#2e211a',
+    sidebarText: '#f7f6f6',
+    accent: '#b4491f',
+  },
+  'lagoon-dark': {
+    appBg: '#080c0d',
+    surface: '#121a1c',
+    surfaceSoft: '#1a2629',
+    text: '#f0f8f9',
+    muted: '#82a0a4',
+    line: 'rgba(255, 255, 255, 0.09)',
+    sidebar: '#0c1214',
+    sidebarText: '#f0f8f9',
+    accent: '#58cfdb',
+  },
+  'lagoon-light': {
+    appBg: '#eff5f5',
+    surface: '#fbfefe',
+    surfaceSoft: '#dde9ea',
+    text: '#142022',
+    muted: '#50676b',
+    line: '#ccd3d3',
+    sidebar: '#14282b',
+    sidebarText: '#f6f6f7',
+    accent: '#0f7480',
+  },
+  'plum-dark': {
+    appBg: '#0c090c',
+    surface: '#191319',
+    surfaceSoft: '#251c25',
+    text: '#faf3fa',
+    muted: '#9d86a0',
+    line: 'rgba(255, 255, 255, 0.09)',
+    sidebar: '#110c11',
+    sidebarText: '#faf3fa',
+    accent: '#e090d8',
+  },
+  'plum-light': {
+    appBg: '#f7f2f7',
+    surface: '#fffcff',
+    surfaceSoft: '#ece2ec',
+    text: '#251925',
+    muted: '#715a73',
+    line: '#d5cfd5',
+    sidebar: '#2a1a2b',
+    sidebarText: '#f6f6f7',
+    accent: '#94308c',
+  },
+  'brass-dark': {
+    appBg: '#0c0b08',
+    surface: '#191710',
+    surfaceSoft: '#252218',
+    text: '#f9f6ec',
+    muted: '#9b9374',
+    line: 'rgba(255, 255, 255, 0.09)',
+    sidebar: '#110f0a',
+    sidebarText: '#f9f6ec',
+    accent: '#e8c15a',
+  },
+  'brass-light': {
+    appBg: '#f6f2e6',
+    surface: '#fffdf5',
+    surfaceSoft: '#ebe4cf',
+    text: '#28220f',
+    muted: '#6a613c',
+    line: '#d5d1c4',
+    sidebar: '#2b2412',
+    sidebarText: '#f7f6f6',
+    accent: '#8a6200',
+  },
 } satisfies Record<ThemeId, Record<ThemeColorKey, string>>
 
 export type CustomTheme = {
@@ -177,6 +329,90 @@ export function resolveCustomThemeColors(custom: CustomTheme): ResolvedThemeColo
   return { ...base, ...custom.colors }
 }
 
+export function themeMode(preferences: ThemePreference): ThemeMode {
+  const custom = activeCustomTheme(preferences)
+  const id = custom ? custom.base : preferences.theme
+  return themes.find((theme) => theme.id === id)?.mode ?? 'light'
+}
+
+function parseRgb(value: string): [number, number, number] | null {
+  if (value.startsWith('#')) {
+    const full = value.length === 4 ? value.replace(/[0-9a-f]/gi, (c) => c + c) : value
+    const channels = [1, 3, 5].map((i) => Number.parseInt(full.slice(i, i + 2), 16))
+    return channels.every(Number.isFinite) ? [channels[0] ?? 0, channels[1] ?? 0, channels[2] ?? 0] : null
+  }
+  const match = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(value)
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null
+}
+
+function relativeLuminance([r, g, b]: [number, number, number]): number {
+  const [lr = 0, lg = 0, lb = 0] = [r, g, b].map((channel) => {
+    const raw = channel / 255
+    return raw <= 0.03928 ? raw / 12.92 : ((raw + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb
+}
+
+/** WCAG 2 contrast ratio, 1 (none) to 21 (black on white). Alpha is ignored. */
+export function contrastRatio(foreground: string, background: string): number | null {
+  const fg = parseRgb(foreground)
+  const bg = parseRgb(background)
+  if (!fg || !bg) return null
+  const [a, b] = [relativeLuminance(fg), relativeLuminance(bg)]
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+}
+
+export type ContrastCheck = {
+  id: string
+  label: string
+  foreground: string
+  background: string
+  minimum: number
+  ratio: number | null
+}
+
+/** The places where two theme colors meet, each with the contrast it must reach. */
+export function themeContrastChecks(colors: ResolvedThemeColors): ContrastCheck[] {
+  const rules = [
+    {
+      id: 'text',
+      label: 'Text on background',
+      foreground: colors.text,
+      background: colors.appBg,
+      minimum: 4.5,
+    },
+    {
+      id: 'surface',
+      label: 'Text on surface',
+      foreground: colors.text,
+      background: colors.surface,
+      minimum: 4.5,
+    },
+    {
+      id: 'muted',
+      label: 'Muted text on raised surface',
+      foreground: colors.muted,
+      background: colors.surfaceSoft,
+      minimum: 4.5,
+    },
+    {
+      id: 'accent',
+      label: 'Accent on surface',
+      foreground: colors.accent,
+      background: colors.surface,
+      minimum: 3,
+    },
+    {
+      id: 'sidebar',
+      label: 'Sidebar text on sidebar',
+      foreground: colors.sidebarText,
+      background: colors.sidebar,
+      minimum: 4.5,
+    },
+  ]
+  return rules.map((rule) => ({ ...rule, ratio: contrastRatio(rule.foreground, rule.background) }))
+}
+
 const overrideTokens = [...themeColorRoles.map((role) => role.token), '--accent-soft', '--accent-text']
 
 export function applyThemeColors(root: HTMLElement, custom: CustomTheme | null) {
@@ -190,30 +426,102 @@ export function applyThemeColors(root: HTMLElement, custom: CustomTheme | null) 
   root.style.setProperty('--accent-text', readableTextColor(colors.accent))
 }
 
-export const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
+export const themes: Array<{ id: ThemeId; name: string; description: string; mode: ThemeMode }> = [
   {
     id: 'midnight',
     name: 'Midnight',
     description: 'Dark-native near-black workspace',
-    colors: ['#08090a', '#191a1b', '#5b59dc'],
+    mode: 'dark',
   },
   {
     id: 'river',
     name: 'River',
     description: 'Calm green and warm paper',
-    colors: ['#202b26', '#f3f0e7', '#d8f0df'],
+    mode: 'light',
   },
   {
     id: 'parchment',
     name: 'Parchment',
     description: 'Editorial sepia and ink',
-    colors: ['#4a3728', '#f1e5cc', '#b85c38'],
+    mode: 'light',
   },
   {
     id: 'cobalt',
     name: 'Cobalt',
     description: 'Crisp blue and cool white',
-    colors: ['#102a43', '#edf4fb', '#1769c2'],
+    mode: 'light',
+  },
+  {
+    id: 'indigo-dark',
+    name: 'Indigo Ink Dark',
+    description: 'Brand indigo with corrected link contrast',
+    mode: 'dark',
+  },
+  {
+    id: 'indigo-light',
+    name: 'Indigo Ink Light',
+    description: 'Brand indigo with corrected link contrast',
+    mode: 'light',
+  },
+  {
+    id: 'moss-dark',
+    name: 'Moss Dark',
+    description: 'Calm green on tinted neutrals',
+    mode: 'dark',
+  },
+  {
+    id: 'moss-light',
+    name: 'Moss Light',
+    description: 'Calm green on tinted neutrals',
+    mode: 'light',
+  },
+  {
+    id: 'ember-dark',
+    name: 'Ember Dark',
+    description: 'Warm terracotta, low glare',
+    mode: 'dark',
+  },
+  {
+    id: 'ember-light',
+    name: 'Ember Light',
+    description: 'Warm terracotta, low glare',
+    mode: 'light',
+  },
+  {
+    id: 'lagoon-dark',
+    name: 'Lagoon Dark',
+    description: 'Clear teal with cool neutrals',
+    mode: 'dark',
+  },
+  {
+    id: 'lagoon-light',
+    name: 'Lagoon Light',
+    description: 'Clear teal with cool neutrals',
+    mode: 'light',
+  },
+  {
+    id: 'plum-dark',
+    name: 'Plum Dark',
+    description: 'Magenta-violet with soft surfaces',
+    mode: 'dark',
+  },
+  {
+    id: 'plum-light',
+    name: 'Plum Light',
+    description: 'Magenta-violet with soft surfaces',
+    mode: 'light',
+  },
+  {
+    id: 'brass-dark',
+    name: 'Brass Dark',
+    description: 'Editorial amber and ink',
+    mode: 'dark',
+  },
+  {
+    id: 'brass-light',
+    name: 'Brass Light',
+    description: 'Editorial amber and ink',
+    mode: 'light',
   },
 ]
 
@@ -278,7 +586,7 @@ const defaults: WorkspacePreferences = {
 
 const storageKey = 'sangam.workspace-preferences.v1'
 
-const themeIdSchema = z.enum(['midnight', 'river', 'parchment', 'cobalt'])
+const themeIdSchema = z.enum(themeIds)
 const uiFontIdSchema = z.enum(['system', 'inter', 'plex', 'serif'])
 const uiDensitySchema = z.enum(['compact', 'default', 'comfortable'])
 const editorSizeSchema = z.enum(['small', 'default', 'large'])
@@ -377,7 +685,9 @@ function loadPreferences(): WorkspacePreferences {
   }
 }
 
-export function activeCustomTheme(preferences: WorkspacePreferences): CustomTheme | null {
+type ThemePreference = Pick<WorkspacePreferences, 'theme' | 'customThemes'>
+
+export function activeCustomTheme(preferences: ThemePreference): CustomTheme | null {
   if (!preferences.theme.startsWith(customThemeIdPrefix)) return null
   const id = preferences.theme.slice(customThemeIdPrefix.length)
   return preferences.customThemes.find((entry) => entry.id === id) ?? null

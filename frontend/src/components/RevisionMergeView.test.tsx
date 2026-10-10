@@ -6,6 +6,7 @@ import { RevisionMergeView } from './RevisionMergeView'
 
 vi.mock('../theme', () => ({
   useTheme: () => ({ preferences: { theme: 'river' } }),
+  themeMode: () => 'light',
 }))
 
 vi.mock('./PierreRevisionDiff', () => ({

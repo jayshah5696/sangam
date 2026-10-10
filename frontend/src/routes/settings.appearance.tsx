@@ -32,14 +32,19 @@ import {
   readableTextColor,
   resolveCustomThemeColors,
   themeColorRoles,
+  themeContrastChecks,
+  themeIds,
+  themeMode,
   themes,
   uiDensities,
   uiFonts,
   useTheme,
   sidebarFooterToolDefinitions,
   type CustomTheme,
+  type ResolvedThemeColors,
   type ThemeColorKey,
   type ThemeId,
+  type ThemeMode,
 } from '../theme'
 import { useWorkbench } from '../workbench'
 
@@ -55,6 +60,12 @@ export function WorkspaceSettings() {
   const { category: activeCategory, destination } = settingsRoute.useSearch()
   const navigate = useNavigate({ from: '/settings' })
   const { preferences, updatePreferences } = useTheme()
+  const activeCustom = activeCustomTheme(preferences)
+  const activeBase = themes.find((theme) => theme.id === (activeCustom?.base ?? preferences.theme))
+  const activeThemeColors = activeCustom
+    ? resolveCustomThemeColors(activeCustom)
+    : baseThemeColors[activeBase?.id ?? 'midnight']
+  const activeThemeName = activeCustom?.name ?? activeBase?.name ?? 'this theme'
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
@@ -72,6 +83,7 @@ export function WorkspaceSettings() {
       void queryClient.invalidateQueries({ queryKey: ['publication-content'] })
     },
   })
+  const [modeFilter, setModeFilter] = useState<ThemeMode | 'all'>('all')
   const [tagName, setTagName] = useState('')
   const [tagColor, setTagColor] = useState('#327a62')
   const createTag = useMutation({
@@ -123,23 +135,48 @@ export function WorkspaceSettings() {
               title="Theme"
               description="Preview the complete Sangam workbench before changing its colors."
             >
+              <div className="theme-picker-toolbar">
+                <div className="density-switch" role="group" aria-label="Theme brightness">
+                  {(['all', 'dark', 'light'] as const).map((mode) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      aria-pressed={modeFilter === mode}
+                      className={modeFilter === mode ? 'density-option selected' : 'density-option'}
+                      onClick={() => setModeFilter(mode)}
+                    >
+                      {mode === 'all' ? 'All' : mode === 'dark' ? 'Dark' : 'Light'}
+                    </button>
+                  ))}
+                </div>
+                <span className="setting-value">Each card shows its text contrast ratio.</span>
+              </div>
               <div className="theme-grid settings-theme-grid">
-                {themes.map((theme) => (
-                  <button
-                    type="button"
-                    key={theme.id}
-                    className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
-                    aria-pressed={preferences.theme === theme.id}
-                    onClick={() => updatePreferences({ theme: theme.id })}
-                  >
-                    <ThemeWireframe themeId={theme.id} />
-                    <strong>
-                      {theme.name}
-                      {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
-                    </strong>
-                    <small>{theme.description}</small>
-                  </button>
-                ))}
+                {themes
+                  .filter((theme) => modeFilter === 'all' || theme.mode === modeFilter)
+                  .map((theme) => {
+                    const colors = baseThemeColors[theme.id]
+                    const textRatio = themeContrastChecks(colors)[0]?.ratio
+                    return (
+                      <button
+                        type="button"
+                        key={theme.id}
+                        className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
+                        aria-pressed={preferences.theme === theme.id}
+                        onClick={() => updatePreferences({ theme: theme.id })}
+                      >
+                        <CustomThemeWireframe colors={colors} />
+                        <strong>
+                          {theme.name}
+                          {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
+                        </strong>
+                        <small>{theme.description}</small>
+                        {textRatio && (
+                          <small className="theme-card-ratio">{textRatio.toFixed(1)}:1 text</small>
+                        )}
+                      </button>
+                    )
+                  })}
                 {preferences.customThemes.map((custom) => {
                   const ref = customThemeRef(custom.id)
                   const selected = preferences.theme === ref
@@ -162,6 +199,26 @@ export function WorkspaceSettings() {
                   )
                 })}
               </div>
+              <ThemeContrastReport
+                title={`Contrast in ${activeThemeName}`}
+                colors={activeThemeColors}
+                mode={themeMode(preferences)}
+              />
+              <details className="theme-method">
+                <summary>How these palettes are chosen</summary>
+                <p>
+                  Color taste is a personal choice, so contrast is the part Sangam fixes. Every pair of colors
+                  that touch in the workbench has a minimum WCAG contrast ratio. Body text, muted text, and
+                  sidebar text must reach 4.5:1. The accent must reach 3:1 against the surface, so focus rings
+                  and links stay visible.
+                </p>
+                <p>
+                  Each palette starts from one hue. The neutrals carry a small tint of that hue so panels read
+                  as separate areas without hard borders. In dark themes the accent is lighter, because a
+                  bright accent keeps its contrast on dark surfaces. In light themes it is darker, for the
+                  same reason. The ratio on each card is checked against the real colors, not an estimate.
+                </p>
+              </details>
             </SettingsSection>
           )}
 
@@ -573,7 +630,7 @@ function CreateThemeSection() {
       .regex(/^[a-z0-9-]+$/)
       .optional(),
     name: z.string().trim().optional(),
-    base: z.enum(['river', 'midnight', 'parchment', 'cobalt']).optional().default('midnight'),
+    base: z.enum(themeIds).optional().default('midnight'),
     colors: z.record(z.string(), z.string()).optional().default({}),
   })
 
@@ -731,6 +788,11 @@ function CreateThemeSection() {
               )
             })}
           </div>
+          <ThemeContrastReport
+            title="Contrast of this theme"
+            colors={resolveCustomThemeColors(editing)}
+            mode={themeMode({ theme: customThemeRef(editing.id), customThemes: preferences.customThemes })}
+          />
           <p className="setting-value">
             Changes apply live across the workspace. Unset roles follow the base palette.
           </p>
@@ -798,7 +860,7 @@ function CreateThemeSection() {
 function CustomThemeWireframe({ colors }: { colors: Record<ThemeColorKey, string> }) {
   const ink = readableTextColor(colors.surface)
   return (
-    <span className="theme-wireframe" aria-hidden="true" style={{ background: colors.surface }}>
+    <span className="theme-wireframe" aria-hidden="true" style={{ background: colors.surface, color: ink }}>
       <i className="theme-wireframe-sidebar" style={{ background: colors.sidebar }}>
         <b style={{ background: hexToRgba(colors.sidebarText, 0.4) }} />
         <b style={{ background: hexToRgba(colors.sidebarText, 0.25) }} />
@@ -823,27 +885,43 @@ function CustomThemeWireframe({ colors }: { colors: Record<ThemeColorKey, string
   )
 }
 
-function ThemeWireframe({ themeId }: { themeId: string }) {
+function ThemeContrastReport({
+  title,
+  colors,
+  mode,
+}: {
+  title: string
+  colors: ResolvedThemeColors
+  mode: ThemeMode
+}) {
   return (
-    <span className={`theme-wireframe theme-wireframe-${themeId}`} aria-hidden="true">
-      <i className="theme-wireframe-sidebar">
-        <b />
-        <b />
-        <b />
-      </i>
-      <i className="theme-wireframe-editor">
-        <b />
-        <b />
-        <b />
-        <b />
-      </i>
-      <i className="theme-wireframe-inspector">
-        <b />
-        <b />
-        <b />
-      </i>
-      <i className="theme-wireframe-focus" />
-    </span>
+    <section className="theme-contrast" aria-label={title}>
+      <header>
+        <strong>{title}</strong>
+        <span className="setting-value">{mode === 'dark' ? 'Dark' : 'Light'} theme · WCAG 2 contrast</span>
+      </header>
+      <ul>
+        {themeContrastChecks(colors).map((check) => {
+          const pass = check.ratio !== null && check.ratio >= check.minimum
+          return (
+            <li key={check.id}>
+              <span
+                className="theme-contrast-sample"
+                aria-hidden="true"
+                style={{ color: check.foreground, background: check.background }}
+              >
+                Aa
+              </span>
+              <span className="theme-contrast-label">{check.label}</span>
+              <code>{check.ratio === null ? 'n/a' : `${check.ratio.toFixed(1)}:1`}</code>
+              <span className={pass ? 'theme-contrast-badge pass' : 'theme-contrast-badge low'}>
+                {pass ? `Meets ${check.minimum}:1` : `Below ${check.minimum}:1`}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 

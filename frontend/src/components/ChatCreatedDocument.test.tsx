@@ -8,7 +8,10 @@ const state = vi.hoisted(() => ({ navigate: vi.fn() }))
 
 vi.mock('@openai/chatkit-react', () => ({ ChatKit: () => null, useChatKit: () => ({ control: {} }) }))
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => state.navigate }))
-vi.mock('../theme', () => ({ useTheme: () => ({ preferences: { theme: 'river' } }) }))
+vi.mock('../theme', () => ({
+  useTheme: () => ({ preferences: { theme: 'river' } }),
+  themeMode: () => 'light',
+}))
 vi.mock('./RevisionMergeView', () => ({ RevisionMergeView: () => null }))
 
 import { CompletionRow, CreatedFromChat } from './ChatPanel'

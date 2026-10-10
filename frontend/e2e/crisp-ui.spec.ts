@@ -356,9 +356,19 @@ test('settings categories survive reload and support browser history', async ({ 
 test('every workspace theme preserves settings contrast', async ({ page }) => {
   await page.goto('/settings')
 
-  for (const theme of ['Midnight', 'River', 'Parchment', 'Cobalt']) {
-    await page.getByRole('button', { name: new RegExp(theme) }).click()
-    await expect(page.locator('html')).toHaveAttribute('data-theme', theme.toLowerCase())
+  const themes = [
+    ['Midnight', 'midnight'],
+    ['River', 'river'],
+    ['Parchment', 'parchment'],
+    ['Cobalt', 'cobalt'],
+    ...['Indigo Ink', 'Moss', 'Ember', 'Lagoon', 'Plum', 'Brass'].flatMap((family) => [
+      [`${family} Dark`, `${family.split(' ')[0]!.toLowerCase()}-dark`],
+      [`${family} Light`, `${family.split(' ')[0]!.toLowerCase()}-light`],
+    ]),
+  ]
+  for (const [theme, id] of themes) {
+    await page.getByRole('button', { name: new RegExp(`^${theme}`) }).click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', id!)
     await page.waitForTimeout(200)
     const results = await new AxeBuilder({ page }).withTags(['wcag2aa']).analyze()
     expect(results.violations, `${theme}: ${formatViolations(results.violations)}`).toEqual([])

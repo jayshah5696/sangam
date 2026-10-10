@@ -2,7 +2,16 @@
 
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ThemeProvider, useTheme } from './theme'
+import {
+  baseThemeColors,
+  contrastRatio,
+  themeContrastChecks,
+  themeIds,
+  themeMode,
+  themes,
+  ThemeProvider,
+  useTheme,
+} from './theme'
 
 class MemoryStorage {
   data = new Map<string, string>()
@@ -175,5 +184,30 @@ describe('sidebar footer navigation preferences', () => {
     const stored = JSON.parse(window.localStorage.getItem('sangam.workspace-preferences.v1') ?? '{}')
     expect(stored.sidebarFooterTools.projects).toBe(false)
     expect(stored.sidebarFooterTools.trash).toBe(true)
+  })
+})
+
+describe('theme palettes', () => {
+  it('keeps text, muted text, and sidebar text readable in every new palette', () => {
+    const added = themes.filter((theme) => theme.id.includes('-'))
+    expect(added).toHaveLength(12)
+    for (const theme of added) {
+      for (const check of themeContrastChecks(baseThemeColors[theme.id])) {
+        expect(check.ratio, `${theme.id}: ${check.label}`).toBeGreaterThanOrEqual(check.minimum)
+      }
+    }
+  })
+
+  it('defines a picker entry and base colors for every theme id', () => {
+    expect(themes.map((theme) => theme.id).sort()).toEqual([...themeIds].sort())
+  })
+
+  it('measures WCAG contrast and reports theme brightness', () => {
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 0)
+    expect(themeMode({ theme: 'moss-dark', customThemes: [] })).toBe('dark')
+    expect(
+      themeMode({ theme: 'custom:x', customThemes: [{ id: 'x', name: 'X', base: 'plum-dark', colors: {} }] }),
+    ).toBe('dark')
+    expect(themeMode({ theme: 'river', customThemes: [] })).toBe('light')
   })
 })
