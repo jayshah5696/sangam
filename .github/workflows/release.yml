@@ -75,7 +75,6 @@ jobs:
 
   scan:
     name: Smoke and scan before push
-    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
