@@ -1802,6 +1802,10 @@ class DocumentService:
     ) -> list[DocumentSummary]:
         if path_prefixes == ():
             return []
+        validate_metadata_text(query, "Search query")
+        validate_metadata_text(category, "Search category")
+        validate_metadata_text(actor_id, "Search actor ID")
+        validate_metadata_text(tag_id, "Search tag ID")
         expression = self.search_index.compile_expression(query)
         conditions = ["d.deleted = 0"]
         parameters: list[object] = []
