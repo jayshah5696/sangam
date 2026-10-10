@@ -65,7 +65,8 @@ export function WorkspaceSettings() {
   const activeThemeColors = activeCustom
     ? resolveCustomThemeColors(activeCustom)
     : baseThemeColors[activeBase?.id ?? 'midnight']
-  const activeThemeName = activeCustom?.name ?? activeBase?.name ?? 'this theme'
+  const [modeFilter, setModeFilter] = useState<ThemeMode | null>(null)
+  const shownMode = modeFilter ?? themeMode(preferences)
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
@@ -83,7 +84,6 @@ export function WorkspaceSettings() {
       void queryClient.invalidateQueries({ queryKey: ['publication-content'] })
     },
   })
-  const [modeFilter, setModeFilter] = useState<ThemeMode | 'all'>('all')
   const [tagName, setTagName] = useState('')
   const [tagColor, setTagColor] = useState('#327a62')
   const createTag = useMutation({
@@ -137,46 +137,44 @@ export function WorkspaceSettings() {
             >
               <div className="theme-picker-toolbar">
                 <div className="density-switch" role="group" aria-label="Theme brightness">
-                  {(['all', 'dark', 'light'] as const).map((mode) => (
+                  {(['dark', 'light'] as const).map((mode) => (
                     <button
                       type="button"
                       key={mode}
-                      aria-pressed={modeFilter === mode}
-                      className={modeFilter === mode ? 'density-option selected' : 'density-option'}
-                      onClick={() => setModeFilter(mode)}
+                      aria-pressed={shownMode === mode}
+                      className={shownMode === mode ? 'density-option selected' : 'density-option'}
+                      onClick={() => {
+                        setModeFilter(mode)
+                        const counterpart = themes.find(
+                          (theme) => theme.family === activeBase?.family && theme.mode === mode,
+                        )
+                        if (counterpart && !activeCustom) updatePreferences({ theme: counterpart.id })
+                      }}
                     >
-                      {mode === 'all' ? 'All' : mode === 'dark' ? 'Dark' : 'Light'}
+                      {mode === 'dark' ? 'Dark' : 'Light'}
                     </button>
                   ))}
                 </div>
-                <span className="setting-value">Each card shows its text contrast ratio.</span>
               </div>
               <div className="theme-grid settings-theme-grid">
                 {themes
-                  .filter((theme) => modeFilter === 'all' || theme.mode === modeFilter)
-                  .map((theme) => {
-                    const colors = baseThemeColors[theme.id]
-                    const textRatio = themeContrastChecks(colors)[0]?.ratio
-                    return (
-                      <button
-                        type="button"
-                        key={theme.id}
-                        className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
-                        aria-pressed={preferences.theme === theme.id}
-                        onClick={() => updatePreferences({ theme: theme.id })}
-                      >
-                        <CustomThemeWireframe colors={colors} />
-                        <strong>
-                          {theme.name}
-                          {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
-                        </strong>
-                        <small>{theme.description}</small>
-                        {textRatio && (
-                          <small className="theme-card-ratio">{textRatio.toFixed(1)}:1 text</small>
-                        )}
-                      </button>
-                    )
-                  })}
+                  .filter((theme) => theme.mode === shownMode)
+                  .map((theme) => (
+                    <button
+                      type="button"
+                      key={theme.id}
+                      className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
+                      aria-pressed={preferences.theme === theme.id}
+                      aria-label={theme.name}
+                      onClick={() => updatePreferences({ theme: theme.id })}
+                    >
+                      <CustomThemeWireframe colors={baseThemeColors[theme.id]} />
+                      <strong>
+                        {theme.family}
+                        {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
+                      </strong>
+                    </button>
+                  ))}
                 {preferences.customThemes.map((custom) => {
                   const ref = customThemeRef(custom.id)
                   const selected = preferences.theme === ref
@@ -194,31 +192,11 @@ export function WorkspaceSettings() {
                         {custom.name}
                         {selected && <Check size="var(--icon-inline)" />}
                       </strong>
-                      <small>Custom theme · {custom.base}</small>
                     </button>
                   )
                 })}
               </div>
-              <ThemeContrastReport
-                title={`Contrast in ${activeThemeName}`}
-                colors={activeThemeColors}
-                mode={themeMode(preferences)}
-              />
-              <details className="theme-method">
-                <summary>How these palettes are chosen</summary>
-                <p>
-                  Color taste is a personal choice, so contrast is the part Sangam fixes. Every pair of colors
-                  that touch in the workbench has a minimum WCAG contrast ratio. Body text, muted text, and
-                  sidebar text must reach 4.5:1. The accent must reach 3:1 against the surface, so focus rings
-                  and links stay visible.
-                </p>
-                <p>
-                  Each palette starts from one hue. The neutrals carry a small tint of that hue so panels read
-                  as separate areas without hard borders. In dark themes the accent is lighter, because a
-                  bright accent keeps its contrast on dark surfaces. In light themes it is darker, for the
-                  same reason. The ratio on each card is checked against the real colors, not an estimate.
-                </p>
-              </details>
+              <ThemeContrastReport colors={activeThemeColors} />
             </SettingsSection>
           )}
 
@@ -788,11 +766,7 @@ function CreateThemeSection() {
               )
             })}
           </div>
-          <ThemeContrastReport
-            title="Contrast of this theme"
-            colors={resolveCustomThemeColors(editing)}
-            mode={themeMode({ theme: customThemeRef(editing.id), customThemes: preferences.customThemes })}
-          />
+          <ThemeContrastReport colors={resolveCustomThemeColors(editing)} />
           <p className="setting-value">
             Changes apply live across the workspace. Unset roles follow the base palette.
           </p>
@@ -885,23 +859,18 @@ function CustomThemeWireframe({ colors }: { colors: Record<ThemeColorKey, string
   )
 }
 
-function ThemeContrastReport({
-  title,
-  colors,
-  mode,
-}: {
-  title: string
-  colors: ResolvedThemeColors
-  mode: ThemeMode
-}) {
+function ThemeContrastReport({ colors }: { colors: ResolvedThemeColors }) {
+  const checks = themeContrastChecks(colors)
+  const failing = checks.filter((check) => check.ratio === null || check.ratio < check.minimum)
   return (
-    <section className="theme-contrast" aria-label={title}>
-      <header>
-        <strong>{title}</strong>
-        <span className="setting-value">{mode === 'dark' ? 'Dark' : 'Light'} theme · WCAG 2 contrast</span>
-      </header>
+    <details className="theme-contrast">
+      <summary>
+        {failing.length === 0
+          ? 'Contrast: all readability checks pass'
+          : `Contrast: ${failing.length} of ${checks.length} checks are low`}
+      </summary>
       <ul>
-        {themeContrastChecks(colors).map((check) => {
+        {checks.map((check) => {
           const pass = check.ratio !== null && check.ratio >= check.minimum
           return (
             <li key={check.id}>
@@ -915,13 +884,13 @@ function ThemeContrastReport({
               <span className="theme-contrast-label">{check.label}</span>
               <code>{check.ratio === null ? 'n/a' : `${check.ratio.toFixed(1)}:1`}</code>
               <span className={pass ? 'theme-contrast-badge pass' : 'theme-contrast-badge low'}>
-                {pass ? `Meets ${check.minimum}:1` : `Below ${check.minimum}:1`}
+                {pass ? 'Pass' : `Below ${check.minimum}:1`}
               </span>
             </li>
           )
         })}
       </ul>
-    </section>
+    </details>
   )
 }
 

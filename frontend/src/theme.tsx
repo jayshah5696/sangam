@@ -426,99 +426,121 @@ export function applyThemeColors(root: HTMLElement, custom: CustomTheme | null) 
   root.style.setProperty('--accent-text', readableTextColor(colors.accent))
 }
 
-export const themes: Array<{ id: ThemeId; name: string; description: string; mode: ThemeMode }> = [
+export const themes: Array<{
+  id: ThemeId
+  family: string
+  name: string
+  description: string
+  mode: ThemeMode
+}> = [
   {
     id: 'midnight',
+    family: 'Midnight',
     name: 'Midnight',
     description: 'Dark-native near-black workspace',
     mode: 'dark',
   },
   {
     id: 'river',
+    family: 'River',
     name: 'River',
     description: 'Calm green and warm paper',
     mode: 'light',
   },
   {
     id: 'parchment',
+    family: 'Parchment',
     name: 'Parchment',
     description: 'Editorial sepia and ink',
     mode: 'light',
   },
   {
     id: 'cobalt',
+    family: 'Cobalt',
     name: 'Cobalt',
     description: 'Crisp blue and cool white',
     mode: 'light',
   },
   {
     id: 'indigo-dark',
+    family: 'Indigo Ink',
     name: 'Indigo Ink Dark',
     description: 'Brand indigo with corrected link contrast',
     mode: 'dark',
   },
   {
     id: 'indigo-light',
+    family: 'Indigo Ink',
     name: 'Indigo Ink Light',
     description: 'Brand indigo with corrected link contrast',
     mode: 'light',
   },
   {
     id: 'moss-dark',
+    family: 'Moss',
     name: 'Moss Dark',
     description: 'Calm green on tinted neutrals',
     mode: 'dark',
   },
   {
     id: 'moss-light',
+    family: 'Moss',
     name: 'Moss Light',
     description: 'Calm green on tinted neutrals',
     mode: 'light',
   },
   {
     id: 'ember-dark',
+    family: 'Ember',
     name: 'Ember Dark',
     description: 'Warm terracotta, low glare',
     mode: 'dark',
   },
   {
     id: 'ember-light',
+    family: 'Ember',
     name: 'Ember Light',
     description: 'Warm terracotta, low glare',
     mode: 'light',
   },
   {
     id: 'lagoon-dark',
+    family: 'Lagoon',
     name: 'Lagoon Dark',
     description: 'Clear teal with cool neutrals',
     mode: 'dark',
   },
   {
     id: 'lagoon-light',
+    family: 'Lagoon',
     name: 'Lagoon Light',
     description: 'Clear teal with cool neutrals',
     mode: 'light',
   },
   {
     id: 'plum-dark',
+    family: 'Plum',
     name: 'Plum Dark',
     description: 'Magenta-violet with soft surfaces',
     mode: 'dark',
   },
   {
     id: 'plum-light',
+    family: 'Plum',
     name: 'Plum Light',
     description: 'Magenta-violet with soft surfaces',
     mode: 'light',
   },
   {
     id: 'brass-dark',
+    family: 'Brass',
     name: 'Brass Dark',
     description: 'Editorial amber and ink',
     mode: 'dark',
   },
   {
     id: 'brass-light',
+    family: 'Brass',
     name: 'Brass Light',
     description: 'Editorial amber and ink',
     mode: 'light',

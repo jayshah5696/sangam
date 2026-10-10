@@ -357,17 +357,24 @@ test('every workspace theme preserves settings contrast', async ({ page }) => {
   await page.goto('/settings')
 
   const themes = [
-    ['Midnight', 'midnight'],
-    ['River', 'river'],
-    ['Parchment', 'parchment'],
-    ['Cobalt', 'cobalt'],
-    ...['Indigo Ink', 'Moss', 'Ember', 'Lagoon', 'Plum', 'Brass'].flatMap((family) => [
-      [`${family} Dark`, `${family.split(' ')[0]!.toLowerCase()}-dark`],
-      [`${family} Light`, `${family.split(' ')[0]!.toLowerCase()}-light`],
-    ]),
+    ['dark', 'Midnight', 'midnight'],
+    ['light', 'River', 'river'],
+    ['light', 'Parchment', 'parchment'],
+    ['light', 'Cobalt', 'cobalt'],
+    ...['Indigo Ink', 'Moss', 'Ember', 'Lagoon', 'Plum', 'Brass'].flatMap((family) =>
+      (['dark', 'light'] as const).map((mode) => [
+        mode,
+        `${family} ${mode === 'dark' ? 'Dark' : 'Light'}`,
+        `${family.split(' ')[0]!.toLowerCase()}-${mode}`,
+      ]),
+    ),
   ]
-  for (const [theme, id] of themes) {
-    await page.getByRole('button', { name: new RegExp(`^${theme}`) }).click()
+  for (const [mode, theme, id] of themes) {
+    await page
+      .getByRole('group', { name: 'Theme brightness' })
+      .getByRole('button', { name: mode === 'dark' ? 'Dark' : 'Light' })
+      .click()
+    await page.getByRole('button', { name: theme, exact: true }).click()
     await expect(page.locator('html')).toHaveAttribute('data-theme', id!)
     await page.waitForTimeout(200)
     const results = await new AxeBuilder({ page }).withTags(['wcag2aa']).analyze()
