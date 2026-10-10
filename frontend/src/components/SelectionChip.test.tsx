@@ -8,7 +8,10 @@ vi.mock('@openai/chatkit-react', () => ({
   useChatKit: () => ({ control: {} }),
 }))
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => () => {} }))
-vi.mock('../theme', () => ({ useTheme: () => ({ preferences: { theme: 'river' } }) }))
+vi.mock('../theme', () => ({
+  useTheme: () => ({ preferences: { theme: 'river' } }),
+  themeMode: () => 'light',
+}))
 vi.mock('./RevisionMergeView', () => ({ RevisionMergeView: () => null }))
 
 import { ChatCompactContext, ChatContextBanner, hasMountedChatInterface, SelectionChip } from './ChatPanel'

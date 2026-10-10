@@ -26,20 +26,26 @@ import {
   activeCustomTheme,
   baseThemeColors,
   customThemeRef,
+  deriveThemeColors,
   editorSizes,
   hexToRgba,
   isValidColorValue,
   readableTextColor,
   resolveCustomThemeColors,
   themeColorRoles,
+  themeContrastChecks,
+  themeIds,
+  themeMode,
+  themeModeOf,
   themes,
   uiDensities,
   uiFonts,
   useTheme,
   sidebarFooterToolDefinitions,
   type CustomTheme,
+  type ResolvedThemeColors,
   type ThemeColorKey,
-  type ThemeId,
+  type ThemeMode,
 } from '../theme'
 import { useWorkbench } from '../workbench'
 
@@ -55,6 +61,13 @@ export function WorkspaceSettings() {
   const { category: activeCategory, destination } = settingsRoute.useSearch()
   const navigate = useNavigate({ from: '/settings' })
   const { preferences, updatePreferences } = useTheme()
+  const activeCustom = activeCustomTheme(preferences)
+  const activeBase = themes.find((theme) => theme.id === (activeCustom?.base ?? preferences.theme))
+  const activeThemeColors = activeCustom
+    ? resolveCustomThemeColors(activeCustom)
+    : baseThemeColors[activeBase?.id ?? 'midnight']
+  const [modeFilter, setModeFilter] = useState<ThemeMode | null>(null)
+  const shownMode = modeFilter ?? themeMode(preferences)
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
   const tags = useQuery({ queryKey: ['tags'], queryFn: api.listTags })
@@ -123,45 +136,73 @@ export function WorkspaceSettings() {
               title="Theme"
               description="Preview the complete Sangam workbench before changing its colors."
             >
-              <div className="theme-grid settings-theme-grid">
-                {themes.map((theme) => (
-                  <button
-                    type="button"
-                    key={theme.id}
-                    className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
-                    aria-pressed={preferences.theme === theme.id}
-                    onClick={() => updatePreferences({ theme: theme.id })}
-                  >
-                    <ThemeWireframe themeId={theme.id} />
-                    <strong>
-                      {theme.name}
-                      {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
-                    </strong>
-                    <small>{theme.description}</small>
-                  </button>
-                ))}
-                {preferences.customThemes.map((custom) => {
-                  const ref = customThemeRef(custom.id)
-                  const selected = preferences.theme === ref
-                  const colors = resolveCustomThemeColors(custom)
-                  return (
+              <div className="theme-picker-toolbar">
+                <div className="density-switch" role="group" aria-label="Theme brightness">
+                  {(['dark', 'light'] as const).map((mode) => (
                     <button
                       type="button"
-                      key={ref}
-                      className={selected ? 'theme-card selected' : 'theme-card'}
-                      aria-pressed={selected}
-                      onClick={() => updatePreferences({ theme: ref })}
+                      key={mode}
+                      aria-pressed={shownMode === mode}
+                      className={shownMode === mode ? 'density-option selected' : 'density-option'}
+                      onClick={() => {
+                        setModeFilter(mode)
+                        const counterpart = themes.find(
+                          (theme) => theme.family === activeBase?.family && theme.mode === mode,
+                        )
+                        if (counterpart && !activeCustom) updatePreferences({ theme: counterpart.id })
+                      }}
                     >
-                      <CustomThemeWireframe colors={colors} />
-                      <strong>
-                        {custom.name}
-                        {selected && <Check size="var(--icon-inline)" />}
-                      </strong>
-                      <small>Custom theme · {custom.base}</small>
+                      {mode === 'dark' ? 'Dark' : 'Light'}
                     </button>
-                  )
-                })}
+                  ))}
+                </div>
               </div>
+              <div className="theme-grid settings-theme-grid">
+                {themes
+                  .filter((theme) => theme.mode === shownMode)
+                  .map((theme) => (
+                    <button
+                      type="button"
+                      key={theme.id}
+                      className={preferences.theme === theme.id ? 'theme-card selected' : 'theme-card'}
+                      aria-pressed={preferences.theme === theme.id}
+                      aria-label={theme.name}
+                      onClick={() => updatePreferences({ theme: theme.id })}
+                    >
+                      <CustomThemeWireframe colors={baseThemeColors[theme.id]} />
+                      <strong>
+                        {theme.family}
+                        {preferences.theme === theme.id && <Check size="var(--icon-inline)" />}
+                      </strong>
+                    </button>
+                  ))}
+                {preferences.customThemes
+                  .filter(
+                    (custom) =>
+                      themeMode({ theme: customThemeRef(custom.id), customThemes: [custom] }) === shownMode,
+                  )
+                  .map((custom) => {
+                    const ref = customThemeRef(custom.id)
+                    const selected = preferences.theme === ref
+                    const colors = resolveCustomThemeColors(custom)
+                    return (
+                      <button
+                        type="button"
+                        key={ref}
+                        className={selected ? 'theme-card selected' : 'theme-card'}
+                        aria-pressed={selected}
+                        onClick={() => updatePreferences({ theme: ref })}
+                      >
+                        <CustomThemeWireframe colors={colors} />
+                        <strong>
+                          {custom.name}
+                          {selected && <Check size="var(--icon-inline)" />}
+                        </strong>
+                      </button>
+                    )
+                  })}
+              </div>
+              <ThemeContrastReport colors={activeThemeColors} />
             </SettingsSection>
           )}
 
@@ -170,7 +211,7 @@ export function WorkspaceSettings() {
               id="create-theme"
               icon={Palette}
               title="Create theme"
-              description="Build a theme from a base palette, edit its colors with live preview on the real workspace, and share it as JSON."
+              description="Pick a background and an accent. The rest is derived and kept readable."
             >
               <CreateThemeSection />
             </SettingsSection>
@@ -543,7 +584,19 @@ export function WorkspaceSettings() {
   )
 }
 
-const studioEditableRoles = themeColorRoles.filter((role) => role.key !== 'line')
+const fineTuneRoles = themeColorRoles.filter(
+  (role) => role.key !== 'line' && role.key !== 'appBg' && role.key !== 'accent',
+)
+
+const importedThemeSchema = z.object({
+  id: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
+  name: z.string().trim().optional(),
+  base: z.enum(themeIds).optional().default('midnight'),
+  colors: z.record(z.string(), z.string()).optional().default({}),
+})
 
 function CreateThemeSection() {
   const { preferences, updatePreferences } = useTheme()
@@ -552,6 +605,7 @@ function CreateThemeSection() {
   const [importError, setImportError] = useState('')
   const [copied, setCopied] = useState(false)
   const editing = preferences.customThemes.find((theme) => theme.id === editingId) ?? null
+  const active = activeCustomTheme(preferences)
 
   const patchTheme = (id: string, patch: Partial<CustomTheme>) => {
     updatePreferences({
@@ -561,32 +615,28 @@ function CreateThemeSection() {
     })
   }
 
-  const setColor = (id: string, key: ThemeColorKey, value: string) => {
-    const current = preferences.customThemes.find((theme) => theme.id === id)
-    if (!current) return
-    patchTheme(id, { colors: { ...current.colors, [key]: value } })
+  // Background and accent are the only required picks. Everything else follows from them.
+  const setCorePick = (theme: CustomTheme, key: 'appBg' | 'accent', value: string) => {
+    const current = resolveCustomThemeColors(theme)
+    const next = deriveThemeColors(
+      key === 'appBg' ? value : current.appBg,
+      key === 'accent' ? value : current.accent,
+    )
+    patchTheme(theme.id, { base: next.base, colors: next.colors })
   }
 
-  const importedThemeSchema = z.object({
-    id: z
-      .string()
-      .regex(/^[a-z0-9-]+$/)
-      .optional(),
-    name: z.string().trim().optional(),
-    base: z.enum(['river', 'midnight', 'parchment', 'cobalt']).optional().default('midnight'),
-    colors: z.record(z.string(), z.string()).optional().default({}),
-  })
+  const setFineTuneColor = (theme: CustomTheme, key: ThemeColorKey, value: string) => {
+    patchTheme(theme.id, { colors: { ...theme.colors, [key]: value } })
+  }
 
   const createTheme = () => {
     const id = `theme-${Date.now().toString(36)}`
-    const matchingTheme = themes.find((t) => t.id === preferences.theme)
-    const defaultBase: ThemeId = matchingTheme ? matchingTheme.id : 'midnight'
-    const theme: CustomTheme = {
-      id,
-      name: 'My theme',
-      base: activeCustomTheme(preferences)?.base ?? defaultBase,
-      colors: {},
-    }
+    // Start from the theme in use, so tuning what you already run is an edit, not a rebuild.
+    const seed = active
+      ? resolveCustomThemeColors(active)
+      : baseThemeColors[themes.find((t) => t.id === preferences.theme)?.id ?? 'midnight']
+    const derived = deriveThemeColors(seed.appBg, seed.accent)
+    const theme: CustomTheme = { id, name: 'My theme', base: derived.base, colors: derived.colors }
     updatePreferences({ customThemes: [...preferences.customThemes, theme], theme: customThemeRef(id) })
     setEditingId(id)
   }
@@ -595,10 +645,7 @@ function CreateThemeSection() {
     const remaining = preferences.customThemes.filter((theme) => theme.id !== id)
     updatePreferences({
       customThemes: remaining,
-      theme:
-        preferences.theme === customThemeRef(id)
-          ? (activeCustomTheme(preferences)?.base ?? 'midnight')
-          : preferences.theme,
+      theme: preferences.theme === customThemeRef(id) ? 'midnight' : preferences.theme,
     })
     if (editingId === id) setEditingId(null)
   }
@@ -606,8 +653,7 @@ function CreateThemeSection() {
   const importTheme = () => {
     setImportError('')
     try {
-      const raw = JSON.parse(importJson)
-      const result = importedThemeSchema.safeParse(raw)
+      const result = importedThemeSchema.safeParse(JSON.parse(importJson))
       if (!result.success) {
         setImportError('That is not valid theme JSON.')
         return
@@ -632,7 +678,6 @@ function CreateThemeSection() {
         customThemes: [...preferences.customThemes, theme],
         theme: customThemeRef(id),
       })
-      setEditingId(id)
       setImportJson('')
     } catch {
       setImportError('That is not valid theme JSON.')
@@ -645,152 +690,120 @@ function CreateThemeSection() {
     window.setTimeout(() => setCopied(false), 1500)
   }
 
+  if (editing) {
+    const colors = resolveCustomThemeColors(editing)
+    return (
+      <div className="theme-studio">
+        <label className="settings-field">
+          <span>Name</span>
+          <input
+            aria-label="Theme name"
+            className="theme-name-input"
+            value={editing.name}
+            onChange={(event) => patchTheme(editing.id, { name: event.target.value })}
+          />
+        </label>
+        <div className="theme-core-picks">
+          {(
+            [
+              ['appBg', 'Background'],
+              ['accent', 'Accent'],
+            ] as const
+          ).map(([key, label]) => (
+            <label className="theme-core-pick" key={key}>
+              <input
+                aria-label={label}
+                type="color"
+                value={colors[key]}
+                onChange={(event) => setCorePick(editing, key, event.target.value)}
+              />
+              <span>
+                <strong>{label}</strong>
+                <code>{colors[key]}</code>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="setting-value">
+          {themeModeOf(colors.appBg) === 'dark' ? 'Dark' : 'Light'} theme. Everything else is derived and kept
+          readable. Changes apply live.
+        </p>
+        <details className="theme-fine-tune">
+          <summary>Fine-tune other colors</summary>
+          <p className="setting-value">Changing background or accent again regenerates these.</p>
+          <div className="theme-studio-colors">
+            {fineTuneRoles.map((role) => (
+              <label className="settings-field theme-color-row" key={role.key}>
+                <span>{role.label}</span>
+                <span className="accent-input">
+                  <input
+                    aria-label={role.label}
+                    type="color"
+                    value={colors[role.key]}
+                    onChange={(event) => setFineTuneColor(editing, role.key, event.target.value)}
+                  />
+                  <code>{colors[role.key]}</code>
+                </span>
+              </label>
+            ))}
+          </div>
+        </details>
+        <div className="theme-builder-actions">
+          <button type="button" className="secondary-action" onClick={() => setEditingId(null)}>
+            Done
+          </button>
+          <button type="button" className="secondary-action" onClick={() => void exportTheme(editing)}>
+            {copied ? <Check size="var(--icon-inline)" /> : null}
+            {copied ? 'Copied JSON' : 'Export JSON'}
+          </button>
+          <button
+            type="button"
+            className="secondary-action danger-action"
+            onClick={() => deleteTheme(editing.id)}
+          >
+            <Trash2 size="var(--icon-inline)" />
+            Delete
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="theme-studio">
-      {!editing && (
-        <div className="theme-studio-empty">
-          <p>
-            Build a theme from a base palette, edit its color roles with live preview, and share it as JSON.
+      <div className="theme-builder-actions">
+        <button type="button" className="secondary-action" onClick={createTheme}>
+          <Plus size="var(--icon-inline)" />
+          New theme
+        </button>
+        {active && (
+          <button type="button" className="secondary-action" onClick={() => setEditingId(active.id)}>
+            Edit {active.name}
+          </button>
+        )}
+      </div>
+      <details className="theme-import">
+        <summary>Import theme JSON</summary>
+        <textarea
+          aria-label="Theme JSON"
+          value={importJson}
+          placeholder='{"name":"My theme","base":"midnight","colors":{"accent":"#ff8800"}}'
+          onChange={(event) => setImportJson(event.target.value)}
+        />
+        {importError && (
+          <p className="error-text" role="alert">
+            {importError}
           </p>
-          <div className="theme-builder-actions">
-            <button type="button" className="secondary-action" onClick={createTheme}>
-              <Plus size="var(--icon-inline)" />
-              New theme
-            </button>
-          </div>
-          <details className="theme-import">
-            <summary>Import theme JSON</summary>
-            <textarea
-              aria-label="Theme JSON"
-              value={importJson}
-              placeholder='{"id":"my-theme","name":"My theme","base":"midnight","colors":{"accent":"#ff8800"}}'
-              onChange={(event) => setImportJson(event.target.value)}
-            />
-            {importError && (
-              <p className="error-text" role="alert">
-                {importError}
-              </p>
-            )}
-            <button
-              type="button"
-              className="secondary-action"
-              disabled={!importJson.trim()}
-              onClick={importTheme}
-            >
-              Import
-            </button>
-          </details>
-        </div>
-      )}
-      {editing && (
-        <div className="theme-studio-editor">
-          <div className="theme-studio-row">
-            <label className="settings-field">
-              <span>Name</span>
-              <input
-                aria-label="Theme name"
-                value={editing.name}
-                onChange={(event) => patchTheme(editing.id, { name: event.target.value })}
-              />
-            </label>
-            <label className="settings-field">
-              <span>Base palette</span>
-              <select
-                aria-label="Base palette"
-                className="settings-select"
-                value={editing.base}
-                onChange={(event) => {
-                  const baseTheme = themes.find((t) => t.id === event.target.value)
-                  if (baseTheme) patchTheme(editing.id, { base: baseTheme.id })
-                }}
-              >
-                {themes.map((theme) => (
-                  <option key={theme.id} value={theme.id}>
-                    {theme.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="theme-studio-colors">
-            {studioEditableRoles.map((role) => {
-              const value = editing.colors[role.key] ?? baseThemeColors[editing.base][role.key]
-              return (
-                <label className="settings-field theme-color-row" key={role.key}>
-                  <span>{role.label}</span>
-                  <span className="accent-input">
-                    <input
-                      aria-label={role.label}
-                      type="color"
-                      value={value}
-                      onChange={(event) => setColor(editing.id, role.key, event.target.value)}
-                    />
-                    <code>{value}</code>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-          <p className="setting-value">
-            Changes apply live across the workspace. Unset roles follow the base palette.
-          </p>
-          <div className="theme-builder-actions">
-            {preferences.theme !== customThemeRef(editing.id) && (
-              <button
-                type="button"
-                className="secondary-action"
-                onClick={() => updatePreferences({ theme: customThemeRef(editing.id) })}
-              >
-                Use this theme
-              </button>
-            )}
-            {preferences.theme === customThemeRef(editing.id) && (
-              <span className="setting-value">
-                <Check size="var(--icon-inline)" /> Active
-              </span>
-            )}
-            <button type="button" className="secondary-action" onClick={() => void exportTheme(editing)}>
-              {copied ? <Check size="var(--icon-inline)" /> : null}
-              {copied ? 'Copied JSON' : 'Export JSON'}
-            </button>
-            <button type="button" className="secondary-action" onClick={() => setEditingId(null)}>
-              Done
-            </button>
-            <button
-              type="button"
-              className="secondary-action danger-action"
-              onClick={() => deleteTheme(editing.id)}
-            >
-              <Trash2 size="var(--icon-inline)" />
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
-      {preferences.customThemes.length > 0 && !editing && (
-        <ul className="theme-studio-list">
-          {preferences.customThemes.map((theme) => (
-            <li key={theme.id}>
-              <strong>{theme.name}</strong>
-              <span className="setting-value">
-                {preferences.theme === customThemeRef(theme.id) ? 'Active' : theme.base}
-              </span>
-              <button
-                type="button"
-                className="secondary-action"
-                onClick={() => {
-                  setEditingId(theme.id)
-                  if (preferences.theme !== customThemeRef(theme.id)) {
-                    updatePreferences({ theme: customThemeRef(theme.id) })
-                  }
-                }}
-              >
-                Edit
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+        )}
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={!importJson.trim()}
+          onClick={importTheme}
+        >
+          Import
+        </button>
+      </details>
     </div>
   )
 }
@@ -798,7 +811,7 @@ function CreateThemeSection() {
 function CustomThemeWireframe({ colors }: { colors: Record<ThemeColorKey, string> }) {
   const ink = readableTextColor(colors.surface)
   return (
-    <span className="theme-wireframe" aria-hidden="true" style={{ background: colors.surface }}>
+    <span className="theme-wireframe" aria-hidden="true" style={{ background: colors.surface, color: ink }}>
       <i className="theme-wireframe-sidebar" style={{ background: colors.sidebar }}>
         <b style={{ background: hexToRgba(colors.sidebarText, 0.4) }} />
         <b style={{ background: hexToRgba(colors.sidebarText, 0.25) }} />
@@ -823,27 +836,38 @@ function CustomThemeWireframe({ colors }: { colors: Record<ThemeColorKey, string
   )
 }
 
-function ThemeWireframe({ themeId }: { themeId: string }) {
+function ThemeContrastReport({ colors }: { colors: ResolvedThemeColors }) {
+  const checks = themeContrastChecks(colors)
+  const failing = checks.filter((check) => check.ratio === null || check.ratio < check.minimum)
   return (
-    <span className={`theme-wireframe theme-wireframe-${themeId}`} aria-hidden="true">
-      <i className="theme-wireframe-sidebar">
-        <b />
-        <b />
-        <b />
-      </i>
-      <i className="theme-wireframe-editor">
-        <b />
-        <b />
-        <b />
-        <b />
-      </i>
-      <i className="theme-wireframe-inspector">
-        <b />
-        <b />
-        <b />
-      </i>
-      <i className="theme-wireframe-focus" />
-    </span>
+    <details className="theme-contrast">
+      <summary>
+        {failing.length === 0
+          ? 'Contrast: all readability checks pass'
+          : `Contrast: ${failing.length} of ${checks.length} checks are low`}
+      </summary>
+      <ul>
+        {checks.map((check) => {
+          const pass = check.ratio !== null && check.ratio >= check.minimum
+          return (
+            <li key={check.id}>
+              <span
+                className="theme-contrast-sample"
+                aria-hidden="true"
+                style={{ color: check.foreground, background: check.background }}
+              >
+                Aa
+              </span>
+              <span className="theme-contrast-label">{check.label}</span>
+              <code>{check.ratio === null ? 'n/a' : `${check.ratio.toFixed(1)}:1`}</code>
+              <span className={pass ? 'theme-contrast-badge pass' : 'theme-contrast-badge low'}>
+                {pass ? 'Pass' : `Below ${check.minimum}:1`}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </details>
   )
 }
 

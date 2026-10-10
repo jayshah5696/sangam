@@ -12,6 +12,24 @@
     '--accent-soft',
     '--accent-text',
   ]
+  var THEMES = [
+    'river',
+    'midnight',
+    'parchment',
+    'cobalt',
+    'indigo-dark',
+    'indigo-light',
+    'moss-dark',
+    'moss-light',
+    'ember-dark',
+    'ember-light',
+    'lagoon-dark',
+    'lagoon-light',
+    'plum-dark',
+    'plum-light',
+    'brass-dark',
+    'brass-light',
+  ]
   var ROLES = [
     'appBg',
     'surface',
@@ -84,7 +102,7 @@
         root.style.setProperty('--accent-soft', hexToRgba(custom.colors.accent, 0.16))
         root.style.setProperty('--accent-text', readableText(custom.colors.accent))
       }
-    } else if (['river', 'midnight', 'parchment', 'cobalt'].indexOf(stored.theme) !== -1) {
+    } else if (THEMES.indexOf(stored.theme) !== -1) {
       data.theme = stored.theme
     }
   } catch (error) {}
