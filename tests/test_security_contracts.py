@@ -91,9 +91,7 @@ def test_pdf_search_and_annotations_query_reject_null_bytes(client: TestClient):
     search_res = client.get(f"/api/v1/pdfs/{doc_id}/search", params={"q": "term\x00null"})
     assert search_res.status_code == 422
 
-    annotations_res = client.get(
-        f"/api/v1/pdfs/{doc_id}/annotations", params={"q": "term\x00null"}
-    )
+    annotations_res = client.get(f"/api/v1/pdfs/{doc_id}/annotations", params={"q": "term\x00null"})
     assert annotations_res.status_code == 422
 
 
