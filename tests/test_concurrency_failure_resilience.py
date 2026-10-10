@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -2726,3 +2727,35 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient
     parent_dir = file_path.parent
     orphaned_temp_files = list(parent_dir.glob(".simultaneous_rw.md.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
+
+
+def test_folder_manifest_sync_failure_cleans_up_temp_file(
+    client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder_path = "research/failing_folder"
+
+    # Monkeypatch os.replace to fail when replacing folder manifest
+    orig_replace = os.replace
+
+    def failing_replace(src, dst):
+        if ".sangam-folder-" in str(src) or ".sangam-folder.json" in str(dst):
+            raise OSError("Simulated disk error during folder manifest replacement")
+        return orig_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+
+    # Attempt folder creation, which invokes _sync_folder_manifest
+    with pytest.raises(OSError, match="Simulated disk error during folder manifest replacement"):
+        client.app.state.services.organization.create_folder(
+            path=folder_path,
+            category="Failure Test",
+            tag_ids=[],
+            actor_id="human:jay",
+            idempotency_key="folder-fail-sync-k1",
+        )
+
+    # Verify no temporary .sangam-folder-* files remain in folder_dir
+    folder_dir = settings.workspace_root / folder_path
+    if folder_dir.is_dir():
+        temp_files = list(folder_dir.glob(".sangam-folder-*"))
+        assert len(temp_files) == 0, f"Orphaned folder manifest temp files found: {temp_files}"
