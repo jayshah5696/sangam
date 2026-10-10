@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Awaitable, Iterator
 from pathlib import Path
 
 import pytest
@@ -34,6 +34,22 @@ def settings(tmp_path: Path) -> Settings:
 def client(settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(settings)) as test_client:
         yield test_client
+
+
+def run_in_app[T](client: TestClient, awaitable: Awaitable[T]) -> T:
+    """Run a coroutine on the application's own event loop.
+
+    Services such as the chat store keep asyncio state bound to the loop that first used
+    them. A fresh asyncio.run() per call closes its loop while cleanup is still scheduled,
+    which leaks a worker slot and makes shutdown time out when the machine is busy.
+    """
+
+    async def await_it() -> T:
+        return await awaitable
+
+    portal = client.portal
+    assert portal is not None, "use the client inside its `with` block"
+    return portal.call(await_it)
 
 
 def headers(key: str) -> dict[str, str]:
