@@ -676,6 +676,10 @@ class ActivityService:
             for key, value in (details or {}).items()
             if key in ALLOWED_AUDIT_DETAIL_KEYS
         }
+        if "action_type" not in safe_details and action:
+            safe_details["action_type"] = action
+        if "target_file" not in safe_details and path is not None:
+            safe_details["target_file"] = path
 
         detail_json = json.dumps(safe_details, sort_keys=True)
         size_bytes = len(detail_json.encode("utf-8")) + 256
