@@ -372,6 +372,8 @@ class WorkspaceAccessService:
                     details["target_file"] = destination or current.path
                 elif current.path is not None:
                     details["target_file"] = current.path
+                else:
+                    details["target_file"] = document_id
                 conditions = Preconditions.parse(if_match, if_none_match)
                 has_conditions = if_match is not None or if_none_match is not None
                 expected = payload.get("expected_revision_id")
