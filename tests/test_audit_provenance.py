@@ -908,3 +908,38 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
     assert "my_db_password" not in sanitized
     assert "my_tls_key" not in sanitized
     assert "client_secret_data" not in sanitized
+
+
+def test_unmaterialized_document_mutation_audit_target_file(client: TestClient) -> None:
+    """Verify unmaterialized document writes fallback target_file to document_id."""
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Draft Unmaterialized Doc",
+            "content": "# Draft\nContent without path.",
+            "path": None,
+        },
+        headers=headers("idemp_unmat_doc_create"),
+    )
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    doc_id = created["document_id"]
+    rev1 = created["current_revision_id"]
+
+    update_resp = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "expected_revision_id": rev1,
+            "content": "# Draft\nUpdated content without path.",
+        },
+        headers=headers("idemp_unmat_doc_update"),
+    )
+    assert update_resp.status_code == 200
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    unmat_update = next(e for e in events if e["resource_id"] == doc_id and e["action"] == "update")
+    assert unmat_update["details"]["action_type"] == "update"
+    assert unmat_update["details"]["target_file"] == doc_id
