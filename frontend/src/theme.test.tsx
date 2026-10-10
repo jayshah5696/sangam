@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   baseThemeColors,
   contrastRatio,
+  deriveThemeColors,
   themeContrastChecks,
   themeIds,
+  themeModeOf,
   themeMode,
   themes,
   ThemeProvider,
@@ -209,5 +211,20 @@ describe('theme palettes', () => {
       themeMode({ theme: 'custom:x', customThemes: [{ id: 'x', name: 'X', base: 'plum-dark', colors: {} }] }),
     ).toBe('dark')
     expect(themeMode({ theme: 'river', customThemes: [] })).toBe('light')
+  })
+
+  it('derives a readable palette from only a background and an accent', () => {
+    for (const [background, accent] of [
+      ['#0b0c12', '#5b59dc'],
+      ['#f6f2e6', '#e8c15a'],
+      ['#1f2937', '#22d3ee'],
+      ['#ffffff', '#ff8800'],
+    ] as const) {
+      const { base, colors } = deriveThemeColors(background, accent)
+      expect(base).toBe(themeModeOf(background) === 'dark' ? 'midnight' : 'river')
+      for (const check of themeContrastChecks(colors)) {
+        expect(check.ratio, `${background}/${accent}: ${check.label}`).toBeGreaterThanOrEqual(check.minimum)
+      }
+    }
   })
 })

@@ -90,24 +90,26 @@ test('create theme builds, applies, persists, imports, and deletes', async ({ pa
 
   await builder.getByRole('button', { name: 'New theme' }).click()
   await builder.getByLabel('Theme name').fill('Sunset')
-  await builder.getByLabel('Base palette').selectOption('cobalt')
+  // Two picks: a dark background and an accent. The theme becomes dark and keeps readable contrast.
+  await builder.getByLabel('Background').fill('#1f2937')
   await builder.getByLabel('Accent', { exact: true }).fill('#ff8800')
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight')
   await expect
-    .poll(() => page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent')))
-    .toBe('#ff8800')
+    .poll(() => page.locator('html').evaluate((element) => element.style.getPropertyValue('--app-bg')))
+    .toBe('#1f2937')
+  await expect(page.getByText('Contrast: all readability checks pass')).toBeVisible()
 
   await page.reload()
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
-  expect(await page.locator('html').evaluate((element) => element.style.getPropertyValue('--accent'))).toBe(
-    '#ff8800',
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight')
+  expect(await page.locator('html').evaluate((element) => element.style.getPropertyValue('--app-bg'))).toBe(
+    '#1f2937',
   )
   await expect(page.locator('.theme-card', { hasText: 'Sunset' })).toBeVisible()
 
-  await builder.getByRole('button', { name: 'Edit', exact: true }).first().click()
+  await builder.getByRole('button', { name: 'Edit Sunset' }).click()
   await builder.getByRole('button', { name: 'Export JSON' }).click()
   await builder.getByRole('button', { name: 'Delete' }).click()
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight')
 
   await builder.getByText('Import theme JSON').click()
   await builder.getByLabel('Theme JSON').fill(

@@ -65,17 +65,21 @@ Add a palette with a `data-theme` block in `tokens.css`, entries in `themeIds`,
 
 ### Create theme
 
-Settings > Appearance > Create theme is a theme studio: start a theme from one
-of the built-in base palettes, edit its color roles (app background, surface,
-raised surface, text, muted text, sidebar, sidebar text, accent) with live
-preview on the real workspace, then keep editing or export it as JSON for
-sharing. Import theme JSON recreates a shared theme. Custom themes are stored
-in the workspace preferences as `customThemes` and applied before first paint:
-`data-theme` is set to the theme's base palette while each overridden color
-role is injected as an inline custom property on `<html>`, with
-`--accent-soft` and a luminance-derived `--accent-text` derived from the
-accent. Custom themes appear as cards in the Theme grid and are
-browser-scoped like the rest of Appearance.
+Settings > Appearance > Create theme asks for two colors: a background and an
+accent. `deriveThemeColors` builds the rest. The background decides dark or
+light. Surfaces, text, muted text, sidebar, and sidebar text follow from it. The
+accent and muted text move just far enough to reach the contrast rules. A new
+theme starts from the theme in use, and the whole workspace previews it live.
+"Fine-tune other colors" exposes the derived roles for manual edits; picking a
+background or accent again regenerates them. Themes export and import as JSON.
+
+Custom themes are stored in the workspace preferences as `customThemes` and
+applied before first paint: `data-theme` is set to the base palette (`midnight`
+for dark, `river` for light) while each color role is injected as an inline
+custom property on `<html>`, with `--accent-soft` and a luminance-derived
+`--accent-text` derived from the accent. Custom themes appear as cards in the
+Theme grid under their Dark or Light switch and are browser-scoped like the rest
+of Appearance.
 
 ## Dimensions
 

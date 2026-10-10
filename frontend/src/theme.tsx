@@ -362,6 +362,67 @@ export function contrastRatio(foreground: string, background: string): number | 
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
 }
 
+function toHex([r, g, b]: [number, number, number]): string {
+  return `#${[r, g, b]
+    .map((v) =>
+      Math.round(Math.min(255, Math.max(0, v)))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`
+}
+
+function mixHex(from: string, to: string, amount: number): string {
+  const a = parseRgb(from) ?? [0, 0, 0]
+  const b = parseRgb(to) ?? [0, 0, 0]
+  return toHex([a[0] + (b[0] - a[0]) * amount, a[1] + (b[1] - a[1]) * amount, a[2] + (b[2] - a[2]) * amount])
+}
+
+/** Moves `color` toward `target` until it reaches `minimum` contrast on `background`. */
+function reachContrast(color: string, background: string, target: string, minimum: number): string {
+  let next = color
+  for (let step = 0; step < 25; step += 1) {
+    if ((contrastRatio(next, background) ?? 0) >= minimum) return next
+    next = mixHex(next, target, 0.06)
+  }
+  return target
+}
+
+export function themeModeOf(background: string): ThemeMode {
+  const rgb = parseRgb(background)
+  return rgb && relativeLuminance(rgb) < 0.2 ? 'dark' : 'light'
+}
+
+/**
+ * Builds a full palette from two picks. The background decides dark or light.
+ * Text, muted text, and the accent are moved just far enough to stay readable.
+ */
+export type DerivedTheme = { base: ThemeId; colors: ResolvedThemeColors }
+
+export function deriveThemeColors(background: string, accent: string): DerivedTheme {
+  const mode = themeModeOf(background)
+  const dark = mode === 'dark'
+  const surface = dark ? mixHex(background, '#ffffff', 0.05) : mixHex(background, '#ffffff', 0.65)
+  const surfaceSoft = dark ? mixHex(background, '#ffffff', 0.1) : mixHex(background, '#000000', 0.05)
+  const text = dark ? mixHex('#f7f8f8', background, 0.04) : mixHex('#15181c', background, 0.06)
+  const toward = dark ? '#ffffff' : '#000000'
+  const sidebar = dark ? mixHex(background, '#000000', 0.3) : mixHex('#101418', accent, 0.18)
+  return {
+    base: dark ? 'midnight' : 'river',
+    colors: {
+      appBg: background,
+      surface,
+      surfaceSoft,
+      text,
+      muted: reachContrast(mixHex(text, background, 0.45), surfaceSoft, text, 4.5),
+      line: dark ? 'rgba(255, 255, 255, 0.09)' : mixHex(background, '#000000', 0.14),
+      sidebar,
+      sidebarText: mixHex('#f7f8f8', sidebar, 0.04),
+      accent: reachContrast(accent, surface, toward, 4.5),
+    },
+  }
+}
+
 export type ContrastCheck = {
   id: string
   label: string
