@@ -7,6 +7,19 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.6] - 2026-10-09
+
+### Added
+
+- Twelve built-in themes: dark and light variants of Indigo Ink, Moss, Ember, Lagoon, Plum, and Brass, for 16 themes in total. Every new palette meets WCAG contrast minimums (4.5:1 for text, 3:1 for the accent) (#443).
+- Theme contrast check: a collapsed readability summary under the theme picker lists the WCAG ratios for the active theme.
+
+### Changed
+
+- Theme picker: a Dark/Light switch and compact preview cards replace the four large cards. Switching between Dark and Light also swaps the active theme to its other variant.
+- Create theme: pick a background and an accent, and Sangam derives the remaining colors and keeps them readable. A new theme starts from the theme in use. Other color roles sit under "Fine-tune other colors" (#443).
+- Code blocks, diffs, and PDF highlights now follow the real theme brightness, including custom themes, instead of treating only Midnight as dark.
+
 ## [0.13.5] - 2026-10-08
 
 ### Added
