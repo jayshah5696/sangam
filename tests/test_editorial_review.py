@@ -1,4 +1,3 @@
-import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
@@ -6,7 +5,7 @@ from threading import Event
 import pytest
 from agents.tool_context import ToolContext
 from chatkit.agents import AgentContext
-from conftest import headers, issue_agent_token
+from conftest import headers, issue_agent_token, run_in_app
 from fastapi.testclient import TestClient
 from test_phase_five_pdf_research import import_pdf, text_pdf
 from test_phase_seven_chat import create_test_run, create_thread
@@ -572,7 +571,7 @@ def test_a_revoked_run_cannot_retrieve_or_record_new_source_content(client, edit
         client, principal, thread_id=thread_id, document_id=document["document_id"]
     )
     context = ChatRequestContext(principal=principal, run_id=run_id)
-    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, context))
+    thread = run_in_app(client, chat.store_adapter.load_thread(thread_id, context))
     agent = AgentContext(thread=thread, store=chat.store_adapter, request_context=context)
     tool = next(tool for tool in chat.tools if tool.name == "read_document")
     arguments = json.dumps({"document_id": document["document_id"]})
@@ -580,7 +579,7 @@ def test_a_revoked_run_cannot_retrieve_or_record_new_source_content(client, edit
         context=agent, tool_name=tool.name, tool_call_id="revoked-read", tool_arguments=arguments
     )
     client.app.state.services.identity.revoke_token(principal.token_id)
-    payload = json.loads(asyncio.run(tool.on_invoke_tool(tool_context, arguments)))
+    payload = json.loads(run_in_app(client, tool.on_invoke_tool(tool_context, arguments)))
     assert payload["error"]["code"] == "authentication_required"
     assert "original" not in json.dumps(payload)
     assert chat.evidence.list_run_sources(run_id) == []

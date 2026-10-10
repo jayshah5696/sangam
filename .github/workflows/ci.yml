@@ -13,9 +13,39 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The independent jobs below run in parallel. The "Source, UI, and docs" job is the single
+# required check for them: it keeps the branch-protection name stable while the work is split.
 jobs:
-  source:
-    name: Source, UI, and docs
+  python:
+    name: Python lint, types, and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+          enable-cache: true
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+        with:
+          just-version: "1.40.0"
+      - run: uv sync --frozen
+      - name: Lint, types, API contract, and parallel tests
+        run: just test-python
+      - name: Backup restore drill
+        run: just verify-restore-drill
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification-evidence
+          path: |
+            artifacts/restore-drill/**
+            artifacts/verify-sangam/**
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend, docs, and distribution config
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -39,23 +69,97 @@ jobs:
           just-version: "1.40.0"
       - run: uv sync --frozen
       - run: pnpm --dir frontend install --frozen-lockfile
-      - name: Canonical source, frontend, docs, and release gates
-        run: just check
-      - name: Backup restore drill
-        run: just verify-restore-drill
-      - name: Upload verification evidence
-        if: always()
+      - name: Format, build, lint, and unit tests
+        run: just test-frontend
+      - name: Documentation gates
+        run: just test-docs
+      - name: Settings, version, and dependency audit gates
+        run: just check-distribution
+
+  e2e:
+    name: Browser tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: desktop
+            engines: chromium
+            projects: --project=chromium-desktop
+          - name: narrow
+            engines: chromium
+            projects: --project=chromium-narrow
+          - name: touch mobile
+            engines: chromium
+            projects: --project=chromium-touch-mobile
+          - name: webkit mobile
+            engines: webkit
+            projects: >-
+              --project=webkit-mobile-evidence
+              --project=webkit-mobile-pdf
+              --project=webkit-mobile-projects
+              --project=webkit-mobile-editorial
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+          enable-cache: true
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: frontend/package.json
+          run_install: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+          package-manager-cache: false
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+        with:
+          just-version: "1.40.0"
+      - run: uv sync --frozen
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Resolve the Playwright version
+        id: playwright
+        run: echo "version=$(pnpm --dir frontend exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache browser downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ matrix.engines }}
+      - run: just install-browsers "${{ matrix.engines }}"
+      - name: Browser tests
+        run: just test-e2e "${{ matrix.projects }}"
+      - name: Upload Playwright failure evidence
+        if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: verification-evidence
+          name: playwright-failure-${{ strategy.job-index }}
           path: |
-            artifacts/restore-drill/**
-            artifacts/verify-sangam/**
+            frontend/playwright-report/**
+            frontend/test-results/**
           if-no-files-found: ignore
-      - name: Desktop and narrow browser gates
+          retention-days: 7
+
+  source:
+    name: Source, UI, and docs
+    needs: [python, frontend, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every source, UI, and browser job to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          just install-browsers
-          just test-e2e
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "A required job finished as '$result'." >&2
+              exit 1
+            fi
+          done
 
   artifacts:
     name: Wheel and sdist clean install

@@ -76,23 +76,25 @@ test-e2e-webkit-local args="":
     for library in "$root"/*.so.[0-9]*; do LD_PRELOAD="$LD_PRELOAD:$library"; done
     just test-e2e '{{ args }}'
 
-# Run the complete fast local verification suite.
-test:
+# Run the Python lint, format, type, API-contract, and test gates. Tests run in parallel.
+test-python:
     uv run ruff check .
     uv run ruff format --check .
-    pnpm --dir frontend run format:check
     just typecheck
     uv run python scripts/verify_openapi_contract.py
-    uv run pytest
-    pnpm --dir frontend run build
-    pnpm --dir frontend run lint
-    pnpm --dir frontend run test
+    uv run pytest -n auto
 
-# Run source, documentation, version, configuration, and distribution gates.
-check: test test-docs validate-compose
+# Run the complete fast local verification suite.
+test: test-python test-frontend
+
+# Verify settings inventories, version propagation, and dependency audits. Needs a built frontend.
+check-distribution:
     uv run python scripts/verify-release-config.py
     uv run python scripts/verify-version.py --frontend-dist
     ./scripts/audit-dependencies.sh
+
+# Run source, documentation, version, configuration, and distribution gates.
+check: test test-docs validate-compose check-distribution
     ./scripts/smoke-package.sh
 
 # Run only the Python service and API tests.
@@ -189,9 +191,9 @@ test-frontend-unit args="":
 test-e2e args="":
     pnpm --dir frontend run test:e2e {{ args }}
 
-# Install the browser engines used by the Playwright suite.
-install-browsers:
-    pnpm --dir frontend exec playwright install --with-deps chromium webkit
+# Install the browser engines used by the Playwright suite, or only the named engines.
+install-browsers browsers="chromium webkit":
+    pnpm --dir frontend exec playwright install --with-deps {{ browsers }}
 
 # Run empirical verification, performance benchmark, and chat agent evals across isolated Sangam services.
 verify-behavior port="8765" count="25" eval_limit="3":
