@@ -325,7 +325,11 @@ class ChatProfileService:
         return MemoryPage(entries=entries, has_more=len(rows) > request.limit)
 
     def search_memory(
-        self, principal: Principal, request: MemorySearch, context_id: str | None = None
+        self,
+        principal: Principal,
+        request: MemorySearch,
+        context_id: str | None = None,
+        max_bytes: int = 32000,
     ) -> MemoryPage:
         with self.database.transaction() as conn:
             if context_id:
@@ -335,6 +339,10 @@ class ChatProfileService:
                 if owner is None or owner["actor_id"] != principal.actor_id:
                     raise AuthorizationError("That memory turn belongs to another actor")
             page = self.list_memory(principal, request, active_only=True)
+            if len(page.model_dump_json().encode()) > max_bytes:
+                raise ValidationError(
+                    "Saved facts exceed the result budget; reduce the search limit"
+                )
             if context_id:
                 read_ids = {
                     (row["scope"], row["memory_id"])

@@ -577,12 +577,21 @@ class ChatToolset:
 
         def operation(principal: Principal) -> dict[str, Any]:
             selected = self.profiles.resolve(context).project_id
+            budget = (
+                min(self.max_result_bytes, self.policies["search_chat_memory"].max_result_bytes)
+                - 1000
+            )
             if project_id is not None and project_id != selected:
                 raise ValidationError("Memory recall requires the explicitly selected project")
             if not query.strip():
-                return self.profiles.list_memory(principal, request).model_dump(mode="json")
+                page = self.profiles.list_memory(principal, request)
+                if len(page.model_dump_json().encode()) > budget:
+                    raise ValidationError(
+                        "Saved facts exceed the result budget; reduce the list limit"
+                    )
+                return page.model_dump(mode="json")
             return self.profiles.search_memory(
-                principal, request, context.context_snapshot_id
+                principal, request, context.context_snapshot_id, budget
             ).model_dump(mode="json")
 
         return await self._run_tool(
