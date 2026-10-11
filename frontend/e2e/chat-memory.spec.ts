@@ -59,7 +59,7 @@ test('chat context stays compact and closing preserves drafts until explicit dis
       const closeBounds = await page.getByRole('button', { name: 'Close chat context' }).boundingBox()
       expect(closeBounds?.height).toBeGreaterThanOrEqual(44)
     }
-    for (const width of [320, 767, 769, 844]) {
+    for (const width of [320, 599, 601, 767, 769, 844, 899, 901]) {
       await page.setViewportSize({ width, height: width === 844 ? 390 : 844 })
       await expect
         .poll(async () => {
@@ -74,9 +74,16 @@ test('chat context stays compact and closing preserves drafts until explicit dis
         })
         .toBe(true)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+      await page.keyboard.press('Escape')
+      // Short landscape can require scrolling past status notices; the complete
+      // chat frame must remain reachable rather than being clipped by its host.
+      if (width === 844) await page.locator('.chatkit-frame').scrollIntoViewIfNeeded()
+      await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 1 })
+      await trigger.click()
     }
     await page.screenshot({ path: test.info().outputPath('chat-context-editor.png') })
     await page.keyboard.press('Escape')
+    await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 1 })
     await page.screenshot({ path: test.info().outputPath('chat-context-closed.png') })
   } finally {
     for (const index of [0, 1, 2]) {

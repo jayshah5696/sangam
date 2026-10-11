@@ -434,6 +434,7 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .load-more-history-btn { width: 100%; justify-content: center; }
 @media (pointer: coarse), (max-width: 768px) {
   .chat-instructions summary,
+  .chat-instructions button,
   .chat-context-controls button,
   .chat-effect-tray-disclosure,
   .secondary-action.chat-effect-clear-btn,
@@ -529,8 +530,8 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .workspace-chat-surface { min-height: 0; display: flex; overflow: hidden; padding: var(--space-3); }
 .workspace-chat-surface > .ui-state { width: min(40rem, calc(100% - var(--space-5))); margin: auto; }
 .workspace-chat-surface .chat-panel { width: min(72rem, 100%); margin: 0 auto; overflow-y: auto; }
-.workspace-chat-surface .chatkit-shell { min-height: 32rem; }
-.workspace-chat-surface .chatkit-frame { min-height: 32rem; flex-basis: 32rem; }
+.workspace-chat-surface .chat-panel > .chatkit-shell { min-height: min(32rem, 40dvh); flex: 1 1 0; height: auto; }
+.workspace-chat-surface .chatkit-frame { min-height: 0; flex: 1 1 0; height: auto; }
 .publication-filters { display: grid; grid-template-columns: minmax(14rem, 1fr) repeat(2, minmax(9rem, 12rem)); gap: var(--space-2); margin: var(--space-4) 0; }
 .publication-filters > label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); padding: 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--muted); }
 .publication-filters input { min-width: 0; flex: 1; border: 0; background: transparent; color: var(--text); outline: 0; }
@@ -939,8 +940,6 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   }
   .workspace-chat-surface .chat-panel { width: 100%; }
   .workspace-chat-surface .chat-context-banner { border-radius: 0; border-inline: 0; }
-  .workspace-chat-surface .chatkit-shell { min-height: 0; flex: 1; height: 100%; }
-  .workspace-chat-surface .chatkit-frame { min-height: 0; flex-basis: auto; height: 100%; }
   .workspace-chat-surface .chatkit-frame, .workspace-chat-surface .chatkit-state-overlay { border-radius: 0; border-inline: 0; border-bottom: 0; }
   .document-header { flex-direction: column; gap: var(--space-2); }
   .document-title-input { width: 100%; min-width: 0; }
