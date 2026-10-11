@@ -76,6 +76,57 @@ def test_uploaded_image_is_stored_in_attachments_and_readable(
     assert served.headers["x-content-type-options"] == "nosniff"
 
 
+def test_relative_asset_reads_enforce_agent_path_scopes(
+    client: TestClient, settings: Settings
+) -> None:
+    secret_dir = settings.workspace_root / "private"
+    secret_dir.mkdir(parents=True, exist_ok=True)
+    (secret_dir / "secret.png").write_bytes(PNG)
+
+    root_doc = create(client, "asset-root-doc", path="public_root.md")
+    public_dir = settings.workspace_root / "public"
+    public_dir.mkdir(parents=True, exist_ok=True)
+    (public_dir / "diagram.png").write_bytes(PNG)
+    public_doc = create(client, "asset-public-doc", path="public/item.md")
+
+    scoped_token = issue_agent_token(
+        client,
+        actor_id="agent:scoped-asset-reader",
+        capabilities=("read",),
+        path_prefix="public",
+    )
+    auth = {"Authorization": f"Bearer {scoped_token}"}
+
+    denied_root_access = client.get(
+        f"/api/v1/documents/{root_doc['document_id']}/assets",
+        params={"path": "private/secret.png"},
+        headers=auth,
+    )
+    assert denied_root_access.status_code == 403
+
+    denied_sub_access = client.get(
+        f"/api/v1/documents/{public_doc['document_id']}/assets",
+        params={"path": "private/secret.png"},
+        headers=auth,
+    )
+    assert denied_sub_access.status_code in {403, 404}
+
+    allowed_sub_access = client.get(
+        f"/api/v1/documents/{public_doc['document_id']}/assets",
+        params={"path": "diagram.png"},
+        headers=auth,
+    )
+    assert allowed_sub_access.status_code == 200
+    assert allowed_sub_access.content == PNG
+
+    human_access = client.get(
+        f"/api/v1/documents/{root_doc['document_id']}/assets",
+        params={"path": "private/secret.png"},
+    )
+    assert human_access.status_code == 200
+    assert human_access.content == PNG
+
+
 def test_pathless_drafts_can_add_images(client: TestClient) -> None:
     draft = create(client, "asset-draft", path=None)
     response = upload(client, draft["document_id"])
