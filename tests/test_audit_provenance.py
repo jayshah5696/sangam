@@ -1007,3 +1007,19 @@ def test_chronicle_database_connection_string_sanitization() -> None:
     assert "CONN_STR=[REDACTED]" in sanitized
     assert "DSN=[REDACTED]" in sanitized
     assert "CONNECTION_STRING=[REDACTED]" in sanitized
+def test_chronicle_additional_secret_key_terms_sanitization() -> None:
+    """Verify newly added secret key terms are sanitized by sanitize_sensitive_data."""
+    payload = {
+        "app_secret": "my_app_secret_val",
+        "webhook_secret": "my_webhook_secret_val",
+        "deploy_key": "my_deploy_key_val",
+        "ssh_key": "my_ssh_key_val",
+        "safe_key": "safe_val",
+    }
+    sanitized = sanitize_sensitive_data(payload)
+    assert isinstance(sanitized, dict)
+    assert sanitized["app_secret"] == "[REDACTED]"
+    assert sanitized["webhook_secret"] == "[REDACTED]"
+    assert sanitized["deploy_key"] == "[REDACTED]"
+    assert sanitized["ssh_key"] == "[REDACTED]"
+    assert sanitized["safe_key"] == "safe_val"
