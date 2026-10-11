@@ -48,6 +48,7 @@ def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() 
             "create_document",
             "apply_workspace_organization_plan",
             "publish_document",
+            "update_chat_profile",
             "update_project",
             "update_publication",
             "annotate_pdf",
@@ -120,9 +121,10 @@ def test_workspace_chat_does_not_inherit_a_thread_document_context(client: TestC
         else thread.metadata.get("document_id")
     )
     assert document_id is None
-    assert run_in_app(client, chat.app_context(context, "thread-1")) == (
-        "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
-    )
+    prompt = run_in_app(client, chat.app_context(context, "thread-1"))
+    assert "No current document is open." in prompt
+    assert "doc-from-thread" not in prompt
+    assert '"project_id":null' in prompt
 
 
 def test_document_chat_persists_the_requested_pinned_revision(client: TestClient) -> None:
@@ -295,6 +297,8 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "apply_workspace_organization_plan",
         "read_revision_history",
         "inspect_projects",
+        "inspect_chat_profile",
+        "update_chat_profile",
         "update_project",
         "update_publication",
         "annotate_pdf",

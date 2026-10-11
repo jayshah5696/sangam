@@ -37,6 +37,7 @@ import {
 import { useChatKitScript } from './useChatKitScript'
 import { ChatEffectTray, DurableEffectStatus } from './ChatEffectTray'
 import { ChatEffectConfirmation } from './ChatEffectConfirmation'
+import { ChatInstructions } from './ChatInstructions'
 import {
   organizationOperationDetail,
   organizationOperationTitle,
@@ -92,6 +93,7 @@ export function ChatPanel({
     () => initialThreadId ?? localStorage.getItem(threadStorageKey),
   )
   const [chatEpoch, setChatEpoch] = useState(0)
+  const [instructionsOverride, setInstructionsOverride] = useState('')
   // One review is pending at a time: the card for the effect the model is waiting on.
   const [review, setReview] = useState<PendingReview | null>(null)
   const [decisionError, setDecisionError] = useState(false)
@@ -228,9 +230,13 @@ export function ChatPanel({
   )
   const refreshProposals = useCallback(
     () =>
-      queryClient.invalidateQueries({
-        queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
-      }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['chat-profile'] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-profile-applied', threadId] }),
+        queryClient.invalidateQueries({
+          queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
+        }),
+      ]),
     [activeDocument?.document_id, queryClient, threadId],
   )
   const showPendingEffect = useCallback((effect: ChatEffect) => {
@@ -310,6 +316,8 @@ export function ChatPanel({
     pdfPageNumber: pdfPageNumber ?? null,
     annotationId: annotationId ?? null,
     projectId: projectId ?? null,
+    instructionsOverride,
+    clearInstructionsOverride: () => setInstructionsOverride(''),
     selectedText: activeSelectedText,
     refreshProposals,
     navigate,
@@ -322,6 +330,8 @@ export function ChatPanel({
       pdfPageNumber: pdfPageNumber ?? null,
       annotationId: annotationId ?? null,
       projectId: projectId ?? null,
+      instructionsOverride,
+      clearInstructionsOverride: () => setInstructionsOverride(''),
       selectedText: activeSelectedText,
       refreshProposals,
       navigate,
@@ -533,6 +543,12 @@ export function ChatPanel({
 
   return (
     <div className={`chat-panel ${compact ? 'chat-panel-compact' : ''}`}>
+      <ChatInstructions
+        projectId={projectId}
+        threadId={threadId}
+        override={instructionsOverride}
+        onOverrideChange={setInstructionsOverride}
+      />
       {initialPrompt && (
         <StateMessage
           compact
@@ -1285,6 +1301,8 @@ type LiveChatContext = {
   pdfPageNumber: number | null
   annotationId: string | null
   projectId: string | null
+  instructionsOverride: string
+  clearInstructionsOverride: () => void
   selectedText: string
   refreshProposals: () => void
   navigate: ReturnType<typeof useNavigate>
@@ -1432,6 +1450,8 @@ function WorkspaceChatSurface({
           pdf_page_number: liveRef.current.pdfPageNumber,
           annotation_id: liveRef.current.annotationId,
           selected_text: liveRef.current.selectedText.slice(0, SELECTION_LIMIT),
+          project_id: liveRef.current.projectId,
+          instructions_override: liveRef.current.instructionsOverride,
         })
         headers.set('X-Sangam-Context-ID', snapshot.context_id)
       } else {
@@ -1444,7 +1464,9 @@ function WorkspaceChatSurface({
         if (init?.signal?.aborted) controller.abort()
         else init?.signal?.addEventListener('abort', () => controller.abort(), { once: true })
       }
-      return fetch(input, { ...init, headers, signal: controller?.signal ?? init?.signal })
+      const response = await fetch(input, { ...init, headers, signal: controller?.signal ?? init?.signal })
+      if (startsTurn && response.ok) liveRef.current.clearInstructionsOverride()
+      return response
     },
     [liveRef],
   )

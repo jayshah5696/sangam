@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+from uuid import uuid4
 
 from chatkit.server import NonStreamingResult, StreamingResult
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from sangam.access import writes
 from sangam.chat import ChatRequestContext, SangamChatServer
+from sangam.chat_profiles import ProfileContext, ProfileEntry, UpdateProfile
 from sangam.chat_runtime import ChatAdmissionLease, read_limited_body
 from sangam.errors import ServiceUnavailableError, ValidationError
 from sangam.schemas import (
@@ -47,6 +49,26 @@ def create_chat_router(
     router = APIRouter(prefix="/api/v1", tags=["chat"])
     principal_dependency = Depends(resolve_principal)
     admin_dependency = Depends(require_administrator)
+
+    @router.get("/chat/profile", response_model=ProfileContext)
+    def get_profile(
+        project_id: str | None = Query(default=None, min_length=1, max_length=200),
+        thread_id: str | None = Query(default=None, min_length=1, max_length=200),
+        principal: Principal = principal_dependency,
+    ) -> ProfileContext:
+        if thread_id:
+            chat.proposals.repository.require_thread_owner(thread_id, principal)
+            applied = chat.profiles.latest(principal, thread_id)
+            return applied if applied is not None else ProfileContext(entries=[])
+        return chat.profiles.resolve(ChatRequestContext(principal=principal, project_id=project_id))
+
+    @router.put("/chat/profile", response_model=ProfileEntry)
+    def update_profile(
+        body: UpdateProfile,
+        key: str | None = Header(default=None, alias="Idempotency-Key"),
+        principal: Principal = admin_dependency,
+    ) -> ProfileEntry:
+        return chat.profiles.update(principal, key or str(uuid4()), body)
 
     @router.get("/chat/config", response_model=ChatRuntimeConfig)
     def runtime_config(
@@ -157,8 +179,14 @@ def create_chat_router(
         context_id: str | None = Header(default=None, alias="X-Sangam-Context-ID"),
         entry_point: str = Header(default="workspace", alias="X-Sangam-Chat-Entry"),
         project_id: str | None = Header(default=None, alias="X-Sangam-Project-ID", max_length=200),
+        instructions_override: str | None = Header(
+            default=None, alias="X-Sangam-Instructions-Override", max_length=12000
+        ),
         principal: Principal = principal_dependency,
     ) -> Response:
+        decoded_override = unquote(instructions_override) if instructions_override else None
+        if decoded_override and len(decoded_override) > 2000:
+            raise ValidationError("Next-turn instructions must be at most 2000 characters")
         try:
             lease = await chat.admission.acquire()
         except ServiceUnavailableError as error:
@@ -178,6 +206,7 @@ def create_chat_router(
                     workspace_context=workspace_context == "1",
                     context_snapshot_id=context_id,
                     project_id=project_id,
+                    instructions_override=decoded_override,
                     entry_point="document" if entry_point == "document" else "workspace",
                 ),
             )
@@ -213,6 +242,15 @@ def create_chat_router(
             selected_text=body.selected_text,
             pdf_page_number=body.pdf_page_number,
             annotation_id=body.annotation_id,
+        )
+        chat.profiles.resolve(
+            ChatRequestContext(
+                principal=principal,
+                document_id=body.document_id,
+                project_id=body.project_id,
+                instructions_override=body.instructions_override,
+                context_snapshot_id=context.context_id,
+            )
         )
         return ChatTurnContext(
             context_id=context.context_id,

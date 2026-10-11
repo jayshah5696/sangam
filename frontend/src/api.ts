@@ -1,5 +1,22 @@
 import { z } from 'zod'
 
+export const chatProfileEntrySchema = z.object({
+  project_id: z.string().nullable(),
+  content: z.string().max(4000),
+  version: z.number().int().nonnegative(),
+})
+export const chatProfileUpdateSchema = z.object({
+  project_id: z.string().nullable(),
+  content: z.string().max(4000),
+  expected_version: z.number().int().nonnegative(),
+})
+export const chatProfileContextSchema = z.object({
+  entries: z.array(chatProfileEntrySchema).max(2),
+  project_id: z.string().nullable(),
+  instructions_override: z.string().max(2000),
+})
+export type ChatProfileEntry = z.infer<typeof chatProfileEntrySchema>
+
 export const searchMatchSchema = z.object({
   source: z.enum(['content', 'pdf_page', 'annotation', 'title', 'path', 'metadata']),
   snippet: z.string(),
@@ -920,6 +937,7 @@ export const chatEffectSchema = z.object({
     'publish_document',
     'apply_workspace_organization_plan',
     'update_project',
+    'update_chat_profile',
     'update_publication',
     'annotate_pdf',
   ]),
@@ -1223,6 +1241,20 @@ export async function collectPages<T>(
 }
 
 export const api = {
+  async chatProfile(projectId?: string, threadId?: string) {
+    const params = new URLSearchParams()
+    if (projectId) params.set('project_id', projectId)
+    if (threadId) params.set('thread_id', threadId)
+    return chatProfileContextSchema.parse(await request(`/chat/profile?${params}`))
+  },
+  async saveChatProfile(entry: ChatProfileEntry, content: string) {
+    return chatProfileEntrySchema.parse(
+      await request('/chat/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ project_id: entry.project_id, expected_version: entry.version, content }),
+      }),
+    )
+  },
   async listAssignments(projectId: string) {
     return z.array(assignmentSchema).parse(await request(`/projects/${projectId}/assignments`))
   },
@@ -1386,6 +1418,8 @@ export const api = {
     pdf_page_number?: number | null
     annotation_id?: string | null
     selected_text: string
+    project_id?: string | null
+    instructions_override?: string
   }): Promise<z.infer<typeof chatTurnContextSchema>> {
     return chatTurnContextSchema.parse(
       await request('/chat/contexts', { method: 'POST', body: JSON.stringify(input) }),

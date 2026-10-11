@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ChatEffect, OrganizationOperation } from './api'
+import { chatProfileUpdateSchema, type ChatEffect, type OrganizationOperation } from './api'
 
 /** The IDs people read in review cards: enough to recognise, short enough to scan. */
 export function shortId(value: string): string {
@@ -236,6 +236,17 @@ const annotationTypeLabel = {
  * caller can refuse to show an approval it cannot describe.
  */
 export function describeEffectReview(effect: ChatEffect): EffectReview | null {
+  if (effect.capability_id === 'update_chat_profile') {
+    const parsed = chatProfileUpdateSchema.safeParse(effect.preview)
+    return parsed.success
+      ? {
+          eyebrow: 'Saved instructions',
+          title: parsed.data.project_id ? 'Change project instructions?' : 'Change personal instructions?',
+          detail: `${parsed.data.project_id ?? 'Personal profile'} · version ${parsed.data.expected_version}`,
+          approveLabel: 'Approve instruction change',
+        }
+      : null
+  }
   if (effect.capability_id === 'update_project') {
     const change = parseProjectChange(effect.preview)
     return change

@@ -20,6 +20,7 @@ from sangam.chat_capabilities import (
     ChatCapability,
     ChatCapabilityRegistry,
     CreateDocumentInput,
+    InspectProfileInput,
     InspectProjectsInput,
     InspectWorkspaceOrganizationInput,
     ProjectChange,
@@ -34,9 +35,10 @@ from sangam.chat_capabilities import (
     UpdatePublicationInput,
     WorkspaceSearchInput,
 )
-from sangam.chat_context import ToolContext
+from sangam.chat_context import ChatRequestContext, ToolContext
 from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
+from sangam.chat_profiles import UpdateProfile
 from sangam.chat_proposals import ChatProposalService
 from sangam.chat_runtime import BoundedChatAdmission
 from sangam.errors import NotFoundError, SangamError, ValidationError
@@ -69,11 +71,25 @@ class ChatToolset:
         self.runtime = runtime
         self.identity = identity
         self.projects = projects
+        self.profiles = effects.profiles
         self.max_result_bytes = max_result_bytes
         self.policies = registry.by_id
 
     def as_agent_tools(self, capabilities: tuple[ChatCapability, ...] | None = None) -> list[Any]:
         tools = [
+            function_tool(
+                self.inspect_chat_profile,
+                description_override=(
+                    "Read personal or explicitly selected project instructions and their version."
+                ),
+            ),
+            function_tool(
+                self.update_chat_profile,
+                description_override=(
+                    "Save or clear the complete personal/project instructions "
+                    "after inspecting their version. Use project_id=null for personal preferences."
+                ),
+            ),
             function_tool(
                 self.get_editor_selection,
                 description_override="Read selected text from the active Sangam editor.",
@@ -508,6 +524,30 @@ class ChatToolset:
 
         return await self._run_tool(
             ctx, self.policies["read_revision_history"], validated.document_id, operation
+        )
+
+    async def inspect_chat_profile(self, ctx: ToolContext, project_id: str | None = None) -> str:
+        validated = InspectProfileInput(project_id=project_id)
+        return await self._run_tool(
+            ctx,
+            self.policies["inspect_chat_profile"],
+            validated.project_id or "user",
+            lambda principal: self.profiles.resolve(
+                ChatRequestContext(principal=principal, project_id=validated.project_id)
+            ).model_dump(mode="json"),
+        )
+
+    async def update_chat_profile(
+        self, ctx: ToolContext, content: str, expected_version: int, project_id: str | None = None
+    ) -> str | None:
+        arguments = UpdateProfile(
+            content=content, expected_version=expected_version, project_id=project_id
+        ).model_dump(mode="json")
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["update_chat_profile"],
+            arguments=arguments,
+            preview=arguments,
         )
 
     async def inspect_projects(self, ctx: ToolContext, project_id: str | None = None) -> str:
