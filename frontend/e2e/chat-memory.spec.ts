@@ -78,12 +78,13 @@ test('chat context stays compact and closing preserves drafts until explicit dis
       // Short landscape can require scrolling past status notices; the complete
       // chat frame must remain reachable rather than being clipped by its host.
       if (width === 844) await page.locator('.chatkit-frame').scrollIntoViewIfNeeded()
-      await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 1 })
+      // WebKit rounds intersection geometry at fractional device pixels.
+      await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 0.999 })
       await trigger.click()
     }
     await page.screenshot({ path: test.info().outputPath('chat-context-editor.png') })
     await page.keyboard.press('Escape')
-    await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 1 })
+    await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 0.999 })
     await page.screenshot({ path: test.info().outputPath('chat-context-closed.png') })
   } finally {
     for (const index of [0, 1, 2]) {
