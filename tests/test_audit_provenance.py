@@ -908,3 +908,21 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
     assert "my_db_password" not in sanitized
     assert "my_tls_key" not in sanitized
     assert "client_secret_data" not in sanitized
+
+
+def test_chronicle_additional_secret_key_terms_sanitization() -> None:
+    """Verify newly added secret key terms are sanitized by sanitize_sensitive_data."""
+    payload = {
+        "app_secret": "my_app_secret_val",
+        "webhook_secret": "my_webhook_secret_val",
+        "deploy_key": "my_deploy_key_val",
+        "ssh_key": "my_ssh_key_val",
+        "safe_key": "safe_val",
+    }
+    sanitized = sanitize_sensitive_data(payload)
+    assert isinstance(sanitized, dict)
+    assert sanitized["app_secret"] == "[REDACTED]"
+    assert sanitized["webhook_secret"] == "[REDACTED]"
+    assert sanitized["deploy_key"] == "[REDACTED]"
+    assert sanitized["ssh_key"] == "[REDACTED]"
+    assert sanitized["safe_key"] == "safe_val"

@@ -134,6 +134,10 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "signing_key",
     "encryption_key",
     "user_key",
+    "app_secret",
+    "webhook_secret",
+    "deploy_key",
+    "ssh_key",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
