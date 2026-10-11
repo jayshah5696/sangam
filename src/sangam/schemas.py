@@ -1108,6 +1108,7 @@ class ChatEffect(BaseModel):
     capability_id: Literal[
         "create_document",
         "update_chat_profile",
+        "update_chat_memory",
         "publish_document",
         "apply_workspace_organization_plan",
         "update_project",

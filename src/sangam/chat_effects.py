@@ -36,7 +36,7 @@ from sangam.chat_capabilities import (
     UpdateProjectMemberChange,
     UpdatePublicationInput,
 )
-from sangam.chat_profiles import ChatProfileService, UpdateProfile
+from sangam.chat_profiles import ChatProfileService, MemoryChange, UpdateProfile
 from sangam.db import Database, utc_now
 from sangam.errors import (
     AuthorizationError,
@@ -117,6 +117,13 @@ class ChatEffectService:
         self.approval_ttl = approval_ttl
         idempotency = workspace.documents.idempotency
         self.durable: dict[str, DurableEffect] = {
+            "update_chat_memory": DurableEffect(
+                preflight=lambda principal, arguments: profiles.preflight_memory(
+                    principal, MemoryChange.model_validate(arguments)
+                ),
+                execute=self._execute_memory,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
             "update_chat_profile": DurableEffect(
                 preflight=lambda principal, arguments: profiles.preflight(
                     principal, UpdateProfile.model_validate(arguments)
@@ -180,6 +187,21 @@ class ChatEffectService:
         return EffectOutcome(
             result, dict(result), "chat_profile", entry.project_id or principal.actor_id
         )
+
+    def _execute_memory(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        entry = self.profiles.change_memory(
+            principal, operation_key, MemoryChange.model_validate(arguments)
+        )
+        result = {**entry.model_dump(mode="json"), "approved": True, "status": entry.state}
+        return EffectOutcome(result, dict(result), "chat_profile", entry.memory_id)
 
     def propose(
         self,

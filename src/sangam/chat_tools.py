@@ -38,7 +38,7 @@ from sangam.chat_capabilities import (
 from sangam.chat_context import ChatRequestContext, ToolContext
 from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
-from sangam.chat_profiles import UpdateProfile
+from sangam.chat_profiles import MemoryChange, MemorySearch, UpdateProfile
 from sangam.chat_proposals import ChatProposalService
 from sangam.chat_runtime import BoundedChatAdmission
 from sangam.errors import NotFoundError, SangamError, ValidationError
@@ -81,6 +81,20 @@ class ChatToolset:
                 self.inspect_chat_profile,
                 description_override=(
                     "Read personal or explicitly selected project instructions and their version."
+                ),
+            ),
+            function_tool(
+                self.search_chat_memory,
+                description_override=(
+                    "Search relevant saved facts. Empty query lists facts only for explicit "
+                    "memory management."
+                ),
+            ),
+            function_tool(
+                self.update_chat_memory,
+                description_override=(
+                    "Save an explicitly requested fact, suggest an inferred fact, or "
+                    "correct/accept/forget an inspected entry. Preferences use update_chat_profile."
                 ),
             ),
             function_tool(
@@ -546,6 +560,66 @@ class ChatToolset:
         return await self._request_effect(
             ctx,
             capability=self.policies["update_chat_profile"],
+            arguments=arguments,
+            preview=arguments,
+        )
+
+    async def search_chat_memory(
+        self,
+        ctx: ToolContext,
+        query: str = "",
+        project_id: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> str:
+        request = MemorySearch(query=query, project_id=project_id, limit=limit, offset=offset)
+        context = ctx.context.request_context
+
+        def operation(principal: Principal) -> dict[str, Any]:
+            selected = self.profiles.resolve(context).project_id
+            if project_id is not None and project_id != selected:
+                raise ValidationError("Memory recall requires the explicitly selected project")
+            if not query.strip():
+                return self.profiles.list_memory(principal, request).model_dump(mode="json")
+            return self.profiles.search_memory(
+                principal, request, context.context_snapshot_id
+            ).model_dump(mode="json")
+
+        return await self._run_tool(
+            ctx, self.policies["search_chat_memory"], project_id or "user", operation
+        )
+
+    async def update_chat_memory(
+        self,
+        ctx: ToolContext,
+        memory_id: str,
+        expected_version: int,
+        action: Literal["save", "suggest", "accept", "forget"] = "save",
+        content: str = "",
+        project_id: str | None = None,
+        source_thread_id: str | None = None,
+        source_item_id: str | None = None,
+    ) -> str | None:
+        if source_thread_id is None and expected_version == 0:
+            source_thread_id = ctx.context.thread.id
+            context_id = ctx.context.request_context.context_snapshot_id
+            if context_id:
+                source = self.evidence.get_turn_context(
+                    ctx.context.request_context.principal, context_id
+                )
+                source_item_id = source.user_item_id
+        arguments = MemoryChange(
+            memory_id=memory_id,
+            expected_version=expected_version,
+            action=action,
+            content=content,
+            project_id=project_id,
+            source_thread_id=source_thread_id,
+            source_item_id=source_item_id,
+        ).model_dump(mode="json")
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["update_chat_memory"],
             arguments=arguments,
             preview=arguments,
         )

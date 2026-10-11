@@ -1,5 +1,31 @@
 import { z } from 'zod'
 
+export const chatMemoryEntrySchema = z.object({
+  memory_id: z.string(),
+  project_id: z.string().nullable(),
+  kind: z.literal('fact'),
+  content: z.string().max(2000),
+  state: z.enum(['active', 'suggested', 'forgotten']),
+  version: z.number().int().positive(),
+  source_thread_id: z.string().nullable(),
+  source_item_id: z.string().nullable(),
+})
+export const chatMemoryChangeSchema = z.object({
+  memory_id: z.string(),
+  project_id: z.string().nullable(),
+  action: z.enum(['save', 'suggest', 'accept', 'forget']),
+  content: z.string().max(2000),
+  expected_version: z.number().int().nonnegative(),
+  source_thread_id: z.string().nullable(),
+  source_item_id: z.string().nullable(),
+})
+export const chatMemoryPageSchema = z.object({
+  entries: z.array(chatMemoryEntrySchema).max(20),
+  has_more: z.boolean(),
+})
+export type ChatMemoryEntry = z.infer<typeof chatMemoryEntrySchema>
+export type ChatMemoryChange = z.infer<typeof chatMemoryChangeSchema>
+
 export const chatProfileEntrySchema = z.object({
   project_id: z.string().nullable(),
   content: z.string().max(4000),
@@ -14,6 +40,7 @@ export const chatProfileContextSchema = z.object({
   entries: z.array(chatProfileEntrySchema).max(2),
   project_id: z.string().nullable(),
   instructions_override: z.string().max(2000),
+  memories: z.array(chatMemoryEntrySchema).max(20).default([]),
 })
 export type ChatProfileEntry = z.infer<typeof chatProfileEntrySchema>
 
@@ -938,6 +965,7 @@ export const chatEffectSchema = z.object({
     'apply_workspace_organization_plan',
     'update_project',
     'update_chat_profile',
+    'update_chat_memory',
     'update_publication',
     'annotate_pdf',
   ]),
@@ -1241,6 +1269,19 @@ export async function collectPages<T>(
 }
 
 export const api = {
+  async chatMemory(projectId?: string, offset = 0) {
+    const params = new URLSearchParams({ offset: String(offset) })
+    if (projectId) params.set('project_id', projectId)
+    return chatMemoryPageSchema.parse(await request(`/chat/memory?${params}`))
+  },
+  async changeChatMemory(change: ChatMemoryChange) {
+    return chatMemoryEntrySchema.parse(
+      await request('/chat/memory', {
+        method: 'PUT',
+        body: JSON.stringify(change),
+      }),
+    )
+  },
   async chatProfile(projectId?: string, threadId?: string) {
     const params = new URLSearchParams()
     if (projectId) params.set('project_id', projectId)

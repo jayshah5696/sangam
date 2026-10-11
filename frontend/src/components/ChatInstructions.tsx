@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { api, ApiError, type ChatProfileEntry } from '../api'
 import { StateMessage } from './ui/StateMessage'
+import { ChatMemory } from './ChatMemory'
 
 /** One profile editor for both sources; the override is local to the next submitted turn. */
 export function ChatInstructions({
@@ -60,6 +61,7 @@ export function ChatInstructions({
         />
       </label>
       <p>This override clears after your next message is sent. It does not change saved instructions.</p>
+      <ChatMemory projectId={projectId} />
       {applied.data && applied.data.entries.length > 0 && (
         <details>
           <summary>Applied to the latest turn</summary>
@@ -72,6 +74,15 @@ export function ChatInstructions({
             </p>
           ))}
           {applied.data.instructions_override && <p>Turn override: {applied.data.instructions_override}</p>}
+          {applied.data.memories.map((entry) => (
+            <p key={`${entry.project_id ?? 'user'}:${entry.memory_id}`}>
+              <strong>
+                Saved fact {entry.memory_id} · version {entry.version}
+              </strong>
+              <span className="instruction-content">{entry.content}</span>
+            </p>
+          ))}
+          <p>Corrected or forgotten facts are omitted from this current memory view.</p>
         </details>
       )}
     </details>
