@@ -1,5 +1,28 @@
 import { expect, test } from './fixtures'
 import { chatMemoryEntrySchema, chatMemoryPageSchema, projectDetailSchema } from '../src/api'
+import type { Page } from '@playwright/test'
+
+async function expectChatFrameContained(page: Page) {
+  await expect
+    .poll(async () => {
+      const [frame, panel] = await Promise.all([
+        page.locator('.chatkit-frame').boundingBox(),
+        page.locator('.chat-panel').boundingBox(),
+      ])
+      const viewport = page.viewportSize()
+      if (!frame || !panel || !viewport || frame.height <= 0) throw new Error('Chat frame is not laid out')
+      // Account for the shared one-pixel border and fractional scroll rounding.
+      // Return the largest overflow so a failure reports its size in CSS pixels.
+      return Math.max(
+        panel.x - frame.x,
+        panel.y - frame.y,
+        frame.x + frame.width - panel.x - panel.width,
+        frame.y + frame.height - panel.y - panel.height,
+        frame.y + frame.height - viewport.height,
+      )
+    })
+    .toBeLessThanOrEqual(2)
+}
 
 test('chat context stays compact and closing preserves drafts until explicit discard', async ({
   page,
@@ -78,13 +101,12 @@ test('chat context stays compact and closing preserves drafts until explicit dis
       // Short landscape can require scrolling past status notices; the complete
       // chat frame must remain reachable rather than being clipped by its host.
       if (width === 844) await page.locator('.chatkit-frame').scrollIntoViewIfNeeded()
-      // WebKit rounds intersection geometry at fractional device pixels.
-      await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 0.999 })
+      await expectChatFrameContained(page)
       await trigger.click()
     }
     await page.screenshot({ path: test.info().outputPath('chat-context-editor.png') })
     await page.keyboard.press('Escape')
-    await expect(page.locator('.chatkit-frame')).toBeInViewport({ ratio: 0.999 })
+    await expectChatFrameContained(page)
     await page.screenshot({ path: test.info().outputPath('chat-context-closed.png') })
   } finally {
     for (const index of [0, 1, 2]) {
