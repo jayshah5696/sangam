@@ -7,6 +7,8 @@ export interface ModalDialogProps {
   className?: string
   onClose: () => void
   children: ReactNode
+  /** Keep children mounted while closed when a caller owns an editable draft. */
+  open?: boolean
 }
 
 /**
@@ -21,12 +23,14 @@ export function ModalDialog({
   className = '',
   onClose,
   children,
+  open = true,
 }: ModalDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const generatedId = useId()
   const headingId = ariaLabelledBy || (title ? generatedId : undefined)
 
   useEffect(() => {
+    if (!open) return
     const active = document.activeElement
     const trigger = active instanceof HTMLElement ? active : null
     const dialog = dialogRef.current
@@ -69,7 +73,7 @@ export function ModalDialog({
         trigger.focus()
       }
     }
-  }, [onClose])
+  }, [onClose, open])
 
   return (
     <dialog

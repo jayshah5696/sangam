@@ -256,8 +256,13 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: var(--space-3); overflow-y: auto; }
 .chat-panel > :not(.chatkit-shell) { flex-shrink: 0; }
 .chat-panel:not(.chat-panel-compact) > .chatkit-shell { flex: 1 0 auto; }
-.chat-instructions { flex: none; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); max-height: 50%; overflow: auto; font-family: var(--font-ui); }
-.chat-instructions summary { cursor: pointer; font-size: var(--text-control); }
+.chat-context-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); font-size: var(--text-control); color: var(--muted); }
+.chat-instructions { padding: var(--space-4); width: min(38rem, calc(100vw - var(--space-5) - var(--space-5))); max-height: calc(100dvh - var(--space-5) - var(--space-5)); overflow: auto; overscroll-behavior: contain; font-family: var(--font-ui); }
+.chat-instructions h2 { font-size: var(--text-body); }
+.chat-memory-row { border-top: 1px solid var(--line); padding-block: var(--space-2); }
+.chat-memory-row > p { overflow-wrap: anywhere; }
+.chat-memory-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.chat-instructions summary { cursor: pointer; font-size: var(--text-control); min-height: var(--control-height); padding-block: var(--space-2); }
 .chat-instructions p, .chat-instructions section { margin-block: var(--space-3); }
 .chat-instructions textarea { display: block; width: 100%; margin-block: var(--space-2); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); padding: var(--space-2); font-family: var(--font-ui); font-size: var(--text-body); }
 .instruction-content { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-ui); font-size: var(--text-body); }
@@ -426,6 +431,8 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-effect-live-announcer { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .load-more-history-btn { width: 100%; justify-content: center; }
 @media (pointer: coarse), (max-width: 768px) {
+  .chat-instructions summary,
+  .chat-context-controls button,
   .chat-effect-tray-disclosure,
   .secondary-action.chat-effect-clear-btn,
   .chat-effect-clear-btn,
