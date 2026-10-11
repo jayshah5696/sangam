@@ -254,6 +254,8 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .inspector-chat-toolbar span { color: var(--muted); font-size: var(--text-meta); }
 .inspector-chat-toolbar .secondary-action { flex: none; }
 .chat-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: var(--space-3); overflow-y: auto; }
+.chat-panel > :not(.chatkit-shell) { flex-shrink: 0; }
+.chat-panel:not(.chat-panel-compact) > .chatkit-shell { flex: 1 0 auto; }
 .chat-instructions { flex: none; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); max-height: 50%; overflow: auto; font-family: var(--font-ui); }
 .chat-instructions summary { cursor: pointer; font-size: var(--text-control); }
 .chat-instructions p, .chat-instructions section { margin-block: var(--space-3); }

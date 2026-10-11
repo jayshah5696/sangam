@@ -59,7 +59,7 @@ setup-webkit-local:
     mkdir -p "$root"
     cd "$root"
     for package in \
-      main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.9_amd64.deb \
+      main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.10_amd64.deb \
       universe/f/flite/libflite1_2.2-6build3_amd64.deb \
       main/i/icu/libicu74_74.2-1ubuntu3.1_amd64.deb; do
         archive="${package##*/}"
