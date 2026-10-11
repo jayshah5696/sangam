@@ -2726,3 +2726,57 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient
     parent_dir = file_path.parent
     orphaned_temp_files = list(parent_dir.glob(".simultaneous_rw.md.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
+
+
+def test_concurrent_asset_uploads_with_path_locking(client: TestClient, settings) -> None:
+    # Create Markdown document
+    res_doc = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Asset Path Lock Test Doc",
+            "content": "# Document with images\n",
+            "path": "research/asset_lock_test.md",
+        },
+        headers=headers("asset-lock-doc-k1"),
+    )
+    assert res_doc.status_code == 201
+    doc_id = res_doc.json()["document_id"]
+
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc` \x05\x00\x00\x04"
+        b"\x00\x01\x140\x7e\xb5\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    results = []
+
+    def upload_same_asset(worker_idx: int):
+        # Uploading with the exact same filename and bytes targets the exact same path
+        resp = client.post(
+            f"/api/v1/documents/{doc_id}/assets",
+            params={"filename": "shared_diagram.png"},
+            content=png_bytes,
+            headers={"Content-Type": "image/png", **headers(f"upload-same-asset-{worker_idx}")},
+        )
+        results.append(resp)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(upload_same_asset, i) for i in range(5)]
+        for f in futures:
+            f.result(timeout=10)
+
+    for resp in results:
+        assert resp.status_code == 201
+        asset = resp.json()
+        assert asset["media_type"] == "image/png"
+        assert asset["size_bytes"] == len(png_bytes)
+        ref_path = asset["reference"].lstrip("/")
+        asset_file = settings.workspace_root / ref_path
+        assert asset_file.is_file()
+        assert asset_file.read_bytes() == png_bytes
+
+    # Check attachments directory for orphaned temporary files
+    attachments_dir = settings.workspace_root / "attachments"
+    if attachments_dir.is_dir():
+        temp_files = list(attachments_dir.glob(".*.sangam-*"))
+        assert len(temp_files) == 0, f"Found orphaned temp files in attachments: {temp_files}"
