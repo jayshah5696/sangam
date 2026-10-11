@@ -35,8 +35,7 @@ export function ChatMemory({ projectId }: { projectId?: string }) {
     },
   })
   return (
-    <details>
-      <summary>Saved facts</summary>
+    <div>
       <p>
         Facts provide context when relevant. Keep preferences in Instructions above. Forgetting stops future
         recall. Original conversations and past run evidence remain; delete a conversation separately to
@@ -144,7 +143,7 @@ export function ChatMemory({ projectId }: { projectId?: string }) {
           description="Your draft is preserved."
         />
       )}
-    </details>
+    </div>
   )
 }
 

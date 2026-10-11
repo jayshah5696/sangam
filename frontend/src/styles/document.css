@@ -259,6 +259,8 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-context-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); font-size: var(--text-control); color: var(--muted); }
 .chat-instructions { padding: var(--space-4); width: min(38rem, calc(100vw - var(--space-5) - var(--space-5))); max-height: calc(100dvh - var(--space-5) - var(--space-5)); overflow: auto; overscroll-behavior: contain; font-family: var(--font-ui); }
 .chat-instructions h2 { font-size: var(--text-body); }
+.chat-context-tabs { display: flex; gap: var(--space-2); margin-block: var(--space-3); }
+.chat-context-tabs [aria-selected="true"] { color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent); }
 .chat-memory-row { border-top: 1px solid var(--line); padding-block: var(--space-2); }
 .chat-memory-row > p { overflow-wrap: anywhere; }
 .chat-memory-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }

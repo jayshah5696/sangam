@@ -232,6 +232,7 @@ Use Settings for workspace-wide tag management.
 ### Chat context controls
 
 Instructions and saved facts open in the shared bounded Chat context dialog.
+Separate keyboard-accessible tabs keep instruction editors out of fact management.
 Closing it with the close button, Escape, or the backdrop preserves drafts while
 the chat component remains mounted. Drafts do not survive a page reload. Saved
 facts show compact previews and open their editors only on request. Closing an

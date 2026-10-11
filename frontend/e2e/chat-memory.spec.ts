@@ -22,7 +22,15 @@ test('chat context stays compact and closing preserves drafts until explicit dis
     await expect(page.getByRole('dialog', { name: 'Chat context' })).not.toBeVisible()
     await trigger.click()
     const dialog = page.getByRole('dialog', { name: 'Chat context' })
+    await expect(page.getByRole('tab', { name: 'Instructions', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await page.getByRole('tab', { name: 'Instructions', exact: true }).focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('tab', { name: 'Saved facts' })).toBeFocused()
     await page.getByText('Saved facts', { exact: true }).click()
+    await expect(page.getByLabel('Personal instructions')).not.toBeVisible()
     await expect(page.getByRole('button', { name: 'Edit fact', exact: true })).toHaveCount(3)
     await expect(page.getByLabel('Edit fact').first()).not.toBeVisible()
     await page.getByRole('button', { name: 'Edit fact', exact: true }).first().click()
@@ -40,12 +48,17 @@ test('chat context stays compact and closing preserves drafts until explicit dis
     await expect(editor).toHaveValue('Unsaved headset correction')
     await page.getByRole('button', { name: 'Discard fact changes' }).click()
     await expect(editor).toHaveValue(original)
+    await page.getByRole('tab', { name: 'Instructions', exact: true }).click()
     await page.getByLabel('Personal instructions').fill('Unsaved preferences')
     await page.getByRole('button', { name: 'Close chat context' }).click()
     await trigger.click()
     await expect(page.getByLabel('Personal instructions')).toHaveValue('Unsaved preferences')
     await page.getByRole('button', { name: 'Discard personal instruction changes' }).click()
     await expect(page.getByLabel('Personal instructions')).toHaveValue('')
+    if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) {
+      const closeBounds = await page.getByRole('button', { name: 'Close chat context' }).boundingBox()
+      expect(closeBounds?.height).toBeGreaterThanOrEqual(44)
+    }
     for (const width of [320, 767, 769, 844]) {
       await page.setViewportSize({ width, height: width === 844 ? 390 : 844 })
       await expect
@@ -85,7 +98,7 @@ test('saved facts survive reload, preserve stale drafts, and forget with cancell
   request,
 }) => {
   await page.goto('/chat')
-  await page.getByText('Instructions', { exact: true }).click()
+  await page.getByRole('button', { name: 'Instructions', exact: true }).click()
   await page.getByText('Saved facts', { exact: true }).click()
   await page.getByText('Add fact', { exact: true }).click()
   await page.getByLabel('Fact to remember').fill('My headset is Quest 3')
@@ -94,7 +107,7 @@ test('saved facts survive reload, preserve stale drafts, and forget with cancell
   await expect(page.getByLabel('Edit fact')).toHaveValue('My headset is Quest 3')
   const saved = chatMemoryPageSchema.parse(await (await request.get('/api/v1/chat/memory')).json()).entries[0]
   await page.reload()
-  await page.getByText('Instructions', { exact: true }).click()
+  await page.getByRole('button', { name: 'Instructions', exact: true }).click()
   await page.getByText('Saved facts', { exact: true }).click()
   await page.getByRole('button', { name: 'Edit fact', exact: true }).click()
   await expect(page.getByLabel('Edit fact')).toHaveValue('My headset is Quest 3')
@@ -141,11 +154,11 @@ test('suggestions require acceptance and explicit project facts remain scoped', 
   )
   try {
     await page.goto('/chat')
-    await page.getByText('Instructions', { exact: true }).click()
+    await page.getByRole('button', { name: 'Instructions', exact: true }).click()
     await page.getByText('Saved facts', { exact: true }).click()
     await expect(page.getByRole('button', { name: 'Edit fact', exact: true })).toHaveCount(0)
     await page.goto(`/chat?project=${project.project_id}`)
-    await page.getByText('Instructions', { exact: true }).click()
+    await page.getByRole('button', { name: 'Instructions', exact: true }).click()
     await page.getByText('Saved facts', { exact: true }).click()
     await expect(page.getByText('Suggested fact', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Edit fact', exact: true }).click()
