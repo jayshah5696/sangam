@@ -23,6 +23,9 @@ export const chatMemoryPageSchema = z.object({
   entries: z.array(chatMemoryEntrySchema).max(20),
   has_more: z.boolean(),
 })
+export const chatMemoryPreviewSchema = chatMemoryChangeSchema.extend({
+  previous_content: z.string().max(2000).nullable(),
+})
 export type ChatMemoryEntry = z.infer<typeof chatMemoryEntrySchema>
 export type ChatMemoryChange = z.infer<typeof chatMemoryChangeSchema>
 

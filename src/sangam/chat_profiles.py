@@ -122,6 +122,14 @@ class ChatProfileService:
             ).fetchone()
         return MemoryEntry(project_id=project_id, **dict(row)) if row else None
 
+    def memory_preview(self, principal: Principal, request: MemoryChange) -> dict[str, object]:
+        self.preflight_memory(principal, request)
+        current = self._memory(principal, request.memory_id, request.project_id)
+        return {
+            **request.model_dump(mode="json"),
+            "previous_content": current.content if current else None,
+        }
+
     def preflight_memory(self, principal: Principal, request: MemoryChange) -> None:
         AuthorizationPolicy.require_administrator(principal)
         current = self._memory(principal, request.memory_id, request.project_id)

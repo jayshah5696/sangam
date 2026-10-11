@@ -1,4 +1,4 @@
-import { chatMemoryChangeSchema, chatProfileUpdateSchema, type ChatEffect } from '../api'
+import { chatMemoryPreviewSchema, chatProfileUpdateSchema, type ChatEffect } from '../api'
 import type { EffectReview } from '../chatEffectCopy'
 import { StateMessage } from './ui/StateMessage'
 
@@ -25,7 +25,7 @@ export function ChatEffectConfirmation({
   const profile =
     effect.capability_id === 'update_chat_profile' ? chatProfileUpdateSchema.safeParse(effect.preview) : null
   const memory =
-    effect.capability_id === 'update_chat_memory' ? chatMemoryChangeSchema.safeParse(effect.preview) : null
+    effect.capability_id === 'update_chat_memory' ? chatMemoryPreviewSchema.safeParse(effect.preview) : null
   return (
     <section
       className="chat-effect-confirmation"
@@ -47,6 +47,7 @@ export function ChatEffectConfirmation({
       )}
       {memory?.success && (
         <pre className="instruction-content" aria-label="Fact change to approve">
+          {memory.data.previous_content ? `Current fact: ${memory.data.previous_content}\n` : ''}
           {memory.data.action === 'forget'
             ? 'Stop recalling this saved fact. The original transcript and past run evidence remain.'
             : memory.data.content}

@@ -626,11 +626,16 @@ class ChatToolset:
             source_thread_id=source_thread_id,
             source_item_id=source_item_id,
         ).model_dump(mode="json")
+        preview = await self.runtime.run_sync(
+            self.profiles.memory_preview,
+            self.identity.reauthorize(ctx.context.request_context.principal),
+            MemoryChange.model_validate(arguments),
+        )
         return await self._request_effect(
             ctx,
             capability=self.policies["update_chat_memory"],
             arguments=arguments,
-            preview=arguments,
+            preview=preview,
         )
 
     async def inspect_projects(self, ctx: ToolContext, project_id: str | None = None) -> str:
