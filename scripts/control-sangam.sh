@@ -759,7 +759,7 @@ cmd_eval() {
 
   # 1. Deterministic capability policy and plan lifecycle verification
   echo "  --> Verifying deterministic capability policies and organization lifecycle..."
-  uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py
+  just eval-chat-policy
 
   # 2. Live empirical evals via OpenRouter if key is available
   local has_key=0

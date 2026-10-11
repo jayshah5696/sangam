@@ -1,6 +1,6 @@
 # Chat agent evals
 
-A deterministic eval harness for Sangam's chat agent. It runs 17 question, edit, organization, safety, and language tasks against a seeded throwaway workspace. Checks inspect tool arguments, durable effects, and persisted workspace outcomes rather than trusting model prose. See [chat-capabilities.md](chat-capabilities.md) for the contract under test.
+A live-model eval harness for Sangam's chat agent. It runs 25 tasks through the production ChatKit request handler. Each case has its own seeded database and workspace. Checks inspect tool arguments, durable effects, and persisted workspace outcomes. See [chat-capabilities.md](chat-capabilities.md) for the contract under test.
 
 ## Quickstart
 
@@ -24,7 +24,7 @@ The recipe runs this checkout's eval script with the other checkout's installed 
 
 ## What the suite measures
 
-The dataset in `scripts/evals/chat_eval_dataset.json` covers 17 cases:
+The dataset in `scripts/evals/chat_eval_dataset.json` covers 25 cases:
 
 | Case | What it exercises |
 | --- | --- |
@@ -37,23 +37,29 @@ The dataset in `scripts/evals/chat_eval_dataset.json` covers 17 cases:
 | 3 organization tasks | Exact document move, folder creation with two moves, and existing-tag assignment |
 | 2 organization safety tasks | Ambiguous titles require clarification; untrusted document text cannot expand the requested operation |
 | 1 language task | The answer follows the language of the latest request |
+| 5 additional organization tasks | Trash, duplicate, create a tag, restore, and revision history |
+| 3 project tasks | List, create, and update project details |
 
-Each item records bounded nested tool arguments, durable effect status and preview, final workspace paths and tags, final answer, token usage, tool rounds, and wall time. Aggregate metrics:
+Each item records bounded nested tool arguments, durable effect status and preview, final workspace paths and tags, final answer, token usage, chat runs, and wall time. A chat run is one initial request or effect continuation, not one model response. Aggregate metrics:
 
 - `success_rate` — items passing all of their per-item checks.
 - `edit_success_rate` — the same, restricted to edit tasks.
 - `citation_rate` and `refusal_rate` — grounding and refusal behavior.
-- `avg_tool_rounds`, `avg_output_tokens`, `avg_wall_seconds` — harness efficiency.
+- `avg_chat_runs`, `avg_output_tokens`, `avg_wall_seconds` — harness efficiency.
+
+Production resolves capabilities, constructs the prompt, pins turn context, stops at durable effects, and persists run evidence. Review cases stop with a pending effect unless their `decision` explicitly requests `approve` or `deny`. YOLO cases resume with the stored result through `threads.add_client_tool_output`. The runner never substitutes an invented effect result.
+
+Case `fixtures` can seed `trashed_documents` by seed ID and `projects` by name. Restore and project-update cases declare these prerequisites. The tag case starts with the original document path. No case depends on an earlier case's changes.
 
 ## Interpreting results
 
 Per-item output marks each case `PASS` or `FAIL` and lists failed check keys. Check keys are defined per dataset item; common ones:
 
-- `proposal_created` — an edit task produced a pending proposal.
+- `proposal_status_by_mode` — Review produced a pending proposal. YOLO applied the proposal and its content and revision match the persisted document.
 - `content_contains` / `content_not_contains` — string checks against the proposal's resolved full content.
 - `faq_heading_before_training_plan` — ordering check for structural edits.
 - `answer_contains` / `answer_matches_regex` — string checks against the final answer.
-- `citation_in_answer` / `no_citation_in_answer` — grounding checks.
+- `citation_in_answer` / `no_citation_in_answer` — citation format checks. They do not prove source support.
 - `tool_called` / `not_called` — tool-selection checks.
 - `effect_status_by_mode` — review leaves an exact pending effect; workspace mode completes an eligible private effect.
 - `organization_kind` / `organization_path` — the stored plan contains the requested operations and paths.
@@ -68,7 +74,7 @@ Treat single runs as noisy: frontier models vary between runs, so a one-item swi
 | Flag | Meaning |
 | --- | --- |
 | `--output PATH` | Write full JSON results to this path. |
-| `--model ID` | OpenRouter model under test (default `openai/gpt-5.6-sol`). |
+| `--model ID` | OpenRouter model under test (default `openai/gpt-5.6-luna`). |
 | `--reasoning-effort PRESET` | Reasoning effort under test (default `medium`). |
 | `--autonomy-mode MODE` | Exact `review` or no-prompt `workspace` YOLO mode. |
 | `--limit N` | Run only the first N items; useful for smoke tests. |

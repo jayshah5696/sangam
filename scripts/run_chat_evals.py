@@ -8,10 +8,9 @@ Usage
                                             [--output results.json]
                                             [--dataset PATH] [--timeout SECS]
 
-The harness builds a throwaway Sangam instance (temp SQLite database + temp
-workspace root) using the same construction path as the application and tests,
-seeds a small deterministic document corpus, then runs each dataset item
-against the real OpenAI Agents SDK agent with an OpenRouter model.
+For each case, the harness builds a throwaway Sangam instance (temp SQLite database
+and workspace root), seeds explicit fixtures, and sends requests through production
+ChatKit with an OpenRouter model. Effect continuations use persisted results.
 
 API key resolution order:
   1. SANGAM_OPENROUTER_API_KEY environment variable
@@ -37,14 +36,15 @@ import argparse
 import asyncio
 import contextlib
 import functools
+import hashlib
 import inspect
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -312,6 +312,7 @@ class EvalEnvironment:
         from sangam.config import Settings
 
         self.root = root
+        self.autonomy_mode = autonomy_mode
         self.settings = Settings(
             database_path=root / "database" / "eval.sqlite3",
             workspace_root=root / "workspace",
@@ -322,17 +323,6 @@ class EvalEnvironment:
         )
         database = initialize_application_state(self.settings)
         self.services = build_application_services(self.settings, initialized_database=database)
-        self.services.chat.model_catalog.state()
-        with database.transaction() as connection:
-            columns = {
-                row["name"]
-                for row in connection.execute("PRAGMA table_info(chat_model_settings)").fetchall()
-            }
-            if "autonomy_mode" in columns:
-                connection.execute(
-                    "UPDATE chat_model_settings SET autonomy_mode = ? WHERE id = 1",
-                    (autonomy_mode,),
-                )
         self.principal = None
         self.documents_by_seed: dict[str, Any] = {}
         self.tags_by_name: dict[str, Any] = {}
@@ -366,21 +356,35 @@ class EvalEnvironment:
         )
         self.tags_by_name[reviewed.name] = reviewed
 
-    def app_context(self, document_id: str | None) -> str:
-        if not document_id:
-            return "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
-        document = self.services.workspace_access.get_document(self.principal, document_id)
-        revision_id = document.current_revision_id
-        return (
-            "<SANGAM_CONTEXT>\n"
-            f"Current document id: {document.document_id}\n"
-            f"Title: {document.title}\n"
-            f"Revision pinned for this turn: {revision_id}\n"
-            f"Content type: {document.content_type}\n"
-            "Call read_document or read_pdf_page before making claims about its content. "
-            "Call get_editor_selection when the user's request refers to selected text.\n"
-            "</SANGAM_CONTEXT>"
-        )
+    def seed_case(self, item: dict[str, Any]) -> None:
+        """Establish each case's prerequisites without depending on earlier trials."""
+        from sangam.schemas import ApplyOrganizationPlan, CreateProject
+
+        fixtures = item.get("fixtures", {})
+        for seed_id in fixtures.get("trashed_documents", []):
+            document = self.documents_by_seed[seed_id]
+            self.services.workspace_access.apply_workspace_organization_plan(
+                self.principal,
+                plan=ApplyOrganizationPlan.model_validate(
+                    {
+                        "operations": [
+                            {
+                                "kind": "trash_document",
+                                "document_id": document.document_id,
+                                "expected_revision_id": document.current_revision_id,
+                                "expected_source_path": document.path,
+                            }
+                        ]
+                    }
+                ),
+                idempotency_key=f"eval-fixture-trash-{seed_id}",
+            )
+        for project in fixtures.get("projects", []):
+            self.services.projects.create_project_once(
+                self.principal,
+                f"eval-fixture-project-{project['name']}",
+                CreateProject(**project, create_brief=False),
+            )
 
 
 def _bounded_json(value: Any, *, depth: int = 0) -> Any:
@@ -444,12 +448,10 @@ async def run_item(
     reasoning_effort: str,
     timeout: float,
 ) -> dict[str, Any]:
-    from agents import Agent, ModelSettings, RunConfig, Runner
-    from chatkit.agents import AgentContext
-    from chatkit.types import ThreadMetadata
-    from openai.types.shared.reasoning import Reasoning
+    from dataclasses import replace
 
-    from sangam.chat import agent_instructions
+    from chatkit.server import StreamingResult
+
     from sangam.chat_context import ChatRequestContext
 
     server = env.services.chat
@@ -457,114 +459,111 @@ async def run_item(
     document = env.documents_by_seed[item["document"]] if item.get("document") else None
     document_id = document.document_id if document else None
     entry_point = "document" if document_id else "workspace"
-
-    thread = ThreadMetadata(
-        id=f"thread_{uuid.uuid4().hex}",
-        created_at=datetime.now(UTC),
-        metadata={},
+    state = server.model_catalog.state()
+    model_ref = f"openrouter::{model_id}"
+    server.model_catalog.update(
+        expected_version=state.version,
+        workspace_enabled=True,
+        autonomy_mode=env.autonomy_mode,
+        default_model=model_ref,
+        enabled_models=[model_ref],
+        unknown_model_overrides=[model_ref],
     )
-    turn = server.evidence.create_turn_context(
-        principal,
-        entry_point=entry_point,
-        document_id=document_id,
-        revision_id=None,
-        selected_text="",
-    )
-    manifest = tuple(capability.manifest_item() for capability in server.capabilities.capabilities)
-    await server.store.save_thread(
-        thread, ChatRequestContext(principal=principal, document_id=document_id)
-    )
-    run_id = server.evidence.begin_run(
-        principal,
-        thread_id=thread.id,
-        user_item_id=None,
-        context_id=turn.context_id,
-        connection_id="openrouter",
-        model_ref=f"openrouter::{model_id}",
-        capability_manifest=manifest,
-    )
-
+    server.config = replace(server.config, reasoning_effort=reasoning_effort)
     request_context = ChatRequestContext(
         principal=principal,
         document_id=document_id,
-        pinned_revision_id=turn.revision_id,
+        workspace_context=document_id is None,
         entry_point=entry_point,
-        context_snapshot_id=turn.context_id,
-        run_id=run_id,
-    )
-    agent_context = AgentContext(
-        thread=thread,
-        store=server.store_adapter,
-        request_context=request_context,
     )
     calls: list[ToolCallRecord] = []
     restore_tools = instrument_toolset(server.toolset, calls)
-    tools = server.toolset.as_agent_tools()
+    thread_id: str | None = None
+    final_text = ""
+    chat_runs = 0
 
-    agent = Agent(
-        name="Sangam workspace agent",
-        instructions=agent_instructions(server.capabilities.capabilities),
-        tools=tools,
-    )
-    run_config = RunConfig(
-        model=model_id,
-        model_provider=env.services.provider_connections.model_provider("openrouter"),
-        model_settings=ModelSettings(
-            reasoning=Reasoning(effort=reasoning_effort),
-            max_tokens=env.settings.chat_max_output_tokens,
-            store=False,
-            parallel_tool_calls=False,
-        ),
-        tracing_disabled=True,
-        workflow_name="Sangam chat evals",
-    )
-    input_items = [
-        {
-            "role": "developer",
-            "content": [{"type": "input_text", "text": env.app_context(document_id)}],
-        },
-        {"role": "user", "content": [{"type": "input_text", "text": item["question"]}]},
-    ]
+    async def drive() -> None:
+        nonlocal thread_id, final_text, chat_runs
+        request = {
+            "type": "threads.create",
+            "params": {
+                "input": {
+                    "content": [{"type": "input_text", "text": item["question"]}],
+                    "attachments": [],
+                    "inference_options": {"model": model_ref},
+                },
+            },
+        }
+        # Each continuation must use the stored effect result, just as the browser does.
+        for _ in range(env.settings.chat_max_tool_rounds):
+            response = await server.process(json.dumps(request), request_context)
+            if not isinstance(response, StreamingResult):
+                raise RuntimeError("Chat evaluation expected a streaming response")
+            review = None
+            chat_runs += 1
+            async with contextlib.aclosing(response.json_events) as events:
+                async for chunk in events:
+                    for line in chunk.decode().splitlines():
+                        if not line.startswith("data: "):
+                            continue
+                        event = json.loads(line.removeprefix("data: "))
+                        if event["type"] == "thread.created":
+                            thread_id = event["thread"]["id"]
+                        elif event["type"] == "error":
+                            raise RuntimeError(f"Chat stream failed: {event}")
+                        elif event["type"] == "thread.item.done":
+                            value = event["item"]
+                            if value["type"] == "assistant_message":
+                                final_text += "".join(part["text"] for part in value["content"])
+                            elif value["type"] == "client_tool_call":
+                                if value["name"] != "review_chat_effect":
+                                    raise RuntimeError(f"Unsupported client tool: {value['name']}")
+                                review = value["arguments"]
+            if review is None:
+                return
+            effect = server.effects.get(principal, review["effect_id"])
+            if effect.status == "pending_approval":
+                decision = item.get("decision")
+                if decision is None:
+                    return
+                execution = await server.admission.run_sync(
+                    server.effects.decide,
+                    principal,
+                    effect_id=effect.effect_id,
+                    verdict=decision,
+                    argument_digest=review["argument_digest"],
+                    reason=None,
+                )
+                client_result = execution.client_result
+            else:
+                client_result = effect.result
+            request = {
+                "type": "threads.add_client_tool_output",
+                "params": {"thread_id": thread_id, "result": client_result},
+            }
+        raise RuntimeError("Chat evaluation exceeded the continuation limit")
 
     started = time.monotonic()
     error: str | None = None
-    final_text = ""
-    input_tokens = output_tokens = 0
-    rounds = 0
     try:
-        result = await asyncio.wait_for(
-            Runner.run(
-                agent,
-                input=input_items,
-                context=agent_context,
-                max_turns=env.settings.chat_max_tool_rounds,
-                run_config=run_config,
-            ),
-            timeout=timeout,
-        )
-        final_text = _extract_final_text(result)
-        for response in result.raw_responses:
-            input_tokens += response.usage.input_tokens
-            output_tokens += response.usage.output_tokens
-        rounds = len(result.raw_responses)
+        await asyncio.wait_for(drive(), timeout=timeout)
     except TimeoutError:
         error = f"timeout after {timeout:g}s"
     except Exception as exc:  # noqa: BLE001 - record and continue
         error = f"{type(exc).__name__}: {exc}"
-        message = getattr(exc, "message", str(exc))
-        final_text = f"[error] {message}"[:500]
     finally:
         restore_tools()
     wall_time = time.monotonic() - started
-    with contextlib.suppress(Exception):
-        server.evidence.complete_run(
-            run_id,
-            status="failed" if error else "completed",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
+    if thread_id is None:
+        raise RuntimeError(error or "Chat evaluation did not create a thread")
+    with server.evidence.database.connection() as connection:
+        usage = connection.execute(
+            "SELECT SUM(input_tokens), SUM(output_tokens) FROM chat_runs WHERE thread_id = ?",
+            (thread_id,),
+        ).fetchone()
+    input_tokens, output_tokens = (value or 0 for value in usage)
 
-    proposals_after = server.proposals.list(principal, thread_id=thread.id, document_id=document_id)
+    proposals_after = server.proposals.list(principal, thread_id=thread_id, document_id=document_id)
     proposal_payload = None
     if proposals_after:
         latest = proposals_after[0]
@@ -574,51 +573,50 @@ async def run_item(
             "summary": latest.summary,
             "content_length": len(latest.content),
             "content": latest.content,
+            "applied_revision_id": latest.applied_revision_id,
         }
+    edited_document = (
+        env.services.workspace_access.get_document(principal, document_id, include_deleted=True)
+        if document_id
+        else None
+    )
     propose_call = next((c for c in reversed(calls) if c.tool == "propose_update"), None)
     effects = [
         effect.model_dump(mode="json")
-        for effect in server.effects.list(principal, thread_id=thread.id)
+        for effect in server.effects.list(principal, thread_id=thread_id)
     ]
     workspace_state: dict[str, dict[str, Any]] = {}
     for seed_id, seeded in env.documents_by_seed.items():
-        with contextlib.suppress(Exception):
-            current = env.services.workspace_access.get_document(principal, seeded.document_id)
-            workspace_state[seed_id] = {
-                "document_id": current.document_id,
-                "path": current.path,
-                "category": current.category,
-                "tag_ids": sorted(tag.tag_id for tag in current.tags),
-                "tags": sorted(tag.name for tag in current.tags),
-            }
+        current = env.services.workspace_access.get_document(
+            principal,
+            seeded.document_id,
+            include_deleted=True,
+        )
+        workspace_state[seed_id] = {
+            "document_id": current.document_id,
+            "path": current.path,
+            "category": current.category,
+            "deleted": current.deleted,
+            "tag_ids": sorted(tag.tag_id for tag in current.tags),
+            "tags": sorted(tag.name for tag in current.tags),
+        }
     return {
         "final_text": final_text,
         "error": error,
         "tool_calls": [{"tool": c.tool, "args": c.args} for c in calls],
         "propose_args": propose_call.args if propose_call else None,
         "proposal": proposal_payload,
+        "edited_document_content": edited_document.content if edited_document else None,
+        "edited_document_revision_id": edited_document.current_revision_id
+        if edited_document
+        else None,
         "effects": effects,
         "workspace_state": workspace_state,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "rounds": rounds,
+        "chat_runs": chat_runs,
         "wall_seconds": round(wall_time, 2),
     }
-
-
-def _extract_final_text(result: Any) -> str:
-    final = getattr(result, "final_output", None)
-    if isinstance(final, str) and final.strip():
-        return final
-    try:
-        from agents import ItemHelpers
-
-        text = ItemHelpers.text_message_outputs(result.new_items)
-        if text.strip():
-            return text
-    except Exception:  # noqa: BLE001
-        pass
-    return final if isinstance(final, str) else ""
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +642,18 @@ def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
     for check in item["checks"]:
         if check == "proposal_created":
             passed = outcome["proposal"] is not None and outcome["proposal"]["status"] == "pending"
+        elif check == "proposal_status_by_mode":
+            proposal = outcome["proposal"]
+            if outcome["autonomy_mode"] == "workspace":
+                passed = (
+                    proposal is not None
+                    and proposal["status"] == "applied"
+                    and proposal["applied_revision_id"] is not None
+                    and proposal["applied_revision_id"] == outcome["edited_document_revision_id"]
+                    and proposal["content"] == outcome["edited_document_content"]
+                )
+            else:
+                passed = proposal is not None and proposal["status"] == "pending"
         elif check == "no_proposal":
             passed = outcome["proposal"] is None
         elif check.startswith("content_contains:"):
@@ -760,7 +770,7 @@ def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
         "edit_success_rate": round(edit_passes / len(edits), 3) if edits else None,
         "citation_rate": round(citations / total, 3),
         "refusal_rate": round(refusals / total, 3),
-        "avg_tool_rounds": round(sum(i["rounds"] for i in items) / count, 2),
+        "avg_chat_runs": round(sum(i["chat_runs"] for i in completed) / count, 2),
         "avg_output_tokens": round(sum(i["output_tokens"] for i in items) / count, 1),
         "avg_wall_seconds": round(sum(i["wall_seconds"] for i in items) / count, 2),
         "errors": sum(1 for i in items if i["error"]),
@@ -779,8 +789,6 @@ async def main_async(args: argparse.Namespace) -> int:
     seeds = _seed_documents()
 
     with tempfile.TemporaryDirectory(prefix="sangam-chat-evals-") as tmp:
-        env = EvalEnvironment(api_key, Path(tmp), args.autonomy_mode)
-        env.seed(seeds)
         longest = max(len(seed["content"]) for seed in seeds.values())
         print(
             f"[evals] variant={variant} model={args.model} reasoning={args.reasoning_effort} "
@@ -791,13 +799,19 @@ async def main_async(args: argparse.Namespace) -> int:
 
         results: list[dict[str, Any]] = []
         for index, item in enumerate(items):
-            outcome = await run_item(
-                item,
-                env,
-                args.model,
-                args.reasoning_effort,
-                args.timeout,
-            )
+            env = EvalEnvironment(api_key, Path(tmp) / str(index), args.autonomy_mode)
+            try:
+                env.seed(seeds)
+                env.seed_case(item)
+                outcome = await run_item(
+                    item,
+                    env,
+                    args.model,
+                    args.reasoning_effort,
+                    args.timeout,
+                )
+            finally:
+                await env.services.chat.close()
             outcome["autonomy_mode"] = args.autonomy_mode
             checks = evaluate_checks(item, outcome)
             passed = all(checks.values()) and outcome["error"] is None
@@ -818,20 +832,23 @@ async def main_async(args: argparse.Namespace) -> int:
                 "effects": outcome["effects"],
                 "workspace_state": outcome["workspace_state"],
                 "propose_args": outcome["propose_args"],
-                "rounds": outcome["rounds"],
+                "chat_runs": outcome["chat_runs"],
                 "input_tokens": outcome["input_tokens"],
                 "output_tokens": outcome["output_tokens"],
                 "wall_seconds": outcome["wall_seconds"],
                 "error": outcome["error"],
                 "final_text": outcome["final_text"],
                 "proposal_content": outcome["proposal"]["content"] if outcome["proposal"] else None,
+                "proposal": outcome["proposal"],
+                "edited_document_content": outcome["edited_document_content"],
+                "edited_document_revision_id": outcome["edited_document_revision_id"],
             }
             results.append(record)
             status = "PASS" if passed else "FAIL"
             tools = ",".join(record["tools_called"])[:40] or "-"
             print(
                 f"[{index + 1}/{len(items)}] {status} {item['id']:<36} "
-                f"rounds={record['rounds']} out_tok={record['output_tokens']:>5} "
+                f"runs={record['chat_runs']} out_tok={record['output_tokens']:>5} "
                 f"t={record['wall_seconds']:>5}s tools={tools}"
             )
             if not passed:
@@ -849,6 +866,15 @@ async def main_async(args: argparse.Namespace) -> int:
             "reasoning_effort": args.reasoning_effort,
             "autonomy_mode": args.autonomy_mode,
             "dataset": str(dataset_path),
+            "execution_path": "production_chatkit",
+            "fixture_isolation": "per_case",
+            "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            "working_tree": subprocess.check_output(
+                ["git", "status", "--short"],
+                text=True,
+            ).splitlines(),
+            "dataset_sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+            "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "aggregate": summary,
             "items": results,
         }
@@ -857,14 +883,14 @@ async def main_async(args: argparse.Namespace) -> int:
             print(f"\n[evals] wrote {args.output}")
 
         print("\n=== Per-item ===")
-        header = f"{'id':<38} {'pass':<5} {'tools':<42} {'rnd':>3} {'out_tok':>7} {'secs':>6}"
+        header = f"{'id':<38} {'pass':<5} {'tools':<42} {'runs':>4} {'out_tok':>7} {'secs':>6}"
         print(header)
         print("-" * len(header))
         for record in results:
             tools = ",".join(record["tools_called"])[:40] or "-"
             print(
                 f"{record['id']:<38} {'PASS' if record['passed'] else 'FAIL':<5} {tools:<42} "
-                f"{record['rounds']:>3} {record['output_tokens']:>7} {record['wall_seconds']:>6}"
+                f"{record['chat_runs']:>4} {record['output_tokens']:>7} {record['wall_seconds']:>6}"
             )
         print("\n=== Aggregate ===")
         for key, value in summary.items():

@@ -176,7 +176,7 @@ eval-chat-yolo model="openai/gpt-5.6-luna" reasoning="medium" output="test-resul
 
 # Verify deterministic approval, permission, cancellation, replay, and plan policy.
 eval-chat-policy:
-    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py
+    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py tests/test_chat_eval_runner.py
 
 # Run the chat eval suite against another checkout's code for before/after comparison.
 eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-baseline.json":
