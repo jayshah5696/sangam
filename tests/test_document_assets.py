@@ -104,9 +104,7 @@ def test_concurrent_asset_uploads_are_serialized_safely(
 
     digest = hashlib.sha256(PNG).hexdigest()[:16]
     for i in range(5):
-        asset_file = (
-            settings.workspace_root / "attachments" / f"concurrent-{i}-{digest}.png"
-        )
+        asset_file = settings.workspace_root / "attachments" / f"concurrent-{i}-{digest}.png"
         assert asset_file.is_file()
         assert asset_file.read_bytes() == PNG
 
