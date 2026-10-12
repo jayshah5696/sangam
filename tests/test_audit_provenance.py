@@ -908,3 +908,56 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
     assert "my_db_password" not in sanitized
     assert "my_tls_key" not in sanitized
     assert "client_secret_data" not in sanitized
+
+
+def test_huggingface_and_dashed_key_sanitization() -> None:
+    """Verify HuggingFace tokens and dashed secret keys are sanitized."""
+    hf_text = "HuggingFace token: hf_abcdefghijklmnopqrstuvwxyz123456"
+    sanitized_hf = sanitize_sensitive_text(hf_text)
+    assert "hf_abcdefghijklmnopqrstuvwxyz123456" not in sanitized_hf
+    assert "hf_[REDACTED]" in sanitized_hf or "[REDACTED]" in sanitized_hf
+
+    dashed_text = "MY-API-KEY=secret_api_val AWS-SECRET-ACCESS-KEY='secret_aws_key_123'"
+    sanitized_dashed = sanitize_sensitive_text(dashed_text)
+    assert "secret_api_val" not in sanitized_dashed
+    assert "secret_aws_key_123" not in sanitized_dashed
+    assert "MY-API-KEY=[REDACTED]" in sanitized_dashed
+    assert "AWS-SECRET-ACCESS-KEY=[REDACTED]" in sanitized_dashed
+
+
+def test_activity_service_auto_populates_action_type_and_target_file() -> None:
+    """Verify ActivityService auto-populates action_type and target_file if omitted from details."""
+    from sangam.activity import ActivityService
+    from sangam.security import Principal
+
+    principal = Principal.trusted_human(
+        actor_id="human:chronicle", display_name="Chronicle Test", operation_id="op_123"
+    )
+    service = ActivityService.__new__(ActivityService)
+
+    row, _ = service._prepare_event_row(
+        principal=principal,
+        action="update",
+        resource_type="document",
+        outcome="accepted",
+        resource_id="doc_123",
+        path="docs/test.md",
+        details={},
+    )
+    detail_json = json.loads(str(row[11]))
+    assert detail_json["action_type"] == "update"
+    assert detail_json["target_file"] == "docs/test.md"
+
+    # Test auto-populating target_file from destination_path when path is None
+    row_dest, _ = service._prepare_event_row(
+        principal=principal,
+        action="move",
+        resource_type="document",
+        outcome="accepted",
+        resource_id="doc_123",
+        path=None,
+        details={"destination_path": "docs/moved.md"},
+    )
+    detail_json_dest = json.loads(str(row_dest[11]))
+    assert detail_json_dest["action_type"] == "move"
+    assert detail_json_dest["target_file"] == "docs/moved.md"
