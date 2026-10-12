@@ -328,7 +328,9 @@ class AssignmentService:
                 title="Project review" if project_id else "Refresh proposal",
             )
             conn.execute(
-                "INSERT INTO chat_threads VALUES (?, ?, NULL, ?, ?, ?)",
+                "INSERT INTO chat_threads(thread_id,created_by,document_id,data_json,"
+                "created_at,updated_at) "
+                "VALUES (?, ?, NULL, ?, ?, ?)",
                 (thread.id, principal.actor_id, thread.model_dump_json(), utc_now(), utc_now()),
             )
             if project_id:

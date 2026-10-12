@@ -45,6 +45,7 @@ def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() 
 
     assert behavior == {
         "stop_at_tool_names": [
+            "correct_task_state",
             "create_document",
             "apply_workspace_organization_plan",
             "publish_document",
@@ -287,6 +288,10 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
     assert local_config["transport_message"] == "ChatKit browser transport is ready."
 
     assert {tool.name for tool in client.app.state.services.chat.tools} == {
+        "search_chat_history",
+        "read_chat_history",
+        "inspect_task_state",
+        "correct_task_state",
         "get_editor_selection",
         "search_workspace",
         "read_document",

@@ -36,6 +36,7 @@ from sangam.chat_capabilities import (
     UpdateProjectMemberChange,
     UpdatePublicationInput,
 )
+from sangam.chat_continuity import ChatContinuityService, TaskCorrection
 from sangam.chat_profiles import ChatProfileService, MemoryChange, UpdateProfile
 from sangam.db import Database, utc_now
 from sangam.errors import (
@@ -106,6 +107,7 @@ class ChatEffectService:
         projects: ProjectService,
         registry: ChatCapabilityRegistry,
         profiles: ChatProfileService,
+        continuity: ChatContinuityService,
         approval_ttl: timedelta = timedelta(minutes=30),
     ) -> None:
         self.database = database
@@ -113,10 +115,18 @@ class ChatEffectService:
         self.identity = identity
         self.projects = projects
         self.profiles = profiles
+        self.continuity = continuity
         self.registry = registry
         self.approval_ttl = approval_ttl
         idempotency = workspace.documents.idempotency
         self.durable: dict[str, DurableEffect] = {
+            "correct_task_state": DurableEffect(
+                preflight=lambda principal, arguments: continuity.preflight(
+                    principal, TaskCorrection.model_validate(arguments)
+                ),
+                execute=self._execute_task_correction,
+                committed=self._task_correction_committed,
+            ),
             "update_chat_memory": DurableEffect(
                 preflight=lambda principal, arguments: profiles.preflight_memory(
                     principal, MemoryChange.model_validate(arguments)
@@ -170,6 +180,30 @@ class ChatEffectService:
                 ),
             ),
         }
+
+    def _task_correction_committed(self, actor: str, key: str) -> bool:
+        with self.database.connection() as conn:
+            return (
+                conn.execute(
+                    "SELECT 1 FROM chat_task_mutations WHERE actor_id=? AND idempotency_key=?",
+                    (actor, key),
+                ).fetchone()
+                is not None
+            )
+
+    def _execute_task_correction(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        request = TaskCorrection.model_validate(arguments)
+        state = self.continuity.correct(principal, operation_key, request)
+        result = {"task": state.model_dump(mode="json"), "approved": True}
+        return EffectOutcome(result, dict(result), "chat_task", request.thread_id)
 
     def _execute_profile(
         self,

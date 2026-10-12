@@ -36,6 +36,7 @@ from sangam.chat_capabilities import (
     WorkspaceSearchInput,
 )
 from sangam.chat_context import ChatRequestContext, ToolContext
+from sangam.chat_continuity import HistorySearch, TaskCorrection
 from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_profiles import MemoryChange, MemorySearch, UpdateProfile
@@ -72,11 +73,16 @@ class ChatToolset:
         self.identity = identity
         self.projects = projects
         self.profiles = effects.profiles
+        self.continuity = effects.continuity
         self.max_result_bytes = max_result_bytes
         self.policies = registry.by_id
 
     def as_agent_tools(self, capabilities: tuple[ChatCapability, ...] | None = None) -> list[Any]:
         tools = [
+            function_tool(self.search_chat_history),
+            function_tool(self.read_chat_history),
+            function_tool(self.inspect_task_state),
+            function_tool(self.correct_task_state),
             function_tool(
                 self.inspect_chat_profile,
                 description_override=(
@@ -538,6 +544,73 @@ class ChatToolset:
 
         return await self._run_tool(
             ctx, self.policies["read_revision_history"], validated.document_id, operation
+        )
+
+    async def search_chat_history(
+        self,
+        ctx: ToolContext,
+        query: str,
+        project_id: str | None = None,
+        limit: int = 5,
+        offset: int = 0,
+        include_current_thread: bool = False,
+    ) -> str:
+        """Find bounded source-linked excerpts in owned accessible conversations."""
+        request = HistorySearch(
+            query=query,
+            project_id=project_id or ctx.context.request_context.project_id,
+            limit=limit,
+            offset=offset,
+            include_current_thread=include_current_thread,
+        )
+        return await self._run_tool(
+            ctx,
+            self.policies["search_chat_history"],
+            project_id or "user",
+            lambda principal: self.continuity.search(
+                principal, request, ctx.context.thread.id
+            ).model_dump(mode="json"),
+        )
+
+    async def read_chat_history(
+        self, ctx: ToolContext, thread_id: str, item_id: str, offset: int = 0
+    ) -> str:
+        """Read up to 1200 characters of one original source message."""
+        return await self._run_tool(
+            ctx,
+            self.policies["read_chat_history"],
+            thread_id,
+            lambda principal: self.continuity.read(
+                principal, thread_id, item_id, offset
+            ).model_dump(mode="json"),
+        )
+
+    async def inspect_task_state(self, ctx: ToolContext, thread_id: str) -> str:
+        """Inspect a versioned active task and live run/effect statuses."""
+        return await self._run_tool(
+            ctx,
+            self.policies["inspect_task_state"],
+            thread_id,
+            lambda principal: self.continuity.get(principal, thread_id).model_dump(mode="json"),
+        )
+
+    async def correct_task_state(
+        self, ctx: ToolContext, thread_id: str, expected_version: int, key: str, text: str
+    ) -> str | None:
+        """Request an exact correction of one inspected field; empty text dismisses it."""
+        request = TaskCorrection(
+            thread_id=thread_id, expected_version=expected_version, key=key, text=text
+        )
+        state = await self.runtime.run_sync(
+            self.continuity.get,
+            self.identity.reauthorize(ctx.context.request_context.principal),
+            thread_id,
+        )
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["correct_task_state"],
+            arguments=request.model_dump(mode="json"),
+            preview={**request.model_dump(mode="json"), "before": state.model_dump(mode="json")},
         )
 
     async def inspect_chat_profile(self, ctx: ToolContext, project_id: str | None = None) -> str:

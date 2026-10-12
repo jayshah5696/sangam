@@ -202,6 +202,10 @@ verify-behavior port="8765" count="25" eval_limit="3":
     trap './scripts/control-sangam.sh cleanup >/dev/null 2>&1 || true' EXIT
     ./scripts/control-sangam.sh launch "{{ port }}"
     ./scripts/control-sangam.sh doctor
+    if [[ "${SANGAM_VERIFY_CONTINUITY:-}" == "1" ]]; then
+        source "${TMPDIR:-/tmp}/.sangam-active-verification"
+        uv run python scripts/verify_chat_continuity.py
+    fi
     ./scripts/control-sangam.sh seed
     if [[ "${SANGAM_VERIFY_SECURITY:-}" == "1" ]]; then
         source "${TMPDIR:-/tmp}/.sangam-active-verification"
@@ -209,6 +213,16 @@ verify-behavior port="8765" count="25" eval_limit="3":
     fi
     ./scripts/control-sangam.sh benchmark "{{ count }}"
     ./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" "{{ eval_limit }}"
+
+# Prove task compaction, steering, corrections and history against a live provider.
+verify-continuity port="8894":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-continuity-control.XXXXXX")"
+    export SANGAM_VERIFY_CONTINUITY=1
+    export SANGAM_CHAT_MAX_CONTEXT_MESSAGES=2
+    trap 'rmdir "$TMPDIR" 2>/dev/null || true' EXIT
+    just verify-behavior "{{ port }}" 25 3
 
 # Run the canonical behavior harness with private control state and live security proof.
 verify-security port="8893":

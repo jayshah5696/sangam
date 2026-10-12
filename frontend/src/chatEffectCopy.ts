@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   chatMemoryChangeSchema,
   chatProfileUpdateSchema,
+  taskCorrectionPreviewSchema,
   type ChatEffect,
   type OrganizationOperation,
 } from './api'
@@ -241,6 +242,17 @@ const annotationTypeLabel = {
  * caller can refuse to show an approval it cannot describe.
  */
 export function describeEffectReview(effect: ChatEffect): EffectReview | null {
+  if (effect.capability_id === 'correct_task_state') {
+    const parsed = taskCorrectionPreviewSchema.safeParse(effect.preview)
+    return parsed.success
+      ? {
+          eyebrow: 'Active task',
+          title: 'Correct this task field?',
+          detail: `${parsed.data.key} · version ${parsed.data.expected_version}`,
+          approveLabel: 'Approve task correction',
+        }
+      : null
+  }
   if (effect.capability_id === 'update_chat_memory') {
     const parsed = chatMemoryChangeSchema.safeParse(effect.preview)
     return parsed.success

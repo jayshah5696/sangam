@@ -20,6 +20,7 @@ const chatSearchSchema = z.object({
   proposal: z.string().max(200).optional(),
   // The project the conversation starts from; chat is told about it.
   project: z.string().max(200).optional(),
+  message: z.string().max(200).optional(),
 })
 
 export const Route = createFileRoute('/chat')({
@@ -141,9 +142,10 @@ function WorkspaceChat() {
         ) : (
           <Suspense fallback={<StateMessage kind="loading" title="Preparing workspace chat" />}>
             <ChatPanel
-              key={`${search.thread ?? ''}:${search.proposal ?? ''}:${search.project ?? ''}`}
+              key={`${search.thread ?? ''}:${search.proposal ?? ''}:${search.project ?? ''}:${search.message ?? ''}`}
               initialPrompt={initialPrompt}
               initialThreadId={search.thread}
+              initialSourceMessageId={search.message}
               projectId={search.project}
               document={contextDocument}
               selectedText={selectedText}

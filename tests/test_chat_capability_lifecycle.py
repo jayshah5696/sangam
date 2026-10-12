@@ -261,6 +261,10 @@ def test_registry_filters_authority_and_rejects_extra_tool_arguments(client: Tes
         model_supports_tools=True,
     )
     assert {capability.capability_id for capability in resolved} == {
+        "search_chat_history",
+        "read_chat_history",
+        "inspect_task_state",
+        "correct_task_state",
         "get_editor_selection",
         "search_workspace",
         "inspect_workspace_organization",

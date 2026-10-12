@@ -87,6 +87,8 @@ Chat can do what the app can, through the same services and with the same author
 | Projects: create, add or remove a document | `update_project`, one exact change per review |
 | View and edit personal or project chat instructions | `inspect_chat_profile`, `update_chat_profile`; one versioned entry per person and explicit project scope |
 | List, save, correct, accept, dismiss and forget saved facts | `search_chat_memory`, `update_chat_memory`; the same profile service and exact effect approval |
+| Inspect and correct active task context | `inspect_task_state`, `correct_task_state`; source-linked, versioned fields; exact effect approval for chat corrections |
+| Recall original conversations | `search_chat_history`, `read_chat_history`; bounded actor-owned excerpts, stable project membership and current document access |
 
 Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
 
@@ -101,6 +103,40 @@ Each entry holds at most 4,000 characters. Saving or clearing requires the curre
 **Next turn only** holds an optional 2,000-character override. Each submitted turn pins the applicable sources and their versions. Approval continuations keep that snapshot and recheck access. **Applied to the latest turn** shows the actual snapshot for the thread, including its override. Clearing the composer override does not change saved instructions.
 
 Application policy and tool contracts always apply. The latest user request takes precedence over the override, followed by project instructions and personal instructions. Retrieved documents and web pages cannot change these sources or their precedence. Sangam does not scan filesystem instruction files.
+
+### Active task and conversation history
+
+Open **Instructions → Active task** to inspect the thread's task summary, correct
+one field, or read its original source messages. The summary starts when history
+exceeds the recent model context window. Compaction runs inside the current
+request with the selected provider and no tools. It keeps at most 12 fields,
+each with a stable key, a kind, up to 600 characters and up to four source IDs.
+Up to four batches of 12 bounded source excerpts are processed per request.
+If older history exceeds that budget, the UI marks incomplete coverage and the
+agent can retrieve missing details through history tools. Compaction usage is
+included in the run's token counts.
+
+Each update creates a persisted revision. Corrections use the observed version;
+stale saves preserve the editor draft. Empty text dismisses a field and records
+its key so compaction cannot restore it. A thread can retain 12 dismissed keys.
+Closing the dialog or correction editor retains drafts. Discard resets them.
+Source edits or deletion invalidate the summary. The next eligible chat turn
+rebuilds it from current messages. Original transcripts remain available.
+
+History searches return at most ten owner-scoped excerpts, each limited to
+1,200 characters. Further reads use the original thread/message IDs and a
+bounded character offset. Project filtering uses explicit thread project IDs
+or `project_threads` membership. Folder paths never select conversation scope.
+Current document and project access is checked before excerpts are returned.
+Source links open the conversation's context dialog at that exact message.
+Chat recall excludes the current conversation by default so the current question
+cannot match itself. `include_current_thread=true` searches within it as well.
+
+Task summaries are fallible context. They do not save facts or standing
+instructions, grant authority, approve effects, or start background work.
+Effect IDs and statuses come from live durable records, separately from the
+summary. A completed response does not mean a task or proposed effect completed.
+Reloading a thread restores context without resuming an interrupted request.
 
 ### Saved facts
 

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from sangam.access import writes
 from sangam.chat import ChatRequestContext, SangamChatServer
+from sangam.chat_continuity import HistoryPage, HistorySearch, TaskCorrection, TaskState
 from sangam.chat_profiles import (
     MemoryChange,
     MemoryEntry,
@@ -57,6 +58,41 @@ def create_chat_router(
     router = APIRouter(prefix="/api/v1", tags=["chat"])
     principal_dependency = Depends(resolve_principal)
     admin_dependency = Depends(require_administrator)
+
+    @router.get("/chat/threads/{thread_id}/task", response_model=TaskState)
+    def get_task(thread_id: str, principal: Principal = principal_dependency) -> TaskState:
+        return chat.continuity.get(principal, thread_id)
+
+    @router.put("/chat/threads/{thread_id}/task", response_model=TaskState)
+    def correct_task(
+        thread_id: str,
+        body: TaskCorrection,
+        key: str | None = Header(default=None, alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> TaskState:
+        if body.thread_id != thread_id:
+            raise ValidationError("Task correction must target this conversation")
+        return chat.continuity.correct(principal, key or str(uuid4()), body)
+
+    @router.get("/chat/history", response_model=HistoryPage)
+    def search_history(
+        query: str = Query(min_length=1, max_length=200),
+        project_id: str | None = Query(default=None, max_length=200),
+        offset: int = Query(default=0, ge=0, le=10000),
+        principal: Principal = principal_dependency,
+    ) -> HistoryPage:
+        return chat.continuity.search(
+            principal, HistorySearch(query=query, project_id=project_id, offset=offset)
+        )
+
+    @router.get("/chat/threads/{thread_id}/messages/{item_id}", response_model=HistoryPage)
+    def read_history(
+        thread_id: str,
+        item_id: str,
+        offset: int = Query(default=0, ge=0, le=1000000),
+        principal: Principal = principal_dependency,
+    ) -> HistoryPage:
+        return chat.continuity.read(principal, thread_id, item_id, offset)
 
     @router.get("/chat/memory", response_model=MemoryPage)
     def get_memory(

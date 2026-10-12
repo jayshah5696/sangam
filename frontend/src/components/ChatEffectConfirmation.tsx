@@ -1,4 +1,9 @@
-import { chatMemoryPreviewSchema, chatProfileUpdateSchema, type ChatEffect } from '../api'
+import {
+  chatMemoryPreviewSchema,
+  chatProfileUpdateSchema,
+  taskCorrectionPreviewSchema,
+  type ChatEffect,
+} from '../api'
 import type { EffectReview } from '../chatEffectCopy'
 import { StateMessage } from './ui/StateMessage'
 
@@ -26,6 +31,10 @@ export function ChatEffectConfirmation({
     effect.capability_id === 'update_chat_profile' ? chatProfileUpdateSchema.safeParse(effect.preview) : null
   const memory =
     effect.capability_id === 'update_chat_memory' ? chatMemoryPreviewSchema.safeParse(effect.preview) : null
+  const task =
+    effect.capability_id === 'correct_task_state'
+      ? taskCorrectionPreviewSchema.safeParse(effect.preview)
+      : null
   return (
     <section
       className="chat-effect-confirmation"
@@ -43,6 +52,13 @@ export function ChatEffectConfirmation({
       {profile?.success && (
         <pre className="instruction-content" aria-label="Instructions to save">
           {profile.data.content || '(Clear saved instructions)'}
+        </pre>
+      )}
+      {task?.success && (
+        <pre className="instruction-content" aria-label="Task correction to approve">
+          {`Current: ${task.data.before.notes.find((note) => note.key === task.data.key)?.text ?? ''}\n`}
+          {`Correction: ${task.data.text || '(Dismiss this field)'}\n`}
+          This changes task context only. It does not approve or resume other effects.
         </pre>
       )}
       {memory?.success && (

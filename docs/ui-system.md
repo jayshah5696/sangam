@@ -232,6 +232,10 @@ Use Settings for workspace-wide tag management.
 ### Chat context controls
 
 Instructions and saved facts open in the shared bounded Chat context dialog.
+Active task context uses a third tab in that dialog. It stays collapsed on the
+chat page. Corrections and source excerpts expand only after an explicit action;
+a source-message link opens the exact source directly. Closing retains correction
+drafts, and Discard resets them. A thread change clears its local task drafts.
 Separate keyboard-accessible tabs keep instruction editors out of fact management.
 Closing it with the close button, Escape, or the backdrop preserves drafts while
 the chat component remains mounted. Drafts do not survive a page reload. Saved
