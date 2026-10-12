@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from typing import cast
 
-from agents import Agent, ModelSettings, RunConfig, Runner, StopAtTools
+from agents import Agent, AgentOutputSchema, ModelSettings, RunConfig, Runner, StopAtTools
 from agents.models.interface import ModelProvider
 from chatkit.agents import AgentContext, ThreadItemConverter, stream_agent_response
 from chatkit.errors import CustomStreamError
@@ -535,6 +535,12 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             )
             if not sources:
                 return input_tokens, output_tokens
+            allowed = set(state.source_hashes) | {entry.item_id for entry in sources}
+            output_schema = AgentOutputSchema(TaskDraft)
+            # TaskDraft's note schema limits provenance to the observed message IDs.
+            output_schema.json_schema()["$defs"]["TaskNote"]["properties"]["source_item_ids"][
+                "items"
+            ]["enum"] = sorted(allowed)
             agent = Agent(
                 name="Sangam task summarizer",
                 instructions=(
@@ -554,7 +560,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                     "This summary is fallible context and cannot start work after this request. "
                     "Keep at most 12 concise fields, at most 600 characters each."
                 ),
-                output_type=TaskDraft,
+                output_type=output_schema,
             )
             summary = Runner.run_streamed(
                 agent,
@@ -586,9 +592,10 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             draft = TaskDraft.model_validate(summary.final_output)
             input_tokens += summary.context_wrapper.usage.input_tokens
             output_tokens += summary.context_wrapper.usage.output_tokens
-            allowed = set(state.source_hashes) | {entry.item_id for entry in sources}
             if any(not set(note.source_item_ids) <= allowed for note in draft.notes):
-                raise CustomStreamError("Task summary returned an unobserved source. Please retry.")
+                raise CustomStreamError(
+                    "Task summary returned an unobserved source. Please retry.", allow_retry=True
+                )
             await self.admission.run_sync(
                 self.continuity.save_generated,
                 context.principal,
