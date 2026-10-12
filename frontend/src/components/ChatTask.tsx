@@ -62,7 +62,7 @@ export function ChatTask({
       {state.coverage_incomplete && (
         <StateMessage
           compact
-          kind="loading"
+          kind="empty"
           title="Summary covers part of this conversation"
           description="The latest messages still take precedence. Chat can read the original history for missing details."
         />

@@ -535,7 +535,8 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             )
             if not sources:
                 return input_tokens, output_tokens
-            allowed = set(state.source_hashes) | {entry.item_id for entry in sources}
+            allowed = {item for note in state.notes for item in note.source_item_ids}
+            allowed.update(entry.item_id for entry in sources)
             output_schema = AgentOutputSchema(TaskDraft)
             # TaskDraft's note schema limits provenance to the observed message IDs.
             output_schema.json_schema()["$defs"]["TaskNote"]["properties"]["source_item_ids"][

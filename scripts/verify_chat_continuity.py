@@ -23,7 +23,9 @@ def main() -> None:
     assert config["autonomy_mode"] == "review", config["autonomy_mode"]
     turn_number = 0
 
-    def turn(text: str, thread_id: str | None = None) -> tuple[str, str]:
+    def turn(
+        text: str, thread_id: str | None = None, project_id: str | None = None
+    ) -> tuple[str, str]:
         nonlocal turn_number
         turn_number += 1
         params = {
@@ -35,9 +37,12 @@ def main() -> None:
         }
         if thread_id:
             params["thread_id"] = thread_id
+        request_headers = {"X-Sangam-Workspace-Context": "1"}
+        if project_id:
+            request_headers["X-Sangam-Project-ID"] = project_id
         response = api.post(
             "/chatkit",
-            headers={"X-Sangam-Workspace-Context": "1"},
+            headers=request_headers,
             json={
                 "type": "threads.add_user_message" if thread_id else "threads.create",
                 "params": params,
@@ -244,6 +249,21 @@ def main() -> None:
         == []
     )
     checks.append("another actor cannot inspect task state or read/search the owner's transcript")
+
+    born, _ = turn(
+        "Atlas binding probe. Reply only with acknowledged.", project_id=project["project_id"]
+    )
+    api.post(
+        f"/projects/{project['project_id']}/threads", json={"thread_id": born}
+    ).raise_for_status()
+    scoped = {"query": "binding", "project_id": project["project_id"]}
+    assert api.get("/chat/history", params=scoped).raise_for_status().json()["entries"]
+    api.delete(
+        f"/projects/{project['project_id']}/threads/{born}",
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+    ).raise_for_status()
+    assert api.get("/chat/history", params=scoped).raise_for_status().json()["entries"] == []
+    checks.append("removing a conversation also clears its initial project binding from recall")
 
     evidence = {
         "checks": checks,

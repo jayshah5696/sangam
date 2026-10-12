@@ -912,6 +912,10 @@ class ProjectService:
                 (project_id, thread_id),
             )
             conn.execute(
+                "UPDATE chat_threads SET project_id=NULL WHERE thread_id=? AND project_id=?",
+                (thread_id, project_id),
+            )
+            conn.execute(
                 "UPDATE projects SET active_thread_id=NULL "
                 "WHERE project_id=? AND active_thread_id=?",
                 (project_id, thread_id),
