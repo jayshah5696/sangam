@@ -76,6 +76,41 @@ def test_uploaded_image_is_stored_in_attachments_and_readable(
     assert served.headers["x-content-type-options"] == "nosniff"
 
 
+def test_concurrent_asset_uploads_are_serialized_safely(
+    client: TestClient, settings: Settings
+) -> None:
+
+    import concurrent.futures
+
+    document = create(client, "asset-concurrent")
+    results = []
+
+    def perform_upload(index: int):
+        return upload(
+            client,
+            document["document_id"],
+            content=PNG,
+            filename=f"concurrent-{index}.png",
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(perform_upload, i) for i in range(5)]
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+
+    assert len(results) == 5
+    for res in results:
+        assert res.status_code == 201, res.text
+
+    digest = hashlib.sha256(PNG).hexdigest()[:16]
+    for i in range(5):
+        asset_file = (
+            settings.workspace_root / "attachments" / f"concurrent-{i}-{digest}.png"
+        )
+        assert asset_file.is_file()
+        assert asset_file.read_bytes() == PNG
+
+
 def test_pathless_drafts_can_add_images(client: TestClient) -> None:
     draft = create(client, "asset-draft", path=None)
     response = upload(client, draft["document_id"])
