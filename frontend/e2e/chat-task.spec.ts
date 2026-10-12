@@ -100,6 +100,7 @@ test('active task stays in context; corrections retain drafts and restore focus'
   await expect(page.getByRole('button', { name: 'Correct language' })).toBeFocused()
   await expect(page.getByRole('paragraph').filter({ hasText: /^Use English$/ })).toBeVisible()
   await expect(page.getByRole('paragraph').filter({ hasText: /^At most 300 words$/ })).toBeVisible()
+  await page.getByLabel('Sources for language').click()
   await page.getByRole('button', { name: 'Read source source' }).first().click()
   await expect(page.getByText('Use French, at most 300 words', { exact: true })).toBeVisible()
   for (const width of [320, 599, 601, 767, 769, 899, 901, 844]) {

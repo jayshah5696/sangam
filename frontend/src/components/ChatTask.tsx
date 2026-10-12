@@ -185,9 +185,12 @@ function TaskField({ note, state, onDismiss }: { note: TaskNote; state: TaskStat
           Discard task correction
         </button>
       </div>
-      {note.source_item_ids.map((itemId) => (
-        <TaskSource key={itemId} threadId={state.thread_id} itemId={itemId} />
-      ))}
+      <details>
+        <summary aria-label={`Sources for ${note.key}`}>Sources ({note.source_item_ids.length})</summary>
+        {note.source_item_ids.map((itemId) => (
+          <TaskSource key={itemId} threadId={state.thread_id} itemId={itemId} />
+        ))}
+      </details>
     </section>
   )
 }
