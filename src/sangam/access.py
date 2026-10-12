@@ -23,7 +23,12 @@ from sangam.conditions import (
     document_etag,
 )
 from sangam.db import utc_now
-from sangam.document_assets import DocumentAssetService, StoredAsset
+from sangam.document_assets import (
+    ATTACHMENTS_FOLDER,
+    DocumentAssetService,
+    StoredAsset,
+    resolve_asset_reference,
+)
 from sangam.errors import (
     AuthorizationError,
     ConflictError,
@@ -1120,12 +1125,19 @@ class WorkspaceAccessService:
         self, principal: Principal, *, document_id: str, reference: str
     ) -> StoredAsset:
         current = self.documents.get_document(document_id)
+
+        def operation() -> StoredAsset:
+            workspace_path = resolve_asset_reference(current.path, reference)
+            if not workspace_path.startswith(f"{ATTACHMENTS_FOLDER}/"):
+                self.policy.require(principal, Capability.READ, workspace_path)
+            return self.assets.read(document=current, reference=reference)
+
         return self._document_operation(
             principal,
             capability=Capability.READ,
             action=reads("read", "document"),
             current=current,
-            operation=lambda: self.assets.read(document=current, reference=reference),
+            operation=operation,
         )
 
     def issue_trusted_preview(

@@ -189,6 +189,67 @@ def test_asset_routes_obey_document_scopes(client: TestClient) -> None:
     assert denied_write.status_code == 403
 
 
+def test_relative_asset_read_checks_path_authorization(
+    client: TestClient, settings: Settings
+) -> None:
+    # Place a relative image in notes/diagram.png and private/secret.png
+    notes_dir = settings.workspace_root / "notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    (notes_dir / "diagram.png").write_bytes(PNG)
+
+    private_dir = settings.workspace_root / "private"
+    private_dir.mkdir(parents=True, exist_ok=True)
+    (private_dir / "secret.png").write_bytes(PNG)
+
+    doc_notes = create(client, "notes-doc", path="notes/plan.md")
+    doc_private = create(client, "private-doc", path="private/plan.md")
+
+    # Agent with scope prefix "notes"
+    notes_agent = issue_agent_token(
+        client, actor_id="agent:notes-agent", capabilities=("read",), path_prefix="notes"
+    )
+
+    # Reading notes/diagram.png via notes-doc succeeds
+    res_ok = client.get(
+        f"/api/v1/documents/{doc_notes['document_id']}/assets",
+        params={"path": "diagram.png"},
+        headers={"Authorization": f"Bearer {notes_agent}"},
+    )
+    assert res_ok.status_code == 200
+    assert res_ok.content == PNG
+
+    # Reading private/secret.png via private-doc is denied
+    res_doc_denied = client.get(
+        f"/api/v1/documents/{doc_private['document_id']}/assets",
+        params={"path": "secret.png"},
+        headers={"Authorization": f"Bearer {notes_agent}"},
+    )
+    assert res_doc_denied.status_code in (403, 404)
+
+    # Reading relative asset outside document's parent folder raises 404
+    res_relative_escape = client.get(
+        f"/api/v1/documents/{doc_notes['document_id']}/assets",
+        params={"path": "../private/secret.png"},
+        headers={"Authorization": f"Bearer {notes_agent}"},
+    )
+    assert res_relative_escape.status_code == 404
+
+    # Agent scoped strictly to document "notes/plan.md"
+    file_agent = issue_agent_token(
+        client, actor_id="agent:file-agent", capabilities=("read",), path_prefix="notes/plan.md"
+    )
+
+    # `resolve_asset_reference("notes/plan.md", "diagram.png")` yields "notes/diagram.png".
+    # doc_notes ("notes/plan.md") is readable for file_agent, but "notes/diagram.png"
+    # is outside its "notes/plan.md" scope prefix.
+    res_scope_denied = client.get(
+        f"/api/v1/documents/{doc_notes['document_id']}/assets",
+        params={"path": "diagram.png"},
+        headers={"Authorization": f"Bearer {file_agent}"},
+    )
+    assert res_scope_denied.status_code == 403
+
+
 def test_published_document_serves_its_uploaded_image(client: TestClient) -> None:
     document = create(client, "asset-publish")
     asset = upload(client, document["document_id"]).json()
