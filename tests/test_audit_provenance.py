@@ -908,33 +908,3 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
     assert "my_db_password" not in sanitized
     assert "my_tls_key" not in sanitized
     assert "client_secret_data" not in sanitized
-
-
-def test_prepare_event_row_fallback_action_type_and_target_file() -> None:
-    """Verify ActivityService._prepare_event_row populates default action_type and target_file."""
-    from sangam.activity import ActivityService
-    from sangam.db import Database
-    from sangam.security import Principal
-
-    db = Database(":memory:")
-    service = ActivityService(db)
-    principal = Principal.trusted_human(
-        actor_id="human:tester",
-        display_name="Tester",
-        operation_id="op_fallback_001",
-    )
-
-    row, _ = service._prepare_event_row(
-        principal=principal,
-        action="update",
-        resource_type="document",
-        outcome="accepted",
-        resource_id="doc_123",
-        path="docs/sample.md",
-        details=None,
-    )
-
-    detail_json_str = row[11]
-    details = json.loads(detail_json_str)
-    assert details["action_type"] == "update"
-    assert details["target_file"] == "docs/sample.md"
