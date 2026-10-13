@@ -47,6 +47,11 @@ class DocumentCommentService:
         actor_id: str,
         idempotency_key: str | None = None,
     ) -> DocumentComment:
+        if not request.body.strip():
+            raise ValidationError("Comment body cannot be blank")
+        if request.start > request.end:
+            raise ValidationError("Comment start offset cannot exceed end offset")
+
         validate_metadata_text(request.exact, "Comment exact passage")
         validate_metadata_text(request.prefix, "Comment prefix")
         validate_metadata_text(request.suffix, "Comment suffix")

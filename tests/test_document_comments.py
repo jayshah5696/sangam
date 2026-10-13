@@ -358,3 +358,42 @@ def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
         f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=other_headers
     )
     assert denied_get.status_code == 403
+
+
+def test_comment_validation_body_and_offsets(client: TestClient) -> None:
+    doc = create_doc(client, "Doc Validation", "Validation test text.")
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Blank body (whitespace only)
+    res_blank_body = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Validation",
+            "start": 0,
+            "end": 10,
+            "body": "   \n\t ",
+        },
+        headers=headers("blank-body-cmt"),
+    )
+    assert res_blank_body.status_code == 422
+    assert "Comment body cannot be blank" in res_blank_body.json()["error"]["message"]
+
+    # Start > End offset
+    res_invalid_offset = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Validation",
+            "start": 10,
+            "end": 5,
+            "body": "Valid body",
+        },
+        headers=headers("invalid-offset-cmt"),
+    )
+    assert res_invalid_offset.status_code == 422
+    assert (
+        "Comment start offset cannot exceed end offset"
+        in res_invalid_offset.json()["error"]["message"]
+    )
