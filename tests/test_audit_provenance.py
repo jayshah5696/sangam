@@ -911,7 +911,7 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
 
 
 def test_prepare_event_row_fallback_action_type_and_target_file() -> None:
-    """Verify ActivityService._prepare_event_row populates action_type and target_file when omitted."""
+    """Verify ActivityService._prepare_event_row populates default action_type and target_file."""
     from sangam.activity import ActivityService
     from sangam.db import Database
     from sangam.security import Principal
