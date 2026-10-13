@@ -1635,31 +1635,51 @@ class DocumentService:
     def _finish_materialization(self, document: Document) -> None:
         if document.deleted or not document.path:
             return
-        try:
-            file_hash = self.workspace.write_atomic(document.path, document.content)
-        except Exception as error:
-            raise MaterializationError(
-                "The revision was committed, but its workspace file is still pending",
-                details={
-                    "document_id": document.document_id,
-                    "revision_id": document.current_revision_id,
-                    "path": document.path,
-                },
-            ) from error
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                UPDATE documents
-                SET materialization_state = 'clean', file_hash = ?
-                WHERE document_id = ? AND current_revision_id = ?
-                """,
-                (file_hash, document.document_id, document.current_revision_id),
-            )
-            self.database.set_audit_target(
-                resource_id=document.document_id,
-                revision_id=document.current_revision_id,
-                path=document.path,
-            )
+        with (
+            self.mutations.path(document.path),
+            self.mutations.document(document.document_id),
+        ):
+            with self.database.connection() as connection:
+                latest = connection.execute(
+                    """
+                    SELECT current_revision_id, materialization_state, path, deleted
+                    FROM documents WHERE document_id = ?
+                    """,
+                    (document.document_id,),
+                ).fetchone()
+            if (
+                latest is None
+                or latest["deleted"]
+                or latest["path"] != document.path
+                or latest["current_revision_id"] != document.current_revision_id
+            ):
+                return
+            try:
+                file_hash = self.workspace.write_atomic(document.path, document.content)
+            except Exception as error:
+                raise MaterializationError(
+                    "The revision was committed, but its workspace file is still pending",
+                    details={
+                        "document_id": document.document_id,
+                        "revision_id": document.current_revision_id,
+                        "path": document.path,
+                    },
+                ) from error
+            with self.database.transaction() as connection:
+                updated = connection.execute(
+                    """
+                    UPDATE documents
+                    SET materialization_state = 'clean', file_hash = ?
+                    WHERE document_id = ? AND current_revision_id = ?
+                    """,
+                    (file_hash, document.document_id, document.current_revision_id),
+                )
+                if updated.rowcount == 1:
+                    self.database.set_audit_target(
+                        resource_id=document.document_id,
+                        revision_id=document.current_revision_id,
+                        path=document.path,
+                    )
 
     def rematerialize_document(self, document_id: str) -> Document:
         """Rewrite a materialized document from the canonical database head."""
