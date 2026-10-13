@@ -16,7 +16,7 @@ export function ChatTask({
     queryFn: () => api.chatTask(threadId ?? ''),
     enabled: Boolean(threadId),
   })
-  const refresh = useRef<HTMLButtonElement>(null)
+  const overview = useRef<HTMLDivElement>(null)
   if (!threadId) return <StateMessage compact kind="empty" title="Start a conversation first" />
   if (query.isPending) return <StateMessage compact kind="loading" title="Loading active task" />
   if (query.isError && !query.data)
@@ -35,22 +35,16 @@ export function ChatTask({
   const state = query.data
   if (!state) return null
   return (
-    <div>
+    <div ref={overview} tabIndex={-1}>
       {sourceMessageId && (
         <TaskSource key={sourceMessageId} threadId={threadId} itemId={sourceMessageId} initiallyOpen />
       )}
-      <p>
-        Task context · version {state.version}. This summary can be wrong. It grants no permissions or
-        approvals.
+      <p className="chat-context-description">
+        What chat is keeping in mind. Edit a detail to guide the next reply.
       </p>
-      <button ref={refresh} className="secondary-action" onClick={() => void query.refetch()}>
-        Refresh task summary
-      </button>
-      <p>
-        {state.run_status === 'failed' || state.run_status === 'cancelled'
-          ? 'Interrupted. No work continues in the background.'
-          : 'No work continues in the background.'}
-      </p>
+      {(state.run_status === 'failed' || state.run_status === 'cancelled') && (
+        <p className="chat-context-description">Interrupted. Nothing is running.</p>
+      )}
       {state.stale && (
         <StateMessage
           compact
@@ -88,9 +82,19 @@ export function ChatTask({
           key={`${threadId}:${note.key}`}
           note={note}
           state={state}
-          onDismiss={() => refresh.current?.focus()}
+          onDismiss={() => overview.current?.focus()}
         />
       ))}
+      <details className="chat-task-details">
+        <summary>About this summary</summary>
+        <p>
+          Version {state.version}. This summary can be wrong. Your latest message takes precedence. It grants
+          no permissions or approvals, and opening it does not resume work.
+        </p>
+        <button className="secondary-action" disabled={query.isFetching} onClick={() => void query.refetch()}>
+          {query.isFetching ? 'Refreshing…' : 'Refresh task summary'}
+        </button>
+      </details>
       {state.effects.length > 0 && (
         <details>
           <summary>Current effect statuses</summary>
@@ -112,6 +116,11 @@ function TaskField({ note, state, onDismiss }: { note: TaskNote; state: TaskStat
   const [baseline, setBaseline] = useState({ text: note.text, version: state.version })
   const [draft, setDraft] = useState(note.text)
   const trigger = useRef<HTMLButtonElement>(null)
+  const editor = useRef<HTMLTextAreaElement>(null)
+  const label =
+    note.key === 'objective'
+      ? 'Task'
+      : note.key.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())
   const dirty = draft !== baseline.text
   if (!dirty && (baseline.version !== state.version || baseline.text !== note.text)) {
     setBaseline({ text: note.text, version: state.version })
@@ -137,19 +146,29 @@ function TaskField({ note, state, onDismiss }: { note: TaskNote; state: TaskStat
   })
   return (
     <section className="chat-task-field">
-      <strong>
-        {note.kind} · {note.key}
-        {note.corrected ? ' · corrected' : ''}
-      </strong>
-      <p className="instruction-content">{note.text}</p>
-      {dirty && <span>Unsaved correction</span>}
-      <button ref={trigger} className="secondary-action" onClick={() => setEditing(!editing)}>
-        {editing ? `Close correction ${note.key}` : `Correct ${note.key}`}
-      </button>
+      <div className="chat-task-heading">
+        <strong>{label}</strong>
+        {note.corrected && <span className="scope-badge">Edited</span>}
+        <button
+          ref={trigger}
+          className="secondary-action"
+          aria-label={editing ? `Close correction ${note.key}` : `Edit ${note.key}`}
+          aria-expanded={editing}
+          onClick={() => {
+            setEditing(!editing)
+            if (!editing) requestAnimationFrame(() => editor.current?.focus())
+          }}
+        >
+          {editing ? 'Close' : 'Edit'}
+        </button>
+      </div>
+      {!editing && <p className="instruction-content">{note.text}</p>}
+      {dirty && <span className="chat-context-description">Unsaved correction</span>}
       <div hidden={!editing}>
         <label className="settings-field">
           Correction for {note.key}
           <textarea
+            ref={editor}
             aria-label={`Correction for ${note.key}`}
             rows={3}
             maxLength={600}
@@ -157,7 +176,9 @@ function TaskField({ note, state, onDismiss }: { note: TaskNote; state: TaskStat
             onChange={(event) => setDraft(event.target.value)}
           />
         </label>
-        <p>Clear the text to dismiss this field. The original source stays available.</p>
+        <p className="chat-context-description">
+          Clear this field to remove it from the summary. Original messages are kept.
+        </p>
         {save.isError && (
           <StateMessage
             compact
@@ -169,21 +190,29 @@ function TaskField({ note, state, onDismiss }: { note: TaskNote; state: TaskStat
             }
           />
         )}
-        <button className="primary-button" disabled={save.isPending || !dirty} onClick={() => save.mutate()}>
-          Save task correction
-        </button>
-        <button
-          className="secondary-action"
-          disabled={save.isPending}
-          onClick={() => {
-            setBaseline({ text: note.text, version: state.version })
-            setDraft(note.text)
-            save.reset()
-            void queryClient.invalidateQueries({ queryKey: ['chat-task', state.thread_id] })
-          }}
-        >
-          Discard task correction
-        </button>
+        <div className="chat-effect-actions">
+          <button
+            className="primary-button"
+            aria-label="Save changes to task"
+            disabled={save.isPending || !dirty}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? 'Saving…' : 'Save changes'}
+          </button>
+          <button
+            className="secondary-action"
+            aria-label="Discard changes to task"
+            disabled={save.isPending}
+            onClick={() => {
+              setBaseline({ text: note.text, version: state.version })
+              setDraft(note.text)
+              save.reset()
+              void queryClient.invalidateQueries({ queryKey: ['chat-task', state.thread_id] })
+            }}
+          >
+            Discard changes
+          </button>
+        </div>
       </div>
       <details>
         <summary aria-label={`Sources for ${note.key}`}>Sources ({note.source_item_ids.length})</summary>
@@ -215,7 +244,7 @@ function TaskSource({
   return (
     <div>
       <button className="secondary-action" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? `Close source ${itemId}` : `Read source ${itemId}`}
+        {open ? 'Close original message' : 'Read original message'}
       </button>
       {open && (
         <div>
@@ -223,10 +252,8 @@ function TaskSource({
           {source.isError && <StateMessage compact kind="error" title="Source message could not be loaded" />}
           {entry && (
             <>
-              <p className="instruction-content">{entry.text}</p>
-              <p>
-                Original {entry.role} message · {itemId}
-              </p>
+              <blockquote className="chat-task-source instruction-content">{entry.text}</blockquote>
+              <p className="chat-context-description">Original {entry.role} message</p>
               {offset > 0 && (
                 <button className="secondary-action" onClick={() => setOffset(Math.max(0, offset - 1200))}>
                   Previous excerpt

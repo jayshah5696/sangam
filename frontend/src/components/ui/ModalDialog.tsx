@@ -103,9 +103,9 @@ export function ModalDialog({
         if (event.key !== 'Tab') return
         const controls = [
           ...event.currentTarget.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex="0"]',
           ),
-        ]
+        ].filter((control) => control.tabIndex >= 0 && control.checkVisibility({ visibilityProperty: true }))
         if (controls.length === 0) return
         const first = controls[0]
         const last = controls.at(-1)

@@ -556,26 +556,28 @@ export function ChatPanel({
 
   return (
     <div className={`chat-panel ${compact ? 'chat-panel-compact' : ''}`}>
-      <ChatInstructions
-        sourceMessageId={threadId === initialThreadId ? initialSourceMessageId : undefined}
-        projectId={projectId}
-        threadId={threadId}
-        override={instructionsOverride}
-        onOverrideChange={setInstructionsOverride}
-      />
+      <div className="chat-context-toolbar">
+        {!compact && (
+          <ChatContextBanner
+            document={activeDocument}
+            selectedText={activeSelectedText}
+            onClear={onClearContext}
+          />
+        )}
+        <ChatInstructions
+          sourceMessageId={threadId === initialThreadId ? initialSourceMessageId : undefined}
+          projectId={projectId}
+          threadId={threadId}
+          override={instructionsOverride}
+          onOverrideChange={setInstructionsOverride}
+        />
+      </div>
       {initialPrompt && (
         <StateMessage
           compact
           kind="empty"
           title="Message draft"
           description="Review the prepared message in the composer, then choose Send."
-        />
-      )}
-      {!compact && (
-        <ChatContextBanner
-          document={activeDocument}
-          selectedText={activeSelectedText}
-          onClear={onClearContext}
         />
       )}
       {contextSwitchEvent && (
@@ -1497,7 +1499,7 @@ function WorkspaceChatSurface({
     frameTitle: 'Workspace chat',
     initialThread: initialThreadId ?? undefined,
     theme: chatkitTheme,
-    header: compact ? { enabled: false } : { enabled: true, title: { text: 'Workspace chat' } },
+    header: compact ? { enabled: false } : { enabled: true },
     history: { enabled: true, showDelete: !compact, showRename: !compact },
     startScreen: {
       greeting: compact ? 'Ask about this document' : 'Ask about this workspace',

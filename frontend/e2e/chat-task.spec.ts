@@ -36,6 +36,13 @@ test('active task stays in context; corrections retain drafts and restore focus'
     effects: [],
     notes: [
       {
+        key: 'objective',
+        kind: 'objective',
+        text: 'Write a launch brief for Atlas, for product and operations teams.',
+        source_item_ids: ['source'],
+        corrected: false,
+      },
+      {
         key: 'language',
         kind: 'constraint',
         text: 'Use French',
@@ -46,6 +53,20 @@ test('active task stays in context; corrections retain drafts and restore focus'
         key: 'length',
         kind: 'constraint',
         text: 'At most 300 words',
+        source_item_ids: ['source'],
+        corrected: false,
+      },
+      {
+        key: 'delivery',
+        kind: 'constraint',
+        text: 'Reply in this conversation.',
+        source_item_ids: ['source'],
+        corrected: false,
+      },
+      {
+        key: 'documents',
+        kind: 'constraint',
+        text: 'Do not create or publish a document.',
         source_item_ids: ['source'],
         corrected: false,
       },
@@ -84,29 +105,55 @@ test('active task stays in context; corrections retain drafts and restore focus'
   )
   await page.goto(`/chat?thread=${threadId}`)
   await expect(page.getByRole('paragraph').filter({ hasText: /^Use French$/ })).not.toBeVisible()
-  await page.getByRole('button', { name: 'Instructions', exact: true }).click()
-  await page.getByRole('tab', { name: 'Active task' }).click()
+  await page.getByRole('button', { name: 'Chat context', exact: true }).click()
+  await expect(page.getByRole('tab', { name: 'Active task' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByText('Language', { exact: true })).toBeVisible()
+  await expect(page.getByText('constraint · language')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Edit length' })).toBeInViewport()
+  await page.screenshot({ path: test.info().outputPath('task-overview.png') })
+  await page.getByRole('button', { name: 'Close chat context' }).focus()
+  await page.keyboard.press('Shift+Tab')
+  await expect(page.getByText('About this summary', { exact: true })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: 'Close chat context' })).toBeFocused()
   await expect(page.getByRole('paragraph').filter({ hasText: /^Use French$/ })).toBeVisible()
-  await expect(
-    page.getByText('Interrupted. No work continues in the background.', { exact: true }),
-  ).toBeVisible()
-  await page.getByRole('button', { name: 'Correct language' }).click()
+  await expect(page.getByText('Interrupted. Nothing is running.', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Edit language' }).click()
+  await expect(page.getByLabel('Correction for language')).toBeFocused()
   await page.getByLabel('Correction for language').fill('Use English')
+  await page.screenshot({ path: test.info().outputPath('task-edit.png') })
   await page.getByRole('button', { name: 'Close chat context' }).click()
-  await expect(page.getByRole('button', { name: 'Instructions', exact: true })).toBeFocused()
-  await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Chat context', exact: true })).toBeFocused()
+  await page.getByRole('button', { name: 'Chat context', exact: true }).click()
   await expect(page.getByLabel('Correction for language')).toHaveValue('Use English')
-  await page.getByRole('button', { name: 'Save task correction' }).click()
-  await expect(page.getByRole('button', { name: 'Correct language' })).toBeFocused()
+  await page.getByRole('button', { name: 'Save changes to task' }).click()
+  await expect(page.getByRole('button', { name: 'Edit language' })).toBeFocused()
   await expect(page.getByRole('paragraph').filter({ hasText: /^Use English$/ })).toBeVisible()
   await expect(page.getByRole('paragraph').filter({ hasText: /^At most 300 words$/ })).toBeVisible()
   await page.getByLabel('Sources for language').click()
-  await page.getByRole('button', { name: 'Read source source' }).first().click()
+  await page.getByRole('button', { name: 'Read original message' }).first().click()
   await expect(page.getByText('Use French, at most 300 words', { exact: true })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('task-source.png') })
+  if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) {
+    for (const control of [
+      page.getByRole('button', { name: 'Edit language' }),
+      page.getByRole('button', { name: 'Close chat context' }),
+    ]) {
+      expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+    }
+  }
   for (const width of [320, 599, 601, 767, 769, 899, 901, 844]) {
     await page.setViewportSize({ width, height: width === 844 ? 390 : 844 })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
     await expect(page.getByRole('dialog')).toBeInViewport()
+    await page.getByText('About this summary', { exact: true }).scrollIntoViewIfNeeded()
+    await expect(page.getByRole('button', { name: 'Close chat context' })).toBeInViewport()
+    const bounds = await page.getByRole('dialog').boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.y).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(width === 844 ? 390 : 844)
   }
   await page.screenshot({ path: test.info().outputPath('active-task.png') })
   await page.goto(`/chat?thread=${threadId}&message=source`)
