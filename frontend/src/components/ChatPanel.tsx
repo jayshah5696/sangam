@@ -232,6 +232,7 @@ export function ChatPanel({
     () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['chat-profile'] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-memory'] }),
         queryClient.invalidateQueries({ queryKey: ['chat-profile-applied', threadId] }),
         queryClient.invalidateQueries({
           queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],

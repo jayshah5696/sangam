@@ -12,7 +12,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from sangam.access import writes
 from sangam.chat import ChatRequestContext, SangamChatServer
-from sangam.chat_profiles import ProfileContext, ProfileEntry, UpdateProfile
+from sangam.chat_profiles import (
+    MemoryChange,
+    MemoryEntry,
+    MemoryPage,
+    MemorySearch,
+    ProfileContext,
+    ProfileEntry,
+    UpdateProfile,
+)
 from sangam.chat_runtime import ChatAdmissionLease, read_limited_body
 from sangam.errors import ServiceUnavailableError, ValidationError
 from sangam.schemas import (
@@ -49,6 +57,25 @@ def create_chat_router(
     router = APIRouter(prefix="/api/v1", tags=["chat"])
     principal_dependency = Depends(resolve_principal)
     admin_dependency = Depends(require_administrator)
+
+    @router.get("/chat/memory", response_model=MemoryPage)
+    def get_memory(
+        project_id: str | None = Query(default=None, min_length=1, max_length=200),
+        query: str = Query(default="", max_length=200),
+        offset: int = Query(default=0, ge=0, le=10000),
+        principal: Principal = admin_dependency,
+    ) -> MemoryPage:
+        return chat.profiles.list_memory(
+            principal, MemorySearch(project_id=project_id, query=query, offset=offset)
+        )
+
+    @router.put("/chat/memory", response_model=MemoryEntry)
+    def change_memory(
+        body: MemoryChange,
+        key: str | None = Header(default=None, alias="Idempotency-Key"),
+        principal: Principal = admin_dependency,
+    ) -> MemoryEntry:
+        return chat.profiles.change_memory(principal, key or str(uuid4()), body)
 
     @router.get("/chat/profile", response_model=ProfileContext)
     def get_profile(

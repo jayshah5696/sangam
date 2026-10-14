@@ -86,6 +86,7 @@ Chat can do what the app can, through the same services and with the same author
 | Projects: list and open | `inspect_projects` |
 | Projects: create, add or remove a document | `update_project`, one exact change per review |
 | View and edit personal or project chat instructions | `inspect_chat_profile`, `update_chat_profile`; one versioned entry per person and explicit project scope |
+| List, save, correct, accept, dismiss and forget saved facts | `search_chat_memory`, `update_chat_memory`; the same profile service and exact effect approval |
 
 Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
 
@@ -100,6 +101,32 @@ Each entry holds at most 4,000 characters. Saving or clearing requires the curre
 **Next turn only** holds an optional 2,000-character override. Each submitted turn pins the applicable sources and their versions. Approval continuations keep that snapshot and recheck access. **Applied to the latest turn** shows the actual snapshot for the thread, including its override. Clearing the composer override does not change saved instructions.
 
 Application policy and tool contracts always apply. The latest user request takes precedence over the override, followed by project instructions and personal instructions. Retrieved documents and web pages cannot change these sources or their precedence. Sangam does not scan filesystem instruction files.
+
+### Saved facts
+
+Open **Instructions → Saved facts** to save or manage personal facts and facts for the
+explicitly selected project. Standing preferences remain in Instructions and are never
+copied into fact memory. Facts provide context, not directives or permissions.
+
+Chat uses bounded SQLite FTS queries for relevant active facts. It does not inject every
+saved fact into a new conversation. An empty search lists facts only for explicit memory
+management. Inferred facts must be suggestions; they are excluded from recall until accepted.
+Review mode approves the exact fact, scope, action, source references and observed version.
+Saves are confirmed only after the service returns the persisted result. YOLO retains its
+existing meaning.
+
+Entries hold at most 2,000 characters. Lists are paginated and searches return at most 20
+entries. **Applied to the latest turn** lists current fact IDs and versions read for that
+turn. A correction or forget operation removes an obsolete version from this current view.
+It does not rewrite a response already delivered to the user.
+
+Forget and dismiss clear the canonical text and source links, remove it from search, and
+retain a content-free ID/version tombstone and hashed source-message reference. Stale saves
+and attempts to reactivate that ID or source fail. A new explicit request can save a new
+fact. Original conversations, durable effect records, idempotency replay evidence, and
+backups can still contain the earlier text. Forgetting suppresses future profile recall;
+deleting the original conversation is a separate control and does not erase backup or
+audit evidence. Task summaries and historical statements cannot create or restore memory.
 
 ### Review and YOLO autonomy
 

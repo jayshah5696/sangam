@@ -71,6 +71,12 @@ const EFFECT_COPY = {
     failed: 'The instructions may have changed. Inspect the saved version and prepare a new request.',
     completed: 'The instructions were saved for future turns.',
   },
+  update_chat_memory: {
+    noun: 'Memory change',
+    history: (n) => `${n} memory ${plural(n, 'change')} completed`,
+    failed: 'The memory may have changed. Inspect the current version and prepare a new request.',
+    completed: 'The requested memory change was completed.',
+  },
   update_publication: {
     noun: 'Publication change',
     history: (n) => `${n} publication ${plural(n, 'change')} made`,
@@ -91,6 +97,7 @@ const EFFECT_ORDER = [
   'apply_workspace_organization_plan',
   'update_project',
   'update_chat_profile',
+  'update_chat_memory',
   'update_publication',
   'annotate_pdf',
 ] as const satisfies readonly ChatEffect['capability_id'][]
