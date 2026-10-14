@@ -142,6 +142,13 @@ const settingsSearchIndex: Array<{
     keywords: 'agent permission mode autonomy yolo approval policy',
   },
   {
+    id: 'chat-skills',
+    category: 'models',
+    label: 'Chat skills',
+    description: 'Reusable procedures and slash commands for workspace chat',
+    keywords: 'skills chat skills slash commands procedures prompts markdown',
+  },
+  {
     id: 'agent-access',
     category: 'agents',
     label: 'Agent access',

@@ -115,7 +115,7 @@ describe('ChatCompactContext', () => {
     expect(screen.getByText('Research Brief')).toBeTruthy()
     expect(screen.getByText(/rev 8f2ac41d…9999/)).toBeTruthy()
     expect(screen.getByText(/21 selected/)).toBeTruthy()
-    expect(screen.getByText('Review required')).toBeTruthy()
+    expect(screen.getByText('Edits require approval')).toBeTruthy()
   })
 
   it('states when authorized effects run immediately', () => {

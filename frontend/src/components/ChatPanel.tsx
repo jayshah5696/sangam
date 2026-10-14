@@ -1047,7 +1047,12 @@ export function CompletionRow({
       </div>
       <div className="chat-effect-complete-actions">
         {openControl}
-        <button type="button" className="secondary-action" onClick={onDismiss}>
+        <button
+          type="button"
+          className="secondary-action"
+          title="Dismiss banner (document is saved)"
+          onClick={onDismiss}
+        >
           Dismiss
         </button>
       </div>
@@ -1130,7 +1135,7 @@ export function ChatCompactContext({
   const contextMeta = document ? `rev ${shortId(document.current_revision_id)}` : 'Whole workspace'
   const selectionMeta = selectedText ? `${selectedText.length.toLocaleString()} selected` : null
   const permissionLabel =
-    autonomyMode === 'workspace' ? 'Authorized effects run immediately' : 'Review required'
+    autonomyMode === 'workspace' ? 'Authorized effects run immediately' : 'Edits require approval'
   return (
     <section className="chat-compact-context" aria-label="Document chat context">
       <div>
@@ -1140,7 +1145,14 @@ export function ChatCompactContext({
           {selectionMeta && ` · ${selectionMeta}`}
         </span>
       </div>
-      <span className={`scope-badge ${autonomyMode === 'workspace' ? 'workspace' : ''}`}>
+      <span
+        className={`scope-badge ${autonomyMode === 'workspace' ? 'workspace' : ''}`}
+        title={
+          autonomyMode === 'workspace'
+            ? 'YOLO mode: effects run immediately'
+            : 'Review mode: agent edits require approval'
+        }
+      >
         {permissionLabel}
       </span>
     </section>
