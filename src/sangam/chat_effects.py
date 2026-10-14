@@ -36,6 +36,7 @@ from sangam.chat_capabilities import (
     UpdateProjectMemberChange,
     UpdatePublicationInput,
 )
+from sangam.chat_profiles import ChatProfileService, UpdateProfile
 from sangam.db import Database, utc_now
 from sangam.errors import (
     AuthorizationError,
@@ -104,16 +105,25 @@ class ChatEffectService:
         identity: IdentityService,
         projects: ProjectService,
         registry: ChatCapabilityRegistry,
+        profiles: ChatProfileService,
         approval_ttl: timedelta = timedelta(minutes=30),
     ) -> None:
         self.database = database
         self.workspace = workspace
         self.identity = identity
         self.projects = projects
+        self.profiles = profiles
         self.registry = registry
         self.approval_ttl = approval_ttl
         idempotency = workspace.documents.idempotency
         self.durable: dict[str, DurableEffect] = {
+            "update_chat_profile": DurableEffect(
+                preflight=lambda principal, arguments: profiles.preflight(
+                    principal, UpdateProfile.model_validate(arguments)
+                ),
+                execute=self._execute_profile,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
             "create_document": DurableEffect(
                 preflight=self._preflight_create,
                 execute=self._execute_create,
@@ -153,6 +163,23 @@ class ChatEffectService:
                 ),
             ),
         }
+
+    def _execute_profile(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        entry = self.profiles.update(
+            principal, operation_key, UpdateProfile.model_validate(arguments)
+        )
+        result = {**entry.model_dump(mode="json"), "approved": True, "status": "saved"}
+        return EffectOutcome(
+            result, dict(result), "chat_profile", entry.project_id or principal.actor_id
+        )
 
     def propose(
         self,

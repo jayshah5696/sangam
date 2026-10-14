@@ -17,7 +17,7 @@ from test_phase_seven_chat import create_thread
 from sangam.chat import agent_instructions
 from sangam.chat_capabilities import CreateDocumentInput
 from sangam.chat_context import ChatRequestContext
-from sangam.errors import AuthorizationError
+from sangam.errors import AuthorizationError, NotFoundError
 from sangam.security import Principal
 
 
@@ -377,18 +377,18 @@ def test_a_conversation_started_from_a_project_tells_the_model_about_it(
             ChatRequestContext(principal=human(), project_id=project["project_id"]), "thread-ctx"
         ),
     )
-    missing = run_in_app(
-        client,
-        chat.app_context(
-            ChatRequestContext(principal=human(), project_id="proj_gone"), "thread-ctx"
-        ),
-    )
+    with pytest.raises(NotFoundError):
+        run_in_app(
+            client,
+            chat.app_context(
+                ChatRequestContext(principal=human(), project_id="proj_gone"), "thread-ctx"
+            ),
+        )
 
     assert f"Open project id: {project['project_id']}" in context
     assert "Project purpose: Size the market" in context
     assert "This conversation's thread id: thread-ctx" in context
     assert f"- {source['document_id']} | ctx-source | source" in context
-    assert "Open project" not in missing
 
 
 def test_an_agent_is_not_told_about_projects(client: TestClient) -> None:
@@ -401,14 +401,13 @@ def test_an_agent_is_not_told_about_projects(client: TestClient) -> None:
     token = issue_agent_token(client, actor_id="agent:nosy", capabilities=("read",))
     agent = services.identity.authenticate(token, operation_id="ctx-agent")
 
-    context = run_in_app(
-        client,
-        services.chat.app_context(
-            ChatRequestContext(principal=agent, project_id=project["project_id"]), "thread-ctx"
-        ),
-    )
-
-    assert "Hidden from agents" not in context
+    with pytest.raises(AuthorizationError):
+        run_in_app(
+            client,
+            services.chat.app_context(
+                ChatRequestContext(principal=agent, project_id=project["project_id"]), "thread-ctx"
+            ),
+        )
 
 
 def test_chat_edits_a_project_its_members_conversations_and_annotations(

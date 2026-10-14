@@ -85,10 +85,21 @@ Chat can do what the app can, through the same services and with the same author
 | Move, trash, restore, duplicate, tag, folders | `apply_workspace_organization_plan`; every operation calls `WorkspaceAccessService.write_document` or the folder services |
 | Projects: list and open | `inspect_projects` |
 | Projects: create, add or remove a document | `update_project`, one exact change per review |
+| View and edit personal or project chat instructions | `inspect_chat_profile`, `update_chat_profile`; one versioned entry per person and explicit project scope |
 
 Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
 
 Not available in chat by design: trust changes, agent tokens, provider connections, backups, reconciliation, Karakeep, and importing PDF bytes. These are administrator operations that hold credentials, operate on infrastructure, or need a binary upload. Chat never rotates a publication token, because that issues a credential, and it cannot create highlight annotations.
+
+### Saved instructions
+
+Open **Instructions** in workspace or document chat to edit personal instructions and the selected project's instructions. Project scope uses the stable project ID from the conversation entry point. Document folders and titles never select a project. Project entries are owned by the person who saves them, and project access is checked against its current document membership.
+
+Each entry holds at most 4,000 characters. Saving or clearing requires the current version. A stale save preserves the draft and asks you to reload. Profile mutations use the same audited service through the API and chat. In Review mode, chat shows the full proposed instructions for approval before saving them.
+
+**Next turn only** holds an optional 2,000-character override. Each submitted turn pins the applicable sources and their versions. Approval continuations keep that snapshot and recheck access. **Applied to the latest turn** shows the actual snapshot for the thread, including its override. Clearing the composer override does not change saved instructions.
+
+Application policy and tool contracts always apply. The latest user request takes precedence over the override, followed by project instructions and personal instructions. Retrieved documents and web pages cannot change these sources or their precedence. Sangam does not scan filesystem instruction files.
 
 ### Review and YOLO autonomy
 

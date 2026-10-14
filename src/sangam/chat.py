@@ -31,13 +31,13 @@ from sangam.chat_context import AgentRunContext, ChatRequestContext
 from sangam.chat_effects import ChatEffectService
 from sangam.chat_evidence import ChatEvidenceRepository
 from sangam.chat_models import ChatModelCatalog
+from sangam.chat_profiles import ChatProfileService
 from sangam.chat_proposals import ChatProposalRepository, ChatProposalService
 from sangam.chat_runtime import BoundedChatAdmission
 from sangam.chat_store import SQLiteChatKitStore
 from sangam.chat_tools import ChatToolset
 from sangam.config import ChatServerConfig
 from sangam.db import Database
-from sangam.errors import NotFoundError
 from sangam.projects import ProjectService
 from sangam.provider_connections import ProviderConnectionService, ProviderStatus
 from sangam.schemas import ChatRuntimeConfig
@@ -114,6 +114,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
     ) -> None:
         self.workspace = workspace
         self.projects = projects
+        self.profiles = ChatProfileService(database, workspace, projects)
         self.config = config
         self.model_catalog = model_catalog
         self.provider_connections = provider_connections
@@ -131,6 +132,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             identity=identity,
             projects=projects,
             registry=self.capabilities,
+            profiles=self.profiles,
         )
         proposal_repository = ChatProposalRepository(database)
         self.proposals = ChatProposalService(
@@ -497,8 +499,12 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
 
     async def app_context(self, context: ChatRequestContext, thread_id: str) -> str:
         """What the model is told about the open document and project."""
+        profile = await self.admission.run_sync(self.profiles.resolve, context)
+        context = replace(context, project_id=profile.project_id)
         project_context = await self.admission.run_sync(self._project_context, context, thread_id)
-        project_context = self._access_context(context.principal) + project_context
+        project_context = (
+            self._access_context(context.principal) + project_context + profile.prompt()
+        )
         if not context.document_id:
             return (
                 "<SANGAM_CONTEXT>\nNo current document is open.\n"
@@ -536,17 +542,10 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         return "Your create access is limited to paths under: " + ", ".join(prefixes) + "\n"
 
     def _project_context(self, context: ChatRequestContext, thread_id: str) -> str:
-        """Describe the project this conversation started from; empty when there is none.
-
-        Projects are administrator-only and may have been deleted since the page loaded,
-        so a project that cannot be read is left out rather than failing the turn.
-        """
-        if not context.project_id or not context.principal.administrator:
+        """Describe the explicitly selected project after profile access has been checked."""
+        if not context.project_id:
             return ""
-        try:
-            project = self.projects.get_project(context.project_id, context.principal)
-        except NotFoundError:
-            return ""
+        project = self.projects.get_project(context.project_id, context.principal)
         members = "\n".join(
             f"- {member.document_id} | {member.document_title} | {member.role}"
             for member in project.documents[:25]

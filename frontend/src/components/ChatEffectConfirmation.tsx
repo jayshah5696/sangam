@@ -1,4 +1,4 @@
-import type { ChatEffect } from '../api'
+import { chatProfileUpdateSchema, type ChatEffect } from '../api'
 import type { EffectReview } from '../chatEffectCopy'
 import { StateMessage } from './ui/StateMessage'
 
@@ -22,6 +22,8 @@ export function ChatEffectConfirmation({
     hour: 'numeric',
     minute: '2-digit',
   })
+  const profile =
+    effect.capability_id === 'update_chat_profile' ? chatProfileUpdateSchema.safeParse(effect.preview) : null
   return (
     <section
       className="chat-effect-confirmation"
@@ -36,6 +38,11 @@ export function ChatEffectConfirmation({
           {review.detail} · requested by {effect.requested_by} · expires at {expires}
         </p>
       </header>
+      {profile?.success && (
+        <pre className="instruction-content" aria-label="Instructions to save">
+          {profile.data.content || '(Clear saved instructions)'}
+        </pre>
+      )}
       {error && (
         <StateMessage
           compact
