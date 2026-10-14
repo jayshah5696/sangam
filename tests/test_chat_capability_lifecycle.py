@@ -270,6 +270,7 @@ def test_registry_filters_authority_and_rejects_extra_tool_arguments(client: Tes
         "inspect_workspace_organization",
         "read_document",
         "read_revision_history",
+        "activate_chat_skill",
     }
     with pytest.raises(PydanticValidationError):
         WorkspaceSearchInput.model_validate({"query": "evidence", "unexpected": True})

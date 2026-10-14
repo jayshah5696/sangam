@@ -61,6 +61,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "033",
         "034",
         "035",
+        "036",
     ]
     assert {
         "document_comments_document_idx",
@@ -87,6 +88,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "operation_events_error_created_idx",
         "chat_effects_thread_attention_idx",
         "activity_problem_acknowledgements_actor_created_idx",
+        "chat_skills_actor_project_idx",
     } <= indexes
 
 

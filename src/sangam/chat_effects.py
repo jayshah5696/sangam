@@ -38,6 +38,7 @@ from sangam.chat_capabilities import (
 )
 from sangam.chat_continuity import ChatContinuityService, TaskCorrection
 from sangam.chat_profiles import ChatProfileService, MemoryChange, UpdateProfile
+from sangam.chat_skills import ChatSkillService, ManageSkillInput, RegisterSkillRequest
 from sangam.db import Database, utc_now
 from sangam.errors import (
     AuthorizationError,
@@ -108,6 +109,7 @@ class ChatEffectService:
         registry: ChatCapabilityRegistry,
         profiles: ChatProfileService,
         continuity: ChatContinuityService,
+        skills: ChatSkillService,
         approval_ttl: timedelta = timedelta(minutes=30),
     ) -> None:
         self.database = database
@@ -116,6 +118,7 @@ class ChatEffectService:
         self.projects = projects
         self.profiles = profiles
         self.continuity = continuity
+        self.skills = skills
         self.registry = registry
         self.approval_ttl = approval_ttl
         idempotency = workspace.documents.idempotency
@@ -179,7 +182,52 @@ class ChatEffectService:
                     actor_id=actor, idempotency_key=key
                 ),
             ),
+            "manage_chat_skill": DurableEffect(
+                preflight=self._preflight_skill,
+                execute=self._execute_skill,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
         }
+
+    def _preflight_skill(self, principal: Principal, arguments: dict[str, object]) -> None:
+        manage_input = ManageSkillInput.model_validate(arguments)
+        if manage_input.action == "register":
+            self.skills.preflight_registration(
+                principal, manage_input.document_id, manage_input.project_id
+            )
+        else:
+            skill = self.skills.get_by_document(principal, manage_input.document_id)
+            if not skill:
+                raise NotFoundError("Skill not found for this document")
+
+    def _execute_skill(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        manage_input = ManageSkillInput.model_validate(arguments)
+        if manage_input.action == "register":
+            summary = self.skills.register(
+                principal,
+                operation_key,
+                RegisterSkillRequest(
+                    document_id=manage_input.document_id,
+                    project_id=manage_input.project_id,
+                ),
+            )
+            result = {**summary.model_dump(mode="json"), "approved": True, "status": "registered"}
+            return EffectOutcome(result, dict(result), "chat_skill", summary.skill_id)
+        else:
+            skill = self.skills.get_by_document(principal, manage_input.document_id)
+            if not skill:
+                raise NotFoundError("Skill not found for this document")
+            self.skills.unregister(principal, operation_key, skill.skill_id)
+            result = {"skill_id": skill.skill_id, "approved": True, "status": "unregistered"}
+            return EffectOutcome(result, dict(result), "chat_skill", skill.skill_id)
 
     def _task_correction_committed(self, actor: str, key: str) -> bool:
         with self.database.connection() as conn:

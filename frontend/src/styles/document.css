@@ -2146,3 +2146,34 @@ button:disabled { cursor: not-allowed; opacity: .56; }
 .chat-task-field > details > summary { color: var(--muted); }
 .chat-task-details { border-top: 1px solid var(--line); margin-top: var(--space-2); color: var(--muted); }
 .chat-task-source { margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); border-inline-start: 2px solid var(--accent); background: var(--surface); }
+
+/* Chat Skills in Chat Context and Document Properties */
+.chat-skills-panel { display: flex; flex-direction: column; gap: var(--space-3); }
+.chat-skills-header-intro { color: var(--muted); font-size: var(--text-control); line-height: 1.5; }
+.chat-skills-header-intro code { font-family: var(--font-mono); color: var(--text); background: var(--surface-soft); padding: 1px 4px; border-radius: var(--radius-control); }
+.empty-skills-notice { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--space-5) var(--space-4); border: 1px dashed var(--line); border-radius: var(--radius-control); gap: var(--space-2); color: var(--muted); }
+.empty-skills-icon { color: var(--accent); opacity: 0.8; }
+.empty-skills-notice .dimmed { font-size: var(--text-meta); max-width: 24rem; }
+.chat-skills-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.chat-skill-card { border: 1px solid var(--line); border-radius: var(--radius-control); padding: var(--space-3); background: var(--surface); display: flex; flex-direction: column; gap: var(--space-2); }
+.chat-skill-card.invalid { border-color: var(--danger); }
+.chat-skill-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.chat-skill-title-group { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.chat-skill-name { margin: 0; font-size: var(--text-body); }
+.chat-skill-name code { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.chat-skill-actions { display: flex; align-items: center; gap: var(--space-1); }
+.chat-skill-description { margin: 0; font-size: var(--text-control); color: var(--text); line-height: 1.4; }
+.chat-skill-meta { display: flex; gap: var(--space-3); font-size: var(--text-meta); color: var(--muted); }
+.chat-skill-meta code { font-family: var(--font-mono); }
+.chat-skill-diagnostics { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-1); padding: var(--space-2); border-radius: var(--radius-control); background: var(--surface-soft); font-size: var(--text-meta); color: var(--danger); }
+.skill-diagnostic-item { display: flex; align-items: flex-start; gap: var(--space-2); }
+.warning-icon { color: var(--warning); flex: none; }
+.dimmed-meta { color: var(--muted); font-size: var(--text-meta); }
+.compact-button { padding-inline: var(--space-2); font-size: var(--text-control); }
+.document-skill-section { margin-block: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--space-2); }
+.document-skill-header { display: flex; align-items: center; justify-content: space-between; }
+.document-skill-header h4 { margin: 0; font-size: var(--text-control); }
+.badge { display: inline-flex; align-items: center; padding: 2px 6px; border-radius: var(--radius-pill); font-size: var(--text-meta); }
+.badge-project { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--line); }
+.badge-personal { background: var(--surface-soft); color: var(--muted); border: 1px solid var(--line); }
+.badge-warning { background: var(--warning-soft); color: var(--warning); border: 1px solid var(--line); }

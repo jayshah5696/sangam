@@ -49,6 +49,20 @@ export const historyPageSchema = z.object({
 export type TaskState = z.infer<typeof taskStateSchema>
 export type TaskNote = z.infer<typeof taskNoteSchema>
 
+export const skillSummarySchema = z.object({
+  skill_id: z.string(),
+  document_id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  project_id: z.string().nullable().default(null),
+  origin: z.enum(['project', 'personal']),
+  current_revision_id: z.string(),
+  has_scripts: z.boolean().default(false),
+  valid: z.boolean().default(true),
+  diagnostics: z.array(z.string()).default([]),
+})
+export type SkillSummary = z.infer<typeof skillSummarySchema>
+
 export const chatMemoryEntrySchema = z.object({
   memory_id: z.string(),
   project_id: z.string().nullable(),
@@ -1322,6 +1336,29 @@ export async function collectPages<T>(
 }
 
 export const api = {
+  async listChatSkills(projectId?: string) {
+    const params = new URLSearchParams()
+    if (projectId) params.set('project_id', projectId)
+    return z.array(skillSummarySchema).parse(await request(`/chat/skills?${params.toString()}`))
+  },
+  async getChatSkill(skillId: string) {
+    return skillSummarySchema.parse(await request(`/chat/skills/${encodeURIComponent(skillId)}`))
+  },
+  async registerChatSkill(documentId: string, projectId?: string) {
+    return skillSummarySchema.parse(
+      await request('/chat/skills', {
+        method: 'POST',
+        body: JSON.stringify({ document_id: documentId, project_id: projectId || null }),
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      }),
+    )
+  },
+  async unregisterChatSkill(skillId: string) {
+    await request(`/chat/skills/${encodeURIComponent(skillId)}`, {
+      method: 'DELETE',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    })
+  },
   async chatMemory(projectId?: string, offset = 0) {
     const params = new URLSearchParams({ offset: String(offset) })
     if (projectId) params.set('project_id', projectId)

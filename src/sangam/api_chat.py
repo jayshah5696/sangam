@@ -7,7 +7,7 @@ from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from chatkit.server import NonStreamingResult, StreamingResult
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from sangam.access import writes
@@ -23,7 +23,8 @@ from sangam.chat_profiles import (
     UpdateProfile,
 )
 from sangam.chat_runtime import ChatAdmissionLease, read_limited_body
-from sangam.errors import ServiceUnavailableError, ValidationError
+from sangam.chat_skills import RegisterSkillRequest, SkillSummary
+from sangam.errors import NotFoundError, ServiceUnavailableError, ValidationError
 from sangam.schemas import (
     AcknowledgeChatEffectsRequest,
     ApplyChatProposal,
@@ -422,6 +423,40 @@ def create_chat_router(
         principal: Principal = principal_dependency,
     ) -> ChatProposal:
         return chat.proposals.dismiss(principal, proposal_id, body.reason)
+
+    @router.get("/chat/skills", response_model=list[SkillSummary])
+    def list_skills(
+        project_id: str | None = Query(default=None, min_length=1, max_length=200),
+        principal: Principal = principal_dependency,
+    ) -> list[SkillSummary]:
+        return chat.skills.list_for_actor(principal, project_id=project_id)
+
+    @router.get("/chat/skills/{skill_id}", response_model=SkillSummary)
+    def get_skill(
+        skill_id: str,
+        principal: Principal = principal_dependency,
+    ) -> SkillSummary:
+        skill = chat.skills.get(principal, skill_id)
+        if not skill:
+            raise NotFoundError(f"Skill '{skill_id}' not found")
+        return skill
+
+    @router.post("/chat/skills", response_model=SkillSummary, status_code=status.HTTP_201_CREATED)
+    def register_skill(
+        body: RegisterSkillRequest,
+        key: str | None = Header(default=None, alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> SkillSummary:
+        return chat.skills.register(principal, key or str(uuid4()), body)
+
+    @router.delete("/chat/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def unregister_skill(
+        skill_id: str,
+        key: str | None = Header(default=None, alias="Idempotency-Key"),
+        principal: Principal = principal_dependency,
+    ) -> Response:
+        chat.skills.unregister(principal, key or str(uuid4()), skill_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return router
 

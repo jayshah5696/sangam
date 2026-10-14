@@ -286,6 +286,7 @@ export function DocumentInspector({
               htmlJavascriptEnabled={htmlJavascript.data?.enabled}
               onUpdated={onUpdated}
             />
+            {document.content_type === 'text/markdown' && <DocumentSkillControl document={document} />}
             {pdf && <PdfReplacementControl document={document} />}
             {document.content_type !== 'application/pdf' && !publicationQuery.isLoading && (
               <PublicationEditor
@@ -1085,4 +1086,103 @@ function MetadataEditor({
 
 function shortRevision(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}…` : value
+}
+
+function DocumentSkillControl({ document }: { document: Document }) {
+  const queryClient = useQueryClient()
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const skillsQuery = useQuery({
+    queryKey: ['chat-skills'],
+    queryFn: () => api.listChatSkills(),
+  })
+  const skill = skillsQuery.data?.find((s) => s.document_id === document.document_id)
+
+  const registerMutation = useMutation({
+    mutationFn: () => api.registerChatSkill(document.document_id),
+    onSuccess: async () => {
+      setErrorMessage(null)
+      await queryClient.invalidateQueries({ queryKey: ['chat-skills'] })
+    },
+    onError: (error) => {
+      setErrorMessage(writeFailureMessage(error, 'Could not register skill.'))
+    },
+  })
+
+  const unregisterMutation = useMutation({
+    mutationFn: (skillId: string) => api.unregisterChatSkill(skillId),
+    onSuccess: async () => {
+      setErrorMessage(null)
+      await queryClient.invalidateQueries({ queryKey: ['chat-skills'] })
+    },
+    onError: (error) => {
+      setErrorMessage(writeFailureMessage(error, 'Could not unregister skill.'))
+    },
+  })
+
+  return (
+    <section className="document-skill-section">
+      <div className="document-skill-header">
+        <h4>Chat Skill</h4>
+        {skill && <span className="badge badge-personal">/{skill.name}</span>}
+      </div>
+      {skill ? (
+        <div className="chat-skill-card">
+          <p className="chat-skill-description">{skill.description}</p>
+          <div className="chat-skill-meta">
+            <span>Origin: {skill.origin}</span>
+            <span>
+              Rev: <code>{skill.current_revision_id.slice(0, 8)}</code>
+            </span>
+          </div>
+          {skill.has_scripts && (
+            <div className="chat-skill-diagnostics">
+              <span>Note: scripts declared in frontmatter are not supported in chat.</span>
+            </div>
+          )}
+          {skill.diagnostics && skill.diagnostics.length > 0 && (
+            <div className="chat-skill-diagnostics">
+              {skill.diagnostics.map((diag, i) => (
+                <div key={i} className="skill-diagnostic-item">
+                  <span>{diag}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            className="secondary-action danger-button"
+            disabled={unregisterMutation.isPending}
+            onClick={() => unregisterMutation.mutate(skill.skill_id)}
+          >
+            {unregisterMutation.isPending ? 'Unregistering…' : 'Unregister skill'}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <p className="small-muted">
+            Mark this Markdown document as a reusable skill. The document must start with YAML frontmatter
+            containing <code>name</code> and <code>description</code>.
+          </p>
+          <button
+            className="panel-button"
+            disabled={registerMutation.isPending}
+            onClick={() => registerMutation.mutate()}
+          >
+            {registerMutation.isPending ? 'Registering…' : 'Register as chat skill'}
+          </button>
+        </div>
+      )}
+      {errorMessage && (
+        <StateMessage
+          compact
+          kind="error"
+          title={errorMessage}
+          action={
+            <button className="secondary-action" onClick={() => setErrorMessage(null)}>
+              Dismiss
+            </button>
+          }
+        />
+      )}
+    </section>
+  )
 }
