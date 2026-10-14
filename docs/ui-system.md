@@ -229,6 +229,21 @@ Use Settings for workspace-wide tag management.
 
 ## Interaction states
 
+### Chat context controls
+
+Instructions and saved facts open in the shared bounded Chat context dialog.
+Separate keyboard-accessible tabs keep instruction editors out of fact management.
+Closing it with the close button, Escape, or the backdrop preserves drafts while
+the chat component remains mounted. Drafts do not survive a page reload. Saved
+facts show compact previews and open their editors only on request. Closing an
+editor preserves its draft; Discard changes resets it to the revision that the
+draft started from. A background refresh cannot replace a dirty draft or advance
+its expected revision. Reload saved values is an explicit recovery action.
+Routine status messages use compact anatomy and success notices can be dismissed.
+Closing context controls does not deny an approval, forget a fact, or delete a
+conversation. Pending approvals remain visible in the existing review controls;
+completed actions remain in collapsed history.
+
 Every interactive surface must define the states that apply to it. Reuse the
 shared button, field, row, tab, badge, and `StateMessage` anatomy before creating
 a local variant.
