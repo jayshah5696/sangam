@@ -25,6 +25,11 @@ from sangam.chat_profiles import (
     ProfileContext,
     UpdateProfile,
 )
+from sangam.chat_skills import (
+    ActivateSkillInput,
+    ManageSkillInput,
+    SkillActivationResult,
+)
 from sangam.errors import ValidationError
 from sangam.schemas import (
     Document,
@@ -998,6 +1003,49 @@ CAPABILITIES: tuple[ChatCapability, ...] = (
             "a note, comment, bookmark, or citation marker on a PDF page. Text and area "
             "highlights need page coordinates and cannot be made from chat. To edit or "
             "delete, use the annotation id and version from read_pdf_page."
+        ),
+    ),
+    ChatCapability(
+        "activate_chat_skill",
+        1,
+        "Activate chat skill",
+        "Load an authorized user-authored skill and its pinned resources at exact revisions.",
+        ActivateSkillInput,
+        SkillActivationResult,
+        EffectClass.READ,
+        ApprovalPolicy.NONE,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        50_000,
+        10.0,
+        guidance=(
+            "Call activate_chat_skill with a skill_id when its description matches the task "
+            "or the user invoked /skill-name. It loads the exact procedure and authorized "
+            "resources. "
+            "Follow the disclosed procedure under standard capabilities and policies."
+        ),
+    ),
+    ChatCapability(
+        "manage_chat_skill",
+        1,
+        "Manage chat skill",
+        "Register or unregister a Markdown document as a reusable skill.",
+        ManageSkillInput,
+        EffectRequestResult,
+        EffectClass.WRITE,
+        ApprovalPolicy.EXACT_EFFECT,
+        (Capability.READ,),
+        ("workspace", "document"),
+        (),
+        10_000,
+        10.0,
+        requires_administrator=True,
+        guidance=(
+            "Use manage_chat_skill only at explicit user request to mark or unmark a document "
+            "as a skill. "
+            "Sangam pauses it for exact review in Review mode and runs it without a prompt in "
+            "YOLO mode."
         ),
     ),
 )

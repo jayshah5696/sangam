@@ -5,6 +5,7 @@ import { api, ApiError, type ChatProfileEntry } from '../api'
 import { StateMessage } from './ui/StateMessage'
 import { ChatMemory } from './ChatMemory'
 import { ChatTask } from './ChatTask'
+import { ChatSkills } from './ChatSkills'
 import { ModalDialog } from './ui/ModalDialog'
 
 /** One profile editor for both sources; the override is local to the next submitted turn. */
@@ -23,7 +24,7 @@ export function ChatInstructions({
 }) {
   const [savedMessage, setSavedMessage] = useState('')
   const [open, setOpen] = useState(Boolean(sourceMessageId))
-  const tabs = ['task', 'instructions', 'facts'] as const
+  const tabs = ['task', 'instructions', 'facts', 'skills'] as const
   const [tab, setTab] = useState<(typeof tabs)[number]>(threadId ? 'task' : 'instructions')
   const contextId = useId()
   const close = useCallback(() => setOpen(false), [])
@@ -80,15 +81,21 @@ export function ChatInstructions({
                     event.key === 'Home'
                       ? 'task'
                       : event.key === 'End'
-                        ? 'facts'
-                        : tabs[(index + (event.key === 'ArrowLeft' ? 2 : 1)) % tabs.length]
+                        ? 'skills'
+                        : tabs[(index + (event.key === 'ArrowLeft' ? tabs.length - 1 : 1)) % tabs.length]
                   if (!next) return
                   setTab(next)
                   document.getElementById(`${contextId}-${next}-tab`)?.focus()
                 }
               }}
             >
-              {value === 'instructions' ? 'Instructions' : value === 'facts' ? 'Saved facts' : 'Active task'}
+              {value === 'instructions'
+                ? 'Instructions'
+                : value === 'facts'
+                  ? 'Saved facts'
+                  : value === 'skills'
+                    ? 'Skills'
+                    : 'Active task'}
             </button>
           ))}
         </div>
@@ -198,6 +205,15 @@ export function ChatInstructions({
           >
             <ChatMemory projectId={projectId} />
           </div>
+          <div
+            id={`${contextId}-skills`}
+            role="tabpanel"
+            aria-labelledby={`${contextId}-skills-tab`}
+            hidden={tab !== 'skills'}
+          >
+            <ChatSkills projectId={projectId} />
+          </div>
+
           <div
             id={`${contextId}-task`}
             role="tabpanel"

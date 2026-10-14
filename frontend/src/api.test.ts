@@ -498,3 +498,35 @@ describe('document creation idempotency', () => {
     expect(keys).toEqual(['key-retry-1', 'key-retry-1'])
   })
 })
+
+describe('chat skills requests', () => {
+  it('lists chat skills and registers a skill', async () => {
+    const skill = {
+      skill_id: 'human:jay:user:code-review',
+      document_id: 'doc-123',
+      name: 'code-review',
+      description: 'Review code',
+      project_id: null,
+      origin: 'personal',
+      current_revision_id: 'rev-1',
+      has_scripts: false,
+      valid: true,
+      diagnostics: [],
+    }
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([skill]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(skill), { status: 201 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    const listed = await api.listChatSkills()
+    expect(listed).toHaveLength(1)
+    expect(listed[0]!.name).toBe('code-review')
+
+    const registered = await api.registerChatSkill('doc-123')
+    expect(registered.skill_id).toBe('human:jay:user:code-review')
+
+    await expect(api.unregisterChatSkill('human:jay:user:code-review')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+})

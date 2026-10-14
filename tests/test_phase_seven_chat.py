@@ -54,6 +54,7 @@ def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() 
             "update_project",
             "update_publication",
             "annotate_pdf",
+            "manage_chat_skill",
         ]
     }
     assert "Do not narrate submission, pending review, or a\nmissing result" in _AGENT_INSTRUCTIONS
@@ -310,6 +311,8 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "update_project",
         "update_publication",
         "annotate_pdf",
+        "activate_chat_skill",
+        "manage_chat_skill",
     }
     create_thread(client)
 

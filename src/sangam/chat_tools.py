@@ -74,6 +74,7 @@ class ChatToolset:
         self.projects = projects
         self.profiles = effects.profiles
         self.continuity = effects.continuity
+        self.skills = effects.skills
         self.max_result_bytes = max_result_bytes
         self.policies = registry.by_id
 
@@ -220,6 +221,22 @@ class ChatToolset:
                     "When the user explicitly requests publication, call this tool immediately. "
                     "Sangam pauses it for exact review in Review mode and runs it without a prompt "
                     "in YOLO mode, so never ask for confirmation in prose before calling it."
+                ),
+            ),
+            function_tool(
+                self.activate_chat_skill,
+                description_override=(
+                    "Load an authorized user-authored skill and its pinned resources at exact "
+                    "revisions. Use when a skill description matches or the user explicitly "
+                    "invoked /skill-name."
+                ),
+            ),
+            function_tool(
+                self.manage_chat_skill,
+                description_override=(
+                    "When the user explicitly asks, register or unregister a Markdown document "
+                    "as a reusable skill. Sangam pauses it for exact review in Review mode and "
+                    "runs it without a prompt in YOLO mode."
                 ),
             ),
         ]
@@ -911,6 +928,43 @@ class ChatToolset:
             capability=self.policies["apply_workspace_organization_plan"],
             arguments=arguments,
             preview={**arguments, "summary": summary},
+        )
+
+    async def activate_chat_skill(
+        self,
+        ctx: ToolContext,
+        skill_id: str,
+    ) -> str:
+        """Load an authorized user-authored skill and its pinned resources."""
+        return await self._run_tool(
+            ctx,
+            self.policies["activate_chat_skill"],
+            skill_id,
+            lambda principal: self.skills.activate(
+                principal,
+                ctx.context.request_context,
+                skill_id,
+            ).model_dump(mode="json"),
+        )
+
+    async def manage_chat_skill(
+        self,
+        ctx: ToolContext,
+        action: Literal["register", "unregister"],
+        document_id: str,
+        project_id: str | None = None,
+    ) -> str | None:
+        """Register or unregister a Markdown document as a reusable skill."""
+        arguments: dict[str, object] = {
+            "action": action,
+            "document_id": document_id,
+            "project_id": project_id,
+        }
+        return await self._request_effect(
+            ctx,
+            capability=self.policies["manage_chat_skill"],
+            arguments=arguments,
+            preview=arguments,
         )
 
     async def publish_document(
