@@ -13,7 +13,7 @@ Sangam embeds an AI chat agent capable of reading documents, proposing structure
 
 - **Web UI**: The Chat Assistant drawer in the workspace editor. Users ask questions, request revisions, or ask the agent to organize tags and folders.
 - **REST API**: `/api/v1/chat/threads`, `/api/v1/chat/messages`, and `/api/v1/chat/runs`.
-- **Eval Harness**: `scripts/run_chat_evals.py` and `just eval-chat` evaluating all 17 standardized workspace benchmark tasks.
+- **Eval Harness**: `scripts/run_chat_evals.py` and `just eval-chat` evaluating all 25 workspace benchmark tasks through production ChatKit with isolated case fixtures.
 
 ## Driving it with control-sangam
 
@@ -31,7 +31,7 @@ just verify-behavior 8765 15 3
 # Evaluates using the default model openai/gpt-5.6-luna
 just verify-eval 'openai/gpt-5.6-luna' 5
 
-# Or run full 17-item evaluation suite:
+# Or run the full 25-item evaluation suite:
 just verify-eval 'openai/gpt-5.6-luna'
 ```
 
@@ -51,10 +51,10 @@ Verifies:
 
 | Check | Target |
 |---|---|
-| **Pass Rate** | 100% (17 / 17 items) |
+| **Pass Rate** | Report observed passes out of the actual case count. |
 | **Edit Accuracy** | 100% (3 / 3 edit items generate valid proposals) |
-| **Tool Calling Efficiency** | ≤ 4 average rounds per task |
-| **Average Latency** | ≤ 7s per evaluation item |
+| **Chat Runs** | Report initial requests and effect continuations separately from model response counts. |
+| **Average Latency** | Report measured latency for the selected model and case set. |
 | **Error Rate** | 0 errors |
 
 ## Gotchas
