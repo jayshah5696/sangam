@@ -196,8 +196,9 @@ class SQLiteChatKitStore(Store[TContext]):
             connection.execute(
                 """
                 INSERT INTO chat_threads(
-                    thread_id, created_by, document_id, data_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    thread_id, created_by, document_id, data_json,
+                    created_at, updated_at, project_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(thread_id) DO UPDATE SET
                     document_id = COALESCE(excluded.document_id, chat_threads.document_id),
                     data_json = excluded.data_json,
@@ -210,6 +211,7 @@ class SQLiteChatKitStore(Store[TContext]):
                     _encode_payload(stored),
                     thread.created_at.isoformat(),
                     now,
+                    getattr(context, "project_id", None),
                 ),
             )
 

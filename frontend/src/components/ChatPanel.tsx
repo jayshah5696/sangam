@@ -22,6 +22,7 @@ import {
   announceCitationNavigation,
   citationHref,
   citationTargetFromData,
+  historyCitationTargetFromData,
   type CitationDataPayload,
   type CitationTarget,
 } from '../citationNavigation'
@@ -70,6 +71,7 @@ export function ChatPanel({
   compact = false,
   initialPrompt,
   initialThreadId,
+  initialSourceMessageId,
   projectId,
 }: {
   document?: Document | null
@@ -81,6 +83,7 @@ export function ChatPanel({
   compact?: boolean
   initialPrompt?: string
   initialThreadId?: string
+  initialSourceMessageId?: string
   projectId?: string
 }) {
   const activeDocument = document ?? null
@@ -233,6 +236,7 @@ export function ChatPanel({
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['chat-profile'] }),
         queryClient.invalidateQueries({ queryKey: ['chat-memory'] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-task', threadId] }),
         queryClient.invalidateQueries({ queryKey: ['chat-profile-applied', threadId] }),
         queryClient.invalidateQueries({
           queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
@@ -380,6 +384,14 @@ export function ChatPanel({
   const handleResponseEnd = useCallback(() => void liveRef.current.refreshProposals(), [])
   const handleCitationDeeplink = useCallback(
     ({ name, data }: { name: string; data?: CitationDataPayload }) => {
+      if (name === 'conversation') {
+        const source = historyCitationTargetFromData(data)
+        if (source) {
+          const params = new URLSearchParams({ thread: source.threadId, message: source.itemId })
+          void liveRef.current.navigate({ href: `/chat?${params}` })
+        }
+        return
+      }
       if (name !== 'document') return
       const target = citationTargetFromData(data)
       if (!target) return
@@ -544,25 +556,28 @@ export function ChatPanel({
 
   return (
     <div className={`chat-panel ${compact ? 'chat-panel-compact' : ''}`}>
-      <ChatInstructions
-        projectId={projectId}
-        threadId={threadId}
-        override={instructionsOverride}
-        onOverrideChange={setInstructionsOverride}
-      />
+      <div className="chat-context-toolbar">
+        {!compact && (
+          <ChatContextBanner
+            document={activeDocument}
+            selectedText={activeSelectedText}
+            onClear={onClearContext}
+          />
+        )}
+        <ChatInstructions
+          sourceMessageId={threadId === initialThreadId ? initialSourceMessageId : undefined}
+          projectId={projectId}
+          threadId={threadId}
+          override={instructionsOverride}
+          onOverrideChange={setInstructionsOverride}
+        />
+      </div>
       {initialPrompt && (
         <StateMessage
           compact
           kind="empty"
           title="Message draft"
           description="Review the prepared message in the composer, then choose Send."
-        />
-      )}
-      {!compact && (
-        <ChatContextBanner
-          document={activeDocument}
-          selectedText={activeSelectedText}
-          onClear={onClearContext}
         />
       )}
       {contextSwitchEvent && (
@@ -1484,7 +1499,7 @@ function WorkspaceChatSurface({
     frameTitle: 'Workspace chat',
     initialThread: initialThreadId ?? undefined,
     theme: chatkitTheme,
-    header: compact ? { enabled: false } : { enabled: true, title: { text: 'Workspace chat' } },
+    header: compact ? { enabled: false } : { enabled: true },
     history: { enabled: true, showDelete: !compact, showRename: !compact },
     startScreen: {
       greeting: compact ? 'Ask about this document' : 'Ask about this workspace',

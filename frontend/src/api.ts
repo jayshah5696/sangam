@@ -1,5 +1,54 @@
 import { z } from 'zod'
 
+export const taskNoteSchema = z.object({
+  key: z.string().max(60),
+  kind: z.enum(['objective', 'constraint', 'assumption', 'question', 'decision', 'artifact']),
+  text: z.string().max(600),
+  source_item_ids: z.array(z.string()).max(4),
+  corrected: z.boolean(),
+})
+export const taskStateSchema = z.object({
+  thread_id: z.string(),
+  version: z.number().int().nonnegative(),
+  notes: z.array(taskNoteSchema).max(12),
+  through_item_id: z.string().nullable(),
+  source_hashes: z.record(z.string(), z.string()),
+  stale: z.boolean(),
+  run_status: z.string().nullable(),
+  history_generation: z.number().int().nonnegative().default(0),
+  dismissed_keys: z.array(z.string()).max(12).default([]),
+  coverage_incomplete: z.boolean().default(false),
+  effects: z
+    .array(z.object({ effect_id: z.string(), capability_id: z.string(), status: z.string() }))
+    .max(10),
+})
+export const taskCorrectionSchema = z.object({
+  thread_id: z.string(),
+  expected_version: z.number().int().nonnegative(),
+  key: z.string().max(60),
+  text: z.string().max(600),
+})
+export const taskCorrectionPreviewSchema = taskCorrectionSchema.extend({ before: taskStateSchema })
+export const historyPageSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        thread_id: z.string(),
+        item_id: z.string(),
+        role: z.enum(['user', 'assistant']),
+        text: z.string().max(1200),
+        citation: z.string(),
+        offset: z.number().int(),
+        total_chars: z.number().int(),
+        truncated: z.boolean(),
+      }),
+    )
+    .max(10),
+  has_more: z.boolean(),
+})
+export type TaskState = z.infer<typeof taskStateSchema>
+export type TaskNote = z.infer<typeof taskNoteSchema>
+
 export const chatMemoryEntrySchema = z.object({
   memory_id: z.string(),
   project_id: z.string().nullable(),
@@ -969,6 +1018,7 @@ export const chatEffectSchema = z.object({
     'update_project',
     'update_chat_profile',
     'update_chat_memory',
+    'correct_task_state',
     'update_publication',
     'annotate_pdf',
   ]),
@@ -1290,6 +1340,25 @@ export const api = {
     if (projectId) params.set('project_id', projectId)
     if (threadId) params.set('thread_id', threadId)
     return chatProfileContextSchema.parse(await request(`/chat/profile?${params}`))
+  },
+  async chatTask(threadId: string) {
+    return taskStateSchema.parse(await request(`/chat/threads/${encodeURIComponent(threadId)}/task`))
+  },
+  async correctChatTask(body: z.infer<typeof taskCorrectionSchema>) {
+    return taskStateSchema.parse(
+      await request(`/chat/threads/${encodeURIComponent(body.thread_id)}/task`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      }),
+    )
+  },
+  async readChatHistory(threadId: string, itemId: string, offset = 0) {
+    return historyPageSchema.parse(
+      await request(
+        `/chat/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(itemId)}?offset=${offset}`,
+      ),
+    )
   },
   async saveChatProfile(entry: ChatProfileEntry, content: string) {
     return chatProfileEntrySchema.parse(

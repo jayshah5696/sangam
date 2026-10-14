@@ -3,7 +3,7 @@ import { chatProfileContextSchema, projectDetailSchema } from '../src/api'
 
 test('chat profile saves once, reports scope, rejects stale edits and clears', async ({ page, request }) => {
   await page.goto('/chat')
-  await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+  await page.getByRole('button', { name: 'Chat context', exact: true }).click()
   const personal = page.getByLabel('Personal instructions')
   await personal.fill('Keep updates concise')
   await page.getByRole('button', { name: 'Save personal instructions' }).click()
@@ -43,18 +43,18 @@ test('explicit project instructions stay separate from personal and document cha
   const project = projectDetailSchema.parse(await response.json())
   try {
     await page.goto(`/chat?project=${project.project_id}`)
-    await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+    await page.getByRole('button', { name: 'Chat context', exact: true }).click()
     await expect(page.getByText(`Selected project: ${project.project_id}`, { exact: true })).toBeVisible()
     await page.getByLabel('Project instructions').fill('Use the project vocabulary')
     await page.getByRole('button', { name: 'Save project instructions' }).click()
     await expect(page.getByText('Project instructions saved', { exact: true })).toBeVisible()
     await page.reload()
-    await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+    await page.getByRole('button', { name: 'Chat context', exact: true }).click()
     await expect(page.getByLabel('Project instructions')).toHaveValue('Use the project vocabulary')
     await page.evaluate(() => document.fonts.ready)
     await page.screenshot({ path: test.info().outputPath('project-instructions.png') })
     await page.goto(`/chat?document=${seededWorkspace.documentId}`)
-    await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+    await page.getByRole('button', { name: 'Chat context', exact: true }).click()
     await expect(page.getByText('No project selected', { exact: true })).toBeVisible()
     await expect(page.getByLabel('Project instructions')).toHaveCount(0)
     for (const width of [320, 844]) {

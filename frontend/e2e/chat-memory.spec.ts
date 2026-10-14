@@ -41,7 +41,7 @@ test('chat context stays compact and closing preserves drafts until explicit dis
       expect(response.ok()).toBeTruthy()
     }
     await page.goto('/chat')
-    const trigger = page.getByRole('button', { name: 'Instructions', exact: true })
+    const trigger = page.getByRole('button', { name: 'Chat context', exact: true })
     await expect(page.getByRole('dialog', { name: 'Chat context' })).not.toBeVisible()
     await trigger.click()
     const dialog = page.getByRole('dialog', { name: 'Chat context' })
@@ -128,7 +128,7 @@ test('saved facts survive reload, preserve stale drafts, and forget with cancell
   request,
 }) => {
   await page.goto('/chat')
-  await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+  await page.getByRole('button', { name: 'Chat context', exact: true }).click()
   await page.getByText('Saved facts', { exact: true }).click()
   await page.getByText('Add fact', { exact: true }).click()
   await page.getByLabel('Fact to remember').fill('My headset is Quest 3')
@@ -137,7 +137,7 @@ test('saved facts survive reload, preserve stale drafts, and forget with cancell
   await expect(page.getByLabel('Edit fact')).toHaveValue('My headset is Quest 3')
   const saved = chatMemoryPageSchema.parse(await (await request.get('/api/v1/chat/memory')).json()).entries[0]
   await page.reload()
-  await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+  await page.getByRole('button', { name: 'Chat context', exact: true }).click()
   await page.getByText('Saved facts', { exact: true }).click()
   await page.getByRole('button', { name: 'Edit fact', exact: true }).click()
   await expect(page.getByLabel('Edit fact')).toHaveValue('My headset is Quest 3')
@@ -184,11 +184,11 @@ test('suggestions require acceptance and explicit project facts remain scoped', 
   )
   try {
     await page.goto('/chat')
-    await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+    await page.getByRole('button', { name: 'Chat context', exact: true }).click()
     await page.getByText('Saved facts', { exact: true }).click()
     await expect(page.getByRole('button', { name: 'Edit fact', exact: true })).toHaveCount(0)
     await page.goto(`/chat?project=${project.project_id}`)
-    await page.getByRole('button', { name: 'Instructions', exact: true }).click()
+    await page.getByRole('button', { name: 'Chat context', exact: true }).click()
     await page.getByText('Saved facts', { exact: true }).click()
     await expect(page.getByText('Suggested fact', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Edit fact', exact: true }).click()
