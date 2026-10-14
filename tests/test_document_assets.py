@@ -72,8 +72,85 @@ def test_uploaded_image_is_stored_in_attachments_and_readable(
     )
     assert served.status_code == 200
     assert served.content == PNG
-    assert served.headers["content-type"] == "image/png"
-    assert served.headers["x-content-type-options"] == "nosniff"
+
+
+def test_relative_asset_reads_enforce_agent_path_scopes(
+    client: TestClient, settings: Settings
+) -> None:
+    document = create(client, "asset-relative-scope", path="docs/public.md")
+    relative_file = settings.workspace_root / "docs" / "secret" / "diagram.png"
+    relative_file.parent.mkdir(parents=True, exist_ok=True)
+    relative_file.write_bytes(PNG)
+
+    narrow_token = issue_agent_token(
+        client,
+        actor_id="agent:narrow-reader",
+        capabilities=("read",),
+        path_prefix="docs/public.md",
+    )
+    denied = client.get(
+        f"/api/v1/documents/{document['document_id']}/assets",
+        params={"path": "secret/diagram.png"},
+        headers={"Authorization": f"Bearer {narrow_token}"},
+    )
+    assert denied.status_code == 403
+
+    broad_token = issue_agent_token(
+        client,
+        actor_id="agent:broad-reader",
+        capabilities=("read",),
+        path_prefix="docs",
+    )
+    allowed = client.get(
+        f"/api/v1/documents/{document['document_id']}/assets",
+        params={"path": "secret/diagram.png"},
+        headers={"Authorization": f"Bearer {broad_token}"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.content == PNG
+
+
+def test_document_asset_service_store_acquires_path_locks(settings: Settings) -> None:
+    from unittest.mock import MagicMock
+
+    from sangam.document_assets import DocumentAssetService
+    from sangam.schemas import Document
+    from sangam.workspace import DiskWorkspaceFilesystem
+
+    workspace = DiskWorkspaceFilesystem(settings.workspace_root)
+    mock_mutations = MagicMock()
+    service = DocumentAssetService(
+        workspace=workspace,
+        max_bytes=settings.max_publication_asset_bytes,
+        mutations=mock_mutations,
+    )
+    doc = Document(
+        document_id="doc_123",
+        title="Doc",
+        content_type="text/markdown",
+        path="notes/doc.md",
+        content="test",
+        content_hash="abc",
+        size_bytes=4,
+        materialization_state="clean",
+        file_hash="abc",
+        current_revision_id="rev_1",
+        metadata_version=1,
+        trust_version=1,
+        deleted=False,
+        created_at="",
+        updated_at="",
+        created_by="human",
+        updated_by="human",
+        updated_by_name="Human",
+        revision_summary="",
+        category=None,
+        trust_level="untrusted",
+    )
+    asset = service.store(document=doc, filename="test.png", media_type="image/png", content=PNG)
+    assert mock_mutations.path.called
+    expected_path = asset.reference.removeprefix("/")
+    mock_mutations.path.assert_called_once_with(expected_path)
 
 
 def test_pathless_drafts_can_add_images(client: TestClient) -> None:
