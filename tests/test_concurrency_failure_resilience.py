@@ -2726,3 +2726,42 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient
     parent_dir = file_path.parent
     orphaned_temp_files = list(parent_dir.glob(".simultaneous_rw.md.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
+
+
+def test_pdf_spooling_atomic_staging_and_cleanup_on_cancellation(client: TestClient) -> None:
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
+    pdf_service = client.app.state.services.pdf_research
+    source_pdf = text_pdf("PDF Spooling Atomic Staging Test Content")
+    document = pdf_service.import_pdf(
+        title="Spooling Test PDF",
+        path="research/spooling_test.pdf",
+        content=source_pdf,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="pdf-spooling-atomic-key",
+    )
+    doc_id = document.document_id
+
+    # Simulate cancellation during extraction
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    result = pdf_service.extract_text(doc_id, cancel_event=cancel_event)
+    assert result is False
+
+    # Check for temporary orphan files matching .source.pdf.sangam-*
+    import tempfile
+    from pathlib import Path
+
+    temp_dir = Path(tempfile.gettempdir())
+    orphaned_spool_files = list(temp_dir.rglob(".source.pdf.sangam-*"))
+    assert len(orphaned_spool_files) == 0, (
+        f"Found orphaned temp spool files: {orphaned_spool_files}"
+    )
+
+    # Now run successful extraction without cancellation
+    success = pdf_service.extract_text(doc_id)
+    assert success is True
+    pages = pdf_service.pages(doc_id)
+    assert len(pages) == 1
+    assert "PDF Spooling Atomic Staging Test Content" in pages[0].text
