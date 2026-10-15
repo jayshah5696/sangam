@@ -2726,3 +2726,72 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient
     parent_dir = file_path.parent
     orphaned_temp_files = list(parent_dir.glob(".simultaneous_rw.md.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
+
+
+def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revision(
+    client: TestClient, settings
+) -> None:
+    """Verify that a delayed materialization call for a stale revision does NOT overwrite disk."""
+    doc_service = client.app.state.services.documents
+    target_path = "research/stale_mat_race.md"
+
+    # Step 1: Create initial document (Version 1)
+    res1 = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Stale Mat Doc",
+            "content": "Version 1 content\n",
+            "path": target_path,
+        },
+        headers=headers("create-stale-mat-1"),
+    )
+    assert res1.status_code == 201
+    doc1 = res1.json()
+    doc_id = doc1["document_id"]
+    rev_1 = doc1["current_revision_id"]
+
+    # Read Document object representing Version 1 state
+    stale_doc_v1 = doc_service.get_document(doc_id)
+    assert stale_doc_v1.current_revision_id == rev_1
+    assert stale_doc_v1.content == "Version 1 content\n"
+
+    # Step 2: Update document to Version 2
+    res2 = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "content": "Version 2 content\n",
+            "expected_revision_id": rev_1,
+        },
+        headers=headers("update-stale-mat-2"),
+    )
+    assert res2.status_code == 200
+    rev_2 = res2.json()["current_revision_id"]
+
+    # Step 3: Update document to Version 3
+    res3 = client.patch(
+        f"/api/v1/documents/{doc_id}",
+        json={
+            "content": "Version 3 content\n",
+            "expected_revision_id": rev_2,
+        },
+        headers=headers("update-stale-mat-3"),
+    )
+    assert res3.status_code == 200
+
+    # Ensure disk currently holds Version 3
+    file_path = settings.workspace_root / target_path
+    assert file_path.read_text(encoding="utf-8") == "Version 3 content\n"
+
+    # Step 4: Simulate a delayed materialization call for Version 1
+    doc_service._finish_materialization(stale_doc_v1)
+
+    # Step 5: Verify disk file was NOT overwritten with Version 1 content
+    disk_content = file_path.read_text(encoding="utf-8")
+    assert disk_content == "Version 3 content\n", (
+        f"Disk was corrupted/overwritten by stale materialization! Found: {disk_content!r}"
+    )
+
+    # Verify DB state is clean and matches Version 3
+    current_doc = doc_service.get_document(doc_id)
+    assert current_doc.content == "Version 3 content\n"
+    assert current_doc.materialization_state == "clean"
