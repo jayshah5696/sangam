@@ -908,3 +908,46 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
     assert "my_db_password" not in sanitized
     assert "my_tls_key" not in sanitized
     assert "client_secret_data" not in sanitized
+
+
+def test_chronicle_webhook_and_app_secret_header_sanitization() -> None:
+    headers_dict = {
+        "x-webhook-secret": "whsec_1234567890secret",
+        "x-app-secret": "appsec_9876543210secret",
+        "x-session-secret": "sesssec_1122334455secret",
+        "content-type": "application/json",
+    }
+    sanitized = sanitize_headers(headers_dict)
+    assert sanitized["x-webhook-secret"] == "[REDACTED]"
+    assert sanitized["x-app-secret"] == "[REDACTED]"
+    assert sanitized["x-session-secret"] == "[REDACTED]"
+    assert sanitized["content-type"] == "application/json"
+
+
+def test_chronicle_structured_jsonl_export_provenance_validation(client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "JSONL Chronicle Doc",
+            "content": "Line 1\nLine 2",
+            "path": "docs/jsonl_chronicle.md",
+        },
+        headers=headers("idemp_jsonl_chronicle_create"),
+    )
+    assert create_resp.status_code == 201
+    doc_id = create_resp.json()["document_id"]
+
+    jsonl_resp = client.get("/api/v1/activity/export.jsonl", params={"actor_kind": "human"})
+    assert jsonl_resp.status_code == 200
+    lines = [json.loads(line) for line in jsonl_resp.text.strip().split("\n") if line.strip()]
+
+    target_events = [e for e in lines if e.get("resource_id") == doc_id]
+    assert len(target_events) >= 1
+    event = target_events[0]
+    assert event["actor_id"].startswith("human:")
+    assert event["actor_kind"] == "human"
+    assert event["action"] == "create"
+    assert event["path"] == "docs/jsonl_chronicle.md"
+    assert "created_at" in event
+    assert event["details"]["action_type"] == "create"
+    assert event["details"]["target_file"] == "docs/jsonl_chronicle.md"
