@@ -20,6 +20,7 @@ from pathlib import PurePosixPath
 from urllib.parse import unquote, urlsplit
 
 from sangam.errors import NotFoundError, ValidationError, validate_metadata_text
+from sangam.mutations import MutationCoordinator
 from sangam.schemas import Document, DocumentAsset
 from sangam.workspace import WorkspaceFilesystem
 
@@ -104,8 +105,15 @@ def _alt_text(filename: str) -> str:
 
 
 class DocumentAssetService:
-    def __init__(self, *, workspace: WorkspaceFilesystem, max_bytes: int) -> None:
+    def __init__(
+        self,
+        *,
+        workspace: WorkspaceFilesystem,
+        mutations: MutationCoordinator,
+        max_bytes: int,
+    ) -> None:
         self.workspace = workspace
+        self.mutations = mutations
         self.max_bytes = max_bytes
 
     def store(
@@ -126,7 +134,8 @@ class DocumentAssetService:
         # 16 hex digits keep names unguessable without the image itself.
         digest = hashlib.sha256(content).hexdigest()[:16]
         name = f"{_stem(filename)}-{digest}{extension}"
-        self.workspace.write_asset(f"{ATTACHMENTS_FOLDER}/{name}", content)
+        with self.mutations.path(f"{ATTACHMENTS_FOLDER}/{name}"):
+            self.workspace.write_asset(f"{ATTACHMENTS_FOLDER}/{name}", content)
         reference = f"/{ATTACHMENTS_FOLDER}/{name}"
         return DocumentAsset(
             reference=reference,

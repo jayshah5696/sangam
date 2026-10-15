@@ -215,7 +215,9 @@ def build_application_services(
         publications=publications,
         pdf_research=pdf_research,
         assets=DocumentAssetService(
-            workspace=workspace, max_bytes=settings.max_publication_asset_bytes
+            workspace=workspace,
+            mutations=mutations,
+            max_bytes=settings.max_publication_asset_bytes,
         ),
         comments=comments,
     )
