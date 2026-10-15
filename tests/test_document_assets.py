@@ -189,6 +189,52 @@ def test_asset_routes_obey_document_scopes(client: TestClient) -> None:
     assert denied_write.status_code == 403
 
 
+def test_relative_asset_reads_obey_path_scoped_authorization(
+    client: TestClient, settings: Settings
+) -> None:
+    # Document created at notes/plan.md
+    document = create(client, "relative-asset-scope", path="notes/plan.md")
+
+    # Place a relative image in the notes folder on disk
+    image_path = settings.workspace_root / "notes" / "diagram.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(PNG)
+
+    # Token scoped specifically to 'notes/plan.md' file only, not all of 'notes'
+    file_scoped_token = issue_agent_token(
+        client,
+        actor_id="agent:file-scoped",
+        capabilities=("read",),
+        path_prefix="notes/plan.md",
+    )
+
+    # Token scoped to the entire 'notes' folder
+    folder_scoped_token = issue_agent_token(
+        client,
+        actor_id="agent:folder-scoped",
+        capabilities=("read",),
+        path_prefix="notes",
+    )
+
+    # Attempt to read relative asset 'diagram.png' (resolves to notes/diagram.png)
+    # The file-scoped agent can read notes/plan.md but is denied reading notes/diagram.png
+    denied = client.get(
+        f"/api/v1/documents/{document['document_id']}/assets",
+        params={"path": "diagram.png"},
+        headers={"Authorization": f"Bearer {file_scoped_token}"},
+    )
+    assert denied.status_code == 403
+
+    # The folder-scoped agent can read notes/diagram.png
+    allowed = client.get(
+        f"/api/v1/documents/{document['document_id']}/assets",
+        params={"path": "diagram.png"},
+        headers={"Authorization": f"Bearer {folder_scoped_token}"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.content == PNG
+
+
 def test_published_document_serves_its_uploaded_image(client: TestClient) -> None:
     document = create(client, "asset-publish")
     asset = upload(client, document["document_id"]).json()
