@@ -2795,3 +2795,76 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     current_doc = doc_service.get_document(doc_id)
     assert current_doc.content == "Version 3 content\n"
     assert current_doc.materialization_state == "clean"
+
+
+def test_pdf_spooling_atomic_staging_and_hash_validation_concurrency(
+    client: TestClient, settings
+) -> None:
+    """Verify that PDF source byte spooling uses atomic staging, SHA-256 hash verification,
+    and clean temp file cleanup under concurrent extraction and content read operations.
+    """
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
+    pdf_service = client.app.state.services.pdf_research
+
+    pdf_bytes = text_pdf("Atomic PDF Source Spooling Concurrency Test")
+    document = pdf_service.import_pdf(
+        title="Spooling Concurrency Test PDF",
+        path="research/spool_concurrency.pdf",
+        content=pdf_bytes,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="pdf-spool-concurrency-key",
+    )
+    doc_id = document.document_id
+
+    stop_flag = threading.Event()
+    read_results: list[tuple[int, bytes]] = []
+    extraction_results: list[bool] = []
+
+    def continuous_pdf_reader():
+        while not stop_flag.is_set():
+            res = client.get(
+                f"/api/v1/pdfs/{doc_id}/content",
+                headers=headers("reader-pdf-content"),
+            )
+            read_results.append((res.status_code, res.content))
+            time.sleep(0.001)
+
+    def run_extraction():
+        res = pdf_service.extract_text(doc_id)
+        extraction_results.append(res)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        reader_futures = [executor.submit(continuous_pdf_reader) for _ in range(2)]
+        time.sleep(0.01)
+
+        extraction_futures = [executor.submit(run_extraction) for _ in range(3)]
+        for ef in extraction_futures:
+            ef.result(timeout=10)
+
+        stop_flag.set()
+        for rf in reader_futures:
+            rf.result(timeout=10)
+
+    # Validate readers received full, uncorrupted PDF content without zero-byte reads
+    assert len(read_results) > 0, "PDF readers should have executed reads"
+    for status_code, content in read_results:
+        assert status_code == 200, f"Unexpected reader status code: {status_code}"
+        assert len(content) == len(pdf_bytes), "Zero-byte or truncated PDF read detected!"
+        assert content == pdf_bytes, "Corrupted PDF content read during extraction spooling!"
+
+    # Exactly one extraction claimed and completed
+    assert sorted(extraction_results) == [False, False, True]
+
+    # Verify extracted pages match expectation
+    pages = pdf_service.pages(doc_id)
+    assert len(pages) == 1
+    assert "Atomic PDF Source Spooling Concurrency Test" in pages[0].text
+
+    # Verify no orphaned temporary staging files exist in system temp directory
+    import tempfile
+    from pathlib import Path
+
+    temp_dir = Path(tempfile.gettempdir())
+    orphaned_spool_files = list(temp_dir.glob("**/.*source.pdf.sangam-*"))
+    assert len(orphaned_spool_files) == 0, f"Found orphaned spool files: {orphaned_spool_files}"

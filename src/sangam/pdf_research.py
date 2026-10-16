@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -406,11 +407,38 @@ class PdfResearchService:
         with tempfile.TemporaryDirectory(prefix="sangam-pdf-extract-") as directory:
             source = Path(directory) / "source.pdf"
             output = Path(directory) / "pages.json"
-            with source.open("wb") as content:
-                for chunk in self.workspace.iter_binary(document.path, chunk_size=65536):
-                    if cancel_event is not None and cancel_event.is_set():
-                        raise _ExtractionCancelled
-                    content.write(chunk)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".source.pdf.sangam-", dir=directory
+            )
+            temporary = Path(temporary_name)
+            try:
+                digest = hashlib.sha256()
+                try:
+                    out_handle = os.fdopen(descriptor, "wb")
+                except Exception:
+                    os.close(descriptor)
+                    raise
+                with out_handle:
+                    for chunk in self.workspace.iter_binary(document.path, chunk_size=65536):
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise _ExtractionCancelled
+                        out_handle.write(chunk)
+                        digest.update(chunk)
+                    out_handle.flush()
+                    os.fsync(out_handle.fileno())
+                actual_hash = digest.hexdigest()
+                if actual_hash != document.content_hash:
+                    raise ConflictError(
+                        "PDF bytes differ from the imported immutable source",
+                        details={
+                            "document_id": document_id,
+                            "expected_hash": document.content_hash,
+                            "actual_hash": actual_hash,
+                        },
+                    )
+                os.replace(temporary, source)
+            finally:
+                temporary.unlink(missing_ok=True)
             deadline = time.monotonic() + self.extraction_timeout_seconds
             # A file bounds diagnostic buffering even when a corrupt PDF is noisy.
             with (
