@@ -134,6 +134,11 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "signing_key",
     "encryption_key",
     "user_key",
+    "conn_str",
+    "app_secret",
+    "webhook_secret",
+    "deploy_key",
+    "ssh_key",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -159,7 +164,7 @@ _SAFE_HEADER_EXCEPTIONS: set[str] = {
 }
 
 _TOKEN_PATTERN = re.compile(
-    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{22,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,})\b"
+    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{22,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,}|hf_[a-zA-Z0-9_-]{16,})\b"
 )
 
 _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\s\"']+)(@)")
@@ -167,7 +172,7 @@ _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+")
 
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b([a-z0-9_]*(?:secret|token|password|passwd|passphrase|db_pass|pass_|private_key|api_key|auth_key|access_key|credentials|priv_key|tls_key|env_var|env_val|key)[a-z0-9_]*)\s*[:=]\s*('(?:\\[\s\S]|[^'])*'|\"(?:\\[\s\S]|[^\"])*\"|[^\s'\"\\,{}]+)"
+    r"(?i)\b([a-z0-9_-]*(?:secret|token|password|passwd|passphrase|db_pass|pass_|private_key|api_key|auth_key|access_key|credentials|priv_key|tls_key|env_var|env_val|key|dsn|database_url|connection_string|conn_str)[a-z0-9_-]*)\s*[:=]\s*('(?:\\[\s\S]|[^'])*'|\"(?:\\[\s\S]|[^\"])*\"|[^\s'\"\\,{}]+)"
 )
 
 _RESERVED_NAMES: set[str] = {
