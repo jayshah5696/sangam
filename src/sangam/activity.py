@@ -80,6 +80,17 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "role",
     "pinned_page",
     "thread_id",
+    "comment_id",
+    "exact",
+    "start",
+    "end",
+    "resolved",
+    "expected_version",
+    "filename",
+    "media_type",
+    "size_bytes",
+    "name",
+    "replaced",
 }
 
 

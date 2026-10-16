@@ -1078,3 +1078,149 @@ def test_activity_service_auto_populates_action_type_and_target_file() -> None:
     detail_json_dest = json.loads(str(row_dest[11]))
     assert detail_json_dest["action_type"] == "move"
     assert detail_json_dest["target_file"] == "docs/moved.md"
+
+
+def test_document_comment_audit_provenance(client: TestClient) -> None:
+    """Verify comment creation and resolution generate audit events with metadata."""
+    content = "Hello world! Paragraph two for comments."
+    # 1. Create a document
+    doc_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Comment Audit Doc",
+            "content": content,
+            "path": "docs/comment_audit.md",
+        },
+        headers=headers("idemp_comment_doc_create"),
+    )
+    assert doc_resp.status_code == 201
+    doc = doc_resp.json()
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    exact = "Paragraph two"
+    start = content.index(exact)
+    end = start + len(exact)
+
+    # 2. Create a comment
+    comment_resp = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": exact,
+            "start": start,
+            "end": end,
+            "body": "Please revise paragraph two.",
+        },
+        headers=headers("idemp_comment_create"),
+    )
+    assert comment_resp.status_code == 201, comment_resp.text
+    comment = comment_resp.json()
+    comment_id = comment["comment_id"]
+
+    # 3. Resolve the comment
+    resolve_resp = client.post(
+        f"/api/v1/documents/{doc_id}/comments/{comment_id}/resolve",
+        json={
+            "resolved": True,
+            "expected_version": comment["version"],
+        },
+    )
+    assert resolve_resp.status_code == 200
+
+    # 4. Check activity log for comment events
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    doc_events = [e for e in events if e["resource_id"] == doc_id]
+    comment_events = [e for e in doc_events if e["action"] in ("comment", "resolve_comment")]
+    actions = {e["action"]: e for e in comment_events}
+
+    assert "comment" in actions
+    comment_event = actions["comment"]
+    assert comment_event["actor_kind"] == "human"
+    assert comment_event["path"] == "docs/comment_audit.md"
+    assert comment_event["details"]["action_type"] == "comment"
+    assert comment_event["details"]["target_file"] == "docs/comment_audit.md"
+    assert comment_event["details"]["revision_id"] == rev_id
+    assert comment_event["details"]["exact"] == "Paragraph two"
+    assert comment_event["details"]["start"] == start
+    assert comment_event["details"]["end"] == end
+
+    assert "resolve_comment" in actions
+    resolve_event = actions["resolve_comment"]
+    assert resolve_event["actor_kind"] == "human"
+    assert resolve_event["path"] == "docs/comment_audit.md"
+    assert resolve_event["details"]["action_type"] == "resolve_comment"
+    assert resolve_event["details"]["target_file"] == "docs/comment_audit.md"
+    assert resolve_event["details"]["comment_id"] == comment_id
+    assert resolve_event["details"]["resolved"] is True
+
+
+def test_document_asset_attachment_audit_provenance(client: TestClient) -> None:
+    """Verify attaching an asset to a document records asset metadata in audit details."""
+    doc_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Asset Audit Doc",
+            "content": "# Asset Test\nSee attachment.",
+            "path": "docs/asset_audit.md",
+        },
+        headers=headers("idemp_asset_doc_create"),
+    )
+    assert doc_resp.status_code == 201
+    doc_id = doc_resp.json()["document_id"]
+
+    # Tiny 1x1 transparent PNG bytes
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06"
+        b"\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc`\x00\x00\x00\x02\x00\x01"
+        b"\xe2!\xbc\x33\x00\x00\x00\x00IEND\aeB`\x82"
+    )
+
+    attach_resp = client.post(
+        f"/api/v1/documents/{doc_id}/assets",
+        params={"filename": "diagram.png"},
+        content=png_bytes,
+        headers={"Content-Type": "image/png"},
+    )
+    assert attach_resp.status_code == 201
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    attach_events = [
+        e for e in events if e["resource_id"] == doc_id and e["action"] == "attach_asset"
+    ]
+    assert len(attach_events) == 1
+    event = attach_events[0]
+    assert event["actor_kind"] == "human"
+    assert event["path"] == "docs/asset_audit.md"
+    assert event["details"]["action_type"] == "attach_asset"
+    assert event["details"]["target_file"] == "docs/asset_audit.md"
+    assert event["details"]["filename"] == "diagram.png"
+    assert event["details"]["media_type"] == "image/png"
+    assert event["details"]["size_bytes"] == len(png_bytes)
+
+
+def test_saved_views_audit_provenance(client: TestClient) -> None:
+    """Verify saved view creation logs structured metadata."""
+    create_resp = client.post(
+        "/api/v1/saved-views",
+        json={"name": "Audit View", "filters": {"query": "test"}},
+        headers=headers("idemp_saved_view_create"),
+    )
+    assert create_resp.status_code in (200, 201)
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = activity_resp.json()
+
+    view_events = [e for e in events if e["resource_type"] == "saved_view"]
+    assert len(view_events) >= 1
+    event = view_events[0]
+    assert event["action"] == "save_view"
+    assert event["actor_kind"] == "human"
+    assert event["details"]["name"] == "Audit View"
