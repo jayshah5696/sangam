@@ -7,12 +7,15 @@ the document, or its folder, never breaks them.
 from __future__ import annotations
 
 import hashlib
+from unittest.mock import MagicMock
 
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.api import create_app
 from sangam.config import Settings
+from sangam.document_assets import DocumentAssetService
+from sangam.schemas import Document
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
@@ -74,6 +77,51 @@ def test_uploaded_image_is_stored_in_attachments_and_readable(
     assert served.content == PNG
     assert served.headers["content-type"] == "image/png"
     assert served.headers["x-content-type-options"] == "nosniff"
+
+
+def test_document_asset_service_uses_mutation_coordinator_path_lock() -> None:
+    mock_workspace = MagicMock()
+    mock_mutations = MagicMock()
+
+    service = DocumentAssetService(
+        workspace=mock_workspace,
+        max_bytes=10_000,
+        mutations=mock_mutations,
+    )
+
+    doc = Document(
+        document_id="doc1",
+        title="Doc 1",
+        content_type="text/markdown",
+        path="doc1.md",
+        current_revision_id="rev1",
+        content_hash="hash1",
+        size_bytes=100,
+        materialization_state="clean",
+        file_hash="hash1",
+        deleted=False,
+        created_by="user",
+        created_at="2025-01-01T00:00:00Z",
+        updated_at="2025-01-01T00:00:00Z",
+        updated_by="user",
+        updated_by_name="User",
+        revision_summary=None,
+        category=None,
+        metadata_version=1,
+        trust_level="untrusted",
+        trust_version=1,
+        tags=[],
+        content="# Doc 1\n",
+    )
+
+    digest = hashlib.sha256(PNG).hexdigest()[:16]
+    expected_asset_path = f"attachments/test-{digest}.png"
+
+    asset = service.store(document=doc, filename="test.png", media_type="image/png", content=PNG)
+
+    assert asset.reference == f"/attachments/test-{digest}.png"
+    mock_mutations.path.assert_called_once_with(expected_asset_path)
+    mock_workspace.write_asset.assert_called_once_with(expected_asset_path, PNG)
 
 
 def test_pathless_drafts_can_add_images(client: TestClient) -> None:
