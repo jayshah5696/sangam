@@ -899,6 +899,7 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
         "ENV_SECRET=secret_value_123 "
         "SANGAM_TOKEN=sgm_agt_99999.secret_token_data "
         "PASSWD='my_db_password' "
+        "CREDENTIAL=my_service_credential "
         "TLS_KEY=my_tls_key "
         'CLIENT_SECRET="client_secret_data"'
     )
@@ -906,6 +907,7 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
     assert "secret_value_123" not in sanitized
     assert "secret_token_data" not in sanitized
     assert "my_db_password" not in sanitized
+    assert "my_service_credential" not in sanitized
     assert "my_tls_key" not in sanitized
     assert "client_secret_data" not in sanitized
 
