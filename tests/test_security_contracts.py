@@ -37,6 +37,58 @@ def test_invalid_scopes_never_issue_global_grants(client: TestClient, scope):
 
 
 @pytest.mark.parametrize(
+    "param_name,invalid_value",
+    [
+        ("q", "search\x00term"),
+        ("q", "search\x07term"),
+        ("category", "cat\x00egory"),
+        ("actor_id", "agent\x00id"),
+        ("tag_id", "tag\x00id"),
+    ],
+)
+def test_search_documents_rejects_null_bytes_and_control_chars(
+    client: TestClient, param_name: str, invalid_value: str
+):
+    response = client.get("/api/v1/search", params={param_name: invalid_value})
+    assert response.status_code == 422
+    assert "cannot contain" in response.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "field_name,invalid_value",
+    [("query", "search\x00term"), ("tag_id", "tag\x00id")],
+)
+def test_saved_views_reject_control_chars_in_filters(
+    client: TestClient, field_name: str, invalid_value: str
+):
+    response = client.post(
+        "/api/v1/saved-views",
+        json={"name": "Valid Name", "filters": {field_name: invalid_value}},
+        headers=headers("save-view-invalid"),
+    )
+    assert response.status_code == 422
+    assert "cannot contain" in response.json()["error"]["message"]
+
+
+def test_pdf_search_and_annotations_reject_null_bytes(client: TestClient):
+    imported = client.post(
+        "/api/v1/pdfs",
+        params={"title": "Test PDF", "path": "docs/test.pdf"},
+        content=b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<\n/Root 1 0 R\n>>\n%%EOF",
+        headers={"Content-Type": "application/pdf", **headers("import-pdf")},
+    )
+    assert imported.status_code == 201, imported.text
+    document_id = imported.json()["document_id"]
+
+    search = client.get(f"/api/v1/pdfs/{document_id}/search", params={"q": "term\x00null"})
+    annotations = client.get(
+        f"/api/v1/pdfs/{document_id}/annotations", params={"q": "term\x00null"}
+    )
+    assert search.status_code == 422
+    assert annotations.status_code == 422
+
+
+@pytest.mark.parametrize(
     "prefix,path,expected",
     [
         (None, "docs/item.md", True),

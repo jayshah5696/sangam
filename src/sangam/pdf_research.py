@@ -482,6 +482,7 @@ class PdfResearchService:
 
     def search_pages(self, document_id: str, query: str) -> list[PdfSearchResult]:
         self._require_pdf(document_id)
+        validate_metadata_text(query, "Search query")
         terms = [term.casefold() for term in re.findall(r"[\w-]+", query, flags=re.UNICODE)]
         if not terms:
             return []
@@ -511,6 +512,7 @@ class PdfResearchService:
         include_deleted: bool = False,
     ) -> list[Annotation]:
         self._require_pdf(document_id)
+        validate_metadata_text(query, "Search query")
         conditions = ["n.document_id = ?"]
         parameters: list[object] = [document_id]
         if page_number is not None:

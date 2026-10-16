@@ -32,6 +32,8 @@ class SavedViewService:
         name = validate_metadata_text(body.name.strip(), "Saved view name")
         if not name:
             raise ValidationError("Saved view name cannot be blank")
+        validate_metadata_text(body.filters.query, "Saved view search query")
+        validate_metadata_text(body.filters.tag_id, "Saved view tag ID")
         filters = body.filters.model_copy(update={"query": body.filters.query.strip()})
         return self._audited(
             principal,
