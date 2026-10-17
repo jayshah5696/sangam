@@ -20,9 +20,16 @@ class AuthorizationPolicy:
     def require(self, principal: Principal, capability: Capability, path: str | None) -> None:
         if self.allows(principal, capability, path):
             return
+        details: dict[str, object] = {"capability": capability.value}
+        if path is not None and (
+            principal.administrator
+            or principal.identity_kind == "system"
+            or any(path_matches(grant.path_prefix, path) for grant in principal.scopes)
+        ):
+            details["path"] = path
         raise AuthorizationError(
             "The authenticated actor is not allowed to perform this operation",
-            details={"capability": capability.value, "path": path},
+            details=details,
         )
 
     @staticmethod
