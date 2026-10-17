@@ -36,6 +36,53 @@ def test_invalid_scopes_never_issue_global_grants(client: TestClient, scope):
     assert response.status_code == 422
 
 
+def test_authorization_denied_omits_out_of_scope_paths(client: TestClient):
+    public_doc = create(client, path="docs/public/item.md", content="public text").json()
+    secret_doc = create(client, path="docs/private/secret.md", content="secret text").json()
+
+    # Token scoped to docs/public with update capability
+    scoped_token = issue_agent_token(
+        client,
+        actor_id="agent:public_writer",
+        display_name="Public Writer",
+        capabilities=("read", "update"),
+        path_prefix="docs/public",
+    )
+    auth_scoped = {"Authorization": f"Bearer {scoped_token}"}
+
+    # Attempting to update a document in docs/private (out-of-scope)
+    out_of_scope_resp = client.patch(
+        f"/api/v1/documents/{secret_doc['document_id']}",
+        json={"expected_revision_id": secret_doc["current_revision_id"], "content": "hacked"},
+        headers={**auth_scoped, **headers("out-of-scope-update")},
+    )
+    assert out_of_scope_resp.status_code == 403
+    details = out_of_scope_resp.json()["error"]["details"]
+    assert details.get("capability") == "update"
+    assert "path" not in details, f"Out-of-scope path disclosed in error details: {details}"
+
+    # Token scoped to docs/public with read-only capability
+    read_only_token = issue_agent_token(
+        client,
+        actor_id="agent:public_reader",
+        display_name="Public Reader",
+        capabilities=("read",),
+        path_prefix="docs/public",
+    )
+    auth_read_only = {"Authorization": f"Bearer {read_only_token}"}
+
+    # Attempting to update an in-scope document without the update capability
+    in_scope_resp = client.patch(
+        f"/api/v1/documents/{public_doc['document_id']}",
+        json={"expected_revision_id": public_doc["current_revision_id"], "content": "changed"},
+        headers={**auth_read_only, **headers("in-scope-unauthorized-cap")},
+    )
+    assert in_scope_resp.status_code == 403
+    in_scope_details = in_scope_resp.json()["error"]["details"]
+    assert in_scope_details.get("capability") == "update"
+    assert in_scope_details.get("path") == "docs/public/item.md"
+
+
 @pytest.mark.parametrize(
     "param_name,invalid_value",
     [
