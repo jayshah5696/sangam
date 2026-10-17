@@ -672,6 +672,9 @@ def test_hardened_security_sanitization_patterns() -> None:
         "x-refresh-token": "secret_refresh_hdr",
         "x-auth-secret": "secret_auth_hdr",
         "x-api-secret": "secret_api_hdr",
+        "x-webhook-secret": "secret_webhook_hdr",
+        "x-app-secret": "secret_app_hdr",
+        "x-session-secret": "secret_session_hdr",
         "content-type": "application/json",
     }
     sanitized_hdrs = sanitize_headers(headers_dict)
@@ -680,6 +683,9 @@ def test_hardened_security_sanitization_patterns() -> None:
     assert sanitized_hdrs["x-refresh-token"] == "[REDACTED]"
     assert sanitized_hdrs["x-auth-secret"] == "[REDACTED]"
     assert sanitized_hdrs["x-api-secret"] == "[REDACTED]"
+    assert sanitized_hdrs["x-webhook-secret"] == "[REDACTED]"
+    assert sanitized_hdrs["x-app-secret"] == "[REDACTED]"
+    assert sanitized_hdrs["x-session-secret"] == "[REDACTED]"
     assert sanitized_hdrs["content-type"] == "application/json"
 
     data_payload = {

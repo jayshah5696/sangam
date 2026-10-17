@@ -62,6 +62,9 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-refresh-token",
     "x-auth-secret",
     "x-api-secret",
+    "x-webhook-secret",
+    "x-app-secret",
+    "x-session-secret",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
