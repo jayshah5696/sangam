@@ -693,9 +693,7 @@ class ActivityService:
                     str(safe_details["expected_source_path"])
                 )
             elif "path" in safe_details and safe_details["path"]:
-                safe_details["target_file"] = sanitize_sensitive_text(
-                    str(safe_details["path"])
-                )
+                safe_details["target_file"] = sanitize_sensitive_text(str(safe_details["path"]))
         if "action_type" not in safe_details and "target_file" in safe_details:
             safe_details["action_type"] = action
 
