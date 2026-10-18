@@ -313,4 +313,5 @@ def test_parse_pages_atomic_spooling_and_cleanup_on_cancellation(client):
         service._parse_pages(document.document_id, cancel_event)
 
     from sangam.pdf_research import _ExtractionCancelled
+
     assert isinstance(exc_info.value, _ExtractionCancelled)
