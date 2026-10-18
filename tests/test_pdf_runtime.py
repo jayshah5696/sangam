@@ -287,3 +287,30 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
     assert service.extract_text(document.document_id) is True
     assert concurrent_errors == []
     assert service.documents.get_document(document.document_id).pdf_extraction_status == "ready"
+
+
+def test_parse_pages_atomic_spooling_and_cleanup_on_cancellation(client):
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
+    service = client.app.state.services.pdf_research
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    source = io.BytesIO()
+    writer.write(source)
+    document = service.import_pdf(
+        title="Spool Race Test",
+        path="spool_race.pdf",
+        content=source,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="spool-race-test",
+    )
+
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    with pytest.raises(Exception) as exc_info:
+        service._parse_pages(document.document_id, cancel_event)
+
+    from sangam.pdf_research import _ExtractionCancelled
+    assert isinstance(exc_info.value, _ExtractionCancelled)
