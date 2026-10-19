@@ -1141,6 +1141,7 @@ def test_ai_provider_tokens_and_secret_headers_sanitization() -> None:
     assert sanitized_data["app_key"] == "[REDACTED]"
     assert sanitized_data["user_token"] == "[REDACTED]"
 
+
 def test_document_comment_audit_provenance(client: TestClient) -> None:
     """Verify comment creation and resolution capture actor identity and details."""
     create_doc_resp = client.post(
