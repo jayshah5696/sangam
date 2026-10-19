@@ -36,6 +36,47 @@ def test_invalid_scopes_never_issue_global_grants(client: TestClient, scope):
     assert response.status_code == 422
 
 
+def test_authorization_error_details_omits_out_of_scope_paths():
+    from sangam.authorization import AuthorizationPolicy
+    from sangam.capabilities import Capability
+    from sangam.errors import AuthorizationError
+    from sangam.security import Principal, ScopeGrant
+
+    policy = AuthorizationPolicy()
+
+    # Path-scoped agent targeting an out-of-scope path
+    agent_principal = Principal(
+        actor_id="agent:scoped",
+        display_name="Scoped Agent",
+        identity_kind="agent",
+        operation_id="op_1",
+        scopes=(ScopeGrant(capability=Capability.READ, path_prefix="allowed/path"),),
+    )
+
+    with pytest.raises(AuthorizationError) as exc_info:
+        policy.require(agent_principal, Capability.READ, "secret/path/doc.md")
+    assert "path" not in exc_info.value.details
+    assert exc_info.value.details["capability"] == "read"
+
+    # Path-scoped agent targeting an in-scope path with missing capability (e.g. UPDATE)
+    with pytest.raises(AuthorizationError) as exc_info:
+        policy.require(agent_principal, Capability.UPDATE, "allowed/path/doc.md")
+    assert exc_info.value.details.get("path") == "allowed/path/doc.md"
+
+    admin_principal = Principal.trusted_human(
+        actor_id="human:admin", display_name="Admin", operation_id="op_2"
+    )
+    system_principal = Principal(
+        actor_id="system:daemon",
+        display_name="System",
+        identity_kind="system",
+        operation_id="op_3",
+    )
+    # Admin and system pass allows(), so let's verify require doesn't raise for them:
+    policy.require(admin_principal, Capability.READ, "secret/path/doc.md")
+    policy.require(system_principal, Capability.READ, "secret/path/doc.md")
+
+
 @pytest.mark.parametrize(
     "param_name,invalid_value",
     [
