@@ -1080,3 +1080,156 @@ def test_activity_service_auto_populates_action_type_and_target_file() -> None:
     detail_json_dest = json.loads(str(row_dest[11]))
     assert detail_json_dest["action_type"] == "move"
     assert detail_json_dest["target_file"] == "docs/moved.md"
+
+
+def test_document_comment_audit_provenance(client: TestClient) -> None:
+    """Verify comment creation and resolution capture actor identity and details."""
+    create_doc_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Comment Audit Doc",
+            "content": "# Heading\nPassage to comment on.",
+            "path": "docs/comment_audit.md",
+        },
+        headers=headers("idemp_comment_doc_create"),
+    )
+    assert create_doc_resp.status_code == 201
+    doc = create_doc_resp.json()
+    doc_id = doc["document_id"]
+    rev_id = doc["current_revision_id"]
+
+    # Create comment
+    comment_resp = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Passage to comment on.",
+            "start": 10,
+            "end": 32,
+            "body": "This needs clarification.",
+        },
+        headers=headers("idemp_comment_create"),
+    )
+    assert comment_resp.status_code == 201
+    comment = comment_resp.json()
+    comment_id = comment["comment_id"]
+
+    # Resolve comment
+    resolve_resp = client.post(
+        f"/api/v1/documents/{doc_id}/comments/{comment_id}/resolve",
+        json={"resolved": True, "expected_version": comment["version"]},
+        headers=headers("idemp_comment_resolve"),
+    )
+    assert resolve_resp.status_code == 200
+
+    # Verify activity events
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = [e for e in activity_resp.json() if e["resource_id"] == doc_id]
+    comment_events = {
+        e["action"]: e for e in events if e["action"] in ("comment", "resolve_comment")
+    }
+
+    assert "comment" in comment_events
+    comment_evt = comment_events["comment"]
+    assert comment_evt["actor_kind"] == "human"
+    assert comment_evt["path"] == "docs/comment_audit.md"
+    assert comment_evt["details"]["action_type"] == "comment"
+    assert comment_evt["details"]["target_file"] == "docs/comment_audit.md"
+    assert comment_evt["details"]["revision_id"] == rev_id
+    assert comment_evt["details"]["exact"] == "Passage to comment on."
+    assert comment_evt["details"]["start"] == 10
+    assert comment_evt["details"]["end"] == 32
+
+    assert "resolve_comment" in comment_events
+    resolve_evt = comment_events["resolve_comment"]
+    assert resolve_evt["actor_kind"] == "human"
+    assert resolve_evt["path"] == "docs/comment_audit.md"
+    assert resolve_evt["details"]["action_type"] == "resolve_comment"
+    assert resolve_evt["details"]["target_file"] == "docs/comment_audit.md"
+    assert resolve_evt["details"]["comment_id"] == comment_id
+    assert resolve_evt["details"]["resolved"] is True
+
+
+def test_document_asset_attachment_audit_provenance(client: TestClient) -> None:
+    """Verify asset attachment audit logging captures filename, media_type, and size_bytes."""
+    create_doc_resp = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Asset Audit Doc",
+            "content": "# Doc with asset",
+            "path": "docs/asset_audit.md",
+        },
+        headers=headers("idemp_asset_doc_create"),
+    )
+    assert create_doc_resp.status_code == 201
+    doc_id = create_doc_resp.json()["document_id"]
+
+    # 1x1 transparent PNG bytes
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    asset_resp = client.post(
+        f"/api/v1/documents/{doc_id}/assets",
+        params={"filename": "diagram.png"},
+        content=png_bytes,
+        headers={"Content-Type": "image/png"},
+    )
+    assert asset_resp.status_code == 201
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = [
+        e
+        for e in activity_resp.json()
+        if e["resource_id"] == doc_id and e["action"] == "attach_asset"
+    ]
+    assert len(events) == 1
+    asset_evt = events[0]
+    assert asset_evt["actor_kind"] == "human"
+    assert asset_evt["path"] == "docs/asset_audit.md"
+    assert asset_evt["details"]["action_type"] == "attach_asset"
+    assert asset_evt["details"]["target_file"] == "docs/asset_audit.md"
+    assert asset_evt["details"]["filename"] == "diagram.png"
+    assert asset_evt["details"]["media_type"] == "image/png"
+    assert asset_evt["details"]["size_bytes"] == len(png_bytes)
+
+
+def test_saved_view_audit_provenance(client: TestClient) -> None:
+    """Verify saved view creation and deletion audit logging captures name and replaced details."""
+    save_resp = client.post(
+        "/api/v1/saved-views",
+        json={
+            "name": "Audit Test View",
+            "filters": {"query": "provenance", "tag_id": None, "sort": "relevance"},
+        },
+        headers=headers("idemp_save_view"),
+    )
+    assert save_resp.status_code == 200
+    view = save_resp.json()
+    view_id = view["view_id"]
+
+    delete_resp = client.delete(
+        f"/api/v1/saved-views/{view_id}",
+        headers=headers("idemp_delete_view"),
+    )
+    assert delete_resp.status_code == 204
+
+    activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
+    assert activity_resp.status_code == 200
+    events = [e for e in activity_resp.json() if e["resource_id"] == view_id]
+    actions = {e["action"]: e for e in events}
+
+    assert "save_view" in actions
+    save_evt = actions["save_view"]
+    assert save_evt["actor_kind"] == "human"
+    assert save_evt["details"]["name"] == "Audit Test View"
+    assert save_evt["details"]["replaced"] is False
+
+    assert "delete_view" in actions
+    delete_evt = actions["delete_view"]
+    assert delete_evt["actor_kind"] == "human"
+    assert delete_evt["details"]["name"] == "Audit Test View"
