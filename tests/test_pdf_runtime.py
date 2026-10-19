@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import threading
 import time
 
@@ -287,3 +288,63 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
     assert service.extract_text(document.document_id) is True
     assert concurrent_errors == []
     assert service.documents.get_document(document.document_id).pdf_extraction_status == "ready"
+
+
+def test_pdf_research_spools_source_atomically_and_cleans_staging(client, monkeypatch):
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
+    service = client.app.state.services.pdf_research
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    source = io.BytesIO()
+    writer.write(source)
+    document = service.import_pdf(
+        title="Spool Test",
+        path="spool.pdf",
+        content=source,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="spool-test",
+    )
+
+    spooled_staging_files = []
+    original_replace = os.replace
+
+    def mock_replace(src, dst):
+        if ".source.pdf.sangam-" in str(src):
+            spooled_staging_files.append(str(src))
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", mock_replace)
+
+    assert service.extract_text(document.document_id) is True
+    assert len(spooled_staging_files) == 1
+
+
+def test_pdf_research_spooling_hash_mismatch_unlinks_staging(client, monkeypatch):
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
+    service = client.app.state.services.pdf_research
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    source = io.BytesIO()
+    writer.write(source)
+    document = service.import_pdf(
+        title="Mismatch Test",
+        path="mismatch.pdf",
+        content=source,
+        supersedes_document_id=None,
+        actor_id="human:jay",
+        idempotency_key="mismatch-test",
+    )
+
+    # Tamper with workspace binary hash iterator to simulate corrupt spooling
+    def bad_iter_binary(path, *, start=0, end=None, chunk_size=65536):
+        yield b"%PDF-corrupt-bytes"
+
+    monkeypatch.setattr(service.workspace, "iter_binary", bad_iter_binary)
+
+    from sangam.errors import ConflictError
+
+    with pytest.raises(ConflictError, match="PDF bytes differ from expected content hash"):
+        service._parse_pages(document.document_id, cancel_event=None)
