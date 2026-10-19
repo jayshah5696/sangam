@@ -78,6 +78,74 @@ def test_authorization_error_details_omits_out_of_scope_paths():
 
 
 @pytest.mark.parametrize(
+    "field,value",
+    [
+        ("claim", "Claim\x00null"),
+        ("selected_text", "Selected\x07text"),
+        ("note", "Note\x1fcontrol"),
+        ("source_title", "Title\x00null"),
+    ],
+)
+def test_publication_evidence_rejects_null_bytes_and_control_chars(
+    client: TestClient, field: str, value: str
+):
+    slug_field = field.replace("_", "-")
+    doc1 = create(client, path=f"docs/item-post-{slug_field}.md")
+    doc1_id = doc1.json()["document_id"]
+    evidence_item = {
+        "id": "ev1",
+        "claim": "Valid claim",
+        "selected_text": "Valid text",
+        "source_title": "Valid title",
+        field: value,
+    }
+
+    # Test POST /api/v1/publications
+    response_post = client.post(
+        "/api/v1/publications",
+        json={
+            "document_id": doc1_id,
+            "slug": f"pub-invalid-{slug_field}",
+            "access_policy": "public",
+            "evidence": [evidence_item],
+        },
+        headers=headers(f"pub-create-{slug_field}"),
+    )
+    assert response_post.status_code == 422
+    assert "cannot contain" in response_post.json()["error"]["message"]
+
+    # Create a valid publication first on a separate document
+    doc2 = create(client, path=f"docs/item-patch-{slug_field}.md")
+    doc2_id = doc2.json()["document_id"]
+    valid_pub = client.post(
+        "/api/v1/publications",
+        json={
+            "document_id": doc2_id,
+            "slug": f"pub-valid-{slug_field}",
+            "access_policy": "public",
+        },
+        headers=headers(f"pub-create-valid-{slug_field}"),
+    )
+    assert valid_pub.status_code == 201
+    pub_id = valid_pub.json()["publication_id"]
+    version = valid_pub.json()["version"]
+
+    # Test PATCH /api/v1/publications/{publication_id}
+    response_patch = client.patch(
+        f"/api/v1/publications/{pub_id}",
+        json={
+            "expected_version": version,
+            "slug": f"pub-valid-{slug_field}",
+            "access_policy": "public",
+            "evidence": [evidence_item],
+        },
+        headers=headers(f"pub-patch-{slug_field}"),
+    )
+    assert response_patch.status_code == 422
+    assert "cannot contain" in response_patch.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
     "param_name,invalid_value",
     [
         ("q", "search\x00term"),

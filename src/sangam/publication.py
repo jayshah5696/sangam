@@ -15,7 +15,13 @@ from urllib.parse import urlsplit
 
 from sangam.db import Database, utc_now
 from sangam.document_assets import ATTACHMENTS_FOLDER, resolve_asset_reference
-from sangam.errors import ConflictError, IdempotencyError, NotFoundError, ValidationError
+from sangam.errors import (
+    ConflictError,
+    IdempotencyError,
+    NotFoundError,
+    ValidationError,
+    validate_metadata_text,
+)
 from sangam.html_javascript import HtmlJavascriptSettingsService
 from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.schemas import (
@@ -764,6 +770,10 @@ class PublicationService:
     ) -> list[PublishedEvidenceItem]:
         sanitized: list[PublishedEvidenceItem] = []
         for item in evidence:
+            validate_metadata_text(item.claim, "Evidence claim")
+            validate_metadata_text(item.selected_text, "Evidence selected text")
+            validate_metadata_text(item.note, "Evidence note")
+            validate_metadata_text(item.source_title, "Evidence source title")
             source_is_public = False
             source_slug = None
             if item.source_document_id:
