@@ -44,6 +44,7 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "source_path",
     "destination_path",
     "expected_source_path",
+    "path",
     "content_type",
     "category",
     "tag_ids",
@@ -687,6 +688,12 @@ class ActivityService:
                 safe_details["target_file"] = sanitize_sensitive_text(
                     str(safe_details["source_path"])
                 )
+            elif "expected_source_path" in safe_details and safe_details["expected_source_path"]:
+                safe_details["target_file"] = sanitize_sensitive_text(
+                    str(safe_details["expected_source_path"])
+                )
+            elif "path" in safe_details and safe_details["path"]:
+                safe_details["target_file"] = sanitize_sensitive_text(str(safe_details["path"]))
         if "action_type" not in safe_details and "target_file" in safe_details:
             safe_details["action_type"] = action
 

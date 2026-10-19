@@ -1080,3 +1080,63 @@ def test_activity_service_auto_populates_action_type_and_target_file() -> None:
     detail_json_dest = json.loads(str(row_dest[11]))
     assert detail_json_dest["action_type"] == "move"
     assert detail_json_dest["target_file"] == "docs/moved.md"
+
+    # Test auto-populating target_file from expected_source_path and path in details
+    row_exp, _ = service._prepare_event_row(
+        principal=principal,
+        action="move",
+        resource_type="document",
+        outcome="accepted",
+        resource_id="doc_123",
+        path=None,
+        details={"expected_source_path": "docs/expected.md"},
+    )
+    detail_json_exp = json.loads(str(row_exp[11]))
+    assert detail_json_exp["target_file"] == "docs/expected.md"
+
+    row_path_detail, _ = service._prepare_event_row(
+        principal=principal,
+        action="update",
+        resource_type="document",
+        outcome="accepted",
+        resource_id="doc_123",
+        path=None,
+        details={"path": "docs/in_details.md"},
+    )
+    detail_json_path = json.loads(str(row_path_detail[11]))
+    assert detail_json_path["target_file"] == "docs/in_details.md"
+    assert detail_json_path["path"] == "docs/in_details.md"
+
+
+def test_ai_provider_tokens_and_secret_headers_sanitization() -> None:
+    """Verify AI provider tokens and new secret headers are sanitized."""
+    text_payload = (
+        "OpenAI key: sk-proj-1234567890abcdef1234567890 "
+        "Anthropic key: sk-ant-1234567890abcdef1234567890 "
+        "Google key: AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P"
+    )
+    sanitized_text = sanitize_sensitive_text(text_payload)
+    assert "sk-proj-1234567890abcdef1234567890" not in sanitized_text
+    assert "sk-ant-1234567890abcdef1234567890" not in sanitized_text
+    assert "AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P" not in sanitized_text
+
+    secret_headers = {
+        "x-webhook-secret": "whsec_secret_value_123",
+        "x-app-secret": "appsec_secret_value_456",
+        "x-session-secret": "sesssec_secret_value_789",
+    }
+    sanitized_hdrs = sanitize_headers(secret_headers)
+    assert sanitized_hdrs["x-webhook-secret"] == "[REDACTED]"
+    assert sanitized_hdrs["x-app-secret"] == "[REDACTED]"
+    assert sanitized_hdrs["x-session-secret"] == "[REDACTED]"
+
+    key_terms_data = {
+        "bot_token": "slack_bot_token_val",
+        "app_key": "my_app_key_val",
+        "user_token": "my_user_token_val",
+    }
+    sanitized_data = sanitize_sensitive_data(key_terms_data)
+    assert isinstance(sanitized_data, dict)
+    assert sanitized_data["bot_token"] == "[REDACTED]"
+    assert sanitized_data["app_key"] == "[REDACTED]"
+    assert sanitized_data["user_token"] == "[REDACTED]"

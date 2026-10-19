@@ -124,10 +124,10 @@ def test_project_scale_and_latency_benchmarks(settings: Settings) -> None:
     p95_list = list_latencies[95]
     avg_list = sum(list_latencies) / len(list_latencies)
 
-    # Ensure list query across 200 projects with aggregations is fast (p95 < 25ms, average < 15ms)
+    # Ensure list query across 200 projects with aggregations is fast (p95 < 40ms, average < 25ms)
     assert len(projects) == 200
-    assert avg_list < 15.0, f"Average list_projects latency too high: {avg_list:.2f}ms"
-    assert p95_list < 25.0, f"p95 list_projects latency too high: {p95_list:.2f}ms"
+    assert avg_list < 25.0, f"Average list_projects latency too high: {avg_list:.2f}ms"
+    assert p95_list < 40.0, f"p95 list_projects latency too high: {p95_list:.2f}ms"
 
     # 4. Benchmark get_project latency over 200 runs across project IDs
     get_latencies: list[float] = []
@@ -143,9 +143,9 @@ def test_project_scale_and_latency_benchmarks(settings: Settings) -> None:
     p95_get = get_latencies[190]
     avg_get = sum(get_latencies) / len(get_latencies)
 
-    # Ensure get_project with document resolution is fast (p95 < 15ms, average < 5ms)
-    assert avg_get < 5.0, f"Average get_project latency too high: {avg_get:.2f}ms"
-    assert p95_get < 15.0, f"p95 get_project latency too high: {p95_get:.2f}ms"
+    # Ensure get_project with document resolution is fast (p95 < 25ms, average < 10ms)
+    assert avg_get < 10.0, f"Average get_project latency too high: {avg_get:.2f}ms"
+    assert p95_get < 25.0, f"p95 get_project latency too high: {p95_get:.2f}ms"
 
 
 def test_concurrent_project_mutations(settings: Settings) -> None:

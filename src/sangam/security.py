@@ -62,6 +62,9 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-refresh-token",
     "x-auth-secret",
     "x-api-secret",
+    "x-webhook-secret",
+    "x-app-secret",
+    "x-session-secret",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -139,6 +142,9 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "webhook_secret",
     "deploy_key",
     "ssh_key",
+    "bot_token",
+    "app_key",
+    "user_token",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -164,7 +170,7 @@ _SAFE_HEADER_EXCEPTIONS: set[str] = {
 }
 
 _TOKEN_PATTERN = re.compile(
-    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{22,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,}|hf_[a-zA-Z0-9_-]{16,})\b"
+    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-proj-[a-zA-Z0-9_-]{16,}|sk-ant-[a-zA-Z0-9_-]{16,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{16,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,}|hf_[a-zA-Z0-9_-]{16,}|AIzaSy[a-zA-Z0-9_-]{33})\b"
 )
 
 _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\s\"']+)(@)")
