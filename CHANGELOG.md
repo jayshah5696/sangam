@@ -5,11 +5,41 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 ## [Unreleased]
 
+See the generated notes attached to each GitHub Release.
+
+## [0.13.7] - 2026-10-20
+
 ### Added
 
-- Chat web research (#451): read-only `search_web` and `read_web_source` tools, off by default, with per-run source records, date bounds, and a research eval family against frozen fixtures.
+- Chat web research (#451, #507): opt-in read-only `search_web` and `read_web_source` tools, off by default, with per-run source records, date bounds, and a research eval family against frozen fixtures.
+- User-authored reusable skills in chat (#454, #470): standard `SKILL.md` format parser with YAML frontmatter validation and diagnostic reporting, database migration for revision-pinned execution, `ChatSkillService` for personal and project scoping, `activate_chat_skill` tool and `/skill-name` slash command routing, and REST management endpoints.
+- Active task context and chat continuity (#455, #463): preserve source-linked task context across long chats with project recall, task coverage status, and constrained task summary provenance.
+- Inspectable saved facts and memory in chat profiles (#453, #461): inspectable and correctable saved facts in chat profiles with fact preview in memory approvals and bounds on memory recall size.
+- Editable user and project chat instructions (#452, #458): customizable instructions for personal and project chat context.
+- Modular chat context tabs (#462): separate instructions, saved facts, and skills into accessible context tabs with compact controls and draft preservation.
 
-See the generated notes attached to each GitHub Release.
+### Security
+
+- Hardened audit provenance attribution and credential sanitization (#489, #499, #502): expanded token redaction regex to match OpenAI project tokens, Anthropic keys, and Google API keys; sanitized sensitive headers (`x-webhook-secret`, `x-app-secret`, `x-session-secret`) and key terms (`bot_token`, `app_key`, `user_token`, `deploy_key`, `ssh_key`); captured and sanitized audit detail keys.
+- Path-scoped authorization hardening (#474, #501): enforced `Capability.READ` authorization against resolved workspace paths on relative document asset reads, and omitted out-of-scope paths in `AuthorizationError` detail payloads for path-scoped actors to prevent path disclosure.
+- Document materialization and asset storage locking (#469, #490): acquired mutation locks in document materialization to ensure `current_revision_id` matches the database head revision before writing to disk (preventing TOCTOU races), and acquired path locks during asset storage to serialize concurrent asset writes.
+- Publication metadata sanitization (#498): sanitized metadata text in publication evidence.
+
+### Fixed
+
+- Atomic PDF source extraction and spooling (#496, #503): spooled PDF source bytes to temporary staging files with durable flush and fsync, validated spooled SHA-256 against `document.content_hash`, and ensured atomic file replacement and reliable orphaned temporary file cleanup.
+- Comments and search input validation (#491): strengthened input validation and bounds checking across comments and search queries.
+- Project attachment for captured URLs (#490): corrected invocation signature to reliably attach captured documents to projects under actor authorization.
+- Mobile and web accessibility in chat (#452, #455, #462): kept chat composer controls reachable in mobile Safari and on narrow screens, and refined keyboard navigation.
+- Evaluated chat through production effect lifecycle (#451, #457).
+
+### Changed
+
+- Release and CI workflow parallelization (#445, #450): split CI test suite into parallel python, frontend, and browser shards with cached Playwright browser downloads, gated release workflow on green CI for the tagged commit, and executed container build and vulnerability scanning in parallel with CI gate verification.
+
+### Dependencies
+
+- Consolidated dependency upgrades (#478, #480, #492): updated pypdf to 6.20.1, ruff to 0.17.0, typer to 0.27.3, prettier to 3.9.10, jsdom to 30.1.2, dompurify to 3.4.17, and updated certifi to 2026.10.19, and updated core frontend tools.
 
 ## [0.13.6] - 2026-10-09
 
