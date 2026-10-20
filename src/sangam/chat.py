@@ -5,6 +5,7 @@ import json
 import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import cast
 
 from agents import Agent, AgentOutputSchema, ModelSettings, RunConfig, Runner, StopAtTools
@@ -46,6 +47,7 @@ from sangam.projects import ProjectService
 from sangam.provider_connections import ProviderConnectionService, ProviderStatus
 from sangam.schemas import ChatRuntimeConfig
 from sangam.security import IdentityService, Principal
+from sangam.web_research import BraveSearchProvider, WebResearchService, WebSearchProvider
 
 _MAX_TITLE_LENGTH = 48
 
@@ -115,6 +117,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         provider_connections: ProviderConnectionService,
         projects: ProjectService,
         model_provider: ModelProvider | Callable[[str], ModelProvider] | None = None,
+        web_search_provider: WebSearchProvider | None = None,
     ) -> None:
         self.workspace = workspace
         self.projects = projects
@@ -128,7 +131,19 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         self.store_adapter = SQLiteChatKitStore[ChatRequestContext](database)
         super().__init__(self.store_adapter)
 
-        self.capabilities = ChatCapabilityRegistry()
+        if (
+            web_search_provider is None
+            and config.web_research_enabled
+            and config.web_search_api_key
+        ):
+            web_search_provider = BraveSearchProvider(config.web_search_api_key)
+        self.web = (
+            WebResearchService(database, web_search_provider)
+            if config.web_research_enabled and web_search_provider is not None
+            else None
+        )
+        self.clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self.capabilities = ChatCapabilityRegistry(web_enabled=self.web is not None)
         self.evidence = ChatEvidenceRepository(database, workspace)
         # Runs outlive requests, so every chat entry point refreshes token grants.
         identity = IdentityService(database)
@@ -164,6 +179,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             identity=identity,
             projects=projects,
             max_result_bytes=config.max_tool_result_bytes,
+            web=self.web,
         )
         self.tools = self.toolset.as_agent_tools()
         self.item_converter = SangamThreadItemConverter()
@@ -644,7 +660,8 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             self.skills.prompt_catalog, context.principal, context.project_id
         )
         project_context = (
-            self._access_context(context.principal)
+            self._web_context()
+            + self._access_context(context.principal)
             + project_context
             + profile.prompt()
             + skills_prompt
@@ -674,6 +691,18 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             "Call get_editor_selection when the user's request refers to selected text.\n"
             f"{project_context}"
             "</SANGAM_CONTEXT>"
+        )
+
+    def _web_context(self) -> str:
+        if self.web is None:
+            return (
+                "Outside web research is not available. For questions that need outside or "
+                "current sources, say so and offer an answer from the workspace only.\n"
+            )
+        now = self.clock()
+        return (
+            f"Current date and time (UTC, server clock): {now.strftime('%Y-%m-%d %H:%M')}. "
+            "Use it to resolve relative dates. The user's timezone is not known.\n"
         )
 
     def _access_context(self, principal: Principal) -> str:

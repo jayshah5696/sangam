@@ -5,6 +5,10 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 ## [Unreleased]
 
+### Added
+
+- Chat web research (#451): read-only `search_web` and `read_web_source` tools, off by default, with per-run source records, date bounds, and a research eval family against frozen fixtures.
+
 See the generated notes attached to each GitHub Release.
 
 ## [0.13.6] - 2026-10-09
