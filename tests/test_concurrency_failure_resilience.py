@@ -2795,3 +2795,72 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     current_doc = doc_service.get_document(doc_id)
     assert current_doc.content == "Version 3 content\n"
     assert current_doc.materialization_state == "clean"
+
+
+def test_pdf_parser_hash_mismatch_prevents_replace_and_cleans_temp_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import os
+    import sys
+
+    import sangam.pdf_parser as pdf_parser
+
+    source_pdf = tmp_path / "source.pdf"
+    output_json = tmp_path / "pages.json"
+
+    # Create dummy source file
+    source_pdf.write_bytes(b"%PDF-1.4 dummy")
+
+    # Monkeypatch PdfReader to return dummy pages without needing full PDF parsing
+    class DummyPage:
+        def extract_text(self):
+            return "Sample page text"
+
+    class DummyReader:
+        def __init__(self, *args, **kwargs):
+            self.pages = [DummyPage()]
+
+    monkeypatch.setattr(pdf_parser, "PdfReader", DummyReader)
+
+    # Monkeypatch os.fdopen to simulate a corrupted write to temporary file
+    real_fdopen = os.fdopen
+
+    class CorruptedFileWrapper:
+        def __init__(self, raw):
+            self._raw = raw
+
+        def write(self, b: bytes):
+            # Write corrupted bytes instead of actual content_bytes
+            return self._raw.write(b"corrupted bytes")
+
+        def __enter__(self):
+            self._raw.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._raw.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self._raw, name)
+
+    def corrupted_fdopen(fd, mode="r", *args, **kwargs):
+        f = real_fdopen(fd, mode, *args, **kwargs)
+        return CorruptedFileWrapper(f) if "w" in mode or "b" in mode else f
+
+    monkeypatch.setattr(os, "fdopen", corrupted_fdopen)
+
+    monkeypatch.setattr(
+        sys, "argv", ["pdf_parser.py", str(source_pdf), str(output_json), "10", "100000"]
+    )
+
+    with pytest.raises(
+        OSError, match="Extracted PDF page text hash does not match expected content"
+    ):
+        pdf_parser.main()
+
+    # Verify target output file was NOT created or replaced
+    assert not output_json.exists(), "Corrupted staging file replaced output path!"
+
+    # Verify temporary file was cleaned up
+    temp_files = list(tmp_path.glob(".pages.json.sangam-*"))
+    assert len(temp_files) == 0, f"Temporary file leaked on failure: {temp_files}"
