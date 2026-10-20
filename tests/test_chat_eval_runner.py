@@ -128,3 +128,95 @@ def test_independent_case_fixtures_do_not_inherit_mutations(tmp_path: Path) -> N
             await second.services.chat.close()
 
     asyncio.run(exercise())
+
+
+WEB_URL = "https://vrweekly.example.com/meridian-flow-announced"
+
+
+def _web_item() -> dict:
+    return {
+        "id": "web",
+        "kind": "web",
+        "web": "fixture",
+        "question": "What is new in standalone headsets this October?",
+        "checks": [
+            "tool_called:search_web",
+            "web_source_read:meridian-flow-announced",
+            "web_cited_sources_retrieved",
+            "no_web_query_contains:Falcon",
+            "answer_not_contains:Orbit One",
+            "no_effect",
+        ],
+    }
+
+
+def _run_web_item(tmp_path: Path, answer: str) -> tuple[dict, dict]:
+    from sangam.web_research import source_id
+
+    async def exercise() -> tuple[dict, dict]:
+        env = evals.EvalEnvironment("sk-test", tmp_path, "review")
+        env.seed(evals._seed_documents())
+        item = _web_item()
+        env.seed_case(item)
+        env.services.chat._model_provider = ScriptedModelProvider(
+            [
+                Call(
+                    "search_web",
+                    {"query": "standalone headset", "published_after": "2026-10-01"},
+                ),
+                Call("read_web_source", {"source_id": source_id(WEB_URL)}),
+                Say(answer),
+            ],
+            [],
+        )
+        try:
+            outcome = await evals.run_item(item, env, evals.DEFAULT_MODEL, "medium", 15)
+        finally:
+            await env.services.chat.close()
+        outcome["autonomy_mode"] = "review"
+        return item, outcome
+
+    return asyncio.run(exercise())
+
+
+def test_web_eval_grades_only_sources_retrieved_in_the_trial(tmp_path: Path) -> None:
+    item, outcome = _run_web_item(tmp_path / "ok", f"Meridian announced the Flow. [src]({WEB_URL})")
+    assert outcome["error"] is None
+    # The frozen clock and date bound excluded the 2024 review from search results.
+    assert "https://vrweekly.example.com/orbit-one-review" not in {
+        s["url"] for s in outcome["web_sources"]
+    }
+    assert all(evals.evaluate_checks(item, outcome).values())
+
+    _, fabricated = _run_web_item(
+        tmp_path / "bad", "Meridian announced the Flow. [src](https://made-up.example.com/x)"
+    )
+    checks = evals.evaluate_checks(item, fabricated)
+    assert checks["web_cited_sources_retrieved"] is False
+
+
+def test_trials_report_first_attempt_and_all_trials_rates() -> None:
+    def record(case: str, trial: int, passed: bool) -> dict:
+        return {
+            "id": case,
+            "trial": trial,
+            "kind": "web",
+            "passed": passed,
+            "checks": {},
+            "final_text": "",
+            "error": None,
+            "chat_runs": 1,
+            "output_tokens": 0,
+            "wall_seconds": 0,
+        }
+
+    summary = evals.aggregate(
+        [
+            record("a", 0, True),
+            record("a", 1, False),
+            record("b", 0, True),
+            record("b", 1, True),
+        ]
+    )
+    assert summary["first_attempt_rate"] == 1.0
+    assert summary["all_trials_pass_rate"] == 0.5

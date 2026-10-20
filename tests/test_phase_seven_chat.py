@@ -313,6 +313,8 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "annotate_pdf",
         "activate_chat_skill",
         "manage_chat_skill",
+        "search_web",
+        "read_web_source",
     }
     create_thread(client)
 

@@ -174,9 +174,14 @@ eval-chat-yolo model="openai/gpt-5.6-luna" reasoning="medium" output="test-resul
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode workspace --output "{{ output }}"
 
+# Run the web research eval family five times per case (requires SANGAM_OPENROUTER_API_KEY).
+eval-chat-web model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-web.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --kind web --trials 5 --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
+
 # Verify deterministic approval, permission, cancellation, replay, and plan policy.
 eval-chat-policy:
-    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py tests/test_chat_eval_runner.py
+    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py tests/test_chat_eval_runner.py tests/test_chat_web_research.py
 
 # Run the chat eval suite against another checkout's code for before/after comparison.
 eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-baseline.json":

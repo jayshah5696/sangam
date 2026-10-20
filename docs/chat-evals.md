@@ -1,6 +1,6 @@
 # Chat agent evals
 
-A live-model eval harness for Sangam's chat agent. It runs 25 tasks through the production ChatKit request handler. Each case has its own seeded database and workspace. Checks inspect tool arguments, durable effects, and persisted workspace outcomes. See [chat-capabilities.md](chat-capabilities.md) for the contract under test.
+A live-model eval harness for Sangam's chat agent. It runs 33 tasks through the production ChatKit request handler. Each case has its own seeded database and workspace. Checks inspect tool arguments, durable effects, and persisted workspace outcomes. See [chat-capabilities.md](chat-capabilities.md) for the contract under test.
 
 ## Quickstart
 
@@ -21,6 +21,27 @@ just eval-chat-against /Users/jshah/Documents/GitHub/sangam
 ```
 
 The recipe runs this checkout's eval script with the other checkout's installed `sangam` package, so the only variable is the code under test.
+
+## Web research cases
+
+Eight `web` cases cover outside research. They serve frozen, fictional pages from `scripts/evals/web_fixtures.json` through a fixture provider and freeze the clock at 2026-10-10, so a live-web change cannot look like a regression. The fixture provider matches by word overlap, so several valid queries succeed.
+
+The cases cover a dated search, mixing outside sources with a workspace note, conflicting sources, web turned off, a workspace-only request, private text kept out of queries, instructions inside a page, and research that must not save anything. Checks added for them:
+
+- `web_cited_sources_retrieved` — the answer links to at least one outside source, and every outside link was retrieved in the trial.
+- `web_source_read:<url substring>` — that source was actually read.
+- `no_web_query_contains:<text>` — no search query contained the private text.
+- `answer_not_contains:<text>` — for example, stale background was not presented as current.
+
+These checks are code checks. Whether a source supports a claim is not graded yet; the cited-source check only proves the link was retrieved. A calibrated model grader for source support is still to do.
+
+Run the family with repeated trials:
+
+```sh
+just eval-chat-web
+```
+
+It runs each case five times. The report gives `first_attempt_rate` and `all_trials_pass_rate`, so one lucky trial cannot hide a failure. `--kind web`, `--trials N`, `--limit N`, and `--web-off` (serve no web tools, to reproduce the behavior before web research) work with `scripts/run_chat_evals.py` directly.
 
 ## What the suite measures
 

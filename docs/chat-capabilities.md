@@ -89,8 +89,19 @@ Chat can do what the app can, through the same services and with the same author
 | List, save, correct, accept, dismiss and forget saved facts | `search_chat_memory`, `update_chat_memory`; the same profile service and exact effect approval |
 | Inspect and correct active task context | `inspect_task_state`, `correct_task_state`; source-linked, versioned fields; exact effect approval for chat corrections |
 | Recall original conversations | `search_chat_history`, `read_chat_history`; bounded actor-owned excerpts, stable project membership and current document access |
+| Research outside sources | `search_web`, `read_web_source`; read-only, offered only when the server enables web research (see below) |
 
 Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
+
+### Web research
+
+Web research is off by default. Set `SANGAM_WEB_RESEARCH_ENABLED=true` and `SANGAM_BRAVE_SEARCH_API_KEY` to offer `search_web` and `read_web_source`. With it off, the assistant is told web access is unavailable and answers from the workspace only.
+
+- Both tools are read-only. They need the same `read` authority as other reads and run without approval. Researching never authorizes saving or publishing; those stay separate effects.
+- `search_web` takes a short public query, optional `published_after` and `published_before` dates, and returns a stable source ID, URL, publication date when the provider has one, retrieval time, and a snippet. The query is the only thing sent to the search provider. The assistant is told never to include private workspace text, and an eval checks that queries do not leak seeded private canaries.
+- `read_web_source` reads only a source ID that `search_web` returned in the same chat run, so the assistant cannot fetch arbitrary URLs or cite an ID that was never retrieved. It fetches through the same guarded client as URL capture (HTTP and HTTPS on standard ports, resolved addresses checked, connection pinned, redirects revalidated, size and type limits). PDF sources are not read yet. Page text is returned as `untrusted_content`: it is evidence and never an instruction or a grant.
+- Each run records the sources it retrieved (`chat_web_sources`), including the query, retrieval time, and a hash of the text it read.
+- The assistant is given the server clock in UTC to resolve relative dates. The user's timezone is not known yet.
 
 Not available in chat by design: trust changes, agent tokens, provider connections, backups, reconciliation, Karakeep, and importing PDF bytes. These are administrator operations that hold credentials, operate on infrastructure, or need a binary upload. Chat never rotates a publication token, because that issues a credential, and it cannot create highlight annotations.
 

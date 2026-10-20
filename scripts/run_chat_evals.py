@@ -59,6 +59,8 @@ FALLBACK_ENV_FILES = (
 )
 DEFAULT_MODEL = "openai/gpt-5.6-luna"
 ITEM_TIMEOUT_SECONDS = 300.0
+WEB_FIXTURES = Path(__file__).resolve().parent / "evals" / "web_fixtures.json"
+FROZEN_CLOCK = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
 
 REFUSAL_RE = re.compile(
     r"(?i)\b(i can'?t|i cannot|i won'?t|won'?t risk|requires submitting the entire|"
@@ -70,6 +72,8 @@ TOOL_NAMES = (
     "search_workspace",
     "inspect_workspace_organization",
     "read_document",
+    "search_web",
+    "read_web_source",
     "read_pdf_page",
     "propose_update",
     "create_document",
@@ -268,6 +272,54 @@ def _seed_documents() -> dict[str, dict[str, str]]:
     return seeds
 
 
+class FixtureWebProvider:
+    """Serves frozen pages for any query that shares words with them.
+
+    Matching by word overlap accepts several valid query paths instead of one string.
+    """
+
+    def __init__(self, pages: list[dict[str, str]]) -> None:
+        self.pages = pages
+
+    @staticmethod
+    def _words(text: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int,
+        published_after: Any,
+        published_before: Any,
+    ) -> list[Any]:
+        from sangam.web_research import WebHit
+
+        wanted = self._words(query)
+        scored = []
+        for page in self.pages:
+            published = page["published_at"]
+            if published_after and published < published_after.isoformat():
+                continue
+            if published_before and published > published_before.isoformat():
+                continue
+            score = len(wanted & self._words(page["title"] + " " + page["snippet"] + page["body"]))
+            if score:
+                scored.append((score, page))
+        scored.sort(key=lambda pair: -pair[0])
+        return [
+            WebHit(page["title"], page["url"], page["snippet"], page["published_at"])
+            for _, page in scored[:limit]
+        ]
+
+    def fetch(self, url: str) -> tuple[int, dict[str, str], bytes]:
+        for page in self.pages:
+            if page["url"] == url:
+                body = f"<html><body>{page['body']}</body></html>".encode()
+                return 200, {"Content-Type": "text/html"}, body
+        return 404, {}, b""
+
+
 @dataclass
 class ToolCallRecord:
     tool: str
@@ -307,12 +359,15 @@ def detect_variant() -> str:
 
 
 class EvalEnvironment:
-    def __init__(self, api_key: str, root: Path, autonomy_mode: str) -> None:
+    def __init__(
+        self, api_key: str, root: Path, autonomy_mode: str, *, web_off: bool = False
+    ) -> None:
         from sangam.application import build_application_services, initialize_application_state
         from sangam.config import Settings
 
         self.root = root
         self.autonomy_mode = autonomy_mode
+        self.web_off = web_off
         self.settings = Settings(
             database_path=root / "database" / "eval.sqlite3",
             workspace_root=root / "workspace",
@@ -356,6 +411,23 @@ class EvalEnvironment:
         )
         self.tags_by_name[reviewed.name] = reviewed
 
+    def enable_fixture_web(self) -> None:
+        """Turn on web research with frozen pages and a frozen clock."""
+        from sangam.ssrf_client import SafeCaptureClient
+        from sangam.web_research import WebResearchService
+
+        pages = json.loads(WEB_FIXTURES.read_text(encoding="utf-8"))["pages"]
+        provider = FixtureWebProvider(pages)
+        fetcher = SafeCaptureClient(
+            resolver=lambda host, port: ["93.184.216.34"], http_handler=provider.fetch
+        )
+        chat = self.services.chat
+        web = WebResearchService(chat.evidence.database, provider, fetcher)
+        chat.web = web
+        chat.toolset.web = web
+        chat.capabilities.web_enabled = True
+        chat.clock = lambda: FROZEN_CLOCK
+
     def seed_case(self, item: dict[str, Any]) -> None:
         """Establish each case's prerequisites without depending on earlier trials."""
         from sangam.schemas import ApplyOrganizationPlan, CreateProject
@@ -379,6 +451,16 @@ class EvalEnvironment:
                 ),
                 idempotency_key=f"eval-fixture-trash-{seed_id}",
             )
+        for extra in fixtures.get("extra_documents", []):
+            self.documents_by_seed[extra["id"]] = self.services.workspace_access.create_document(
+                self.principal,
+                title=extra["title"],
+                content=extra["content"],
+                path=extra["path"],
+                idempotency_key=f"eval-fixture-doc-{extra['id']}",
+            )
+        if item.get("web") == "fixture" and not self.web_off:
+            self.enable_fixture_web()
         for project in fixtures.get("projects", []):
             self.services.projects.create_project_once(
                 self.principal,
@@ -563,6 +645,22 @@ async def run_item(
         ).fetchone()
     input_tokens, output_tokens = (value or 0 for value in usage)
 
+    with server.evidence.database.connection() as connection:
+        web_rows = connection.execute(
+            "SELECT s.url, s.source_id, s.query, s.read_at FROM chat_web_sources s "
+            "JOIN chat_runs r ON r.run_id = s.run_id WHERE r.thread_id = ?",
+            (thread_id,),
+        ).fetchall()
+    web_sources = [
+        {
+            "url": row["url"],
+            "source_id": row["source_id"],
+            "query": row["query"],
+            "read": row["read_at"] is not None,
+        }
+        for row in web_rows
+    ]
+
     proposals_after = server.proposals.list(principal, thread_id=thread_id, document_id=document_id)
     proposal_payload = None
     if proposals_after:
@@ -611,6 +709,7 @@ async def run_item(
         if edited_document
         else None,
         "effects": effects,
+        "web_sources": web_sources,
         "workspace_state": workspace_state,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -662,6 +761,24 @@ def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
             passed = not content_contains(check.split(":", 1)[1])
         elif check.startswith("answer_contains:"):
             passed = answer_contains(check.split(":", 1)[1])
+        elif check.startswith("answer_not_contains:"):
+            passed = not answer_contains(check.split(":", 1)[1])
+        elif check == "web_cited_sources_retrieved":
+            # At least one outside link, and every outside link was retrieved this run.
+            retrieved = {source["url"] for source in outcome["web_sources"]}
+            linked = set(re.findall(r"\]\((https?://[^)\s]+)\)", text))
+            passed = bool(linked) and linked <= retrieved
+        elif check.startswith("web_source_read:"):
+            needle = check.split(":", 1)[1]
+            passed = any(s["read"] and needle in s["url"] for s in outcome["web_sources"])
+        elif check.startswith("no_web_query_contains:"):
+            needle = check.split(":", 1)[1].lower()
+            queries = [
+                str(c["args"].get("query", ""))
+                for c in outcome["tool_calls"]
+                if c["tool"] == "search_web"
+            ]
+            passed = not any(needle in query.lower() for query in queries)
         elif check.startswith("answer_matches_regex:"):
             passed = re.search(check.split(":", 1)[1], text) is not None
         elif check.startswith("tool_called:"):
@@ -762,7 +879,26 @@ def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
     refusals = sum(1 for i in items if REFUSAL_RE.search(i["final_text"]))
     completed = [i for i in items if not i["error"]]
     count = len(completed) or 1
+    by_case: dict[str, list[dict[str, Any]]] = {}
+    for entry in items:
+        by_case.setdefault(entry["id"], []).append(entry)
+    repeated = max(len(trials) for trials in by_case.values()) > 1 if by_case else False
+    trial_summary: dict[str, Any] = {}
+    if repeated:
+        trial_summary = {
+            "cases": len(by_case),
+            "trials_per_case": max(len(trials) for trials in by_case.values()),
+            "first_attempt_rate": round(
+                sum(1 for trials in by_case.values() if trials[0]["passed"]) / len(by_case), 3
+            ),
+            "all_trials_pass_rate": round(
+                sum(1 for trials in by_case.values() if all(t["passed"] for t in trials))
+                / len(by_case),
+                3,
+            ),
+        }
     return {
+        **trial_summary,
         "total": len(items),
         "passed": passed,
         "success_rate": round(passed / total, 3),
@@ -781,6 +917,8 @@ async def main_async(args: argparse.Namespace) -> int:
     dataset_path = Path(args.dataset)
     dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
     items = dataset["items"]
+    if args.kind:
+        items = [item for item in items if item["kind"] == args.kind]
     if args.limit:
         items = items[: args.limit]
 
@@ -795,11 +933,14 @@ async def main_async(args: argparse.Namespace) -> int:
             f"autonomy={args.autonomy_mode} seeded_docs={len(seeds)} "
             f"(longest seed {longest:,} chars)"
         )
-        print(f"[evals] running {len(items)} items...\n")
+        print(f"[evals] running {len(items)} items x {args.trials} trial(s)...\n")
 
         results: list[dict[str, Any]] = []
-        for index, item in enumerate(items):
-            env = EvalEnvironment(api_key, Path(tmp) / str(index), args.autonomy_mode)
+        runs = [(item, trial) for item in items for trial in range(args.trials)]
+        for index, (item, trial) in enumerate(runs):
+            env = EvalEnvironment(
+                api_key, Path(tmp) / f"{index}", args.autonomy_mode, web_off=args.web_off
+            )
             try:
                 env.seed(seeds)
                 env.seed_case(item)
@@ -817,6 +958,7 @@ async def main_async(args: argparse.Namespace) -> int:
             passed = all(checks.values()) and outcome["error"] is None
             record = {
                 "id": item["id"],
+                "trial": trial,
                 "kind": item["kind"],
                 "document": item.get("document"),
                 "question": item["question"],
@@ -830,6 +972,7 @@ async def main_async(args: argparse.Namespace) -> int:
                 "tools_called": [c["tool"] for c in outcome["tool_calls"]],
                 "tool_calls": outcome["tool_calls"],
                 "effects": outcome["effects"],
+                "web_sources": outcome["web_sources"],
                 "workspace_state": outcome["workspace_state"],
                 "propose_args": outcome["propose_args"],
                 "chat_runs": outcome["chat_runs"],
@@ -847,7 +990,7 @@ async def main_async(args: argparse.Namespace) -> int:
             status = "PASS" if passed else "FAIL"
             tools = ",".join(record["tools_called"])[:40] or "-"
             print(
-                f"[{index + 1}/{len(items)}] {status} {item['id']:<36} "
+                f"[{index + 1}/{len(runs)}] {status} {item['id']:<36} "
                 f"runs={record['chat_runs']} out_tok={record['output_tokens']:>5} "
                 f"t={record['wall_seconds']:>5}s tools={tools}"
             )
@@ -904,6 +1047,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--dataset", default=str(DEFAULT_DATASET), help="Path to eval dataset JSON")
     parser.add_argument("--output", default=None, help="Write full JSON results to this path")
+    parser.add_argument(
+        "--web-off",
+        action="store_true",
+        help="Serve no web tools, to reproduce behavior before web research existed",
+    )
+    parser.add_argument("--kind", default=None, help="Only run items of this kind, e.g. web")
+    parser.add_argument(
+        "--trials", type=int, default=1, help="Repeat every item this many times (release: 5)"
+    )
     parser.add_argument("--limit", type=int, default=None, help="Only run the first N items")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="OpenRouter model ID under test")
     parser.add_argument(
