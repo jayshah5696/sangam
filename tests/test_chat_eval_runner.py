@@ -220,3 +220,160 @@ def test_trials_report_first_attempt_and_all_trials_rates() -> None:
     )
     assert summary["first_attempt_rate"] == 1.0
     assert summary["all_trials_pass_rate"] == 0.5
+
+
+def test_web_evidence_contains_only_the_text_returned_to_the_agent(tmp_path: Path) -> None:
+    _, outcome = _run_web_item(tmp_path, f"The Flow costs $499. [source]({WEB_URL})")
+    evidence = outcome["source_evidence"]
+    page = next(entry for entry in evidence if entry["kind"] == "page")
+    assert page["url"] == WEB_URL
+    assert "costs $499" in page["text"]
+    assert all("Orbit One" not in entry["text"] for entry in evidence)
+
+
+@pytest.mark.parametrize(
+    "claim,verdict,url,quote,expected",
+    [
+        ("The Flow costs $499.", "pass", WEB_URL, "costs $499", "pass"),
+        ("The Flow costs $99.", "fail", WEB_URL, "costs $499", "fail"),
+        ("The Flow costs $499.", "pass", WEB_URL, "costs $99", "insufficient_evidence"),
+        (
+            "The Flow costs $499.",
+            "pass",
+            "https://invented.example/x",
+            "costs $499",
+            "insufficient_evidence",
+        ),
+        ("An invented claim.", "pass", WEB_URL, "costs $499", "insufficient_evidence"),
+        ("The Flow costs $499.", "pass", WEB_URL, "", "insufficient_evidence"),
+    ],
+)
+def test_source_grade_rejects_unobserved_claims_and_quotes(
+    claim: str, verdict: str, url: str, quote: str, expected: str
+) -> None:
+    answer = (
+        f"{claim if claim != 'An invented claim.' else 'The Flow costs $499.'} [source]({WEB_URL})"
+    )
+    grade = evals.SourceSupportGrade.model_validate(
+        {
+            "claims": [
+                {
+                    "claim": claim,
+                    "verdict": verdict,
+                    "reason": "Compare the price with the source.",
+                    "evidence": [{"url": url, "quote": quote}],
+                }
+            ],
+            "reason": "Price attribution checked.",
+        }
+    )
+    evidence = [{"kind": "page", "url": WEB_URL, "text": "The Flow costs $499."}]
+    checked = evals.validate_source_grade(answer, evidence, grade)
+    assert checked["verdict"] == expected
+
+
+def test_empty_source_grade_is_ungraded_and_never_passes() -> None:
+    grade = evals.SourceSupportGrade(claims=[], reason="No claims checked.")
+    checked = evals.validate_source_grade("A factual answer.", [], grade)
+    assert checked["verdict"] == "insufficient_evidence"
+
+
+@pytest.mark.parametrize("price,expected", [("$499", "pass"), ("$99", "insufficient_evidence")])
+def test_source_claim_validation_allows_only_emphasis_formatting_changes(
+    price: str, expected: str
+) -> None:
+    grade = evals.SourceSupportGrade.model_validate(
+        {
+            "claims": [
+                {
+                    "claim": f"The Flow costs {price}.",
+                    "verdict": "pass",
+                    "reason": "Check the price.",
+                    "evidence": [{"url": WEB_URL, "quote": "costs $499"}],
+                }
+            ],
+            "reason": "Price checked.",
+        }
+    )
+    answer = f"The **Flow** costs **$499**. [Source]({WEB_URL})"
+    evidence = [{"kind": "page", "url": WEB_URL, "text": "The Flow costs $499."}]
+    assert evals.validate_source_grade(answer, evidence, grade)["verdict"] == expected
+
+
+def test_ungraded_source_support_does_not_count_as_success() -> None:
+    outcome = {
+        "final_text": f"The Flow costs $499. [source]({WEB_URL})",
+        "proposal": None,
+        "tool_calls": [],
+        "effects": [],
+        "source_support": {"verdict": "insufficient_evidence"},
+    }
+    assert evals.evaluate_checks({"checks": ["web_source_support"]}, outcome) == {
+        "web_source_support": False
+    }
+
+
+def test_source_judge_receives_observed_evidence_without_model_identity() -> None:
+    import json
+
+    async def exercise() -> None:
+        seen: list = []
+        answer = f"The Flow costs $99. [source]({WEB_URL})"
+        evidence = [{"kind": "page", "url": WEB_URL, "text": "The Flow costs $499."}]
+        provider = ScriptedModelProvider(
+            [
+                Say(
+                    json.dumps(
+                        {
+                            "claims": [
+                                {
+                                    "claim": "The Flow costs $99.",
+                                    "verdict": "fail",
+                                    "reason": "The cited source says $499, not $99.",
+                                    "evidence": [{"url": WEB_URL, "quote": "costs $499"}],
+                                }
+                            ],
+                            "reason": "The price contradicts the cited page.",
+                        }
+                    )
+                )
+            ],
+            seen,
+        )
+        grade = await evals.grade_source_support(answer, evidence, "judge-model", provider, 5)
+        assert grade["verdict"] == "fail"
+        assert grade["model"] == "judge-model"
+        assert grade["rubric_sha256"]
+        packet = json.loads(seen[0][0]["content"])
+        assert packet == {"answer": answer, "sources": evidence}
+
+    asyncio.run(exercise())
+
+
+def test_source_judge_invalid_response_remains_ungraded() -> None:
+    async def exercise() -> None:
+        provider = ScriptedModelProvider([Say("not a structured grade")], [])
+        grade = await evals.grade_source_support(
+            "A factual answer.", [], "judge-model", provider, 5
+        )
+        assert grade["verdict"] == "insufficient_evidence"
+        assert grade["error"]
+
+    asyncio.run(exercise())
+
+
+def test_baseline_loader_preserves_the_retrieval_check(tmp_path: Path) -> None:
+    # HEAD is available in shallow CI checkouts. The comparison recipe selects the pre-PR ref.
+    baseline, commit, source_hash = evals.load_baseline_evaluator("HEAD", tmp_path)
+    assert len(commit) == 40
+    assert source_hash
+    item = {"checks": ["web_cited_sources_retrieved"]}
+    for price in ("$499", "$99"):
+        outcome = {
+            "final_text": f"The Flow costs {price}. [Source]({WEB_URL})",
+            "proposal": None,
+            "tool_calls": [],
+            "effects": [],
+            "web_sources": [{"url": WEB_URL}],
+        }
+        assert baseline.evaluate_checks(item, outcome) == {"web_cited_sources_retrieved": True}

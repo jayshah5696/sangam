@@ -33,7 +33,7 @@ The cases cover a dated search, mixing outside sources with a workspace note, co
 - `no_web_query_contains:<text>` — no search query contained the private text.
 - `answer_not_contains:<text>` — for example, stale background was not presented as current.
 
-These checks are code checks. Whether a source supports a claim is not graded yet; the cited-source check only proves the link was retrieved. A calibrated model grader for source support is still to do.
+These checks are code checks. The cited-source check proves that a link was retrieved. To check whether the source supports the answer, the web recipe also runs a separate model judge.
 
 Run the family with repeated trials:
 
@@ -41,7 +41,37 @@ Run the family with repeated trials:
 just eval-chat-web
 ```
 
-It runs each case five times. The report gives `first_attempt_rate` and `all_trials_pass_rate`, so one lucky trial cannot hide a failure. `--kind web`, `--trials N`, `--limit N`, and `--web-off` (serve no web tools, to reproduce the behavior before web research) work with `scripts/run_chat_evals.py` directly.
+It runs each case five times with GPT-5.6 Luna and grades source support with GPT-5.6 Sol. The report gives `first_attempt_rate` and `all_trials_pass_rate`, so one lucky trial cannot hide a failure. The fourth recipe argument changes the judge model. To run a smaller evaluation through the canonical interface:
+
+```sh
+just eval-chat-focused '--kind web --limit 1 --trials 1 --judge-model openai/gpt-5.6-sol --output test-results/chat-web-focused.json'
+```
+
+`--kind web`, `--trials N`, `--limit N`, and `--web-off` select the cases and fixtures. `--judge-model` enables source-support grading. The ordinary `just eval-chat` and `just eval-chat-yolo` recipes still run deterministic checks alone.
+
+### Source-support grading
+
+The judge receives the final answer and the search snippets and page windows actually returned to the assistant. It receives no model identity, full workspace documents, or fixture text that the assistant did not retrieve. The answer can contain passages from the synthetic workspace fixtures. It has no tools. The rubric asks it to check every material external claim, including announcement dates, shipping dates, prices, and attributed disagreements. Instructions embedded in an answer or source remain untrusted data.
+
+When sources were observed but the answer has no external citations, a deterministic check fails it before invoking the judge. Otherwise each claim gets `pass`, `fail`, or `insufficient_evidence`, a brief reason, and source quotes. Code checks that claims appear in the answer, allowing paired Markdown strong markers to be omitted. Evidence quotes must appear exactly in the observed text. A passing finding needs evidence at a cited URL. These checks cannot establish that the judge found every claim or interpreted it correctly.
+
+The report records the judge model, rubric hash, source text, findings, and separate judge token usage. Provider failures, invalid output, invented grading evidence, empty grades, and packets over the 120,000-character budget remain ungraded. An ungraded case cannot pass `web_source_support`. The aggregate reports the three verdict counts separately. A failed check or runtime error makes the runner exit with status 1.
+
+Before interpreting a judge's scores, compare it with the versioned reference cases:
+
+```sh
+just eval-chat-source-judge
+```
+
+To verify the change against the actual evaluator before this PR, run:
+
+```sh
+just verify-chat-source-support
+```
+
+This reads `scripts/run_chat_evals.py` from baseline commit `c67ed3d` and runs its retrieval check on the same answer and source pairs given to the new grader. The JSON report records both results, the baseline commit and source hash, and the frozen input hash. For example, a "$99" answer citing a retrieved page that says "$499" passes the old retrieval check. The new grader can reject that contradiction. This comparison measures the evaluator's ability to detect an error in a fixed answer. It does not measure an improvement in the chat model's answers. Use the first recipe argument to select another locally available baseline commit.
+
+The reference file covers supported claims, wrong prices, insufficient snippets, missing citations, conflicting dates, unsupported extra claims, and instructions aimed at the grader. These labels were written by the implementation agent and have **not received independent human review**. The report states that fact and records agreement, pass precision, and pass recall against those draft labels. The reference answers are excluded from the judge prompt. Agreement with them is an integration check. Human review and additional held-out examples are required before treating the judge as a calibrated release gate.
 
 ## What the suite measures
 
@@ -103,4 +133,4 @@ Treat single runs as noisy: frontier models vary between runs, so a one-item swi
 | `--dataset PATH` | Use an alternative dataset file. |
 | `--env-file PATH` | Extra `.env` path for the API key. |
 
-The suite is intentionally simple: seeded fixtures, string checks, and tool-call assertions instead of model-graded scoring. Extend the dataset when a harness change adds a behavior worth guarding, and keep every case answerable by deterministic checks.
+Keep persisted outcomes and authority checks deterministic. Use the optional source-support judge for the semantic judgment that code checks cannot establish, and report its limits alongside the deterministic results.
