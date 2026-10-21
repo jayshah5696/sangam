@@ -175,9 +175,19 @@ eval-chat-yolo model="openai/gpt-5.6-luna" reasoning="medium" output="test-resul
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode workspace --output "{{ output }}"
 
 # Run the web research eval family five times per case (requires SANGAM_OPENROUTER_API_KEY).
-eval-chat-web model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-web.json":
+eval-chat-web model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-web.json" judge_model="openai/gpt-5.6-sol":
     mkdir -p test-results
-    uv run python scripts/run_chat_evals.py --kind web --trials 5 --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
+    uv run python scripts/run_chat_evals.py --kind web --trials 5 --model "{{ model }}" --judge-model "{{ judge_model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
+
+# Run a bounded live evaluation with optional source-support grading.
+eval-chat-focused args="":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py {{ args }}
+
+# Check the source judge against draft reference labels before interpreting its scores.
+eval-chat-source-judge model="openai/gpt-5.6-sol" output="test-results/chat-source-judge.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --judge-model "{{ model }}" --judge-cases scripts/evals/source_judge_cases.json --output "{{ output }}"
 
 # Verify deterministic approval, permission, cancellation, replay, and plan policy.
 eval-chat-policy:
