@@ -278,6 +278,28 @@ def test_empty_source_grade_is_ungraded_and_never_passes() -> None:
     assert checked["verdict"] == "insufficient_evidence"
 
 
+@pytest.mark.parametrize("price,expected", [("$499", "pass"), ("$99", "insufficient_evidence")])
+def test_source_claim_validation_allows_only_emphasis_formatting_changes(
+    price: str, expected: str
+) -> None:
+    grade = evals.SourceSupportGrade.model_validate(
+        {
+            "claims": [
+                {
+                    "claim": f"The Flow costs {price}.",
+                    "verdict": "pass",
+                    "reason": "Check the price.",
+                    "evidence": [{"url": WEB_URL, "quote": "costs $499"}],
+                }
+            ],
+            "reason": "Price checked.",
+        }
+    )
+    answer = f"The **Flow** costs **$499**. [Source]({WEB_URL})"
+    evidence = [{"kind": "page", "url": WEB_URL, "text": "The Flow costs $499."}]
+    assert evals.validate_source_grade(answer, evidence, grade)["verdict"] == expected
+
+
 def test_ungraded_source_support_does_not_count_as_success() -> None:
     outcome = {
         "final_text": f"The Flow costs $499. [source]({WEB_URL})",

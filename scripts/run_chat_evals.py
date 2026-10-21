@@ -380,9 +380,15 @@ def validate_source_grade(
 ) -> dict[str, Any]:
     """Reject invented grading evidence before accepting a semantic judgment."""
     linked = set(re.findall(r"\]\((https?://[^)\s]+)\)", answer))
+
+    # A judge may quote rendered strong text without its paired Markdown markers.
+    # Preserve wording, punctuation, and every source quote when checking provenance.
+    def claim_text(value: str) -> str:
+        return re.sub(r"(\*\*|__)(\S(?:.*?\S)?)\1", r"\2", value)
+
     invalid = not grade.claims
     for claim in grade.claims:
-        if claim.claim not in answer:
+        if claim_text(claim.claim) not in claim_text(answer):
             invalid = True
         if claim.verdict == "pass" and not claim.evidence:
             invalid = True
