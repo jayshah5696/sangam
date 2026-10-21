@@ -2795,3 +2795,95 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     current_doc = doc_service.get_document(doc_id)
     assert current_doc.content == "Version 3 content\n"
     assert current_doc.materialization_state == "clean"
+
+
+def test_concurrent_document_writes_with_if_match_and_atomic_staging(
+    client: TestClient, settings
+) -> None:
+    """Simulate simultaneous reads and writes with If-Match preconditions."""
+    target_path = "research/if_match_concurrency.md"
+
+    # Create initial document
+    res = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "If-Match Concurrency Test Doc",
+            "content": "Initial revision 0 content\n",
+            "path": target_path,
+        },
+        headers=headers("create-if-match-doc"),
+    )
+    assert res.status_code == 201
+    doc = res.json()
+    doc_id = doc["document_id"]
+
+    stop_flag = threading.Event()
+    read_results: list[tuple[int, str, bytes]] = []
+    write_results: list[tuple[int, str]] = []
+
+    def reader_worker(worker_id: int):
+        while not stop_flag.is_set():
+            r1 = client.get(
+                f"/api/v1/documents/{doc_id}",
+                headers=headers(f"if-match-reader-{worker_id}-doc"),
+            )
+            r2 = client.get(
+                f"/api/v1/documents/{doc_id}/raw",
+                headers=headers(f"if-match-reader-{worker_id}-raw"),
+            )
+            read_results.append((r1.status_code, "doc", r1.content))
+            read_results.append((r2.status_code, "raw", r2.content))
+            time.sleep(0.001)
+
+    # Fetch full Document etag header
+    doc_resp = client.get(f"/api/v1/documents/{doc_id}", headers=headers("fetch-initial-etag"))
+    initial_etag = doc_resp.headers["ETag"]
+
+    def writer_worker(worker_id: int):
+        resp = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={
+                "content": f"New revision from writer {worker_id}\n",
+            },
+            headers={
+                "If-Match": initial_etag,
+                **headers(f"if-match-writer-{worker_id}"),
+            },
+        )
+        write_results.append((resp.status_code, resp.text))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        r_futures = [executor.submit(reader_worker, i) for i in range(3)]
+        time.sleep(0.01)
+
+        w_futures = [executor.submit(writer_worker, i) for i in range(3)]
+        for wf in w_futures:
+            wf.result(timeout=10)
+
+        stop_flag.set()
+        for rf in r_futures:
+            rf.result(timeout=10)
+
+    # Validate reader results: NO zero-byte reads or error statuses
+    assert len(read_results) > 0
+    for status_code, kind, content in read_results:
+        assert status_code == 200, f"Reader got status code {status_code}"
+        assert len(content) > 0, f"Zero-byte read detected for {kind}"
+
+    # Exactly one writer must succeed (200), and others fail with precondition error (412)
+    status_codes = sorted([code for code, _ in write_results])
+    assert status_codes == [200, 412, 412], f"Unexpected status codes: {status_codes}"
+
+    # Verify disk content matches final database state
+    fetch_resp = client.get(f"/api/v1/documents/{doc_id}", headers=headers("fetch-if-match-final"))
+    assert fetch_resp.status_code == 200
+    final_doc = fetch_resp.json()
+
+    file_path = settings.workspace_root / target_path
+    assert file_path.is_file()
+    assert file_path.read_text(encoding="utf-8") == final_doc["content"]
+
+    # Verify no orphaned temporary files remain
+    parent_dir = file_path.parent
+    orphaned = list(parent_dir.glob(".if_match_concurrency.md.sangam-*"))
+    assert len(orphaned) == 0, f"Found orphaned temp files: {orphaned}"
