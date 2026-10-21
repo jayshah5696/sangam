@@ -17,6 +17,10 @@ setup:
 update-frontend-lock:
     pnpm --dir frontend install --lockfile-only
 
+# Refresh one Python dependency after reviewing its manifest constraint.
+update-python-lock package:
+    uv lock --upgrade-package "{{ package }}"
+
 # Exercise the project API failure cases.
 test-projects:
     uv run pytest tests/test_projects.py tests/test_projects_perf.py
@@ -188,6 +192,11 @@ eval-chat-focused args="":
 eval-chat-source-judge model="openai/gpt-5.6-sol" output="test-results/chat-source-judge.json":
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --judge-model "{{ model }}" --judge-cases scripts/evals/source_judge_cases.json --output "{{ output }}"
+
+# Compare the pre-PR citation check and source-support grader on identical frozen answers.
+verify-chat-source-support baseline="c67ed3d" model="openai/gpt-5.6-sol" output="test-results/chat-source-before-after.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --judge-model "{{ model }}" --judge-cases scripts/evals/source_judge_cases.json --baseline-ref "{{ baseline }}" --output "{{ output }}"
 
 # Verify deterministic approval, permission, cancellation, replay, and plan policy.
 eval-chat-policy:

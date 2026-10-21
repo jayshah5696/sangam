@@ -360,3 +360,20 @@ def test_source_judge_invalid_response_remains_ungraded() -> None:
         assert grade["error"]
 
     asyncio.run(exercise())
+
+
+def test_baseline_loader_preserves_the_retrieval_check(tmp_path: Path) -> None:
+    # HEAD is available in shallow CI checkouts. The comparison recipe selects the pre-PR ref.
+    baseline, commit, source_hash = evals.load_baseline_evaluator("HEAD", tmp_path)
+    assert len(commit) == 40
+    assert source_hash
+    item = {"checks": ["web_cited_sources_retrieved"]}
+    for price in ("$499", "$99"):
+        outcome = {
+            "final_text": f"The Flow costs {price}. [Source]({WEB_URL})",
+            "proposal": None,
+            "tool_calls": [],
+            "effects": [],
+            "web_sources": [{"url": WEB_URL}],
+        }
+        assert baseline.evaluate_checks(item, outcome) == {"web_cited_sources_retrieved": True}

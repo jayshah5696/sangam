@@ -37,6 +37,7 @@ import asyncio
 import contextlib
 import functools
 import hashlib
+import importlib.util
 import inspect
 import json
 import os
@@ -49,6 +50,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -1106,13 +1108,38 @@ def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def load_baseline_evaluator(ref: str, directory: Path) -> tuple[ModuleType, str, str]:
+    """Load the actual committed evaluator for a comparison with identical inputs."""
+    commit = subprocess.check_output(
+        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], text=True
+    ).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("Baseline must resolve to a Git commit")
+    source = subprocess.check_output(["git", "show", f"{commit}:scripts/run_chat_evals.py"])
+    path = directory / f"baseline_{commit}.py"
+    path.write_bytes(source)
+    name = f"chat_eval_baseline_{commit}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load the baseline evaluator")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module, commit, hashlib.sha256(source).hexdigest()
+
+
 async def run_source_judge_cases(args: argparse.Namespace) -> int:
     """Compare a judge with versioned draft labels without presenting them as human labels."""
     reference_path = Path(args.judge_cases)
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     api_key = resolve_api_key(args.env_file)
     results = []
+    baseline_metadata = None
     with tempfile.TemporaryDirectory(prefix="sangam-source-judge-") as tmp:
+        baseline = None
+        if args.baseline_ref:
+            baseline, commit, source_hash = load_baseline_evaluator(args.baseline_ref, Path(tmp))
+            baseline_metadata = {"commit": commit, "runner_sha256": source_hash}
         env = EvalEnvironment(api_key, Path(tmp), "review")
         try:
             provider = env.services.chat._resolve_model_provider("openrouter")
@@ -1125,11 +1152,26 @@ async def run_source_judge_cases(args: argparse.Namespace) -> int:
                     args.timeout,
                 )
                 matched = grade["verdict"] == case["expected"]
+                before = None
+                if baseline is not None:
+                    before = baseline.evaluate_checks(
+                        {"checks": ["web_cited_sources_retrieved"]},
+                        {
+                            "final_text": case["answer"],
+                            "proposal": None,
+                            "tool_calls": [],
+                            "effects": [],
+                            "web_sources": [{"url": source["url"]} for source in case["sources"]],
+                        },
+                    )
                 results.append(
                     {
                         "id": case["id"],
                         "expected": case["expected"],
                         "matched": matched,
+                        "answer": case["answer"],
+                        "sources": case["sources"],
+                        "before": before,
                         "grade": grade,
                     }
                 )
@@ -1144,6 +1186,7 @@ async def run_source_judge_cases(args: argparse.Namespace) -> int:
         "ran_at": datetime.now(UTC).isoformat(),
         "model": args.judge_model,
         "reference_sha256": hashlib.sha256(reference_path.read_bytes()).hexdigest(),
+        "baseline": baseline_metadata,
         "label_origin": reference["label_origin"],
         "human_reviewed": reference["human_reviewed"],
         "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
@@ -1339,6 +1382,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--judge-cases", default=None, help="Compare the source judge with this reference JSON"
     )
     parser.add_argument(
+        "--baseline-ref",
+        default=None,
+        help="Run the committed retrieval check at this Git ref on the same judge reference cases",
+    )
+    parser.add_argument(
         "--reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh", "max"),
         default="medium",
@@ -1361,6 +1409,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.judge_cases and not args.judge_model:
         parser.error("--judge-cases requires --judge-model")
+    if args.baseline_ref and not args.judge_cases:
+        parser.error("--baseline-ref requires --judge-cases")
     return args
 
 

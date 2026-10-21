@@ -63,6 +63,14 @@ Before interpreting a judge's scores, compare it with the versioned reference ca
 just eval-chat-source-judge
 ```
 
+To verify the change against the actual evaluator before this PR, run:
+
+```sh
+just verify-chat-source-support
+```
+
+This reads `scripts/run_chat_evals.py` from baseline commit `c67ed3d` and runs its retrieval check on the same answer and source pairs given to the new grader. The JSON report records both results, the baseline commit and source hash, and the frozen input hash. For example, a "$99" answer citing a retrieved page that says "$499" passes the old retrieval check. The new grader can reject that contradiction. This comparison measures the evaluator's ability to detect an error in a fixed answer. It does not measure an improvement in the chat model's answers. Use the first recipe argument to select another locally available baseline commit.
+
 The reference file covers supported claims, wrong prices, insufficient snippets, missing citations, conflicting dates, unsupported extra claims, and instructions aimed at the grader. These labels were written by the implementation agent and have **not received independent human review**. The report states that fact and records agreement, pass precision, and pass recall against those draft labels. The reference answers are excluded from the judge prompt. Agreement with them is an integration check. Human review and additional held-out examples are required before treating the judge as a calibrated release gate.
 
 ## What the suite measures
