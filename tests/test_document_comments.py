@@ -386,3 +386,47 @@ def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
         f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=other_headers
     )
     assert denied_get.status_code == 403
+
+
+def test_out_of_scope_comment_resolution_authorization(client: TestClient) -> None:
+    # Create document in an out-of-scope path for the agent
+    secret_doc = create_doc(client, "Secret Doc", "Sensitive secret content.", path="secret/doc.md")
+    secret_doc_id = secret_doc["document_id"]
+    secret_rev_id = secret_doc["current_revision_id"]
+
+    # Post a valid comment as human
+    comment_res = client.post(
+        f"/api/v1/documents/{secret_doc_id}/comments",
+        json={
+            "revision_id": secret_rev_id,
+            "exact": "Sensitive secret",
+            "start": 0,
+            "end": 16,
+            "body": "Secret comment",
+        },
+        headers=headers("create-secret-cmt"),
+    )
+    assert comment_res.status_code == 201
+    valid_comment_id = comment_res.json()["comment_id"]
+
+    # Issue an agent token scoped ONLY to "allowed/path"
+    scoped_token = issue_agent_token(
+        client, capabilities=("read", "update"), path_prefix="allowed/path"
+    )
+    scoped_headers = {"Authorization": f"Bearer {scoped_token}"}
+
+    # 1. Attempting to resolve an existing comment on an out-of-scope document returns 403
+    resolve_existing_res = client.post(
+        f"/api/v1/documents/{secret_doc_id}/comments/{valid_comment_id}/resolve",
+        json={"resolved": True, "expected_version": 1},
+        headers={**scoped_headers, **headers("resolve-secret-existing")},
+    )
+    assert resolve_existing_res.status_code == 403
+
+    # 2. Attempting to resolve a non-existent comment ID on an out-of-scope document returns 403
+    resolve_nonexistent_res = client.post(
+        f"/api/v1/documents/{secret_doc_id}/comments/cmt_nonexistent999/resolve",
+        json={"resolved": True, "expected_version": 1},
+        headers={**scoped_headers, **headers("resolve-secret-nonexistent")},
+    )
+    assert resolve_nonexistent_res.status_code == 403
