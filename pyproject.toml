@@ -8,7 +8,7 @@ license-files = ["LICENSE", "NOTICE.md"]
 authors = [{ name = "Jay Shah" }]
 requires-python = ">=3.13"
 dependencies = [
-  "fastapi>=0.142.2,<1",
+  "fastapi>=0.148.0,<1",
   "httpx>=0.28,<1",
   "markdownify>=1.2.3,<2",
   "mcp>=1.30.0,<2",
