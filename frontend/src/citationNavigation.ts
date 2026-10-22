@@ -29,6 +29,8 @@ export type CitationTarget = {
 export const CITATION_NAVIGATION_EVENT = 'sangam:citation-navigation'
 
 const citationDataSchema = z.object({
+  thread_id: z.string().trim().min(1).max(200).optional(),
+  item_id: z.string().trim().min(1).max(200).optional(),
   text_locator: textLocatorSchema.optional(),
   document_id: z.string().trim().min(1).max(200).optional(),
   revision_id: z.string().trim().min(1).max(200).optional(),
@@ -48,6 +50,12 @@ const citationDataSchema = z.object({
 })
 
 export type CitationDataPayload = z.input<typeof citationDataSchema>
+
+export function historyCitationTargetFromData(data: CitationDataPayload | undefined) {
+  const parsed = citationDataSchema.safeParse(data)
+  if (!parsed.success || !parsed.data.thread_id || !parsed.data.item_id) return null
+  return { threadId: parsed.data.thread_id, itemId: parsed.data.item_id }
+}
 
 export function citationTargetFromData(data: CitationDataPayload | undefined): CitationTarget | null {
   if (!data) return null

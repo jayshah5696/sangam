@@ -34,7 +34,7 @@ export default defineConfig({
     {
       name: 'chromium-touch-mobile',
       testMatch:
-        /(?:feature-workflows|ui-bugfixes|source-change-recheck|project-assignments|projects|capture-projects-screenshots|everyday-workflow|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence|review-inbox|revision-history|right-rail-and-published-evidence)\.spec\.ts/,
+        /(?:chat-memory|chat-profile|chat-task|feature-workflows|ui-bugfixes|source-change-recheck|project-assignments|projects|capture-projects-screenshots|everyday-workflow|crisp-ui|html-javascript|chat-publications|activity-token|motion|workspace-organizer|pdf-reader|create-to-write|workspace-evidence|review-inbox|revision-history|right-rail-and-published-evidence)\.spec\.ts/,
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
     },
     {
@@ -55,7 +55,7 @@ export default defineConfig({
     },
     {
       name: 'webkit-mobile-editorial',
-      testMatch: /review-inbox\.spec\.ts/,
+      testMatch: /(?:chat-memory|chat-profile|chat-task|review-inbox)\.spec\.ts/,
       use: { ...devices['iPhone 13'] },
     },
   ],

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
 from types import SimpleNamespace
@@ -11,7 +10,7 @@ from agents.models.interface import Model, ModelProvider
 from agents.tool_context import ToolContext as AgentsToolContext
 from chatkit.agents import AgentContext
 from chatkit.types import CustomTask
-from conftest import headers, issue_agent_token
+from conftest import headers, issue_agent_token, run_in_app
 from fastapi.testclient import TestClient
 from openai.types.responses import (
     Response,
@@ -46,12 +45,16 @@ def test_durable_effect_tools_stop_until_the_client_returns_the_stored_result() 
 
     assert behavior == {
         "stop_at_tool_names": [
+            "correct_task_state",
             "create_document",
             "apply_workspace_organization_plan",
             "publish_document",
+            "update_chat_memory",
+            "update_chat_profile",
             "update_project",
             "update_publication",
             "annotate_pdf",
+            "manage_chat_skill",
         ]
     }
     assert "Do not narrate submission, pending review, or a\nmissing result" in _AGENT_INSTRUCTIONS
@@ -121,9 +124,10 @@ def test_workspace_chat_does_not_inherit_a_thread_document_context(client: TestC
         else thread.metadata.get("document_id")
     )
     assert document_id is None
-    assert asyncio.run(chat.app_context(context, "thread-1")) == (
-        "<SANGAM_CONTEXT>\nNo current document is open.\n</SANGAM_CONTEXT>"
-    )
+    prompt = run_in_app(client, chat.app_context(context, "thread-1"))
+    assert "No current document is open." in prompt
+    assert "doc-from-thread" not in prompt
+    assert '"project_id":null' in prompt
 
 
 def test_document_chat_persists_the_requested_pinned_revision(client: TestClient) -> None:
@@ -285,6 +289,10 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
     assert local_config["transport_message"] == "ChatKit browser transport is ready."
 
     assert {tool.name for tool in client.app.state.services.chat.tools} == {
+        "search_chat_history",
+        "read_chat_history",
+        "inspect_task_state",
+        "correct_task_state",
         "get_editor_selection",
         "search_workspace",
         "read_document",
@@ -296,9 +304,17 @@ def test_chatkit_runtime_config_and_supported_abstractions(client: TestClient) -
         "apply_workspace_organization_plan",
         "read_revision_history",
         "inspect_projects",
+        "inspect_chat_profile",
+        "search_chat_memory",
+        "update_chat_memory",
+        "update_chat_profile",
         "update_project",
         "update_publication",
         "annotate_pdf",
+        "activate_chat_skill",
+        "manage_chat_skill",
+        "search_web",
+        "read_web_source",
     }
     create_thread(client)
 
@@ -546,7 +562,7 @@ def test_propose_update_tool_persists_turn_context_linkage(client: TestClient) -
         pinned_revision_id=document["current_revision_id"],
         context_snapshot_id=context.context_id,
     )
-    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    thread = run_in_app(client, chat.store_adapter.load_thread(thread_id, request_context))
     agent_context = AgentContext(
         thread=thread,
         store=chat.store_adapter,
@@ -566,7 +582,7 @@ def test_propose_update_tool_persists_turn_context_linkage(client: TestClient) -
         tool_arguments=json.dumps(arguments),
     )
 
-    result = asyncio.run(tool.on_invoke_tool(run_context, json.dumps(arguments)))
+    result = run_in_app(client, tool.on_invoke_tool(run_context, json.dumps(arguments)))
     proposal_id = json.loads(result)["proposal_id"]
     proposal = client.get("/api/v1/chat/proposals", params={"thread_id": thread_id}).json()[0]
 
@@ -838,13 +854,14 @@ def test_chat_tool_wrapper_tracks_task_identity_and_serializes_failures(client: 
     agent_context = FakeAgentContext()
     ctx = cast(Any, SimpleNamespace(context=agent_context))
 
-    result = asyncio.run(
+    result = run_in_app(
+        client,
         toolset._run_tool(
             ctx,
             toolset.policies["read_document"],
             "missing",
             lambda _principal: (_ for _ in ()).throw(ValidationError("cannot read document")),
-        )
+        ),
     )
 
     assert agent_context.updated_index == 1
@@ -874,7 +891,7 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
     )
     request_context = ChatRequestContext(principal=principal, document_id=document["document_id"])
     chat = client.app.state.services.chat
-    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    thread = run_in_app(client, chat.store_adapter.load_thread(thread_id, request_context))
     agent_context = AgentContext(
         thread=thread,
         store=chat.store_adapter,
@@ -889,17 +906,19 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
         tool_arguments=arguments,
     )
 
-    result = asyncio.run(
+    result = run_in_app(
+        client,
         read_tool.on_invoke_tool(
             run_context,
             arguments,
-        )
+        ),
     )
-    second_result = asyncio.run(
+    second_result = run_in_app(
+        client,
         read_tool.on_invoke_tool(
             run_context,
             arguments,
-        )
+        ),
     )
 
     payload = json.loads(result)
@@ -985,13 +1004,14 @@ def test_publish_tool_requires_client_confirmation_before_any_side_effect(
         lambda *_args, **_kwargs: pytest.fail("publish must not run before browser approval"),
     )
 
-    result = asyncio.run(
+    result = run_in_app(
+        client,
         toolset.publish_document(
             ctx,
             document_id=document["document_id"],
             slug="release-notes",
             access_policy="public",
-        )
+        ),
     )
 
     assert result is None
@@ -1026,10 +1046,11 @@ def test_create_document_tool_requires_client_confirmation_before_any_side_effec
         lambda *_args, **_kwargs: pytest.fail("create must not run before browser approval"),
     )
 
-    result = asyncio.run(
+    result = run_in_app(
+        client,
         toolset.create_document(
             ctx, title="  Research   note  ", content="# Evidence", content_type="text/markdown"
-        )
+        ),
     )
 
     assert result is None
@@ -1604,7 +1625,7 @@ def test_read_document_paginates_by_character_offset_and_limit(
     principal = client.app.state.services.identity.authenticate(token, operation_id="paged-read")
     request_context = ChatRequestContext(principal=principal, document_id=document["document_id"])
     chat = client.app.state.services.chat
-    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    thread = run_in_app(client, chat.store_adapter.load_thread(thread_id, request_context))
     agent_context = AgentContext(
         thread=thread, store=chat.store_adapter, request_context=request_context
     )
@@ -1617,7 +1638,7 @@ def test_read_document_paginates_by_character_offset_and_limit(
             tool_call_id=f"call-{json.dumps(arguments, sort_keys=True)}",
             tool_arguments=json.dumps(arguments),
         )
-        result = asyncio.run(read_tool.on_invoke_tool(run_context, json.dumps(arguments)))
+        result = run_in_app(client, read_tool.on_invoke_tool(run_context, json.dumps(arguments)))
         return json.loads(result)
 
     first_page = invoke(
@@ -1660,7 +1681,7 @@ def test_search_workspace_passes_pagination_and_caps_limit(
     thread_id = create_thread(client, Authorization=f"Bearer {token}")
     principal = client.app.state.services.identity.authenticate(token, operation_id="paged-search")
     request_context = ChatRequestContext(principal=principal)
-    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    thread = run_in_app(client, chat.store_adapter.load_thread(thread_id, request_context))
     agent_context = AgentContext(
         thread=thread, store=chat.store_adapter, request_context=request_context
     )
@@ -1671,7 +1692,7 @@ def test_search_workspace_passes_pagination_and_caps_limit(
         tool_call_id="call-paged-search",
         tool_arguments=json.dumps({"query": "evidence", "limit": 25, "offset": 30}),
     )
-    asyncio.run(search_tool.on_invoke_tool(run_context, run_context.tool_arguments))
+    run_in_app(client, search_tool.on_invoke_tool(run_context, run_context.tool_arguments))
 
     assert captured["limit"] == 25
     assert captured["offset"] == 30

@@ -44,19 +44,42 @@ place raw font values are allowed. Density multiplies the chrome text tokens;
 it never scales `--text-editor`, which has its own control. Touch targets stay
 at least `--control-touch` tall in every density.
 
+### Theme picker and contrast
+
+Settings > Appearance > Theme lists 16 built-in palettes: the original Midnight,
+River, Parchment, and Cobalt, plus dark and light variants of Indigo Ink, Moss,
+Ember, Lagoon, Plum, and Brass. A Dark/Light/All switch filters the cards.
+Each card renders its real colors and its text contrast ratio.
+
+Contrast drives the palettes. Each palette uses one hue, and its neutrals carry
+a small tint of it. Body, muted, and sidebar text must reach 4.5:1 and the
+accent 3:1 against the surface, using the WCAG 2 ratio. The contrast report
+under the grid checks the active theme against these rules. The Create theme
+editor shows the same report live for custom colors. `themeContrastChecks` in
+`theme.tsx` holds the rules. `themeMode` reports whether a theme is dark,
+including custom themes, so code blocks and diffs follow the theme.
+
+Add a palette with a `data-theme` block in `tokens.css`, entries in `themeIds`,
+`baseThemeColors`, and `themes` in `theme.tsx`, and its id in
+`typography-bootstrap.js`.
+
 ### Create theme
 
-Settings > Appearance > Create theme is a theme studio: start a theme from one
-of the four base palettes, edit its color roles (app background, surface,
-raised surface, text, muted text, sidebar, sidebar text, accent) with live
-preview on the real workspace, then keep editing or export it as JSON for
-sharing. Import theme JSON recreates a shared theme. Custom themes are stored
-in the workspace preferences as `customThemes` and applied before first paint:
-`data-theme` is set to the theme's base palette while each overridden color
-role is injected as an inline custom property on `<html>`, with
-`--accent-soft` and a luminance-derived `--accent-text` derived from the
-accent. Custom themes appear as cards in the Theme grid and are
-browser-scoped like the rest of Appearance.
+Settings > Appearance > Create theme asks for two colors: a background and an
+accent. `deriveThemeColors` builds the rest. The background decides dark or
+light. Surfaces, text, muted text, sidebar, and sidebar text follow from it. The
+accent and muted text move just far enough to reach the contrast rules. A new
+theme starts from the theme in use, and the whole workspace previews it live.
+"Fine-tune other colors" exposes the derived roles for manual edits; picking a
+background or accent again regenerates them. Themes export and import as JSON.
+
+Custom themes are stored in the workspace preferences as `customThemes` and
+applied before first paint: `data-theme` is set to the base palette (`midnight`
+for dark, `river` for light) while each color role is injected as an inline
+custom property on `<html>`, with `--accent-soft` and a luminance-derived
+`--accent-text` derived from the accent. Custom themes appear as cards in the
+Theme grid under their Dark or Light switch and are browser-scoped like the rest
+of Appearance.
 
 ## Dimensions
 
@@ -205,6 +228,25 @@ document. Enter a name and color, select the new tag, then choose **Save tags**.
 Use Settings for workspace-wide tag management.
 
 ## Interaction states
+
+### Chat context controls
+
+Instructions and saved facts open in the shared bounded Chat context dialog.
+Active task context uses a third tab in that dialog. It stays collapsed on the
+chat page. Corrections and source excerpts expand only after an explicit action;
+a source-message link opens the exact source directly. Closing retains correction
+drafts, and Discard resets them. A thread change clears its local task drafts.
+Separate keyboard-accessible tabs keep instruction editors out of fact management.
+Closing it with the close button, Escape, or the backdrop preserves drafts while
+the chat component remains mounted. Drafts do not survive a page reload. Saved
+facts show compact previews and open their editors only on request. Closing an
+editor preserves its draft; Discard changes resets it to the revision that the
+draft started from. A background refresh cannot replace a dirty draft or advance
+its expected revision. Reload saved values is an explicit recovery action.
+Routine status messages use compact anatomy and success notices can be dismissed.
+Closing context controls does not deny an approval, forget a fact, or delete a
+conversation. Pending approvals remain visible in the existing review controls;
+completed actions remain in collapsed history.
 
 Every interactive surface must define the states that apply to it. Reuse the
 shared button, field, row, tab, badge, and `StateMessage` anatomy before creating

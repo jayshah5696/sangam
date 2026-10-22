@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
 import pytest
 from agents.tool_context import ToolContext as AgentsToolContext
 from chatkit.agents import AgentContext
-from conftest import headers, issue_agent_token
+from conftest import headers, issue_agent_token, run_in_app
 from fastapi.testclient import TestClient
 from test_chat_capability_lifecycle import prepare_effect, prepare_run, set_chat_autonomy
 from test_phase_five_pdf_research import import_pdf, text_pdf
@@ -18,7 +17,7 @@ from test_phase_seven_chat import create_thread
 from sangam.chat import agent_instructions
 from sangam.chat_capabilities import CreateDocumentInput
 from sangam.chat_context import ChatRequestContext
-from sangam.errors import AuthorizationError
+from sangam.errors import AuthorizationError, NotFoundError
 from sangam.security import Principal
 
 
@@ -46,7 +45,7 @@ def call_tool_as(
         create_thread(client, Authorization=f"Bearer {bearer}") if bearer else create_thread(client)
     )
     request_context = ChatRequestContext(principal=principal)
-    thread = asyncio.run(chat.store_adapter.load_thread(thread_id, request_context))
+    thread = run_in_app(client, chat.store_adapter.load_thread(thread_id, request_context))
     agent_context = AgentContext(
         thread=thread, store=chat.store_adapter, request_context=request_context
     )
@@ -55,7 +54,7 @@ def call_tool_as(
     context = AgentsToolContext(
         context=agent_context, tool_name=name, tool_call_id=f"call-{name}", tool_arguments=encoded
     )
-    return json.loads(asyncio.run(tool.on_invoke_tool(context, encoded)))
+    return json.loads(run_in_app(client, tool.on_invoke_tool(context, encoded)))
 
 
 def create_document(client: TestClient, key: str, **fields: Any) -> dict[str, Any]:
@@ -372,22 +371,24 @@ def test_a_conversation_started_from_a_project_tells_the_model_about_it(
         headers=headers("ctx-member"),
     )
 
-    context = asyncio.run(
+    context = run_in_app(
+        client,
         chat.app_context(
             ChatRequestContext(principal=human(), project_id=project["project_id"]), "thread-ctx"
-        )
+        ),
     )
-    missing = asyncio.run(
-        chat.app_context(
-            ChatRequestContext(principal=human(), project_id="proj_gone"), "thread-ctx"
+    with pytest.raises(NotFoundError):
+        run_in_app(
+            client,
+            chat.app_context(
+                ChatRequestContext(principal=human(), project_id="proj_gone"), "thread-ctx"
+            ),
         )
-    )
 
     assert f"Open project id: {project['project_id']}" in context
     assert "Project purpose: Size the market" in context
     assert "This conversation's thread id: thread-ctx" in context
     assert f"- {source['document_id']} | ctx-source | source" in context
-    assert "Open project" not in missing
 
 
 def test_an_agent_is_not_told_about_projects(client: TestClient) -> None:
@@ -400,13 +401,13 @@ def test_an_agent_is_not_told_about_projects(client: TestClient) -> None:
     token = issue_agent_token(client, actor_id="agent:nosy", capabilities=("read",))
     agent = services.identity.authenticate(token, operation_id="ctx-agent")
 
-    context = asyncio.run(
-        services.chat.app_context(
-            ChatRequestContext(principal=agent, project_id=project["project_id"]), "thread-ctx"
+    with pytest.raises(AuthorizationError):
+        run_in_app(
+            client,
+            services.chat.app_context(
+                ChatRequestContext(principal=agent, project_id=project["project_id"]), "thread-ctx"
+            ),
         )
-    )
-
-    assert "Hidden from agents" not in context
 
 
 def test_chat_edits_a_project_its_members_conversations_and_annotations(
@@ -829,7 +830,9 @@ def test_a_path_scoped_agent_can_create_inside_its_prefix_through_chat(client: T
             model_supports_tools=True,
         )
     }
-    told = asyncio.run(chat.app_context(ChatRequestContext(principal=agent), "thread-scoped"))
+    told = run_in_app(
+        client, chat.app_context(ChatRequestContext(principal=agent), "thread-scoped")
+    )
 
     assert "create_document" in offered
     assert "Your create access is limited to paths under: agent" in told

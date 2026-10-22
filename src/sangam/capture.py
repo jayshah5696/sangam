@@ -11,7 +11,7 @@ from markdownify import markdownify
 from sangam.access import WorkspaceAccessService
 from sangam.errors import validate_metadata_text
 from sangam.karakeep_extraction import KarakeepExtractor
-from sangam.schemas import Document
+from sangam.schemas import AddProjectDocument, Document
 from sangam.security import Principal
 from sangam.ssrf_client import SafeCaptureClient
 
@@ -160,10 +160,9 @@ class CaptureService:
         if project_id:
             with contextlib.suppress(Exception):
                 self.projects.add_document(
+                    principal,
                     project_id,
-                    document.document_id,
-                    role="source",
-                    actor_id=principal.actor_id,
+                    AddProjectDocument(document_id=document.document_id, role="source"),
                 )
 
         return document

@@ -110,7 +110,7 @@ just verify-assignments
 ```
 Live evaluations require a configured provider and may incur charges. Without credentials, `just verify-eval` runs deterministic policy checks and reports the live evaluation as skipped. Do not describe that result as model verification. The unified `just verify-behavior` gate also benchmarks live streaming and fails without a provider. `just verify-assignments` checks real inference and restart recovery; it requires a live provider.
 
-The evaluation suite covers 17 standardized workspace benchmark tasks (document mutations, multi-hop search, organization plans, and safety gates). It writes `artifacts/verify-sangam/<RUN_ID>/agent-eval.json`.
+The evaluation suite covers 25 workspace benchmark tasks through production ChatKit with a separate database and workspace for each case. It writes `artifacts/verify-sangam/<RUN_ID>/agent-eval.json`.
 
 
 ## 5. Evidence
@@ -123,7 +123,7 @@ Required proof standards:
 - **Mutations:** Verification of returned `current_revision_id` and SQLite DB inspection.
 - **Performance:** `benchmark.json` with p50/p90/p95/p99 latency numbers and throughput metrics.
 - **Security:** 403 Forbidden assertions on unauthorized token operations.
-- **Agent Evals:** `agent-eval.json` with 17-item pass counts, tool call sequences, token usage, and latency.
+- **Agent Evals:** `agent-eval.json` with per-case pass counts, tool call sequences, token usage, chat run counts, and latency. Limited runs report their actual case count.
 - **UI:** ARIA snapshots or screenshots with the app identity visible.
 
 ## 6. Cleanup

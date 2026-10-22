@@ -22,10 +22,11 @@ import {
   announceCitationNavigation,
   citationHref,
   citationTargetFromData,
+  historyCitationTargetFromData,
   type CitationDataPayload,
   type CitationTarget,
 } from '../citationNavigation'
-import { uiFonts, useTheme } from '../theme'
+import { themeMode, uiFonts, useTheme } from '../theme'
 import { OneTimeSecret } from './OneTimeSecret'
 import { StateMessage } from './ui/StateMessage'
 import { RevisionMergeView } from './RevisionMergeView'
@@ -37,6 +38,7 @@ import {
 import { useChatKitScript } from './useChatKitScript'
 import { ChatEffectTray, DurableEffectStatus } from './ChatEffectTray'
 import { ChatEffectConfirmation } from './ChatEffectConfirmation'
+import { ChatInstructions } from './ChatInstructions'
 import {
   organizationOperationDetail,
   organizationOperationTitle,
@@ -69,6 +71,7 @@ export function ChatPanel({
   compact = false,
   initialPrompt,
   initialThreadId,
+  initialSourceMessageId,
   projectId,
 }: {
   document?: Document | null
@@ -80,6 +83,7 @@ export function ChatPanel({
   compact?: boolean
   initialPrompt?: string
   initialThreadId?: string
+  initialSourceMessageId?: string
   projectId?: string
 }) {
   const activeDocument = document ?? null
@@ -92,6 +96,7 @@ export function ChatPanel({
     () => initialThreadId ?? localStorage.getItem(threadStorageKey),
   )
   const [chatEpoch, setChatEpoch] = useState(0)
+  const [instructionsOverride, setInstructionsOverride] = useState('')
   // One review is pending at a time: the card for the effect the model is waiting on.
   const [review, setReview] = useState<PendingReview | null>(null)
   const [decisionError, setDecisionError] = useState(false)
@@ -228,9 +233,15 @@ export function ChatPanel({
   )
   const refreshProposals = useCallback(
     () =>
-      queryClient.invalidateQueries({
-        queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
-      }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['chat-profile'] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-memory'] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-task', threadId] }),
+        queryClient.invalidateQueries({ queryKey: ['chat-profile-applied', threadId] }),
+        queryClient.invalidateQueries({
+          queryKey: ['chat-proposals', activeDocument?.document_id ?? null, threadId],
+        }),
+      ]),
     [activeDocument?.document_id, queryClient, threadId],
   )
   const showPendingEffect = useCallback((effect: ChatEffect) => {
@@ -310,6 +321,8 @@ export function ChatPanel({
     pdfPageNumber: pdfPageNumber ?? null,
     annotationId: annotationId ?? null,
     projectId: projectId ?? null,
+    instructionsOverride,
+    clearInstructionsOverride: () => setInstructionsOverride(''),
     selectedText: activeSelectedText,
     refreshProposals,
     navigate,
@@ -322,6 +335,8 @@ export function ChatPanel({
       pdfPageNumber: pdfPageNumber ?? null,
       annotationId: annotationId ?? null,
       projectId: projectId ?? null,
+      instructionsOverride,
+      clearInstructionsOverride: () => setInstructionsOverride(''),
       selectedText: activeSelectedText,
       refreshProposals,
       navigate,
@@ -369,6 +384,14 @@ export function ChatPanel({
   const handleResponseEnd = useCallback(() => void liveRef.current.refreshProposals(), [])
   const handleCitationDeeplink = useCallback(
     ({ name, data }: { name: string; data?: CitationDataPayload }) => {
+      if (name === 'conversation') {
+        const source = historyCitationTargetFromData(data)
+        if (source) {
+          const params = new URLSearchParams({ thread: source.threadId, message: source.itemId })
+          void liveRef.current.navigate({ href: `/chat?${params}` })
+        }
+        return
+      }
       if (name !== 'document') return
       const target = citationTargetFromData(data)
       if (!target) return
@@ -533,19 +556,28 @@ export function ChatPanel({
 
   return (
     <div className={`chat-panel ${compact ? 'chat-panel-compact' : ''}`}>
+      <div className="chat-context-toolbar">
+        {!compact && (
+          <ChatContextBanner
+            document={activeDocument}
+            selectedText={activeSelectedText}
+            onClear={onClearContext}
+          />
+        )}
+        <ChatInstructions
+          sourceMessageId={threadId === initialThreadId ? initialSourceMessageId : undefined}
+          projectId={projectId}
+          threadId={threadId}
+          override={instructionsOverride}
+          onOverrideChange={setInstructionsOverride}
+        />
+      </div>
       {initialPrompt && (
         <StateMessage
           compact
           kind="empty"
           title="Message draft"
           description="Review the prepared message in the composer, then choose Send."
-        />
-      )}
-      {!compact && (
-        <ChatContextBanner
-          document={activeDocument}
-          selectedText={activeSelectedText}
-          onClear={onClearContext}
         />
       )}
       {contextSwitchEvent && (
@@ -666,7 +698,7 @@ export function ChatPanel({
             <WorkspaceChatSurface
               key={chatEpoch}
               liveRef={liveRef}
-              theme={preferences.theme === 'midnight' ? 'dark' : 'light'}
+              theme={themeMode(preferences)}
               typography={chatTypography}
               density={chatDensity}
               domainKey={configQuery.data.domain_key}
@@ -1015,7 +1047,12 @@ export function CompletionRow({
       </div>
       <div className="chat-effect-complete-actions">
         {openControl}
-        <button type="button" className="secondary-action" onClick={onDismiss}>
+        <button
+          type="button"
+          className="secondary-action"
+          title="Dismiss banner (document is saved)"
+          onClick={onDismiss}
+        >
           Dismiss
         </button>
       </div>
@@ -1098,7 +1135,7 @@ export function ChatCompactContext({
   const contextMeta = document ? `rev ${shortId(document.current_revision_id)}` : 'Whole workspace'
   const selectionMeta = selectedText ? `${selectedText.length.toLocaleString()} selected` : null
   const permissionLabel =
-    autonomyMode === 'workspace' ? 'Authorized effects run immediately' : 'Review required'
+    autonomyMode === 'workspace' ? 'Authorized effects run immediately' : 'Edits require approval'
   return (
     <section className="chat-compact-context" aria-label="Document chat context">
       <div>
@@ -1108,7 +1145,14 @@ export function ChatCompactContext({
           {selectionMeta && ` · ${selectionMeta}`}
         </span>
       </div>
-      <span className={`scope-badge ${autonomyMode === 'workspace' ? 'workspace' : ''}`}>
+      <span
+        className={`scope-badge ${autonomyMode === 'workspace' ? 'workspace' : ''}`}
+        title={
+          autonomyMode === 'workspace'
+            ? 'YOLO mode: effects run immediately'
+            : 'Review mode: agent edits require approval'
+        }
+      >
         {permissionLabel}
       </span>
     </section>
@@ -1285,6 +1329,8 @@ type LiveChatContext = {
   pdfPageNumber: number | null
   annotationId: string | null
   projectId: string | null
+  instructionsOverride: string
+  clearInstructionsOverride: () => void
   selectedText: string
   refreshProposals: () => void
   navigate: ReturnType<typeof useNavigate>
@@ -1432,6 +1478,8 @@ function WorkspaceChatSurface({
           pdf_page_number: liveRef.current.pdfPageNumber,
           annotation_id: liveRef.current.annotationId,
           selected_text: liveRef.current.selectedText.slice(0, SELECTION_LIMIT),
+          project_id: liveRef.current.projectId,
+          instructions_override: liveRef.current.instructionsOverride,
         })
         headers.set('X-Sangam-Context-ID', snapshot.context_id)
       } else {
@@ -1444,7 +1492,9 @@ function WorkspaceChatSurface({
         if (init?.signal?.aborted) controller.abort()
         else init?.signal?.addEventListener('abort', () => controller.abort(), { once: true })
       }
-      return fetch(input, { ...init, headers, signal: controller?.signal ?? init?.signal })
+      const response = await fetch(input, { ...init, headers, signal: controller?.signal ?? init?.signal })
+      if (startsTurn && response.ok) liveRef.current.clearInstructionsOverride()
+      return response
     },
     [liveRef],
   )
@@ -1461,7 +1511,7 @@ function WorkspaceChatSurface({
     frameTitle: 'Workspace chat',
     initialThread: initialThreadId ?? undefined,
     theme: chatkitTheme,
-    header: compact ? { enabled: false } : { enabled: true, title: { text: 'Workspace chat' } },
+    header: compact ? { enabled: false } : { enabled: true },
     history: { enabled: true, showDelete: !compact, showRename: !compact },
     startScreen: {
       greeting: compact ? 'Ask about this document' : 'Ask about this workspace',

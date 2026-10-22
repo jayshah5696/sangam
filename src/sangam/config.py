@@ -31,6 +31,8 @@ class ChatServerConfig:
     max_concurrent_runs: int
     max_waiting_runs: int
     queue_wait_timeout_seconds: float
+    web_research_enabled: bool = False
+    web_search_api_key: str | None = None
 
 
 class Settings(BaseSettings):
@@ -77,6 +79,8 @@ class Settings(BaseSettings):
     chat_max_concurrent_runs: int = Field(default=4, ge=1, le=32)
     chat_max_waiting_runs: int = Field(default=8, ge=0, le=256)
     chat_queue_wait_timeout_seconds: float = Field(default=5.0, ge=0.1, le=60.0)
+    web_research_enabled: bool = False
+    brave_search_api_key: SecretStr | None = None
     auth_mode: Literal["single_user", "trusted_proxy", "cloudflare_access"] = "single_user"
     trusted_identity_header: str = "X-Sangam-Trusted-Identity"
     trusted_identity_value: str = "human:jay"
@@ -108,6 +112,8 @@ class Settings(BaseSettings):
             )
         if len(set(self.chat_available_models)) != len(self.chat_available_models):
             raise ValueError("SANGAM_CHAT_AVAILABLE_MODELS must not contain duplicates")
+        if self.web_research_enabled and not self.brave_search_api_key:
+            raise ValueError("SANGAM_BRAVE_SEARCH_API_KEY is required when web research is enabled")
         if self.deployment_mode == "production":
             self._validate_production()
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -194,6 +200,10 @@ class Settings(BaseSettings):
             max_concurrent_runs=self.chat_max_concurrent_runs,
             max_waiting_runs=self.chat_max_waiting_runs,
             queue_wait_timeout_seconds=self.chat_queue_wait_timeout_seconds,
+            web_research_enabled=self.web_research_enabled,
+            web_search_api_key=(
+                self.brave_search_api_key.get_secret_value() if self.brave_search_api_key else None
+            ),
         )
 
 

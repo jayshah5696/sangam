@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Cpu, Plus, RefreshCw, ServerCog, ShieldAlert, TestTube2 } from 'lucide-react'
+import { Check, Cpu, Plus, RefreshCw, ServerCog, ShieldAlert, Sparkles, TestTube2 } from 'lucide-react'
+import { ChatSkills } from './ChatSkills'
 import { StateMessage } from './ui/StateMessage'
 import {
   ApiError,
@@ -449,6 +450,14 @@ export function ChatModelSettings() {
             {save.isPending ? 'Saving…' : 'Save AI settings'}
           </button>
         </div>
+
+        <div className="settings-subtitle" id="chat-skills" tabIndex={-1}>
+          <div>
+            <Sparkles size="var(--icon-control)" />
+            <strong>Chat skills</strong>
+          </div>
+        </div>
+        <ChatSkills />
       </div>
     </section>
   )

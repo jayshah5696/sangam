@@ -86,6 +86,8 @@ vi.mock('../api', () => ({
     createChatConnection: async () => connection,
     testChatConnection: async () => ({ message: 'Connected', discovered_models: 3 }),
     refreshConnectionModels: async () => snapshot,
+    listChatSkills: async () => [],
+    unregisterChatSkill: async () => ({ ok: true }),
   },
 }))
 
@@ -151,5 +153,11 @@ describe('ChatModelSettings', () => {
     expect(updateChatModels.mock.calls[0]?.[0]).toMatchObject({
       unknown_model_overrides: ['openrouter::meta-llama/llama-3.3-70b-instruct'],
     })
+  })
+
+  it('surfaces chat skills section in AI & models settings', async () => {
+    renderPanel()
+    await screen.findByText('Chat skills')
+    expect(screen.getByText(/No chat skills registered yet/i)).toBeTruthy()
   })
 })

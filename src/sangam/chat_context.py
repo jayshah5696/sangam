@@ -25,6 +25,7 @@ class ChatRequestContext:
     run_id: str | None = None
     # The project the person started this conversation from, if any.
     project_id: str | None = None
+    instructions_override: str | None = None
 
 
 AgentRunContext = AgentContext[ChatRequestContext]

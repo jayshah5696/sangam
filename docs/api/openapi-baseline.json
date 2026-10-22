@@ -1846,6 +1846,9 @@
           "capability_id": {
             "enum": [
               "create_document",
+              "update_chat_profile",
+              "update_chat_memory",
+              "correct_task_state",
               "publish_document",
               "apply_workspace_organization_plan",
               "update_project",
@@ -3128,6 +3131,18 @@
             "title": "Entry Point",
             "type": "string"
           },
+          "instructions_override": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions Override"
+          },
           "pdf_page_number": {
             "anyOf": [
               {
@@ -3139,6 +3154,19 @@
               }
             ],
             "title": "Pdf Page Number"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
           },
           "revision_id": {
             "anyOf": [
@@ -4305,6 +4333,83 @@
         "title": "Folder",
         "type": "object"
       },
+      "HistoryEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "citation": {
+            "title": "Citation",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 1200,
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "total_chars": {
+            "title": "Total Chars",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "thread_id",
+          "item_id",
+          "role",
+          "text",
+          "citation",
+          "total_chars",
+          "truncated"
+        ],
+        "title": "HistoryEntry",
+        "type": "object"
+      },
+      "HistoryPage": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryEntry"
+            },
+            "maxItems": 10,
+            "title": "Entries",
+            "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "HistoryPage",
+        "type": "object"
+      },
       "HtmlJavascriptSettings": {
         "properties": {
           "enabled": {
@@ -5105,6 +5210,183 @@
           "updated_at"
         ],
         "title": "KarakeepImportDetail",
+        "type": "object"
+      },
+      "MemoryChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "default": "save",
+            "enum": [
+              "save",
+              "suggest",
+              "accept",
+              "forget"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "content": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "memory_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Memory Id",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "source_item_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Item Id"
+          },
+          "source_thread_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Thread Id"
+          }
+        },
+        "required": [
+          "memory_id",
+          "expected_version"
+        ],
+        "title": "MemoryChange",
+        "type": "object"
+      },
+      "MemoryEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 2000,
+            "title": "Content",
+            "type": "string"
+          },
+          "kind": {
+            "const": "fact",
+            "default": "fact",
+            "title": "Kind",
+            "type": "string"
+          },
+          "memory_id": {
+            "title": "Memory Id",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "source_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Item Id"
+          },
+          "source_thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Thread Id"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "suggested",
+              "forgotten"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "memory_id",
+          "content",
+          "state",
+          "version"
+        ],
+        "title": "MemoryEntry",
+        "type": "object"
+      },
+      "MemoryPage": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryEntry"
+            },
+            "maxItems": 20,
+            "title": "Entries",
+            "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "MemoryPage",
         "type": "object"
       },
       "MoveFolder": {
@@ -6196,6 +6478,79 @@
           "snippet"
         ],
         "title": "PdfSearchResult",
+        "type": "object"
+      },
+      "ProfileContext": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileEntry"
+            },
+            "maxItems": 2,
+            "title": "Entries",
+            "type": "array"
+          },
+          "instructions_override": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Instructions Override",
+            "type": "string"
+          },
+          "memories": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryEntry"
+            },
+            "maxItems": 20,
+            "title": "Memories",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "ProfileContext",
+        "type": "object"
+      },
+      "ProfileEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Content",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "version": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "title": "ProfileEntry",
         "type": "object"
       },
       "ProjectAnnotationItem": {
@@ -7330,6 +7685,35 @@
         "title": "RefreshProposal",
         "type": "object"
       },
+      "RegisterSkillRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "title": "RegisterSkillRequest",
+        "type": "object"
+      },
       "ReindexPath": {
         "additionalProperties": false,
         "properties": {
@@ -7938,6 +8322,77 @@
         "title": "SearchMatch",
         "type": "object"
       },
+      "SkillSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "current_revision_id": {
+            "title": "Current Revision Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "has_scripts": {
+            "default": false,
+            "title": "Has Scripts",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "project",
+              "personal"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "string"
+          },
+          "valid": {
+            "default": true,
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "skill_id",
+          "document_id",
+          "name",
+          "description",
+          "origin",
+          "current_revision_id"
+        ],
+        "title": "SkillSummary",
+        "type": "object"
+      },
       "Source": {
         "additionalProperties": false,
         "properties": {
@@ -8009,6 +8464,185 @@
           "created_at"
         ],
         "title": "Tag",
+        "type": "object"
+      },
+      "TaskCorrection": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "key": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 600,
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "expected_version",
+          "key",
+          "text"
+        ],
+        "title": "TaskCorrection",
+        "type": "object"
+      },
+      "TaskNote": {
+        "additionalProperties": false,
+        "properties": {
+          "corrected": {
+            "default": false,
+            "title": "Corrected",
+            "type": "boolean"
+          },
+          "key": {
+            "maxLength": 60,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "objective",
+              "constraint",
+              "assumption",
+              "question",
+              "decision",
+              "artifact"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_item_ids": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Source Item Ids",
+            "type": "array"
+          },
+          "text": {
+            "maxLength": 600,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "text",
+          "source_item_ids"
+        ],
+        "title": "TaskNote",
+        "type": "object"
+      },
+      "TaskState": {
+        "additionalProperties": false,
+        "properties": {
+          "coverage_incomplete": {
+            "default": false,
+            "title": "Coverage Incomplete",
+            "type": "boolean"
+          },
+          "dismissed_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Dismissed Keys",
+            "type": "array"
+          },
+          "effects": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Effects",
+            "type": "array"
+          },
+          "history_generation": {
+            "default": 0,
+            "title": "History Generation",
+            "type": "integer"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/TaskNote"
+            },
+            "maxItems": 12,
+            "title": "Notes",
+            "type": "array"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Status"
+          },
+          "source_hashes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Source Hashes",
+            "type": "object"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "through_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Through Item Id"
+          },
+          "version": {
+            "default": 0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "notes",
+          "thread_id"
+        ],
+        "title": "TaskState",
         "type": "object"
       },
       "TokenScope": {
@@ -8323,6 +8957,40 @@
         "title": "UpdateHtmlJavascriptSettings",
         "type": "object"
       },
+      "UpdateProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 4000,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "content",
+          "expected_version"
+        ],
+        "title": "UpdateProfile",
+        "type": "object"
+      },
       "UpdateProject": {
         "additionalProperties": false,
         "properties": {
@@ -8608,7 +9276,7 @@
   "info": {
     "description": "Revision-aware document workspace API for humans and scoped agents. Read a document immediately before changing it, send its current revision as expected_revision_id, and give every intended mutation an Idempotency-Key.",
     "title": "Sangam API",
-    "version": "0.13.4"
+    "version": "0.13.7"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -15606,6 +16274,645 @@
         ]
       }
     },
+    "/api/v1/chat/history": {
+      "get": {
+        "operationId": "searchHistory",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 10000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Search History",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/v1/chat/memory": {
+      "get": {
+        "operationId": "getMemory",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 10000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Get Memory",
+        "tags": [
+          "chat"
+        ]
+      },
+      "put": {
+        "operationId": "changeMemory",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Change Memory",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
     "/api/v1/chat/models": {
       "get": {
         "operationId": "getModels",
@@ -16143,6 +17450,422 @@
           }
         ],
         "summary": "Refresh Models",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/v1/chat/profile": {
+      "get": {
+        "operationId": "getProfile",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Id"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Get Profile",
+        "tags": [
+          "chat"
+        ]
+      },
+      "put": {
+        "operationId": "updateProfile",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Update Profile",
         "tags": [
           "chat"
         ]
@@ -17161,6 +18884,789 @@
         ]
       }
     },
+    "/api/v1/chat/skills": {
+      "get": {
+        "operationId": "listSkills",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillSummary"
+                  },
+                  "title": "Response List Skills Api V1 Chat Skills Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "List Skills",
+        "tags": [
+          "chat"
+        ]
+      },
+      "post": {
+        "operationId": "registerSkill",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Register Skill",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/v1/chat/skills/{skill_id}": {
+      "delete": {
+        "operationId": "unregisterSkill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Unregister Skill",
+        "tags": [
+          "chat"
+        ]
+      },
+      "get": {
+        "operationId": "getSkill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Get Skill",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
     "/api/v1/chat/threads/{thread_id}/cancel": {
       "post": {
         "operationId": "cancelActiveRun",
@@ -17362,6 +19868,612 @@
         ]
       }
     },
+    "/api/v1/chat/threads/{thread_id}/messages/{item_id}": {
+      "get": {
+        "operationId": "readHistory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Read History",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/v1/chat/threads/{thread_id}/task": {
+      "get": {
+        "operationId": "getTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Get Task",
+        "tags": [
+          "chat"
+        ]
+      },
+      "put": {
+        "operationId": "correctTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Use `Bearer <token>` for scoped agent access. In trusted browser deployments, the reverse proxy may authenticate a human instead.",
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Cf-Access-Jwt-Assertion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cf-Access-Jwt-Assertion"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskCorrection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Missing, expired, revoked, or malformed bearer token",
+                    "value": {
+                      "error": {
+                        "code": "authentication_required",
+                        "details": {},
+                        "message": "The bearer token is invalid"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "outsideScope": {
+                    "summary": "Token lacks the required capability or path grant",
+                    "value": {
+                      "error": {
+                        "code": "authorization_denied",
+                        "details": {
+                          "capability": "update",
+                          "path": "projects/plan.md"
+                        },
+                        "message": "The principal is not authorized for this operation"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sangam error envelope"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Correct Task",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
     "/api/v1/chatkit": {
       "post": {
         "description": "ChatKit transport with streaming byte limits and bounded admission. A 422 rejects invalid or oversized input. A 503 with Retry-After rejects overload before context preparation or inference; retry after the indicated delay. Admission remains held until the response stream and storage work finish.",
@@ -17456,6 +20568,23 @@
                 }
               ],
               "title": "X-Sangam-Project-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Sangam-Instructions-Override",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 12000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Sangam-Instructions-Override"
             }
           },
           {
@@ -36032,7 +39161,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-10-06",
-    "reason": "add composable workspace agent primitives endpoints and fields (#341)"
+    "date": "2026-10-20",
+    "reason": "Release v0.13.7"
   }
 }

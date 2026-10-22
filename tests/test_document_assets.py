@@ -7,12 +7,15 @@ the document, or its folder, never breaks them.
 from __future__ import annotations
 
 import hashlib
+from unittest.mock import MagicMock
 
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.api import create_app
 from sangam.config import Settings
+from sangam.document_assets import DocumentAssetService
+from sangam.schemas import Document
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
@@ -74,6 +77,51 @@ def test_uploaded_image_is_stored_in_attachments_and_readable(
     assert served.content == PNG
     assert served.headers["content-type"] == "image/png"
     assert served.headers["x-content-type-options"] == "nosniff"
+
+
+def test_document_asset_service_uses_mutation_coordinator_path_lock() -> None:
+    mock_workspace = MagicMock()
+    mock_mutations = MagicMock()
+
+    service = DocumentAssetService(
+        workspace=mock_workspace,
+        max_bytes=10_000,
+        mutations=mock_mutations,
+    )
+
+    doc = Document(
+        document_id="doc1",
+        title="Doc 1",
+        content_type="text/markdown",
+        path="doc1.md",
+        current_revision_id="rev1",
+        content_hash="hash1",
+        size_bytes=100,
+        materialization_state="clean",
+        file_hash="hash1",
+        deleted=False,
+        created_by="user",
+        created_at="2025-01-01T00:00:00Z",
+        updated_at="2025-01-01T00:00:00Z",
+        updated_by="user",
+        updated_by_name="User",
+        revision_summary=None,
+        category=None,
+        metadata_version=1,
+        trust_level="untrusted",
+        trust_version=1,
+        tags=[],
+        content="# Doc 1\n",
+    )
+
+    digest = hashlib.sha256(PNG).hexdigest()[:16]
+    expected_asset_path = f"attachments/test-{digest}.png"
+
+    asset = service.store(document=doc, filename="test.png", media_type="image/png", content=PNG)
+
+    assert asset.reference == f"/attachments/test-{digest}.png"
+    mock_mutations.path.assert_called_once_with(expected_asset_path)
+    mock_workspace.write_asset.assert_called_once_with(expected_asset_path, PNG)
 
 
 def test_pathless_drafts_can_add_images(client: TestClient) -> None:
@@ -187,6 +235,52 @@ def test_asset_routes_obey_document_scopes(client: TestClient) -> None:
     )
     denied_write = upload(client, document["document_id"], authorization=f"Bearer {read_only}")
     assert denied_write.status_code == 403
+
+
+def test_relative_asset_reads_obey_path_scoped_authorization(
+    client: TestClient, settings: Settings
+) -> None:
+    # Document created at notes/plan.md
+    document = create(client, "relative-asset-scope", path="notes/plan.md")
+
+    # Place a relative image in the notes folder on disk
+    image_path = settings.workspace_root / "notes" / "diagram.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(PNG)
+
+    # Token scoped specifically to 'notes/plan.md' file only, not all of 'notes'
+    file_scoped_token = issue_agent_token(
+        client,
+        actor_id="agent:file-scoped",
+        capabilities=("read",),
+        path_prefix="notes/plan.md",
+    )
+
+    # Token scoped to the entire 'notes' folder
+    folder_scoped_token = issue_agent_token(
+        client,
+        actor_id="agent:folder-scoped",
+        capabilities=("read",),
+        path_prefix="notes",
+    )
+
+    # Attempt to read relative asset 'diagram.png' (resolves to notes/diagram.png)
+    # The file-scoped agent can read notes/plan.md but is denied reading notes/diagram.png
+    denied = client.get(
+        f"/api/v1/documents/{document['document_id']}/assets",
+        params={"path": "diagram.png"},
+        headers={"Authorization": f"Bearer {file_scoped_token}"},
+    )
+    assert denied.status_code == 403
+
+    # The folder-scoped agent can read notes/diagram.png
+    allowed = client.get(
+        f"/api/v1/documents/{document['document_id']}/assets",
+        params={"path": "diagram.png"},
+        headers={"Authorization": f"Bearer {folder_scoped_token}"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.content == PNG
 
 
 def test_published_document_serves_its_uploaded_image(client: TestClient) -> None:
