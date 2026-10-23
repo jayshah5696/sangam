@@ -465,8 +465,11 @@ class DiskWorkspaceFilesystem:
 
     @staticmethod
     def _fsync_directory(directory: Path) -> None:
-        descriptor = os.open(directory, os.O_RDONLY)
         try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+            descriptor = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        except OSError:
+            pass

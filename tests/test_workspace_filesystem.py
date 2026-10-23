@@ -319,3 +319,84 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
     # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
     assert temp_files == []
+
+
+def test_directory_fsync_oserror_resilience_during_concurrent_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import threading
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    doc_path = "unsupported_fsync/doc.md"
+    workspace.write_atomic(doc_path, "initial content")
+
+    original_fsync = os.fsync
+
+    def unsupported_dir_fsync(fd: int) -> None:
+        # If the file descriptor corresponds to a directory, simulate unsupported fsync
+        try:
+            stat_res = os.fstat(fd)
+            import stat
+
+            if stat.S_ISDIR(stat_res.st_mode):
+                raise OSError(22, "Invalid argument: fsync not supported on directory descriptor")
+        except OSError as err:
+            if err.errno == 22:
+                raise
+        original_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", unsupported_dir_fsync)
+
+    stop_event = threading.Event()
+    read_results: list[str] = []
+    read_errors: list[str] = []
+    write_errors: list[str] = []
+    write_lock = threading.Lock()
+
+    def reader():
+        while not stop_event.is_set():
+            try:
+                content = workspace.read_document(doc_path)
+                read_results.append(content)
+            except Exception as exc:
+                read_errors.append(str(exc))
+
+    def writer(thread_id: int):
+        for i in range(15):
+            with write_lock:
+                try:
+                    workspace.write_atomic(
+                        doc_path, f"unsupported fsync content from thread {thread_id} iteration {i}"
+                    )
+                except Exception as exc:
+                    write_errors.append(str(exc))
+
+    reader_threads = [threading.Thread(target=reader) for _ in range(2)]
+    writer_threads = [threading.Thread(target=writer, args=(t,)) for t in range(3)]
+
+    for r in reader_threads:
+        r.start()
+    for t in writer_threads:
+        t.start()
+
+    for t in writer_threads:
+        t.join()
+
+    stop_event.set()
+    for r in reader_threads:
+        r.join()
+
+    assert not write_errors, (
+        f"Atomic writes failed when directory fsync raised OSError: {write_errors}"
+    )
+    assert not read_errors, f"Reads failed during concurrent writes: {read_errors}"
+    assert len(read_results) > 0
+
+    for res in read_results:
+        assert len(res) > 0
+        assert "content" in res
+
+    # Confirm workspace clean of temporary staging files
+    temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
+    assert temp_files == []
