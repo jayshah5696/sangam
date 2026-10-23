@@ -79,6 +79,29 @@ def test_uploaded_image_is_stored_in_attachments_and_readable(
     assert served.headers["x-content-type-options"] == "nosniff"
 
 
+def test_asset_reference_rejects_backslashes_null_bytes_and_control_chars(
+    client: TestClient,
+) -> None:
+    document = create(client, "asset-invalid-refs")
+    invalid_references = (
+        "\\attachments\\image.png",
+        "attachments\\image.png",
+        "notes\\diagram.png",
+        "diagram\x00.png",
+        "diagram%00.png",
+        "diagram\x1f.png",
+        "diagram%1F.png",
+        "\\\\server\\share\\image.png",
+        "//server/share/image.png",
+    )
+    for invalid_ref in invalid_references:
+        response = client.get(
+            f"/api/v1/documents/{document['document_id']}/assets",
+            params={"path": invalid_ref},
+        )
+        assert response.status_code == 404, invalid_ref
+
+
 def test_document_asset_service_uses_mutation_coordinator_path_lock() -> None:
     mock_workspace = MagicMock()
     mock_mutations = MagicMock()
