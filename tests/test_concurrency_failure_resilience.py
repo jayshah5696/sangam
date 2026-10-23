@@ -2887,3 +2887,63 @@ def test_concurrent_document_writes_with_if_match_and_atomic_staging(
     parent_dir = file_path.parent
     orphaned = list(parent_dir.glob(".if_match_concurrency.md.sangam-*"))
     assert len(orphaned) == 0, f"Found orphaned temp files: {orphaned}"
+
+
+def test_pdf_parser_hash_mismatch_prevents_replace_and_cleans_temp_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import os
+    import sys
+
+    import sangam.pdf_parser as pdf_parser
+
+    source_pdf = tmp_path / "source.pdf"
+    output_json = tmp_path / "pages.json"
+    source_pdf.write_bytes(b"%PDF-1.4 dummy")
+
+    class DummyPage:
+        def extract_text(self):
+            return "Sample page text"
+
+    class DummyReader:
+        def __init__(self, *args, **kwargs):
+            self.pages = [DummyPage()]
+
+    monkeypatch.setattr(pdf_parser, "PdfReader", DummyReader)
+
+    real_fdopen = os.fdopen
+
+    class CorruptedFileWrapper:
+        def __init__(self, raw):
+            self._raw = raw
+
+        def write(self, b: bytes):
+            return self._raw.write(b"corrupted bytes")
+
+        def __enter__(self):
+            self._raw.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._raw.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self._raw, name)
+
+    def corrupted_fdopen(fd, mode="r", *args, **kwargs):
+        f = real_fdopen(fd, mode, *args, **kwargs)
+        return CorruptedFileWrapper(f) if "w" in mode or "b" in mode else f
+
+    monkeypatch.setattr(os, "fdopen", corrupted_fdopen)
+    monkeypatch.setattr(
+        sys, "argv", ["pdf_parser.py", str(source_pdf), str(output_json), "10", "100000"]
+    )
+
+    with pytest.raises(
+        OSError, match="Extracted PDF page text hash does not match expected content"
+    ):
+        pdf_parser.main()
+
+    assert not output_json.exists(), "Corrupted staging file replaced output path!"
+    temp_files = list(tmp_path.glob(".pages.json.sangam-*"))
+    assert len(temp_files) == 0, f"Temporary file leaked on failure: {temp_files}"
