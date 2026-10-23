@@ -945,9 +945,6 @@ class WorkspaceAccessService:
         if self.comments is None:
             raise ServiceUnavailableError("Document comments are not configured")
         current = self.documents.get_document(document_id)
-        comment = self.comments.get_comment(comment_id)
-        if comment.document_id != document_id:
-            raise NotFoundError(f"Comment not found: {comment_id}")
         details: dict[str, object] = {
             "action_type": "resolve_comment",
             "target_file": current.path,
@@ -955,17 +952,24 @@ class WorkspaceAccessService:
             "resolved": request.resolved,
             "expected_version": request.expected_version,
         }
+
+        def operation() -> DocumentComment:
+            comment = self.comments.get_comment(comment_id)
+            if comment.document_id != document_id:
+                raise NotFoundError(f"Comment not found: {comment_id}")
+            return self.comments.resolve_comment(
+                comment_id=comment_id,
+                resolved=request.resolved,
+                expected_version=request.expected_version,
+                actor_id=principal.actor_id,
+            )
+
         return self._document_operation(
             principal,
             capability=Capability.UPDATE,
             action=writes("resolve_comment", "document"),
             current=current,
-            operation=lambda: self.comments.resolve_comment(
-                comment_id=comment_id,
-                resolved=request.resolved,
-                expected_version=request.expected_version,
-                actor_id=principal.actor_id,
-            ),
+            operation=operation,
             details=details,
         )
 

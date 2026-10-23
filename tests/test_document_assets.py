@@ -211,6 +211,7 @@ def test_asset_reads_serve_only_images_from_the_attachments_folder(client: TestC
         "/attachments/../private/secret.md",
         "/attachments/notes.md",
         "https://example.com/x.png",
+        "",
         "image\\file.png",
         "image\x00file.png",
         "image%00file.png",
@@ -219,6 +220,13 @@ def test_asset_reads_serve_only_images_from_the_attachments_folder(client: TestC
         "//example.com/attachments/x.png",
         "http://example.com/attachments/x.png",
         "file:///etc/passwd",
+        "\\\\evil.com\\share",
+        "\\\\evil.com/attachments/foo.png",
+        "//evil.com/attachments/foo.png",
+        "/attachments/foo.png\x00",
+        "bad\x00path.png",
+        "bad\npath.png",
+        "/attachments/../attachments/foo.png",
     ):
         escaped = client.get(
             f"/api/v1/documents/{document['document_id']}/assets", params={"path": path}
