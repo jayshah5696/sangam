@@ -8,7 +8,10 @@ vi.mock('@openai/chatkit-react', () => ({
   useChatKit: () => ({ control: {} }),
 }))
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => () => {} }))
-vi.mock('../theme', () => ({ useTheme: () => ({ preferences: { theme: 'river' } }) }))
+vi.mock('../theme', () => ({
+  useTheme: () => ({ preferences: { theme: 'river' } }),
+  themeMode: () => 'light',
+}))
 vi.mock('./RevisionMergeView', () => ({ RevisionMergeView: () => null }))
 
 import { ChatCompactContext, ChatContextBanner, hasMountedChatInterface, SelectionChip } from './ChatPanel'
@@ -112,7 +115,7 @@ describe('ChatCompactContext', () => {
     expect(screen.getByText('Research Brief')).toBeTruthy()
     expect(screen.getByText(/rev 8f2ac41d…9999/)).toBeTruthy()
     expect(screen.getByText(/21 selected/)).toBeTruthy()
-    expect(screen.getByText('Review required')).toBeTruthy()
+    expect(screen.getByText('Edits require approval')).toBeTruthy()
   })
 
   it('states when authorized effects run immediately', () => {

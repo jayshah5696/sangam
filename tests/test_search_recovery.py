@@ -95,6 +95,8 @@ def test_tag_author_pdf_and_annotation_changes_mark_search_dirty(client):
     services = client.app.state.services
     database = services.documents.database
     index = services.documents.search_index
+    # Drain any trailing background extraction sync before testing triggers
+    index.repair_pending()
     statements = [
         (
             "UPDATE pdf_pages SET text = 'changedpage' WHERE document_id = ?",

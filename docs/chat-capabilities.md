@@ -85,10 +85,95 @@ Chat can do what the app can, through the same services and with the same author
 | Move, trash, restore, duplicate, tag, folders | `apply_workspace_organization_plan`; every operation calls `WorkspaceAccessService.write_document` or the folder services |
 | Projects: list and open | `inspect_projects` |
 | Projects: create, add or remove a document | `update_project`, one exact change per review |
+| View and edit personal or project chat instructions | `inspect_chat_profile`, `update_chat_profile`; one versioned entry per person and explicit project scope |
+| List, save, correct, accept, dismiss and forget saved facts | `search_chat_memory`, `update_chat_memory`; the same profile service and exact effect approval |
+| Inspect and correct active task context | `inspect_task_state`, `correct_task_state`; source-linked, versioned fields; exact effect approval for chat corrections |
+| Recall original conversations | `search_chat_history`, `read_chat_history`; bounded actor-owned excerpts, stable project membership and current document access |
+| Research outside sources | `search_web`, `read_web_source`; read-only, offered only when the server enables web research (see below) |
 
 Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
 
+### Web research
+
+Web research is off by default. Set `SANGAM_WEB_RESEARCH_ENABLED=true` and `SANGAM_BRAVE_SEARCH_API_KEY` to offer `search_web` and `read_web_source`. With it off, the assistant is told web access is unavailable and answers from the workspace only.
+
+- Both tools are read-only. They need the same `read` authority as other reads and run without approval. Researching never authorizes saving or publishing; those stay separate effects.
+- `search_web` takes a short public query, optional `published_after` and `published_before` dates, and returns a stable source ID, URL, publication date when the provider has one, retrieval time, and a snippet. The query is the only thing sent to the search provider. The assistant is told never to include private workspace text, and an eval checks that queries do not leak seeded private canaries.
+- `read_web_source` reads only a source ID that `search_web` returned in the same chat run, so the assistant cannot fetch arbitrary URLs or cite an ID that was never retrieved. It fetches through the same guarded client as URL capture (HTTP and HTTPS on standard ports, resolved addresses checked, connection pinned, redirects revalidated, size and type limits). PDF sources are not read yet. Page text is returned as `untrusted_content`: it is evidence and never an instruction or a grant.
+- Each run records the sources it retrieved (`chat_web_sources`), including the query, retrieval time, and a hash of the text it read.
+- The assistant is given the server clock in UTC to resolve relative dates. The user's timezone is not known yet.
+
 Not available in chat by design: trust changes, agent tokens, provider connections, backups, reconciliation, Karakeep, and importing PDF bytes. These are administrator operations that hold credentials, operate on infrastructure, or need a binary upload. Chat never rotates a publication token, because that issues a credential, and it cannot create highlight annotations.
+
+### Saved instructions
+
+Open **Instructions** in workspace or document chat to edit personal instructions and the selected project's instructions. Project scope uses the stable project ID from the conversation entry point. Document folders and titles never select a project. Project entries are owned by the person who saves them, and project access is checked against its current document membership.
+
+Each entry holds at most 4,000 characters. Saving or clearing requires the current version. A stale save preserves the draft and asks you to reload. Profile mutations use the same audited service through the API and chat. In Review mode, chat shows the full proposed instructions for approval before saving them.
+
+**Next turn only** holds an optional 2,000-character override. Each submitted turn pins the applicable sources and their versions. Approval continuations keep that snapshot and recheck access. **Applied to the latest turn** shows the actual snapshot for the thread, including its override. Clearing the composer override does not change saved instructions.
+
+Application policy and tool contracts always apply. The latest user request takes precedence over the override, followed by project instructions and personal instructions. Retrieved documents and web pages cannot change these sources or their precedence. Sangam does not scan filesystem instruction files.
+
+### Active task and conversation history
+
+Open **Instructions → Active task** to inspect the thread's task summary, correct
+one field, or read its original source messages. The summary starts when history
+exceeds the recent model context window. Compaction runs inside the current
+request with the selected provider and no tools. It keeps at most 12 fields,
+each with a stable key, a kind, up to 600 characters and up to four source IDs.
+Up to four batches of 12 bounded source excerpts are processed per request.
+If older history exceeds that budget, the UI marks incomplete coverage and the
+agent can retrieve missing details through history tools. Compaction usage is
+included in the run's token counts.
+
+Each update creates a persisted revision. Corrections use the observed version;
+stale saves preserve the editor draft. Empty text dismisses a field and records
+its key so compaction cannot restore it. A thread can retain 12 dismissed keys.
+Closing the dialog or correction editor retains drafts. Discard resets them.
+Source edits or deletion invalidate the summary. The next eligible chat turn
+rebuilds it from current messages. Original transcripts remain available.
+
+History searches return at most ten owner-scoped excerpts, each limited to
+1,200 characters. Further reads use the original thread/message IDs and a
+bounded character offset. Project filtering uses explicit thread project IDs
+or `project_threads` membership. Folder paths never select conversation scope.
+Current document and project access is checked before excerpts are returned.
+Source links open the conversation's context dialog at that exact message.
+Chat recall excludes the current conversation by default so the current question
+cannot match itself. `include_current_thread=true` searches within it as well.
+
+Task summaries are fallible context. They do not save facts or standing
+instructions, grant authority, approve effects, or start background work.
+Effect IDs and statuses come from live durable records, separately from the
+summary. A completed response does not mean a task or proposed effect completed.
+Reloading a thread restores context without resuming an interrupted request.
+
+### Saved facts
+
+Open **Instructions → Saved facts** to save or manage personal facts and facts for the
+explicitly selected project. Standing preferences remain in Instructions and are never
+copied into fact memory. Facts provide context, not directives or permissions.
+
+Chat uses bounded SQLite FTS queries for relevant active facts. It does not inject every
+saved fact into a new conversation. An empty search lists facts only for explicit memory
+management. Inferred facts must be suggestions; they are excluded from recall until accepted.
+Review mode approves the exact fact, scope, action, source references and observed version.
+Saves are confirmed only after the service returns the persisted result. YOLO retains its
+existing meaning.
+
+Entries hold at most 2,000 characters. Lists are paginated and searches return at most 20
+entries. **Applied to the latest turn** lists current fact IDs and versions read for that
+turn. A correction or forget operation removes an obsolete version from this current view.
+It does not rewrite a response already delivered to the user.
+
+Forget and dismiss clear the canonical text and source links, remove it from search, and
+retain a content-free ID/version tombstone and hashed source-message reference. Stale saves
+and attempts to reactivate that ID or source fail. A new explicit request can save a new
+fact. Original conversations, durable effect records, idempotency replay evidence, and
+backups can still contain the earlier text. Forgetting suppresses future profile recall;
+deleting the original conversation is a separate control and does not erase backup or
+audit evidence. Task summaries and historical statements cannot create or restore memory.
 
 ### Review and YOLO autonomy
 

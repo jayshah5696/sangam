@@ -7,6 +7,8 @@ export interface ModalDialogProps {
   className?: string
   onClose: () => void
   children: ReactNode
+  /** Keep children mounted while closed when a caller owns an editable draft. */
+  open?: boolean
 }
 
 /**
@@ -21,12 +23,14 @@ export function ModalDialog({
   className = '',
   onClose,
   children,
+  open = true,
 }: ModalDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const generatedId = useId()
   const headingId = ariaLabelledBy || (title ? generatedId : undefined)
 
   useEffect(() => {
+    if (!open) return
     const active = document.activeElement
     const trigger = active instanceof HTMLElement ? active : null
     const dialog = dialogRef.current
@@ -69,7 +73,7 @@ export function ModalDialog({
         trigger.focus()
       }
     }
-  }, [onClose])
+  }, [onClose, open])
 
   return (
     <dialog
@@ -99,9 +103,9 @@ export function ModalDialog({
         if (event.key !== 'Tab') return
         const controls = [
           ...event.currentTarget.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex="0"]',
           ),
-        ]
+        ].filter((control) => control.tabIndex >= 0 && control.checkVisibility({ visibilityProperty: true }))
         if (controls.length === 0) return
         const first = controls[0]
         const last = controls.at(-1)

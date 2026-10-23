@@ -235,6 +235,34 @@ def test_comment_input_sanitization(client: TestClient) -> None:
     )
     assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
 
+    # Start greater than end offset
+    res_invalid_offsets = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization",
+            "start": 12,
+            "end": 5,
+            "body": "Valid body",
+        },
+        headers=headers("invalid-offsets-cmt"),
+    )
+    assert res_invalid_offsets.status_code == 422
+
+    # Blank comment body
+    res_blank_body = client.post(
+        f"/api/v1/documents/{doc_id}/comments",
+        json={
+            "revision_id": rev_id,
+            "exact": "Sanitization",
+            "start": 0,
+            "end": 12,
+            "body": "    ",
+        },
+        headers=headers("blank-body-cmt"),
+    )
+    assert res_blank_body.status_code == 422
+
 
 def test_concurrent_comment_resolution_version_precondition(client: TestClient) -> None:
     import concurrent.futures

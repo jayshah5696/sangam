@@ -1,5 +1,115 @@
 import { z } from 'zod'
 
+export const taskNoteSchema = z.object({
+  key: z.string().max(60),
+  kind: z.enum(['objective', 'constraint', 'assumption', 'question', 'decision', 'artifact']),
+  text: z.string().max(600),
+  source_item_ids: z.array(z.string()).max(4),
+  corrected: z.boolean(),
+})
+export const taskStateSchema = z.object({
+  thread_id: z.string(),
+  version: z.number().int().nonnegative(),
+  notes: z.array(taskNoteSchema).max(12),
+  through_item_id: z.string().nullable(),
+  source_hashes: z.record(z.string(), z.string()),
+  stale: z.boolean(),
+  run_status: z.string().nullable(),
+  history_generation: z.number().int().nonnegative().default(0),
+  dismissed_keys: z.array(z.string()).max(12).default([]),
+  coverage_incomplete: z.boolean().default(false),
+  effects: z
+    .array(z.object({ effect_id: z.string(), capability_id: z.string(), status: z.string() }))
+    .max(10),
+})
+export const taskCorrectionSchema = z.object({
+  thread_id: z.string(),
+  expected_version: z.number().int().nonnegative(),
+  key: z.string().max(60),
+  text: z.string().max(600),
+})
+export const taskCorrectionPreviewSchema = taskCorrectionSchema.extend({ before: taskStateSchema })
+export const historyPageSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        thread_id: z.string(),
+        item_id: z.string(),
+        role: z.enum(['user', 'assistant']),
+        text: z.string().max(1200),
+        citation: z.string(),
+        offset: z.number().int(),
+        total_chars: z.number().int(),
+        truncated: z.boolean(),
+      }),
+    )
+    .max(10),
+  has_more: z.boolean(),
+})
+export type TaskState = z.infer<typeof taskStateSchema>
+export type TaskNote = z.infer<typeof taskNoteSchema>
+
+export const skillSummarySchema = z.object({
+  skill_id: z.string(),
+  document_id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  project_id: z.string().nullable().default(null),
+  origin: z.enum(['project', 'personal']),
+  current_revision_id: z.string(),
+  has_scripts: z.boolean().default(false),
+  valid: z.boolean().default(true),
+  diagnostics: z.array(z.string()).default([]),
+})
+export type SkillSummary = z.infer<typeof skillSummarySchema>
+
+export const chatMemoryEntrySchema = z.object({
+  memory_id: z.string(),
+  project_id: z.string().nullable(),
+  kind: z.literal('fact'),
+  content: z.string().max(2000),
+  state: z.enum(['active', 'suggested', 'forgotten']),
+  version: z.number().int().positive(),
+  source_thread_id: z.string().nullable(),
+  source_item_id: z.string().nullable(),
+})
+export const chatMemoryChangeSchema = z.object({
+  memory_id: z.string(),
+  project_id: z.string().nullable(),
+  action: z.enum(['save', 'suggest', 'accept', 'forget']),
+  content: z.string().max(2000),
+  expected_version: z.number().int().nonnegative(),
+  source_thread_id: z.string().nullable(),
+  source_item_id: z.string().nullable(),
+})
+export const chatMemoryPageSchema = z.object({
+  entries: z.array(chatMemoryEntrySchema).max(20),
+  has_more: z.boolean(),
+})
+export const chatMemoryPreviewSchema = chatMemoryChangeSchema.extend({
+  previous_content: z.string().max(2000).nullable(),
+})
+export type ChatMemoryEntry = z.infer<typeof chatMemoryEntrySchema>
+export type ChatMemoryChange = z.infer<typeof chatMemoryChangeSchema>
+
+export const chatProfileEntrySchema = z.object({
+  project_id: z.string().nullable(),
+  content: z.string().max(4000),
+  version: z.number().int().nonnegative(),
+})
+export const chatProfileUpdateSchema = z.object({
+  project_id: z.string().nullable(),
+  content: z.string().max(4000),
+  expected_version: z.number().int().nonnegative(),
+})
+export const chatProfileContextSchema = z.object({
+  entries: z.array(chatProfileEntrySchema).max(2),
+  project_id: z.string().nullable(),
+  instructions_override: z.string().max(2000),
+  memories: z.array(chatMemoryEntrySchema).max(20).default([]),
+})
+export type ChatProfileEntry = z.infer<typeof chatProfileEntrySchema>
+
 export const searchMatchSchema = z.object({
   source: z.enum(['content', 'pdf_page', 'annotation', 'title', 'path', 'metadata']),
   snippet: z.string(),
@@ -920,6 +1030,9 @@ export const chatEffectSchema = z.object({
     'publish_document',
     'apply_workspace_organization_plan',
     'update_project',
+    'update_chat_profile',
+    'update_chat_memory',
+    'correct_task_state',
     'update_publication',
     'annotate_pdf',
   ]),
@@ -1223,6 +1336,75 @@ export async function collectPages<T>(
 }
 
 export const api = {
+  async listChatSkills(projectId?: string) {
+    const params = new URLSearchParams()
+    if (projectId) params.set('project_id', projectId)
+    return z.array(skillSummarySchema).parse(await request(`/chat/skills?${params.toString()}`))
+  },
+  async getChatSkill(skillId: string) {
+    return skillSummarySchema.parse(await request(`/chat/skills/${encodeURIComponent(skillId)}`))
+  },
+  async registerChatSkill(documentId: string, projectId?: string) {
+    return skillSummarySchema.parse(
+      await request('/chat/skills', {
+        method: 'POST',
+        body: JSON.stringify({ document_id: documentId, project_id: projectId || null }),
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      }),
+    )
+  },
+  async unregisterChatSkill(skillId: string) {
+    await request(`/chat/skills/${encodeURIComponent(skillId)}`, {
+      method: 'DELETE',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    })
+  },
+  async chatMemory(projectId?: string, offset = 0) {
+    const params = new URLSearchParams({ offset: String(offset) })
+    if (projectId) params.set('project_id', projectId)
+    return chatMemoryPageSchema.parse(await request(`/chat/memory?${params}`))
+  },
+  async changeChatMemory(change: ChatMemoryChange) {
+    return chatMemoryEntrySchema.parse(
+      await request('/chat/memory', {
+        method: 'PUT',
+        body: JSON.stringify(change),
+      }),
+    )
+  },
+  async chatProfile(projectId?: string, threadId?: string) {
+    const params = new URLSearchParams()
+    if (projectId) params.set('project_id', projectId)
+    if (threadId) params.set('thread_id', threadId)
+    return chatProfileContextSchema.parse(await request(`/chat/profile?${params}`))
+  },
+  async chatTask(threadId: string) {
+    return taskStateSchema.parse(await request(`/chat/threads/${encodeURIComponent(threadId)}/task`))
+  },
+  async correctChatTask(body: z.infer<typeof taskCorrectionSchema>) {
+    return taskStateSchema.parse(
+      await request(`/chat/threads/${encodeURIComponent(body.thread_id)}/task`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      }),
+    )
+  },
+  async readChatHistory(threadId: string, itemId: string, offset = 0) {
+    return historyPageSchema.parse(
+      await request(
+        `/chat/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(itemId)}?offset=${offset}`,
+      ),
+    )
+  },
+  async saveChatProfile(entry: ChatProfileEntry, content: string) {
+    return chatProfileEntrySchema.parse(
+      await request('/chat/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ project_id: entry.project_id, expected_version: entry.version, content }),
+      }),
+    )
+  },
   async listAssignments(projectId: string) {
     return z.array(assignmentSchema).parse(await request(`/projects/${projectId}/assignments`))
   },
@@ -1386,6 +1568,8 @@ export const api = {
     pdf_page_number?: number | null
     annotation_id?: string | null
     selected_text: string
+    project_id?: string | null
+    instructions_override?: string
   }): Promise<z.infer<typeof chatTurnContextSchema>> {
     return chatTurnContextSchema.parse(
       await request('/chat/contexts', { method: 'POST', body: JSON.stringify(input) }),

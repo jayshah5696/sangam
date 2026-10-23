@@ -44,6 +44,7 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "source_path",
     "destination_path",
     "expected_source_path",
+    "path",
     "content_type",
     "category",
     "tag_ids",
@@ -80,6 +81,16 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "role",
     "pinned_page",
     "thread_id",
+    "filename",
+    "media_type",
+    "size_bytes",
+    "comment_id",
+    "resolved",
+    "exact",
+    "start",
+    "end",
+    "name",
+    "replaced",
 }
 
 
@@ -676,6 +687,25 @@ class ActivityService:
             for key, value in (details or {}).items()
             if key in ALLOWED_AUDIT_DETAIL_KEYS
         }
+        if "target_file" not in safe_details:
+            if path is not None:
+                safe_details["target_file"] = sanitize_sensitive_text(path)
+            elif "destination_path" in safe_details and safe_details["destination_path"]:
+                safe_details["target_file"] = sanitize_sensitive_text(
+                    str(safe_details["destination_path"])
+                )
+            elif "source_path" in safe_details and safe_details["source_path"]:
+                safe_details["target_file"] = sanitize_sensitive_text(
+                    str(safe_details["source_path"])
+                )
+            elif "expected_source_path" in safe_details and safe_details["expected_source_path"]:
+                safe_details["target_file"] = sanitize_sensitive_text(
+                    str(safe_details["expected_source_path"])
+                )
+            elif "path" in safe_details and safe_details["path"]:
+                safe_details["target_file"] = sanitize_sensitive_text(str(safe_details["path"]))
+        if "action_type" not in safe_details and "target_file" in safe_details:
+            safe_details["action_type"] = action
 
         detail_json = json.dumps(safe_details, sort_keys=True)
         size_bytes = len(detail_json.encode("utf-8")) + 256

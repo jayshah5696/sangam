@@ -17,6 +17,10 @@ setup:
 update-frontend-lock:
     pnpm --dir frontend install --lockfile-only
 
+# Refresh one Python dependency after reviewing its manifest constraint.
+update-python-lock package:
+    uv lock --upgrade-package "{{ package }}"
+
 # Exercise the project API failure cases.
 test-projects:
     uv run pytest tests/test_projects.py tests/test_projects_perf.py
@@ -59,7 +63,7 @@ setup-webkit-local:
     mkdir -p "$root"
     cd "$root"
     for package in \
-      main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.9_amd64.deb \
+      main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.10_amd64.deb \
       universe/f/flite/libflite1_2.2-6build3_amd64.deb \
       main/i/icu/libicu74_74.2-1ubuntu3.1_amd64.deb; do
         archive="${package##*/}"
@@ -76,23 +80,25 @@ test-e2e-webkit-local args="":
     for library in "$root"/*.so.[0-9]*; do LD_PRELOAD="$LD_PRELOAD:$library"; done
     just test-e2e '{{ args }}'
 
-# Run the complete fast local verification suite.
-test:
+# Run the Python lint, format, type, API-contract, and test gates. Tests run in parallel.
+test-python:
     uv run ruff check .
     uv run ruff format --check .
-    pnpm --dir frontend run format:check
     just typecheck
     uv run python scripts/verify_openapi_contract.py
-    uv run pytest
-    pnpm --dir frontend run build
-    pnpm --dir frontend run lint
-    pnpm --dir frontend run test
+    uv run pytest -n auto
 
-# Run source, documentation, version, configuration, and distribution gates.
-check: test test-docs validate-compose
+# Run the complete fast local verification suite.
+test: test-python test-frontend
+
+# Verify settings inventories, version propagation, and dependency audits. Needs a built frontend.
+check-distribution:
     uv run python scripts/verify-release-config.py
     uv run python scripts/verify-version.py --frontend-dist
     ./scripts/audit-dependencies.sh
+
+# Run source, documentation, version, configuration, and distribution gates.
+check: test test-docs validate-compose check-distribution
     ./scripts/smoke-package.sh
 
 # Run only the Python service and API tests.
@@ -172,9 +178,29 @@ eval-chat-yolo model="openai/gpt-5.6-luna" reasoning="medium" output="test-resul
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode workspace --output "{{ output }}"
 
+# Run the web research eval family five times per case (requires SANGAM_OPENROUTER_API_KEY).
+eval-chat-web model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-web.json" judge_model="openai/gpt-5.6-sol":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --kind web --trials 5 --model "{{ model }}" --judge-model "{{ judge_model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
+
+# Run a bounded live evaluation with optional source-support grading.
+eval-chat-focused args="":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py {{ args }}
+
+# Check the source judge against draft reference labels before interpreting its scores.
+eval-chat-source-judge model="openai/gpt-5.6-sol" output="test-results/chat-source-judge.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --judge-model "{{ model }}" --judge-cases scripts/evals/source_judge_cases.json --output "{{ output }}"
+
+# Compare the pre-PR citation check and source-support grader on identical frozen answers.
+verify-chat-source-support baseline="c67ed3d" model="openai/gpt-5.6-sol" output="test-results/chat-source-before-after.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --judge-model "{{ model }}" --judge-cases scripts/evals/source_judge_cases.json --baseline-ref "{{ baseline }}" --output "{{ output }}"
+
 # Verify deterministic approval, permission, cancellation, replay, and plan policy.
 eval-chat-policy:
-    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py
+    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py tests/test_chat_eval_runner.py tests/test_chat_web_research.py
 
 # Run the chat eval suite against another checkout's code for before/after comparison.
 eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-baseline.json":
@@ -189,9 +215,9 @@ test-frontend-unit args="":
 test-e2e args="":
     pnpm --dir frontend run test:e2e {{ args }}
 
-# Install the browser engines used by the Playwright suite.
-install-browsers:
-    pnpm --dir frontend exec playwright install --with-deps chromium webkit
+# Install the browser engines used by the Playwright suite, or only the named engines.
+install-browsers browsers="chromium webkit":
+    pnpm --dir frontend exec playwright install --with-deps {{ browsers }}
 
 # Run empirical verification, performance benchmark, and chat agent evals across isolated Sangam services.
 verify-behavior port="8765" count="25" eval_limit="3":
@@ -200,6 +226,10 @@ verify-behavior port="8765" count="25" eval_limit="3":
     trap './scripts/control-sangam.sh cleanup >/dev/null 2>&1 || true' EXIT
     ./scripts/control-sangam.sh launch "{{ port }}"
     ./scripts/control-sangam.sh doctor
+    if [[ "${SANGAM_VERIFY_CONTINUITY:-}" == "1" ]]; then
+        source "${TMPDIR:-/tmp}/.sangam-active-verification"
+        uv run python scripts/verify_chat_continuity.py
+    fi
     ./scripts/control-sangam.sh seed
     if [[ "${SANGAM_VERIFY_SECURITY:-}" == "1" ]]; then
         source "${TMPDIR:-/tmp}/.sangam-active-verification"
@@ -207,6 +237,16 @@ verify-behavior port="8765" count="25" eval_limit="3":
     fi
     ./scripts/control-sangam.sh benchmark "{{ count }}"
     ./scripts/control-sangam.sh eval "openai/gpt-5.6-luna" "{{ eval_limit }}"
+
+# Prove task compaction, steering, corrections and history against a live provider.
+verify-continuity port="8894":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-continuity-control.XXXXXX")"
+    export SANGAM_VERIFY_CONTINUITY=1
+    export SANGAM_CHAT_MAX_CONTEXT_MESSAGES=2
+    trap 'rmdir "$TMPDIR" 2>/dev/null || true' EXIT
+    just verify-behavior "{{ port }}" 25 3
 
 # Run the canonical behavior harness with private control state and live security proof.
 verify-security port="8893":
@@ -353,6 +393,21 @@ docker-serve: docker-build
 # Build and exercise the production image with persistent state and restart recovery.
 docker-smoke:
     ./scripts/docker-smoke.sh
+
+# Block until the required CI checks are green for one commit. Used by the tag workflow.
+release-wait-for-ci repository sha:
+    uv run --frozen --no-dev python scripts/wait_for_ci.py --repository "{{ repository }}" --sha "{{ sha }}"
+
+# Check release-only invariants for a tag and build the wheel, sdist, and checksums.
+release-artifacts tag:
+    uv run python scripts/verify-release-config.py
+    pnpm --dir frontend run build
+    uv run python scripts/verify-version.py --expected "{{ tag }}" --frontend-dist
+    ./scripts/audit-dependencies.sh
+    ./scripts/smoke-package.sh
+    rm -rf dist
+    uv build
+    cd dist && sha256sum sangam-* > SHA256SUMS
 
 # Run the release checklist's automatable gates for a SemVer version.
 release-check version:

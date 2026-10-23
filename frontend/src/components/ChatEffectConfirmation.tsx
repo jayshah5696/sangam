@@ -1,4 +1,9 @@
-import type { ChatEffect } from '../api'
+import {
+  chatMemoryPreviewSchema,
+  chatProfileUpdateSchema,
+  taskCorrectionPreviewSchema,
+  type ChatEffect,
+} from '../api'
 import type { EffectReview } from '../chatEffectCopy'
 import { StateMessage } from './ui/StateMessage'
 
@@ -22,6 +27,14 @@ export function ChatEffectConfirmation({
     hour: 'numeric',
     minute: '2-digit',
   })
+  const profile =
+    effect.capability_id === 'update_chat_profile' ? chatProfileUpdateSchema.safeParse(effect.preview) : null
+  const memory =
+    effect.capability_id === 'update_chat_memory' ? chatMemoryPreviewSchema.safeParse(effect.preview) : null
+  const task =
+    effect.capability_id === 'correct_task_state'
+      ? taskCorrectionPreviewSchema.safeParse(effect.preview)
+      : null
   return (
     <section
       className="chat-effect-confirmation"
@@ -36,6 +49,30 @@ export function ChatEffectConfirmation({
           {review.detail} · requested by {effect.requested_by} · expires at {expires}
         </p>
       </header>
+      {profile?.success && (
+        <pre className="instruction-content" aria-label="Instructions to save">
+          {profile.data.content || '(Clear saved instructions)'}
+        </pre>
+      )}
+      {task?.success && (
+        <pre className="instruction-content" aria-label="Task correction to approve">
+          {`Current: ${task.data.before.notes.find((note) => note.key === task.data.key)?.text ?? ''}\n`}
+          {`Correction: ${task.data.text || '(Dismiss this field)'}\n`}
+          This changes task context only. It does not approve or resume other effects.
+        </pre>
+      )}
+      {memory?.success && (
+        <pre className="instruction-content" aria-label="Fact change to approve">
+          {memory.data.previous_content ? `Current fact: ${memory.data.previous_content}\n` : ''}
+          {memory.data.action === 'forget'
+            ? 'Stop recalling this saved fact. The original transcript and past run evidence remain.'
+            : memory.data.content}
+          {memory.data.source_thread_id
+            ? `\nSource thread: ${memory.data.source_thread_id}`
+            : '\nSource: direct edit'}
+          {memory.data.source_item_id ? `\nSource message: ${memory.data.source_item_id}` : ''}
+        </pre>
+      )}
       {error && (
         <StateMessage
           compact

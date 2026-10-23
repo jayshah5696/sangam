@@ -36,6 +36,9 @@ from sangam.chat_capabilities import (
     UpdateProjectMemberChange,
     UpdatePublicationInput,
 )
+from sangam.chat_continuity import ChatContinuityService, TaskCorrection
+from sangam.chat_profiles import ChatProfileService, MemoryChange, UpdateProfile
+from sangam.chat_skills import ChatSkillService, ManageSkillInput, RegisterSkillRequest
 from sangam.db import Database, utc_now
 from sangam.errors import (
     AuthorizationError,
@@ -104,16 +107,43 @@ class ChatEffectService:
         identity: IdentityService,
         projects: ProjectService,
         registry: ChatCapabilityRegistry,
+        profiles: ChatProfileService,
+        continuity: ChatContinuityService,
+        skills: ChatSkillService,
         approval_ttl: timedelta = timedelta(minutes=30),
     ) -> None:
         self.database = database
         self.workspace = workspace
         self.identity = identity
         self.projects = projects
+        self.profiles = profiles
+        self.continuity = continuity
+        self.skills = skills
         self.registry = registry
         self.approval_ttl = approval_ttl
         idempotency = workspace.documents.idempotency
         self.durable: dict[str, DurableEffect] = {
+            "correct_task_state": DurableEffect(
+                preflight=lambda principal, arguments: continuity.preflight(
+                    principal, TaskCorrection.model_validate(arguments)
+                ),
+                execute=self._execute_task_correction,
+                committed=self._task_correction_committed,
+            ),
+            "update_chat_memory": DurableEffect(
+                preflight=lambda principal, arguments: profiles.preflight_memory(
+                    principal, MemoryChange.model_validate(arguments)
+                ),
+                execute=self._execute_memory,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
+            "update_chat_profile": DurableEffect(
+                preflight=lambda principal, arguments: profiles.preflight(
+                    principal, UpdateProfile.model_validate(arguments)
+                ),
+                execute=self._execute_profile,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
             "create_document": DurableEffect(
                 preflight=self._preflight_create,
                 execute=self._execute_create,
@@ -152,7 +182,108 @@ class ChatEffectService:
                     actor_id=actor, idempotency_key=key
                 ),
             ),
+            "manage_chat_skill": DurableEffect(
+                preflight=self._preflight_skill,
+                execute=self._execute_skill,
+                committed=lambda actor, key: idempotency.committed(actor_id=actor, key=key),
+            ),
         }
+
+    def _preflight_skill(self, principal: Principal, arguments: dict[str, object]) -> None:
+        manage_input = ManageSkillInput.model_validate(arguments)
+        if manage_input.action == "register":
+            self.skills.preflight_registration(
+                principal, manage_input.document_id, manage_input.project_id
+            )
+        else:
+            skill = self.skills.get_by_document(principal, manage_input.document_id)
+            if not skill:
+                raise NotFoundError("Skill not found for this document")
+
+    def _execute_skill(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        manage_input = ManageSkillInput.model_validate(arguments)
+        if manage_input.action == "register":
+            summary = self.skills.register(
+                principal,
+                operation_key,
+                RegisterSkillRequest(
+                    document_id=manage_input.document_id,
+                    project_id=manage_input.project_id,
+                ),
+            )
+            result = {**summary.model_dump(mode="json"), "approved": True, "status": "registered"}
+            return EffectOutcome(result, dict(result), "chat_skill", summary.skill_id)
+        else:
+            skill = self.skills.get_by_document(principal, manage_input.document_id)
+            if not skill:
+                raise NotFoundError("Skill not found for this document")
+            self.skills.unregister(principal, operation_key, skill.skill_id)
+            result = {"skill_id": skill.skill_id, "approved": True, "status": "unregistered"}
+            return EffectOutcome(result, dict(result), "chat_skill", skill.skill_id)
+
+    def _task_correction_committed(self, actor: str, key: str) -> bool:
+        with self.database.connection() as conn:
+            return (
+                conn.execute(
+                    "SELECT 1 FROM chat_task_mutations WHERE actor_id=? AND idempotency_key=?",
+                    (actor, key),
+                ).fetchone()
+                is not None
+            )
+
+    def _execute_task_correction(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        request = TaskCorrection.model_validate(arguments)
+        state = self.continuity.correct(principal, operation_key, request)
+        result = {"task": state.model_dump(mode="json"), "approved": True}
+        return EffectOutcome(result, dict(result), "chat_task", request.thread_id)
+
+    def _execute_profile(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        entry = self.profiles.update(
+            principal, operation_key, UpdateProfile.model_validate(arguments)
+        )
+        result = {**entry.model_dump(mode="json"), "approved": True, "status": "saved"}
+        return EffectOutcome(
+            result, dict(result), "chat_profile", entry.project_id or principal.actor_id
+        )
+
+    def _execute_memory(
+        self,
+        principal: Principal,
+        arguments: dict[str, object],
+        effect_id: str,
+        operation_key: str,
+        recorded: bool,
+    ) -> EffectOutcome:
+        del effect_id, recorded
+        entry = self.profiles.change_memory(
+            principal, operation_key, MemoryChange.model_validate(arguments)
+        )
+        result = {**entry.model_dump(mode="json"), "approved": True, "status": entry.state}
+        return EffectOutcome(result, dict(result), "chat_profile", entry.memory_id)
 
     def propose(
         self,

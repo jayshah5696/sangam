@@ -349,3 +349,47 @@ def test_pinned_backend_connects_to_ip() -> None:
         backend.connect_tcp("malicious.example.com", 80)
         # First argument to connect_tcp must be the pinned IP, not the host!
         mock_connect.assert_called_once_with("93.184.216.34", 80, None, None, None)
+
+
+def test_capture_url_attaches_to_project(client: TestClient) -> None:
+    """Verify that capture_url attaches the captured document to the requested project."""
+    project_resp = client.post(
+        "/api/v1/projects",
+        json={"name": "Research Project", "description": "Project for captures"},
+        headers=headers("create-proj"),
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["project_id"]
+
+    with patch("sangam.capture.SafeCaptureClient.fetch") as mock_fetch:
+        from sangam.ssrf_client import SafeCaptureResponse
+
+        mock_fetch.return_value = SafeCaptureResponse(
+            original_url="https://example.com/project-article",
+            final_url="https://example.com/project-article",
+            content_type="text/html",
+            body=(
+                b"<html><head><title>Project Article</title></head>"
+                b"<body><p>Article</p></body></html>"
+            ),
+            title="Project Article",
+            content_hash=hashlib.sha256(b"content").hexdigest(),
+            fetch_time="2026-10-03T23:00:00Z",
+        )
+        resp = client.post(
+            "/api/v1/captures/url",
+            headers=headers("cap-proj"),
+            json={"url": "https://example.com/project-article", "project_id": project_id},
+        )
+        assert resp.status_code == 201
+        captured_doc_id = resp.json()["document_id"]
+
+        # Retrieve project and verify the document is listed as a member
+        get_proj = client.get(
+            f"/api/v1/projects/{project_id}",
+            headers=headers("get-proj"),
+        )
+        assert get_proj.status_code == 200
+        proj_docs = get_proj.json()["documents"]
+        doc_ids = [d["document_id"] for d in proj_docs]
+        assert captured_doc_id in doc_ids

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -406,11 +407,40 @@ class PdfResearchService:
         with tempfile.TemporaryDirectory(prefix="sangam-pdf-extract-") as directory:
             source = Path(directory) / "source.pdf"
             output = Path(directory) / "pages.json"
-            with source.open("wb") as content:
-                for chunk in self.workspace.iter_binary(document.path, chunk_size=65536):
-                    if cancel_event is not None and cancel_event.is_set():
-                        raise _ExtractionCancelled
-                    content.write(chunk)
+
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".source.pdf.sangam-", dir=directory
+            )
+            temporary = Path(temporary_name)
+            try:
+                digest = hashlib.sha256()
+                try:
+                    spool_handle = os.fdopen(descriptor, "wb")
+                except Exception:
+                    os.close(descriptor)
+                    raise
+                with spool_handle:
+                    for chunk in self.workspace.iter_binary(document.path, chunk_size=65536):
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise _ExtractionCancelled
+                        spool_handle.write(chunk)
+                        digest.update(chunk)
+                    spool_handle.flush()
+                    os.fsync(spool_handle.fileno())
+                actual_hash = digest.hexdigest()
+                if actual_hash != document.content_hash:
+                    raise ConflictError(
+                        "PDF bytes differ from expected content hash during extraction spooling",
+                        details={
+                            "document_id": document_id,
+                            "expected_hash": document.content_hash,
+                            "actual_hash": actual_hash,
+                        },
+                    )
+                os.replace(temporary, source)
+            finally:
+                temporary.unlink(missing_ok=True)
+
             deadline = time.monotonic() + self.extraction_timeout_seconds
             # A file bounds diagnostic buffering even when a corrupt PDF is noisy.
             with (
@@ -482,6 +512,7 @@ class PdfResearchService:
 
     def search_pages(self, document_id: str, query: str) -> list[PdfSearchResult]:
         self._require_pdf(document_id)
+        validate_metadata_text(query, "Search query")
         terms = [term.casefold() for term in re.findall(r"[\w-]+", query, flags=re.UNICODE)]
         if not terms:
             return []
@@ -511,6 +542,7 @@ class PdfResearchService:
         include_deleted: bool = False,
     ) -> list[Annotation]:
         self._require_pdf(document_id)
+        validate_metadata_text(query, "Search query")
         conditions = ["n.document_id = ?"]
         parameters: list[object] = [document_id]
         if page_number is not None:

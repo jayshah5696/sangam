@@ -1074,6 +1074,8 @@ class DismissChatProposal(MutationRequest):
 
 class CreateChatTurnContext(MutationRequest):
     entry_point: Literal["workspace", "document"]
+    project_id: str | None = Field(default=None, min_length=1, max_length=200)
+    instructions_override: str | None = Field(default=None, max_length=2000)
     document_id: str | None = Field(default=None, max_length=200)
     revision_id: str | None = Field(default=None, max_length=200)
     pdf_page_number: int | None = Field(default=None, ge=1)
@@ -1105,6 +1107,9 @@ class ChatEffect(BaseModel):
     requested_by: str
     capability_id: Literal[
         "create_document",
+        "update_chat_profile",
+        "update_chat_memory",
+        "correct_task_state",
         "publish_document",
         "apply_workspace_organization_plan",
         "update_project",

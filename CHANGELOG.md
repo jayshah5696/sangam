@@ -7,6 +7,79 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.13.7] - 2026-10-20
+
+### Added
+
+- Chat web research (#451, #507): opt-in read-only `search_web` and `read_web_source` tools, off by default, with per-run source records, date bounds, and a research eval family against frozen fixtures.
+- User-authored reusable skills in chat (#454, #470): standard `SKILL.md` format parser with YAML frontmatter validation and diagnostic reporting, database migration for revision-pinned execution, `ChatSkillService` for personal and project scoping, `activate_chat_skill` tool and `/skill-name` slash command routing, and REST management endpoints.
+- Active task context and chat continuity (#455, #463): preserve source-linked task context across long chats with project recall, task coverage status, and constrained task summary provenance.
+- Inspectable saved facts and memory in chat profiles (#453, #461): inspectable and correctable saved facts in chat profiles with fact preview in memory approvals and bounds on memory recall size.
+- Editable user and project chat instructions (#452, #458): customizable instructions for personal and project chat context.
+- Modular chat context tabs (#462): separate instructions, saved facts, and skills into accessible context tabs with compact controls and draft preservation.
+
+### Security
+
+- Hardened audit provenance attribution and credential sanitization (#489, #499, #502): expanded token redaction regex to match OpenAI project tokens, Anthropic keys, and Google API keys; sanitized sensitive headers (`x-webhook-secret`, `x-app-secret`, `x-session-secret`) and key terms (`bot_token`, `app_key`, `user_token`, `deploy_key`, `ssh_key`); captured and sanitized audit detail keys.
+- Path-scoped authorization hardening (#474, #501): enforced `Capability.READ` authorization against resolved workspace paths on relative document asset reads, and omitted out-of-scope paths in `AuthorizationError` detail payloads for path-scoped actors to prevent path disclosure.
+- Document materialization and asset storage locking (#469, #490): acquired mutation locks in document materialization to ensure `current_revision_id` matches the database head revision before writing to disk (preventing TOCTOU races), and acquired path locks during asset storage to serialize concurrent asset writes.
+- Publication metadata sanitization (#498): sanitized metadata text in publication evidence.
+
+### Fixed
+
+- Atomic PDF source extraction and spooling (#496, #503): spooled PDF source bytes to temporary staging files with durable flush and fsync, validated spooled SHA-256 against `document.content_hash`, and ensured atomic file replacement and reliable orphaned temporary file cleanup.
+- Comments and search input validation (#491): strengthened input validation and bounds checking across comments and search queries.
+- Project attachment for captured URLs (#490): corrected invocation signature to reliably attach captured documents to projects under actor authorization.
+- Mobile and web accessibility in chat (#452, #455, #462): kept chat composer controls reachable in mobile Safari and on narrow screens, and refined keyboard navigation.
+- Evaluated chat through production effect lifecycle (#451, #457).
+
+### Changed
+
+- Release and CI workflow parallelization (#445, #450): split CI test suite into parallel python, frontend, and browser shards with cached Playwright browser downloads, gated release workflow on green CI for the tagged commit, and executed container build and vulnerability scanning in parallel with CI gate verification.
+
+### Dependencies
+
+- Consolidated dependency upgrades (#478, #480, #492): updated pypdf to 6.20.1, ruff to 0.17.0, typer to 0.27.3, prettier to 3.9.10, jsdom to 30.1.2, dompurify to 3.4.17, and updated certifi to 2026.10.19, and updated core frontend tools.
+
+## [0.13.6] - 2026-10-09
+
+### Added
+
+- Twelve built-in themes: dark and light variants of Indigo Ink, Moss, Ember, Lagoon, Plum, and Brass, for 16 themes in total. Every new palette meets WCAG contrast minimums (4.5:1 for text, 3:1 for the accent) (#443).
+- Theme contrast check: a collapsed readability summary under the theme picker lists the WCAG ratios for the active theme.
+
+### Changed
+
+- Theme picker: a Dark/Light switch and compact preview cards replace the four large cards. Switching between Dark and Light also swaps the active theme to its other variant.
+- Create theme: pick a background and an accent, and Sangam derives the remaining colors and keeps them readable. A new theme starts from the theme in use. Other color roles sit under "Fine-tune other colors" (#443).
+- Code blocks, diffs, and PDF highlights now follow the real theme brightness, including custom themes, instead of treating only Midnight as dark.
+
+## [0.13.5] - 2026-10-08
+
+### Added
+
+- Claim versus source matrix view: project-level evidence synthesis table displaying claims against referenced sources with confidence badges, inline verification, and direct citation navigation (#324, #416).
+- Alternative draft exploration: branching workflow to explore alternative conclusions, drafts, or counter-hypotheses without overwriting the original document (#325, #416).
+- Interactive explorables: capability to attach rich interactive simulations, explorable explanations, and widgets directly to documents (#327, #416).
+- Composable workspace agent primitives: decomposed workspace agent capabilities into modular, reusable primitives for inspection, generation, and multi-step tasks (#341, #416).
+
+### Security
+
+- Hardened activity audit provenance and detail tracking: auto-populated `action_type`, `target_file`, and diff metrics (lines added/removed) across document operations, with expanded regex sanitization for credentials, environment variables, and connection secrets (#436, #438).
+- Agent document comment read auditing: wrapped `list_comments` and `get_comment` operations in `WorkspaceAccessService` under audited execution and enforced path-scope authorization (403 forbidden) for scoped agent tokens (#424, #438).
+
+### Fixed
+
+- Exception-safe file descriptor cleanup: ensured file descriptors from `tempfile.mkstemp` are reliably closed on failure before re-raising exceptions across workspace files, backup archives, folder manifests, and PDF text extraction (#435, #438).
+- Comment resolution optimistic concurrency control: enforced atomic database precondition (`WHERE comment_id = ? AND version = ?`) on comment resolution to prevent concurrent resolution races from silently succeeding without conflict (#422, #438).
+- Published HTML viewport scaling: resolved publication display defect so published HTML pages expand to fill the full viewport height (#437).
+- Alternative draft dialog layout: ensured modal dialog and form controls stay within viewport bounds on narrow screens (#420).
+
+### Dependencies
+
+- Consolidated backend dependency upgrades: bumped FastAPI to 0.143.0, openai-agents to 0.23.1, PyJWT[crypto] to 2.15.1, MyPy to 2.4.0, and Ruff to 0.16.10 (#439).
+- Consolidated frontend dependency upgrades: bumped lucide-react to 1.52.0, @openai/chatkit to 1.9.0, @codemirror/view to 6.43.13, react-resizable-panels to 4.14.3, and ESLint to 10.12.0 (#439).
+
 ## [0.13.4] - 2026-10-06
 
 ### Added
@@ -544,7 +617,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.4...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.5...HEAD
+[0.13.5]: https://github.com/jayshah5696/sangam/compare/v0.13.4...v0.13.5
 [0.13.4]: https://github.com/jayshah5696/sangam/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/jayshah5696/sangam/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/jayshah5696/sangam/compare/v0.13.1...v0.13.2

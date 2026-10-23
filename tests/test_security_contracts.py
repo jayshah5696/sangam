@@ -36,6 +36,167 @@ def test_invalid_scopes_never_issue_global_grants(client: TestClient, scope):
     assert response.status_code == 422
 
 
+def test_authorization_error_details_omits_out_of_scope_paths():
+    from sangam.authorization import AuthorizationPolicy
+    from sangam.capabilities import Capability
+    from sangam.errors import AuthorizationError
+    from sangam.security import Principal, ScopeGrant
+
+    policy = AuthorizationPolicy()
+
+    # Path-scoped agent targeting an out-of-scope path
+    agent_principal = Principal(
+        actor_id="agent:scoped",
+        display_name="Scoped Agent",
+        identity_kind="agent",
+        operation_id="op_1",
+        scopes=(ScopeGrant(capability=Capability.READ, path_prefix="allowed/path"),),
+    )
+
+    with pytest.raises(AuthorizationError) as exc_info:
+        policy.require(agent_principal, Capability.READ, "secret/path/doc.md")
+    assert "path" not in exc_info.value.details
+    assert exc_info.value.details["capability"] == "read"
+
+    # Path-scoped agent targeting an in-scope path with missing capability (e.g. UPDATE)
+    with pytest.raises(AuthorizationError) as exc_info:
+        policy.require(agent_principal, Capability.UPDATE, "allowed/path/doc.md")
+    assert exc_info.value.details.get("path") == "allowed/path/doc.md"
+
+    admin_principal = Principal.trusted_human(
+        actor_id="human:admin", display_name="Admin", operation_id="op_2"
+    )
+    system_principal = Principal(
+        actor_id="system:daemon",
+        display_name="System",
+        identity_kind="system",
+        operation_id="op_3",
+    )
+    # Admin and system pass allows(), so let's verify require doesn't raise for them:
+    policy.require(admin_principal, Capability.READ, "secret/path/doc.md")
+    policy.require(system_principal, Capability.READ, "secret/path/doc.md")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("claim", "Claim\x00null"),
+        ("selected_text", "Selected\x07text"),
+        ("note", "Note\x1fcontrol"),
+        ("source_title", "Title\x00null"),
+    ],
+)
+def test_publication_evidence_rejects_null_bytes_and_control_chars(
+    client: TestClient, field: str, value: str
+):
+    slug_field = field.replace("_", "-")
+    doc1 = create(client, path=f"docs/item-post-{slug_field}.md")
+    doc1_id = doc1.json()["document_id"]
+    evidence_item = {
+        "id": "ev1",
+        "claim": "Valid claim",
+        "selected_text": "Valid text",
+        "source_title": "Valid title",
+        field: value,
+    }
+
+    # Test POST /api/v1/publications
+    response_post = client.post(
+        "/api/v1/publications",
+        json={
+            "document_id": doc1_id,
+            "slug": f"pub-invalid-{slug_field}",
+            "access_policy": "public",
+            "evidence": [evidence_item],
+        },
+        headers=headers(f"pub-create-{slug_field}"),
+    )
+    assert response_post.status_code == 422
+    assert "cannot contain" in response_post.json()["error"]["message"]
+
+    # Create a valid publication first on a separate document
+    doc2 = create(client, path=f"docs/item-patch-{slug_field}.md")
+    doc2_id = doc2.json()["document_id"]
+    valid_pub = client.post(
+        "/api/v1/publications",
+        json={
+            "document_id": doc2_id,
+            "slug": f"pub-valid-{slug_field}",
+            "access_policy": "public",
+        },
+        headers=headers(f"pub-create-valid-{slug_field}"),
+    )
+    assert valid_pub.status_code == 201
+    pub_id = valid_pub.json()["publication_id"]
+    version = valid_pub.json()["version"]
+
+    # Test PATCH /api/v1/publications/{publication_id}
+    response_patch = client.patch(
+        f"/api/v1/publications/{pub_id}",
+        json={
+            "expected_version": version,
+            "slug": f"pub-valid-{slug_field}",
+            "access_policy": "public",
+            "evidence": [evidence_item],
+        },
+        headers=headers(f"pub-patch-{slug_field}"),
+    )
+    assert response_patch.status_code == 422
+    assert "cannot contain" in response_patch.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "param_name,invalid_value",
+    [
+        ("q", "search\x00term"),
+        ("q", "search\x07term"),
+        ("category", "cat\x00egory"),
+        ("actor_id", "agent\x00id"),
+        ("tag_id", "tag\x00id"),
+    ],
+)
+def test_search_documents_rejects_null_bytes_and_control_chars(
+    client: TestClient, param_name: str, invalid_value: str
+):
+    response = client.get("/api/v1/search", params={param_name: invalid_value})
+    assert response.status_code == 422
+    assert "cannot contain" in response.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "field_name,invalid_value",
+    [("query", "search\x00term"), ("tag_id", "tag\x00id")],
+)
+def test_saved_views_reject_control_chars_in_filters(
+    client: TestClient, field_name: str, invalid_value: str
+):
+    response = client.post(
+        "/api/v1/saved-views",
+        json={"name": "Valid Name", "filters": {field_name: invalid_value}},
+        headers=headers("save-view-invalid"),
+    )
+    assert response.status_code == 422
+    assert "cannot contain" in response.json()["error"]["message"]
+
+
+def test_pdf_search_and_annotations_reject_null_bytes(client: TestClient):
+    imported = client.post(
+        "/api/v1/pdfs",
+        params={"title": "Test PDF", "path": "docs/test.pdf"},
+        content=b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<\n/Root 1 0 R\n>>\n%%EOF",
+        headers={"Content-Type": "application/pdf", **headers("import-pdf")},
+    )
+    assert imported.status_code == 201, imported.text
+    document_id = imported.json()["document_id"]
+
+    search = client.get(f"/api/v1/pdfs/{document_id}/search", params={"q": "term\x00null"})
+    annotations = client.get(
+        f"/api/v1/pdfs/{document_id}/annotations", params={"q": "term\x00null"}
+    )
+    assert search.status_code == 422
+    assert annotations.status_code == 422
+
+
 @pytest.mark.parametrize(
     "prefix,path,expected",
     [
