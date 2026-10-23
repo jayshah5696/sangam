@@ -17,6 +17,10 @@ setup:
 update-frontend-lock:
     pnpm --dir frontend install --lockfile-only
 
+# Refresh one Python dependency after reviewing its manifest constraint.
+update-python-lock package:
+    uv lock --upgrade-package "{{ package }}"
+
 # Exercise the project API failure cases.
 test-projects:
     uv run pytest tests/test_projects.py tests/test_projects_perf.py
@@ -174,9 +178,29 @@ eval-chat-yolo model="openai/gpt-5.6-luna" reasoning="medium" output="test-resul
     mkdir -p test-results
     uv run python scripts/run_chat_evals.py --model "{{ model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode workspace --output "{{ output }}"
 
+# Run the web research eval family five times per case (requires SANGAM_OPENROUTER_API_KEY).
+eval-chat-web model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-web.json" judge_model="openai/gpt-5.6-sol":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --kind web --trials 5 --model "{{ model }}" --judge-model "{{ judge_model }}" --reasoning-effort "{{ reasoning }}" --autonomy-mode review --output "{{ output }}"
+
+# Run a bounded live evaluation with optional source-support grading.
+eval-chat-focused args="":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py {{ args }}
+
+# Check the source judge against draft reference labels before interpreting its scores.
+eval-chat-source-judge model="openai/gpt-5.6-sol" output="test-results/chat-source-judge.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --judge-model "{{ model }}" --judge-cases scripts/evals/source_judge_cases.json --output "{{ output }}"
+
+# Compare the pre-PR citation check and source-support grader on identical frozen answers.
+verify-chat-source-support baseline="c67ed3d" model="openai/gpt-5.6-sol" output="test-results/chat-source-before-after.json":
+    mkdir -p test-results
+    uv run python scripts/run_chat_evals.py --judge-model "{{ model }}" --judge-cases scripts/evals/source_judge_cases.json --baseline-ref "{{ baseline }}" --output "{{ output }}"
+
 # Verify deterministic approval, permission, cancellation, replay, and plan policy.
 eval-chat-policy:
-    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py tests/test_chat_eval_runner.py
+    uv run pytest tests/test_chat_capability_lifecycle.py tests/test_organization_plans.py tests/test_chat_eval_runner.py tests/test_chat_web_research.py
 
 # Run the chat eval suite against another checkout's code for before/after comparison.
 eval-chat-against source model="openai/gpt-5.6-luna" reasoning="medium" output="test-results/chat-evals-baseline.json":

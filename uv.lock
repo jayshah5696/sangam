@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -129,11 +129,11 @@ wheels = [
 
 [[package]]
 name = "certifi"
-version = "2026.6.17"
+version = "2026.10.19"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c9/c7/424b75da314c1045981bd9777432fad05a9e0c69daa4ed7e308bbaffe405/certifi-2026.6.17.tar.gz", hash = "sha256:024c88eeec92ca068db80f02b8b07c9cef7b9fe261d1d535abfd5abd6f6af432", size = 134594, upload-time = "2026-06-17T10:31:07.894Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/bd/1436c50cc46699de0230fbaacc1d1de7bfec413176099949e9d5112e88f2/certifi-2026.10.19.tar.gz", hash = "sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae", size = 137598, upload-time = "2026-10-20T02:24:16.604Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/2f/c5464532e965badff2f4c4c1a3a83f5697f0d7c407ed0cda44aaa99bb451/certifi-2026.6.17-py3-none-any.whl", hash = "sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db", size = 133289, upload-time = "2026-06-17T10:31:06.348Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/51/29046e48f693c54e5b7412216d447a1d8362c9653148d98c02cdf65fa733/certifi-2026.10.19-py3-none-any.whl", hash = "sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b", size = 136464, upload-time = "2026-10-20T02:24:15.072Z" },
 ]
 
 [[package]]
@@ -441,15 +441,15 @@ wheels = [
 
 [[package]]
 name = "httpcore2"
-version = "2.13.1"
+version = "2.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h11" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/ff/b53af1b49bb2cb5fa97c92215614b173ca5c1a99ded80e2d52f15a94fa6d/httpcore2-2.14.0.tar.gz", hash = "sha256:4f57a1a8249fe6af589d935cfd456f1d13bbdcb0f0fc72af9142368fc94811d7", size = 69096, upload-time = "2026-10-18T16:29:21.898Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/ba/a4568248771ce81957bfb7cc600264a40fbcda092391ee1c415c50be4bea/httpcore2-2.13.1-py3-none-any.whl", hash = "sha256:e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a", size = 83423, upload-time = "2026-09-23T07:47:19.365Z" },
+    { url = "https://files.pythonhosted.org/packages/02/06/a8d6a8f90d11b76d9086242b6bb0ee4b503473bfc8be34c2d5b067275c22/httpcore2-2.14.0-py3-none-any.whl", hash = "sha256:4c4f64f4b544afeb778c42c0ffb5941b29e671157e90ed3f6dc787c4bca90cd1", size = 84291, upload-time = "2026-10-18T16:29:19.743Z" },
 ]
 
 [[package]]
@@ -507,7 +507,7 @@ wheels = [
 
 [[package]]
 name = "httpx2"
-version = "2.13.1"
+version = "2.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio", marker = "sys_platform != 'emscripten'" },
@@ -516,9 +516,9 @@ dependencies = [
     { name = "idna" },
     { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/44/474bef2a0e9d90f1715d32cb98b0738695ca17ba324095fb2497ed7fbd59/httpx2-2.13.1.tar.gz", hash = "sha256:e48744a19e3af5ee48313d0ce5fe941d5422fae5705ea922a4aabf94d7800dfa", size = 100405, upload-time = "2026-09-23T07:47:23.052Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/67/58353f1848b4ba568e1ec22ea1e0d8e039f0bca5fde7e2d1f07739fd83e7/httpx2-2.14.0.tar.gz", hash = "sha256:47ad61a3c40282cd8d0dc96311531f00f5bfc71a066c6fe3b36d8f63fb9e4f6e", size = 102036, upload-time = "2026-10-18T16:29:22.627Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/9c/6fe8931fd9f381042a9e4c7d5a7b4cbf7016b252bec0c99a49fce42c3326/httpx2-2.13.1-py3-none-any.whl", hash = "sha256:6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4", size = 95597, upload-time = "2026-09-23T07:47:20.995Z" },
+    { url = "https://files.pythonhosted.org/packages/69/5a/469616aa8c2cbb0bb9dd67a3c18d07c01ab604cc0b236ee1c47d260c7f6e/httpx2-2.14.0-py3-none-any.whl", hash = "sha256:9d20c13a10bae1773a0be3b0f1e5beeb4bdd549bc3a2ba18efa32897c65403e4", size = 96901, upload-time = "2026-10-18T16:29:20.819Z" },
 ]
 
 [[package]]
@@ -1105,11 +1105,11 @@ crypto = [
 
 [[package]]
 name = "pypdf"
-version = "6.20.1"
+version = "6.21.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e2/c1/da25a099164cf4b210d63b957c902ad687139f4b8c12c20aec7953a4a266/pypdf-6.20.1.tar.gz", hash = "sha256:28f5a9d2fdc2749264612d94e6a58de54c11d730d9f0cabf8ad34117c4942b45", size = 7075352, upload-time = "2026-10-12T16:14:24.784Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/28/081f1cbcca7042441dafc8de00f48ba60853f89e5bff92c5f26477346d81/pypdf-6.21.2.tar.gz", hash = "sha256:0a3e1c5c886a1be03646c16a04827cc166c2a0575c971b26a4bf89686551c2d4", size = 7144571, upload-time = "2026-10-21T16:44:55.272Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/f8/4cbd09988b4b158260b7e0df38bf16f19e998bf0e257a18661a8da04280e/pypdf-6.20.1-py3-none-any.whl", hash = "sha256:aa5a55ddcffdc5e5ab291d5decb23f6383f4e56f8e3263dc39af41fff03885ad", size = 402665, upload-time = "2026-10-12T16:14:22.556Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/4d/c9d2d67f204eff463237a1a8f5e25a6923b7b1043982b91fcaf104c8ef60/pypdf-6.21.2-py3-none-any.whl", hash = "sha256:1d44d1a3a200f25062adff0085b02040e4646431ac2ccac22e42679e91466084", size = 407766, upload-time = "2026-10-21T16:44:53.626Z" },
 ]
 
 [[package]]
@@ -1374,7 +1374,7 @@ wheels = [
 
 [[package]]
 name = "sangam"
-version = "0.13.6"
+version = "0.13.7"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -1410,14 +1410,14 @@ requires-dist = [
     { name = "openai-chatkit", specifier = ">=1.6.5,<2" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1,<3" },
-    { name = "pypdf", specifier = ">=6.20.1,<7" },
+    { name = "pypdf", specifier = ">=6.21.2,<7" },
     { name = "typer", specifier = ">=0.27.3,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0,<1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx2", specifier = ">=2.13.1,<3" },
+    { name = "httpx2", specifier = ">=2.14.0,<3" },
     { name = "mypy", specifier = ">=2.4.0,<3" },
     { name = "pytest", specifier = ">=9.1,<10" },
     { name = "pytest-cov", specifier = ">=6.2,<7" },

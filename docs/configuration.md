@@ -87,4 +87,6 @@ until the stream finishes or disconnects.
 | --- | --- |
 | `SANGAM_KARAKEEP_BASE_URL` | Karakeep instance URL |
 | `SANGAM_KARAKEEP_API_KEY` | Karakeep API key |
+| `SANGAM_WEB_RESEARCH_ENABLED` | Offer web search and source reading in chat (default `false`) |
+| `SANGAM_BRAVE_SEARCH_API_KEY` | Brave Search API key; required when web research is enabled |
 | `SANGAM_KARAKEEP_TIMEOUT_SECONDS` | Request timeout |
