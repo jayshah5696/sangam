@@ -2795,3 +2795,79 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     current_doc = doc_service.get_document(doc_id)
     assert current_doc.content == "Version 3 content\n"
     assert current_doc.materialization_state == "clean"
+
+
+def test_concurrent_move_and_update_maintains_path_lock_and_integrity(
+    client: TestClient, settings
+) -> None:
+    """Verify concurrent document path moves and updates acquire up-to-date path locks."""
+    initial_path = "research/doc_move_race.md"
+    new_path = "archive/doc_move_race_target.md"
+
+    # Step 1: Create initial document
+    res = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Move Race Doc",
+            "content": "Initial content for move race\n",
+            "path": initial_path,
+        },
+        headers=headers("create-move-race-doc"),
+    )
+    assert res.status_code == 201
+    doc = res.json()
+    doc_id = doc["document_id"]
+    rev_1 = doc["current_revision_id"]
+
+    results = []
+
+    def move_op():
+        resp = client.post(
+            f"/api/v1/documents/{doc_id}/move",
+            json={
+                "path": new_path,
+                "expected_revision_id": rev_1,
+            },
+            headers=headers("move-doc-race-op"),
+        )
+        results.append(("move", resp))
+
+    def update_op():
+        resp = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={
+                "content": "Updated content during move race\n",
+                "expected_revision_id": rev_1,
+            },
+            headers=headers("update-doc-race-op"),
+        )
+        results.append(("update", resp))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(move_op)
+        f2 = executor.submit(update_op)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    # One operation succeeds (200), and if both expected rev_1, second gets conflict (409)
+    status_codes = sorted(r[1].status_code for r in results)
+    assert 200 in status_codes, "At least one mutation must succeed"
+    for _, resp in results:
+        assert resp.status_code in (200, 409)
+
+    # Reread document state from database
+    final_doc_resp = client.get(
+        f"/api/v1/documents/{doc_id}",
+        headers=headers("get-final-move-doc"),
+    )
+    assert final_doc_resp.status_code == 200
+    final_doc = final_doc_resp.json()
+
+    # The file on disk must exist at final_doc["path"] and match final_doc["content"]
+    file_path = settings.workspace_root / final_doc["path"]
+    assert file_path.is_file(), f"Workspace file missing at {final_doc['path']}"
+    assert file_path.read_text(encoding="utf-8") == final_doc["content"]
+
+    # Verify no orphaned temp files
+    orphans = list(settings.workspace_root.glob("**/.*sangam-*"))
+    assert len(orphans) == 0, f"Found orphaned temp files: {orphans}"
