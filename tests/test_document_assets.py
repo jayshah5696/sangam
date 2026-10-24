@@ -211,6 +211,13 @@ def test_asset_reads_serve_only_images_from_the_attachments_folder(client: TestC
         "/attachments/../private/secret.md",
         "/attachments/notes.md",
         "https://example.com/x.png",
+        "..\\private\\secret.md",
+        "folder\\image.png",
+        "image.png\x00.jpg",
+        "image%00.png",
+        "image.png\r\n",
+        "//example.com/x.png",
+        "\\\\server\\share\\x.png",
     ):
         escaped = client.get(
             f"/api/v1/documents/{document['document_id']}/assets", params={"path": path}
