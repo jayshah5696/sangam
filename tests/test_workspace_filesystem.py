@@ -317,5 +317,55 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
         assert "content" in res
 
     # Confirm workspace clean of temporary staging files
-    temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
+    temp_files = [
+        f
+        for f in workspace.root.rglob("*")
+        if f.is_file() and ".sangam-" in f.name and "trash" not in f.name
+    ]
+    assert temp_files == []
+
+
+def test_directory_fsync_os_error_handling_graceful(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+
+    original_open = os.open
+
+    def mocked_open(path, flags, *args, **kwargs):
+        # If opening a directory, raise OSError to simulate unsupported directory fsync
+        if Path(path).is_dir():
+            raise OSError("Directory fsync operations unsupported on this platform")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", mocked_open)
+
+    # Atomic write should succeed gracefully despite directory fsync failure
+    written_hash = workspace.write_atomic("docs/test.md", "hello world")
+    assert workspace.read_document("docs/test.md") == "hello world"
+    assert written_hash == hashlib.sha256(b"hello world").hexdigest()
+
+    # Move document should succeed gracefully
+    workspace.move_document("docs/test.md", "docs/moved.md")
+    assert workspace.read_document("docs/moved.md") == "hello world"
+    assert not workspace.is_document_file("docs/test.md")
+
+    # Trash and restore document should succeed gracefully
+    content_hash = hashlib.sha256(b"hello world").hexdigest()
+    size_bytes = len(b"hello world")
+    workspace.trash_document("doc123", "docs/moved.md", content_hash, size_bytes)
+    assert not workspace.is_document_file("docs/moved.md")
+    assert workspace.has_trashed_document("doc123")
+
+    workspace.restore_trash_document("doc123", "docs/restored.md", content_hash, size_bytes)
+    assert workspace.read_document("docs/restored.md") == "hello world"
+
+    # Confirm workspace clean of temporary staging files
+    temp_files = [
+        f
+        for f in workspace.root.rglob("*")
+        if f.is_file() and ".sangam-" in f.name and "trash" not in f.name
+    ]
     assert temp_files == []

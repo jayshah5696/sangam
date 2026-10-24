@@ -739,10 +739,13 @@ class WorkspaceOrganizationService:
                 ):
                     raise OSError("Folder manifest hash does not match expected metadata")
                 os.replace(temporary, destination)
-                descriptor_dir = os.open(folder_dir, os.O_RDONLY)
                 try:
-                    os.fsync(descriptor_dir)
-                finally:
-                    os.close(descriptor_dir)
+                    descriptor_dir = os.open(folder_dir, os.O_RDONLY)
+                    try:
+                        os.fsync(descriptor_dir)
+                    finally:
+                        os.close(descriptor_dir)
+                except OSError:
+                    pass
             finally:
                 temporary.unlink(missing_ok=True)
