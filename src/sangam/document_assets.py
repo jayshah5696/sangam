@@ -54,7 +54,14 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
     other root paths, schemes, and `..` escapes, raises NotFoundError so callers
     cannot tell a forbidden path from a missing one.
     """
-    parsed = urlsplit(unquote(reference))
+    decoded = unquote(reference)
+    if (
+        "\x00" in decoded
+        or "\\" in decoded
+        or any(ord(char) < 32 or ord(char) == 127 for char in decoded)
+    ):
+        raise NotFoundError("Document asset not found")
+    parsed = urlsplit(decoded)
     if parsed.scheme or parsed.netloc:
         raise NotFoundError("Document asset not found")
     if parsed.path.startswith("/"):
