@@ -1044,6 +1044,26 @@ def test_huggingface_and_dashed_key_sanitization() -> None:
     assert "AWS-SECRET-ACCESS-KEY=[REDACTED]" in sanitized_dashed
 
 
+def test_certificate_and_keystore_sanitization() -> None:
+    """Verify client cert, cert data, p12, pfx, and keystore parameters are sanitized."""
+    payload = {
+        "client_cert": "secret_client_cert_bytes",
+        "cert_data": "secret_cert_data_bytes",
+        "p12": "secret_p12_file",
+        "pfx": "secret_pfx_file",
+        "keystore": "secret_keystore_data",
+        "public_path": "docs/public.md",
+    }
+    sanitized = sanitize_sensitive_data(payload)
+    assert isinstance(sanitized, dict)
+    assert sanitized["client_cert"] == "[REDACTED]"
+    assert sanitized["cert_data"] == "[REDACTED]"
+    assert sanitized["p12"] == "[REDACTED]"
+    assert sanitized["pfx"] == "[REDACTED]"
+    assert sanitized["keystore"] == "[REDACTED]"
+    assert sanitized["public_path"] == "docs/public.md"
+
+
 def test_activity_service_auto_populates_action_type_and_target_file() -> None:
     """Verify ActivityService auto-populates action_type and target_file if omitted from details."""
     from sangam.activity import ActivityService

@@ -145,6 +145,11 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "bot_token",
     "app_key",
     "user_token",
+    "client_cert",
+    "cert_data",
+    "p12",
+    "pfx",
+    "keystore",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
