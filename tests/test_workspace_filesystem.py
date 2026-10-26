@@ -319,3 +319,65 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
     # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
     assert temp_files == []
+
+
+def test_directory_fsync_os_error_resilience(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify directory fsync (os.open / os.fsync on directories) handles OSError gracefully."""
+    import os
+    from unittest.mock import MagicMock
+
+    from sangam.backup import BackupManager
+    from sangam.db import Database
+    from sangam.mutations import MutationCoordinator
+    from sangam.organization import WorkspaceOrganizationService
+
+    real_os_open = os.open
+
+    def mock_os_open(path, flags, *args, **kwargs):
+        if isinstance(path, (str, Path)) and Path(path).is_dir():
+            raise OSError(22, "Invalid argument: simulated directory descriptor open failure")
+        return real_os_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", mock_os_open)
+
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+    database = Database(tmp_path / "test.db")
+    database.initialize()
+    mutations = MutationCoordinator()
+
+    # Workspace directory fsync
+    workspace.write_atomic("folder/test.md", "content")
+    assert workspace.read_document("folder/test.md") == "content"
+
+    # Organization folder manifest directory fsync
+    org_svc = WorkspaceOrganizationService(
+        database=database,
+        workspace=workspace,
+        idempotency=MagicMock(),
+        actors=MagicMock(),
+        mutations=mutations,
+    )
+    org_svc._sync_folder_manifest(
+        folder_id="f1",
+        path="folder",
+        category="cat",
+        tag_ids=[],
+        metadata_version=1,
+        updated_at="2026-01-01T00:00:00Z",
+    )
+    manifest_file = workspace.root / "folder" / ".sangam-folder.json"
+    assert manifest_file.is_file()
+
+    # Backup manager directory fsync
+    backup_mgr = BackupManager(
+        database=database,
+        workspace_root=workspace.root,
+        backup_root=tmp_path / "backups",
+        retention_count=5,
+        mutations=mutations,
+    )
+    backup_set = backup_mgr.create(backup_id="20260101T000000000000Z-12345678")
+    assert backup_set.backup_id == "20260101T000000000000Z-12345678"
+    assert backup_mgr.verify(backup_set.backup_id).valid is True
