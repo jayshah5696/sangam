@@ -53,11 +53,14 @@ def _write_manifest(path: Path, backup: BackupSet) -> None:
         ):
             raise OSError("Backup manifest hash does not match expected state")
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
         try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            pass
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -143,11 +146,14 @@ class BackupManager:
             )
             _write_manifest(staging / "manifest.json", backup)
             os.replace(staging, destination)
-            backup_directory = os.open(self.backup_root, os.O_RDONLY)
             try:
-                os.fsync(backup_directory)
-            finally:
-                os.close(backup_directory)
+                backup_directory = os.open(self.backup_root, os.O_RDONLY)
+                try:
+                    os.fsync(backup_directory)
+                finally:
+                    os.close(backup_directory)
+            except OSError:
+                pass
             self.verify(backup_id)
             self._apply_retention()
             return self.get(backup_id)
@@ -328,8 +334,11 @@ class BackupManager:
             self._fsync_backup_root()
 
     def _fsync_backup_root(self) -> None:
-        directory = os.open(self.backup_root, os.O_RDONLY)
         try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+            directory = os.open(self.backup_root, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            pass
