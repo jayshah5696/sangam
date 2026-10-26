@@ -46,16 +46,28 @@ class StoredAsset:
     media_type: str
 
 
+def _has_invalid_path_chars(text: str) -> bool:
+    if "\x00" in text or "\\" in text:
+        return True
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
 def resolve_asset_reference(document_path: str | None, reference: str) -> str:
     """Resolve an image reference to a workspace path.
 
     `/attachments/<file>` resolves to the shared attachments folder; a relative
     reference resolves inside the document's own folder. Anything else, including
-    other root paths, schemes, and `..` escapes, raises NotFoundError so callers
+    other root paths, schemes, netlocs (UNC / protocol-relative paths), backslashes,
+    null bytes, control characters, and `..` escapes, raises NotFoundError so callers
     cannot tell a forbidden path from a missing one.
     """
-    parsed = urlsplit(unquote(reference))
-    if parsed.scheme or parsed.netloc:
+    if _has_invalid_path_chars(reference):
+        raise NotFoundError("Document asset not found")
+    unquoted = unquote(reference)
+    if _has_invalid_path_chars(unquoted):
+        raise NotFoundError("Document asset not found")
+    parsed = urlsplit(unquoted)
+    if parsed.scheme or parsed.netloc or unquoted.startswith("//") or unquoted.startswith("\\\\"):
         raise NotFoundError("Document asset not found")
     if parsed.path.startswith("/"):
         parts = parsed.path.split("/")

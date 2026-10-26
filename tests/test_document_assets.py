@@ -211,11 +211,43 @@ def test_asset_reads_serve_only_images_from_the_attachments_folder(client: TestC
         "/attachments/../private/secret.md",
         "/attachments/notes.md",
         "https://example.com/x.png",
+        "..\\private\\secret.md",
+        "attachments\\pic.png",
+        "\\\\unc\\share\\pic.png",
+        "//example.com/pic.png",
+        "file:///etc/passwd",
+        "diagram.png\x00",
+        "diagram.png%00",
+        "diagram\x07.png",
+        "diagram%07.png",
     ):
         escaped = client.get(
             f"/api/v1/documents/{document['document_id']}/assets", params={"path": path}
         )
         assert escaped.status_code == 404, path
+
+
+def test_resolve_asset_reference_rejects_backslashes_null_bytes_and_control_chars() -> None:
+    import pytest
+
+    from sangam.document_assets import resolve_asset_reference
+    from sangam.errors import NotFoundError
+
+    invalid_refs = (
+        "..\\private\\secret.md",
+        "attachments\\pic.png",
+        "\\\\unc\\share\\pic.png",
+        "//example.com/pic.png",
+        "file:///etc/passwd",
+        "diagram.png\x00",
+        "diagram.png%00",
+        "diagram\x07.png",
+        "diagram%07.png",
+        "diagram\r\n.png",
+    )
+    for ref in invalid_refs:
+        with pytest.raises(NotFoundError):
+            resolve_asset_reference("notes/plan.md", ref)
 
 
 def test_asset_routes_obey_document_scopes(client: TestClient) -> None:
