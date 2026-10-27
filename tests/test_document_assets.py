@@ -9,12 +9,14 @@ from __future__ import annotations
 import hashlib
 from unittest.mock import MagicMock
 
+import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.api import create_app
 from sangam.config import Settings
-from sangam.document_assets import DocumentAssetService
+from sangam.document_assets import DocumentAssetService, resolve_asset_reference
+from sangam.errors import NotFoundError
 from sangam.schemas import Document
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
@@ -211,11 +213,34 @@ def test_asset_reads_serve_only_images_from_the_attachments_folder(client: TestC
         "/attachments/../private/secret.md",
         "/attachments/notes.md",
         "https://example.com/x.png",
+        "..\\private\\secret.md",
+        "\\attachments\\notes.md",
+        "..%5cprivate%5csecret.md",
+        "image.png\x00.md",
+        "image.png%00.md",
+        "image.png\r\n",
+        "image.png%0d%0a",
     ):
         escaped = client.get(
             f"/api/v1/documents/{document['document_id']}/assets", params={"path": path}
         )
         assert escaped.status_code == 404, path
+
+
+def test_resolve_asset_reference_rejects_backslashes_null_bytes_and_control_characters() -> None:
+    invalid_references = (
+        "..\\private\\secret.md",
+        "\\attachments\\notes.md",
+        "..%5cprivate%5csecret.md",
+        "image.png\x00.md",
+        "image.png%00.md",
+        "image.png\r\n",
+        "image.png%0d%0a",
+        "\\\\evil.com\\share\\x.png",
+    )
+    for reference in invalid_references:
+        with pytest.raises(NotFoundError):
+            resolve_asset_reference("notes/plan.md", reference)
 
 
 def test_asset_routes_obey_document_scopes(client: TestClient) -> None:

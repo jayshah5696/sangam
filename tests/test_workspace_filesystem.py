@@ -319,3 +319,16 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
     # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
     assert temp_files == []
+
+
+def test_fsync_directory_handles_os_error_gracefully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
+
+    def mock_open(*args, **kwargs):
+        raise OSError("Directory descriptor operation unsupported")
+
+    monkeypatch.setattr("os.open", mock_open)
+    # Should complete without raising OSError
+    workspace._fsync_directory(tmp_path / "workspace")
