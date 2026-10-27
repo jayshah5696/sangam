@@ -51,10 +51,20 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
 
     `/attachments/<file>` resolves to the shared attachments folder; a relative
     reference resolves inside the document's own folder. Anything else, including
-    other root paths, schemes, and `..` escapes, raises NotFoundError so callers
-    cannot tell a forbidden path from a missing one.
+    other root paths, schemes, backslashes, null bytes, control characters,
+    and `..` escapes, raises NotFoundError so callers cannot tell a forbidden path
+    from a missing one.
     """
-    parsed = urlsplit(unquote(reference))
+    if "\x00" in reference or "\\" in reference:
+        raise NotFoundError("Document asset not found")
+    if any(ord(char) < 32 or ord(char) == 127 for char in reference):
+        raise NotFoundError("Document asset not found")
+    unquoted = unquote(reference)
+    if "\x00" in unquoted or "\\" in unquoted:
+        raise NotFoundError("Document asset not found")
+    if any(ord(char) < 32 or ord(char) == 127 for char in unquoted):
+        raise NotFoundError("Document asset not found")
+    parsed = urlsplit(unquoted)
     if parsed.scheme or parsed.netloc:
         raise NotFoundError("Document asset not found")
     if parsed.path.startswith("/"):
