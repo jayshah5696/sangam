@@ -2795,3 +2795,43 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     current_doc = doc_service.get_document(doc_id)
     assert current_doc.content == "Version 3 content\n"
     assert current_doc.materialization_state == "clean"
+
+
+def test_directory_descriptor_sync_oserror_fallback_resilience(
+    client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify folder manifest sync and backup manager handle OSError on directory fsync."""
+    import os
+
+    real_os_open = os.open
+
+    def os_open_directory_oserror(path, flags, *args, **kwargs):
+        # Fail directory open calls while preserving regular file descriptors
+        if os.path.isdir(path):
+            raise OSError("Directory descriptor operations unsupported on platform or filesystem")
+        return real_os_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", os_open_directory_oserror)
+
+    # 1. Folder creation and manifest sync succeed despite directory descriptor OSError
+    folder_res = client.post(
+        "/api/v1/folders",
+        json={"path": "research/fsync_test_folder", "category": "Fsync Fallback"},
+        headers=headers("fsync-folder-1"),
+    )
+    assert folder_res.status_code == 201
+    folder_data = folder_res.json()
+    assert folder_data["path"] == "research/fsync_test_folder"
+
+    manifest_file = settings.workspace_root / "research/fsync_test_folder/.sangam-folder.json"
+    assert manifest_file.is_file(), "Folder manifest file missing on disk!"
+    manifest_json = json.loads(manifest_file.read_text(encoding="utf-8"))
+    assert manifest_json["category"] == "Fsync Fallback"
+
+    # 2. Backup creation and manifest write must succeed despite directory descriptor OSError
+    backup_mgr = client.app.state.services.backups.manager
+    backup_id = backup_mgr.new_backup_id()
+    backup = backup_mgr.create(backup_id=backup_id)
+    assert backup.backup_id == backup_id
+    manifest_backup_file = settings.backup_root / backup.backup_id / "manifest.json"
+    assert manifest_backup_file.is_file(), "Backup manifest file missing on disk!"
