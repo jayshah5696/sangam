@@ -9,12 +9,14 @@ from __future__ import annotations
 import hashlib
 from unittest.mock import MagicMock
 
+import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.api import create_app
 from sangam.config import Settings
-from sangam.document_assets import DocumentAssetService
+from sangam.document_assets import DocumentAssetService, resolve_asset_reference
+from sangam.errors import NotFoundError
 from sangam.schemas import Document
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
@@ -77,6 +79,26 @@ def test_uploaded_image_is_stored_in_attachments_and_readable(
     assert served.content == PNG
     assert served.headers["content-type"] == "image/png"
     assert served.headers["x-content-type-options"] == "nosniff"
+
+
+def test_resolve_asset_reference_rejects_dangerous_inputs() -> None:
+    doc_path = "notes/plan.md"
+    invalid_references = (
+        "\\\\server\\share\\image.png",
+        "%5C%5Cserver%5Cshare%5Cimage.png",
+        "subfolder\\diagram.png",
+        "diagram.png\x00",
+        "diagram.png%00",
+        "diagram%0D%0A.png",
+        "diagram\r\n.png",
+        "//attacker.com/image.png",
+        "https://attacker.com/image.png",
+        "ftp://attacker.com/image.png",
+        "../private/secret.png",
+    )
+    for ref in invalid_references:
+        with pytest.raises(NotFoundError, match="Document asset not found"):
+            resolve_asset_reference(doc_path, ref)
 
 
 def test_document_asset_service_uses_mutation_coordinator_path_lock() -> None:
