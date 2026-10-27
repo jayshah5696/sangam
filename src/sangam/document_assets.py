@@ -52,11 +52,24 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
     `/attachments/<file>` resolves to the shared attachments folder; a relative
     reference resolves inside the document's own folder. Anything else, including
     other root paths, schemes, and `..` escapes, raises NotFoundError so callers
-    cannot tell a forbidden path from a missing one.
+    cannot tell a forbidden path from a missing one. Empty references, backslashes,
+    and control characters are rejected too.
     """
-    parsed = urlsplit(unquote(reference))
+    if not reference or "\\" in reference or "\x00" in reference:
+        raise NotFoundError("Document asset not found")
+    if any(ord(char) < 32 or ord(char) == 127 for char in reference):
+        raise NotFoundError("Document asset not found")
+
+    unquoted = unquote(reference)
+    if "\\" in unquoted or "\x00" in unquoted:
+        raise NotFoundError("Document asset not found")
+    if any(ord(char) < 32 or ord(char) == 127 for char in unquoted):
+        raise NotFoundError("Document asset not found")
+
+    parsed = urlsplit(unquoted)
     if parsed.scheme or parsed.netloc:
         raise NotFoundError("Document asset not found")
+
     if parsed.path.startswith("/"):
         parts = parsed.path.split("/")
         if (
@@ -67,8 +80,10 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
         ):
             raise NotFoundError("Document asset not found")
         return f"{ATTACHMENTS_FOLDER}/{parts[2]}"
+
     if document_path is None:
         raise NotFoundError("Document asset not found")
+
     document_parent = PurePosixPath(document_path).parent
     parent_parts = [part for part in document_parent.parts if part not in {"", "."}]
     normalized_parts: list[str] = []
@@ -81,12 +96,22 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
             normalized_parts.pop()
         else:
             normalized_parts.append(part)
+
     if (
         len(normalized_parts) <= len(parent_parts)
         or normalized_parts[: len(parent_parts)] != parent_parts
     ):
         raise NotFoundError("Document asset not found")
-    return "/".join(normalized_parts)
+
+    resolved_path = "/".join(normalized_parts)
+    try:
+        from sangam.workspace import _canonicalize_relative_path
+
+        _canonicalize_relative_path(resolved_path, kind="Asset")
+    except Exception as error:
+        raise NotFoundError("Document asset not found") from error
+
+    return resolved_path
 
 
 def _matches_signature(media_type: str, content: bytes) -> bool:

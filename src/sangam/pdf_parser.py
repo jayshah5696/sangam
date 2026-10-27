@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -43,6 +44,11 @@ def main() -> None:
             handle.write(content_bytes)
             handle.flush()
             os.fsync(handle.fileno())
+        if (
+            hashlib.sha256(temporary.read_bytes()).digest()
+            != hashlib.sha256(content_bytes).digest()
+        ):
+            raise OSError("Extracted PDF page text hash does not match expected content")
         os.replace(temporary, output_path)
     finally:
         temporary.unlink(missing_ok=True)
