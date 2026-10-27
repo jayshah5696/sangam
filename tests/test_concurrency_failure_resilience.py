@@ -2889,6 +2889,78 @@ def test_concurrent_document_writes_with_if_match_and_atomic_staging(
     assert len(orphaned) == 0, f"Found orphaned temp files: {orphaned}"
 
 
+def test_concurrent_document_move_and_append_coordinates_locks_on_active_path(
+    client: TestClient, settings
+) -> None:
+    """Verify document lock before reading path prevents race conditions between move and append."""
+    source_path = "research/move_append_source.md"
+    dest_path = "archive/move_append_dest.md"
+
+    # Create initial document
+    res = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Move Append Test Doc",
+            "content": "Initial revision 0\n",
+            "path": source_path,
+        },
+        headers=headers("create-move-append-doc"),
+    )
+    assert res.status_code == 201
+    doc = res.json()
+    doc_id = doc["document_id"]
+    initial_rev = doc["current_revision_id"]
+
+    results = []
+
+    def op_move():
+        resp = client.post(
+            f"/api/v1/documents/{doc_id}/move",
+            json={
+                "path": dest_path,
+                "expected_revision_id": initial_rev,
+            },
+            headers=headers("move-append-move"),
+        )
+        results.append(("move", resp))
+
+    def op_append():
+        resp = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={
+                "content": "Appended revision 1\n",
+                "expected_revision_id": initial_rev,
+            },
+            headers=headers("move-append-append"),
+        )
+        results.append(("append", resp))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(op_move)
+        f2 = executor.submit(op_append)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    # Exactly one operation succeeds and the other fails with a revision conflict (409)
+    status_codes = sorted(r[1].status_code for r in results)
+    assert status_codes == [200, 409], f"Unexpected status codes: {status_codes}"
+
+    fetch_resp = client.get(
+        f"/api/v1/documents/{doc_id}", headers=headers("fetch-move-append-final")
+    )
+    assert fetch_resp.status_code == 200
+    final_doc = fetch_resp.json()
+
+    winning_op = next(op_name for op_name, resp in results if resp.status_code == 200)
+    expected_active_path = dest_path if winning_op == "move" else source_path
+
+    assert final_doc["path"] == expected_active_path
+
+    file_path = settings.workspace_root / expected_active_path
+    assert file_path.is_file(), f"Active workspace file missing at {expected_active_path}"
+    assert file_path.read_text(encoding="utf-8") == final_doc["content"]
+
+
 def test_pdf_parser_hash_mismatch_prevents_replace_and_cleans_temp_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
