@@ -105,6 +105,25 @@ def test_scan_ignores_sangam_temporary_files(tmp_path: Path) -> None:
     }
 
 
+def test_scan_documents_ignores_symlinks_escaping_workspace_root(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    workspace = DiskWorkspaceFilesystem(workspace_dir)
+    workspace.write_atomic("valid.md", "valid content")
+
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    secret_file = external_dir / "secret.md"
+    secret_file.write_text("secret content", encoding="utf-8")
+
+    # Create a symlink inside workspace pointing to the external file
+    symlink_file = workspace_dir / "stolen.md"
+    symlink_file.symlink_to(secret_file)
+
+    scanned = workspace.scan_documents()
+    assert "valid.md" in scanned
+    assert "stolen.md" not in scanned
+
+
 def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
