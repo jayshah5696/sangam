@@ -105,6 +105,62 @@ def test_scan_ignores_sangam_temporary_files(tmp_path: Path) -> None:
     }
 
 
+def test_scan_documents_skips_symlinks_and_traversal_paths(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace = DiskWorkspaceFilesystem(workspace_root)
+    workspace.write_atomic("valid.md", "valid content")
+
+    outside_file = tmp_path / "outside.md"
+    outside_file.write_text("secret outside content", encoding="utf-8")
+
+    symlink_path = workspace_root / "symlink.md"
+    symlink_path.symlink_to(outside_file)
+
+    scanned = workspace.scan_documents()
+    assert "valid.md" in scanned
+    assert "symlink.md" not in scanned
+
+
+def test_backup_archive_workspace_skips_symlinks_and_traversal_paths(tmp_path: Path) -> None:
+    import tarfile
+
+    from sangam.backup import BackupManager
+    from sangam.db import Database
+    from sangam.mutations import MutationCoordinator
+
+    workspace_root = tmp_path / "workspace"
+    backup_root = tmp_path / "backups"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    workspace = DiskWorkspaceFilesystem(workspace_root)
+    workspace.write_atomic("valid.md", "valid content")
+
+    outside_file = tmp_path / "outside.md"
+    outside_file.write_text("secret outside content", encoding="utf-8")
+
+    symlink_path = workspace_root / "symlink.md"
+    symlink_path.symlink_to(outside_file)
+
+    db = Database(tmp_path / "db.sqlite3")
+    mutations = MutationCoordinator()
+    bm = BackupManager(
+        database=db,
+        workspace_root=workspace_root,
+        backup_root=backup_root,
+        retention_count=5,
+        mutations=mutations,
+    )
+
+    tar_path = tmp_path / "workspace.tar.gz"
+    bm._archive_workspace(tar_path)
+
+    with tarfile.open(tar_path, "r:gz") as archive:
+        names = archive.getnames()
+
+    assert "valid.md" in names
+    assert "symlink.md" not in names
+
+
 def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
