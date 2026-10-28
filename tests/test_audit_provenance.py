@@ -1162,6 +1162,25 @@ def test_ai_provider_tokens_and_secret_headers_sanitization() -> None:
     assert sanitized_data["user_token"] == "[REDACTED]"
 
 
+def test_stripe_square_webhook_token_sanitization() -> None:
+    """Verify Stripe API keys, webhook secrets, and Square tokens are sanitized."""
+    text_payload = (
+        "Stripe Live: sk_live_51M0123456789abcdef "
+        "Stripe Test: sk_test_51M0123456789abcdef "
+        "Stripe Restricted: rk_live_51M0123456789abcdef "
+        "Webhook Secret: whsec_0123456789abcdef "
+        "Square IDP: sq0idp-abcdef1234567890 "
+        "Square ATP: sq0atp-abcdef1234567890"
+    )
+    sanitized_text = sanitize_sensitive_text(text_payload)
+    assert "sk_live_51M0123456789abcdef" not in sanitized_text
+    assert "sk_test_51M0123456789abcdef" not in sanitized_text
+    assert "rk_live_51M0123456789abcdef" not in sanitized_text
+    assert "whsec_0123456789abcdef" not in sanitized_text
+    assert "sq0idp-abcdef1234567890" not in sanitized_text
+    assert "sq0atp-abcdef1234567890" not in sanitized_text
+
+
 def test_document_comment_audit_provenance(client: TestClient) -> None:
     """Verify comment creation and resolution capture actor identity and details."""
     create_doc_resp = client.post(
