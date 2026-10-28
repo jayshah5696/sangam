@@ -846,81 +846,81 @@ class DocumentService:
         deleted: bool | None = None,
     ) -> Document:
         """Append one text revision under the document's path and identity locks."""
-        current = self.get_document(document_id, include_deleted=True)
         target_path = self._normalize_path(path) if path is not None else None
-        with (
-            self.mutations.paths(current.path, target_path),
-            self.mutations.document(document_id),
-        ):
-            validate_metadata_text(title, "Document title")
-            validate_metadata_text(summary, "Revision summary")
+        with self.mutations.document(document_id):
+            current = self.get_document(document_id, include_deleted=True)
+            with self.mutations.paths(current.path, target_path):
+                validate_metadata_text(title, "Document title")
+                validate_metadata_text(summary, "Revision summary")
 
-            def write(connection: sqlite3.Connection) -> Written:
-                current = self.get_document_in_connection(connection, document_id)
-                _require_revision(current, expected_revision_id)
-                if current.deleted and operation != "restore":
-                    raise NotFoundError(f"Document is deleted: {document_id}")
-                next_content = current.content if content is None else content
-                self._validate_content_size(next_content)
-                next_title = current.title if title is None else title.strip()
-                next_path = current.path if path is None else path
-                next_deleted = current.deleted if deleted is None else deleted
-                if next_deleted or not next_path:
-                    state, file_hash = "none", None
-                else:
-                    state = "pending"
-                    file_hash = current.file_hash if current.path == next_path else None
-                revision_id = self._insert_revision(
-                    connection,
-                    current,
-                    content=next_content,
-                    actor_id=actor_id,
-                    operation=operation,
-                    summary=summary,
-                )
-                if next_path:
-                    self.organization.ensure_document_folder_hierarchy(connection, next_path)
-                connection.execute(
-                    """
-                    UPDATE documents
-                    SET title = ?, path = ?, current_revision_id = ?, content_hash = ?,
-                        size_bytes = ?, materialization_state = ?, file_hash = ?,
-                        deleted = ?, updated_at = ?
-                    WHERE document_id = ?
-                    """,
-                    (
-                        next_title,
-                        next_path,
-                        revision_id,
-                        _content_hash(next_content),
-                        len(next_content.encode("utf-8")),
-                        state,
-                        file_hash,
-                        int(next_deleted),
-                        utc_now(),
-                        document_id,
-                    ),
-                )
-                moved_from = current.path if current.path and current.path != next_path else None
-                return Written(revision_id, (moved_from,) if moved_from else ())
+                def write(connection: sqlite3.Connection) -> Written:
+                    current = self.get_document_in_connection(connection, document_id)
+                    _require_revision(current, expected_revision_id)
+                    if current.deleted and operation != "restore":
+                        raise NotFoundError(f"Document is deleted: {document_id}")
+                    next_content = current.content if content is None else content
+                    self._validate_content_size(next_content)
+                    next_title = current.title if title is None else title.strip()
+                    next_path = current.path if path is None else path
+                    next_deleted = current.deleted if deleted is None else deleted
+                    if next_deleted or not next_path:
+                        state, file_hash = "none", None
+                    else:
+                        state = "pending"
+                        file_hash = current.file_hash if current.path == next_path else None
+                    revision_id = self._insert_revision(
+                        connection,
+                        current,
+                        content=next_content,
+                        actor_id=actor_id,
+                        operation=operation,
+                        summary=summary,
+                    )
+                    if next_path:
+                        self.organization.ensure_document_folder_hierarchy(connection, next_path)
+                    connection.execute(
+                        """
+                        UPDATE documents
+                        SET title = ?, path = ?, current_revision_id = ?, content_hash = ?,
+                            size_bytes = ?, materialization_state = ?, file_hash = ?,
+                            deleted = ?, updated_at = ?
+                        WHERE document_id = ?
+                        """,
+                        (
+                            next_title,
+                            next_path,
+                            revision_id,
+                            _content_hash(next_content),
+                            len(next_content.encode("utf-8")),
+                            state,
+                            file_hash,
+                            int(next_deleted),
+                            utc_now(),
+                            document_id,
+                        ),
+                    )
+                    moved_from = (
+                        current.path if current.path and current.path != next_path else None
+                    )
+                    return Written(revision_id, (moved_from,) if moved_from else ())
 
-            return self._commit(
-                document_id=document_id,
-                operation=operation,
-                fingerprint=append_fingerprint(
+                return self._commit(
                     document_id=document_id,
-                    expected_revision_id=expected_revision_id,
-                    content=content,
-                    title=title,
-                    path=path,
                     operation=operation,
-                    summary=summary,
-                    deleted=deleted,
-                ),
-                actor_id=actor_id,
-                idempotency_key=idempotency_key,
-                write=write,
-            )
+                    fingerprint=append_fingerprint(
+                        document_id=document_id,
+                        expected_revision_id=expected_revision_id,
+                        content=content,
+                        title=title,
+                        path=path,
+                        operation=operation,
+                        summary=summary,
+                        deleted=deleted,
+                    ),
+                    actor_id=actor_id,
+                    idempotency_key=idempotency_key,
+                    write=write,
+                )
 
     @staticmethod
     def _insert_revision(
@@ -1050,34 +1050,35 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         validate_metadata_text(title, "Document title")
-        source = self.get_document(document_id)
         target_path = self._normalize_path(path) if path is not None else None
-        with self.mutations.paths(source.path, target_path):
-            if source.current_revision_id != expected_revision_id:
-                raise ConflictError(
-                    "The source document changed since it was read",
-                    details={
-                        "document_id": document_id,
-                        "expected_revision_id": expected_revision_id,
-                        "current_revision_id": source.current_revision_id,
-                    },
-                )
-            if source.content_type == "application/pdf":
-                return self._duplicate_pdf_document(
-                    source=source,
-                    title=title,
+        with self.mutations.document(document_id):
+            source = self.get_document(document_id)
+            with self.mutations.paths(source.path, target_path):
+                if source.current_revision_id != expected_revision_id:
+                    raise ConflictError(
+                        "The source document changed since it was read",
+                        details={
+                            "document_id": document_id,
+                            "expected_revision_id": expected_revision_id,
+                            "current_revision_id": source.current_revision_id,
+                        },
+                    )
+                if source.content_type == "application/pdf":
+                    return self._duplicate_pdf_document(
+                        source=source,
+                        title=title,
+                        path=path,
+                        actor_id=actor_id,
+                        idempotency_key=idempotency_key,
+                    )
+                return self.create_document(
+                    title=title or f"{source.title} copy",
+                    content=source.content,
                     path=path,
+                    content_type=source.content_type,
                     actor_id=actor_id,
                     idempotency_key=idempotency_key,
                 )
-            return self.create_document(
-                title=title or f"{source.title} copy",
-                content=source.content,
-                path=path,
-                content_type=source.content_type,
-                actor_id=actor_id,
-                idempotency_key=idempotency_key,
-            )
 
     def _duplicate_pdf_document(
         self,
@@ -1203,73 +1204,78 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        current = self.get_document(document_id, include_deleted=True)
+        with self.mutations.document(document_id):
+            current = self.get_document(document_id, include_deleted=True)
 
-        def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
-            _require_revision(current, expected_revision_id)
-            if current.deleted:
-                raise NotFoundError(f"Document is deleted: {document_id}")
-            if current.path == path:
-                raise ValidationError("A document cannot be moved to its current path")
-            if not current.path:
-                raise ValidationError("Unmaterialized documents must be materialized before moving")
-            existing = connection.execute(
-                "SELECT document_id FROM documents WHERE path = ? AND deleted = 0", (path,)
-            ).fetchone()
-            if existing and existing["document_id"] != document_id:
-                raise ConflictError(f"A document already uses that path: {path}")
-            if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
-                raise ConflictError(f"Destination path conflicts with a folder: {path}")
-            old_path = current.path
-            source_exists = self.workspace.is_document_file(old_path)
-            if source_exists and self.workspace.is_document_file(path):
-                raise ConflictError(f"A workspace file already exists at that path: {path}")
+            def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
+                _require_revision(current, expected_revision_id)
+                if current.deleted:
+                    raise NotFoundError(f"Document is deleted: {document_id}")
+                if current.path == path:
+                    raise ValidationError("A document cannot be moved to its current path")
+                if not current.path:
+                    raise ValidationError(
+                        "Unmaterialized documents must be materialized before moving"
+                    )
+                existing = connection.execute(
+                    "SELECT document_id FROM documents WHERE path = ? AND deleted = 0", (path,)
+                ).fetchone()
+                if existing and existing["document_id"] != document_id:
+                    raise ConflictError(f"A document already uses that path: {path}")
+                if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
+                    raise ConflictError(f"Destination path conflicts with a folder: {path}")
+                old_path = current.path
+                source_exists = self.workspace.is_document_file(old_path)
+                if source_exists and self.workspace.is_document_file(path):
+                    raise ConflictError(f"A workspace file already exists at that path: {path}")
 
-            def apply() -> None:
-                if source_exists:
-                    self.workspace.move_document(old_path, path)
+                def apply() -> None:
+                    if source_exists:
+                        self.workspace.move_document(old_path, path)
 
-            def undo() -> None:
-                if (
-                    source_exists
-                    and self.workspace.is_document_file(path)
-                    and not self.workspace.is_document_file(old_path)
-                ):
-                    self.workspace.move_document(path, old_path)
+                def undo() -> None:
+                    if (
+                        source_exists
+                        and self.workspace.is_document_file(path)
+                        and not self.workspace.is_document_file(old_path)
+                    ):
+                        self.workspace.move_document(path, old_path)
 
-            return FileStep(apply=apply, undo=undo)
+                return FileStep(apply=apply, undo=undo)
 
-        def write(connection: sqlite3.Connection) -> Written:
-            self.organization.ensure_document_folder_hierarchy(connection, path)
-            return self._commit_pdf_head(
-                connection,
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                operation="move",
-                summary=summary or f"Moved to {path}",
-                actor_id=actor_id,
-                assignments="path = ?, materialization_state = 'clean', file_hash = content_hash",
-                parameters=(path,),
-            )
+            def write(connection: sqlite3.Connection) -> Written:
+                self.organization.ensure_document_folder_hierarchy(connection, path)
+                return self._commit_pdf_head(
+                    connection,
+                    document_id=document_id,
+                    expected_revision_id=expected_revision_id,
+                    operation="move",
+                    summary=summary or f"Moved to {path}",
+                    actor_id=actor_id,
+                    assignments=(
+                        "path = ?, materialization_state = 'clean', file_hash = content_hash"
+                    ),
+                    parameters=(path,),
+                )
 
-        with self.mutations.paths(current.path, path), self.mutations.document(document_id):
-            return self._commit(
-                document_id=document_id,
-                operation="move",
-                fingerprint=request_hash(
-                    {
-                        "document_id": document_id,
-                        "expected_revision_id": expected_revision_id,
-                        "path": path,
-                        "operation": "move",
-                        "summary": summary,
-                    }
-                ),
-                actor_id=actor_id,
-                idempotency_key=idempotency_key,
-                write=write,
-                prepare=prepare,
-            )
+            with self.mutations.paths(current.path, path):
+                return self._commit(
+                    document_id=document_id,
+                    operation="move",
+                    fingerprint=request_hash(
+                        {
+                            "document_id": document_id,
+                            "expected_revision_id": expected_revision_id,
+                            "path": path,
+                            "operation": "move",
+                            "summary": summary,
+                        }
+                    ),
+                    actor_id=actor_id,
+                    idempotency_key=idempotency_key,
+                    write=write,
+                    prepare=prepare,
+                )
 
     def delete_document(
         self,
@@ -1311,68 +1317,69 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        current = self.get_document(document_id, include_deleted=True)
+        with self.mutations.document(document_id):
+            current = self.get_document(document_id, include_deleted=True)
 
-        def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
-            del connection
-            _require_revision(current, expected_revision_id)
-            if current.deleted:
-                raise NotFoundError(f"Document is deleted: {document_id}")
-            if not current.path:
-                raise ValidationError("Unmaterialized documents cannot be moved to trash")
-            path = current.path
+            def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
+                del connection
+                _require_revision(current, expected_revision_id)
+                if current.deleted:
+                    raise NotFoundError(f"Document is deleted: {document_id}")
+                if not current.path:
+                    raise ValidationError("Unmaterialized documents cannot be moved to trash")
+                path = current.path
 
-            def apply() -> None:
-                self.workspace.trash_document(
-                    document_id=document_id,
-                    path=path,
-                    content_hash=current.content_hash,
-                    size_bytes=current.size_bytes,
-                )
-
-            def undo() -> None:
-                if self.workspace.has_trashed_document(
-                    document_id
-                ) and not self.workspace.is_document_file(path):
-                    self.workspace.restore_trash_document(
+                def apply() -> None:
+                    self.workspace.trash_document(
                         document_id=document_id,
                         path=path,
                         content_hash=current.content_hash,
                         size_bytes=current.size_bytes,
                     )
 
-            return FileStep(apply=apply, undo=undo)
+                def undo() -> None:
+                    if self.workspace.has_trashed_document(
+                        document_id
+                    ) and not self.workspace.is_document_file(path):
+                        self.workspace.restore_trash_document(
+                            document_id=document_id,
+                            path=path,
+                            content_hash=current.content_hash,
+                            size_bytes=current.size_bytes,
+                        )
 
-        def write(connection: sqlite3.Connection) -> Written:
-            return self._commit_pdf_head(
-                connection,
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                operation="delete",
-                summary=summary or "Moved to trash",
-                actor_id=actor_id,
-                assignments="deleted = 1, materialization_state = 'none', file_hash = NULL",
-                parameters=(),
-            )
+                return FileStep(apply=apply, undo=undo)
 
-        with self.mutations.paths(current.path), self.mutations.document(document_id):
-            return self._commit(
-                document_id=document_id,
-                operation="delete",
-                fingerprint=request_hash(
-                    {
-                        "document_id": document_id,
-                        "expected_revision_id": expected_revision_id,
-                        "operation": "delete",
-                        "summary": summary,
-                        "deleted": True,
-                    }
-                ),
-                actor_id=actor_id,
-                idempotency_key=idempotency_key,
-                write=write,
-                prepare=prepare,
-            )
+            def write(connection: sqlite3.Connection) -> Written:
+                return self._commit_pdf_head(
+                    connection,
+                    document_id=document_id,
+                    expected_revision_id=expected_revision_id,
+                    operation="delete",
+                    summary=summary or "Moved to trash",
+                    actor_id=actor_id,
+                    assignments="deleted = 1, materialization_state = 'none', file_hash = NULL",
+                    parameters=(),
+                )
+
+            with self.mutations.paths(current.path):
+                return self._commit(
+                    document_id=document_id,
+                    operation="delete",
+                    fingerprint=request_hash(
+                        {
+                            "document_id": document_id,
+                            "expected_revision_id": expected_revision_id,
+                            "operation": "delete",
+                            "summary": summary,
+                            "deleted": True,
+                        }
+                    ),
+                    actor_id=actor_id,
+                    idempotency_key=idempotency_key,
+                    write=write,
+                    prepare=prepare,
+                )
 
     def history(self, document_id: str) -> list[Revision]:
         self.get_document(document_id, include_deleted=True)
@@ -1550,94 +1557,97 @@ class DocumentService:
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        current = self.get_document(document_id, include_deleted=True)
+        with self.mutations.document(document_id):
+            current = self.get_document(document_id, include_deleted=True)
 
-        def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
-            if not current.deleted:
-                raise ValidationError(
-                    "Immutable PDF source bytes cannot be restored as text revisions"
-                )
-            _require_revision(current, expected_revision_id)
-            if not current.path:
-                raise ValidationError("Cannot restore a document without a path")
-            path = current.path
-            existing = connection.execute(
-                "SELECT document_id FROM documents WHERE path = ? AND deleted = 0", (path,)
-            ).fetchone()
-            if existing and existing["document_id"] != document_id:
-                raise ConflictError(f"Cannot restore document: path is occupied: {path}")
-            if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
-                raise ConflictError(
-                    f"Cannot restore document: path conflicts with a folder: {path}"
-                )
-            if self.workspace.is_document_file(path):
-                raise ConflictError(f"Cannot restore document: path is occupied: {path}")
-            if not self.workspace.has_trashed_document(document_id):
-                raise NotFoundError(f"Retained trash file not found for document: {document_id}")
+            def prepare(connection: sqlite3.Connection, current: Document) -> FileStep:
+                if not current.deleted:
+                    raise ValidationError(
+                        "Immutable PDF source bytes cannot be restored as text revisions"
+                    )
+                _require_revision(current, expected_revision_id)
+                if not current.path:
+                    raise ValidationError("Cannot restore a document without a path")
+                path = current.path
+                existing = connection.execute(
+                    "SELECT document_id FROM documents WHERE path = ? AND deleted = 0", (path,)
+                ).fetchone()
+                if existing and existing["document_id"] != document_id:
+                    raise ConflictError(f"Cannot restore document: path is occupied: {path}")
+                if connection.execute("SELECT 1 FROM folders WHERE path = ?", (path,)).fetchone():
+                    raise ConflictError(
+                        f"Cannot restore document: path conflicts with a folder: {path}"
+                    )
+                if self.workspace.is_document_file(path):
+                    raise ConflictError(f"Cannot restore document: path is occupied: {path}")
+                if not self.workspace.has_trashed_document(document_id):
+                    raise NotFoundError(
+                        f"Retained trash file not found for document: {document_id}"
+                    )
 
-            def apply() -> None:
-                self.workspace.restore_trash_document(
-                    document_id=document_id,
-                    path=path,
-                    content_hash=current.content_hash,
-                    size_bytes=current.size_bytes,
-                )
-
-            def undo() -> None:
-                if self.workspace.is_document_file(
-                    path
-                ) and not self.workspace.has_trashed_document(document_id):
-                    self.workspace.trash_document(
+                def apply() -> None:
+                    self.workspace.restore_trash_document(
                         document_id=document_id,
                         path=path,
                         content_hash=current.content_hash,
                         size_bytes=current.size_bytes,
                     )
 
-            return FileStep(apply=apply, undo=undo)
+                def undo() -> None:
+                    if self.workspace.is_document_file(
+                        path
+                    ) and not self.workspace.has_trashed_document(document_id):
+                        self.workspace.trash_document(
+                            document_id=document_id,
+                            path=path,
+                            content_hash=current.content_hash,
+                            size_bytes=current.size_bytes,
+                        )
 
-        def write(connection: sqlite3.Connection) -> Written:
-            if current.path:
-                self.organization.ensure_document_folder_hierarchy(connection, current.path)
-            return self._commit_pdf_head(
-                connection,
-                document_id=document_id,
-                expected_revision_id=expected_revision_id,
-                operation="restore",
-                summary=summary or f"Restored {document_id} from trash",
-                actor_id=actor_id,
-                assignments=(
-                    "deleted = 0, materialization_state = 'clean', file_hash = content_hash"
-                ),
-                parameters=(),
-            )
+                return FileStep(apply=apply, undo=undo)
 
-        with self.mutations.paths(current.path), self.mutations.document(document_id):
-            return self._commit(
-                document_id=document_id,
-                operation="restore",
-                fingerprint=request_hash(
-                    {
-                        "document_id": document_id,
-                        "expected_revision_id": expected_revision_id,
-                        "revision_id": revision_id,
-                        "operation": "restore",
-                        "summary": summary,
-                        "deleted": False,
-                    }
-                ),
-                actor_id=actor_id,
-                idempotency_key=idempotency_key,
-                write=write,
-                prepare=prepare,
-            )
+            def write(connection: sqlite3.Connection) -> Written:
+                if current.path:
+                    self.organization.ensure_document_folder_hierarchy(connection, current.path)
+                return self._commit_pdf_head(
+                    connection,
+                    document_id=document_id,
+                    expected_revision_id=expected_revision_id,
+                    operation="restore",
+                    summary=summary or f"Restored {document_id} from trash",
+                    actor_id=actor_id,
+                    assignments=(
+                        "deleted = 0, materialization_state = 'clean', file_hash = content_hash"
+                    ),
+                    parameters=(),
+                )
+
+            with self.mutations.paths(current.path):
+                return self._commit(
+                    document_id=document_id,
+                    operation="restore",
+                    fingerprint=request_hash(
+                        {
+                            "document_id": document_id,
+                            "expected_revision_id": expected_revision_id,
+                            "revision_id": revision_id,
+                            "operation": "restore",
+                            "summary": summary,
+                            "deleted": False,
+                        }
+                    ),
+                    actor_id=actor_id,
+                    idempotency_key=idempotency_key,
+                    write=write,
+                    prepare=prepare,
+                )
 
     def _finish_materialization(self, document: Document) -> None:
         if document.deleted or not document.path:
             return
         with (
-            self.mutations.path(document.path),
             self.mutations.document(document.document_id),
+            self.mutations.path(document.path),
         ):
             with self.database.connection() as connection:
                 latest = connection.execute(
@@ -1683,17 +1693,16 @@ class DocumentService:
 
     def rematerialize_document(self, document_id: str) -> Document:
         """Rewrite a materialized document from the canonical database head."""
-        document = self.get_document(document_id)
-        with (
-            self.mutations.paths(document.path),
-            self.mutations.document(document_id),
-        ):
-            if document.content_type == "application/pdf":
-                raise ValidationError(
-                    "Missing PDF bytes must be restored from backup; they are not stored in SQLite"
-                )
-            self._finish_materialization(document)
-            return self.get_document(document_id)
+        with self.mutations.document(document_id):
+            document = self.get_document(document_id)
+            with self.mutations.paths(document.path):
+                if document.content_type == "application/pdf":
+                    raise ValidationError(
+                        "Missing PDF bytes must be restored from backup; "
+                        "they are not stored in SQLite"
+                    )
+                self._finish_materialization(document)
+                return self.get_document(document_id)
 
     def _require_text_document(self, document_id: str, message: str) -> Document:
         document = self.get_document(document_id, include_deleted=True)

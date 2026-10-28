@@ -2947,3 +2947,78 @@ def test_pdf_parser_hash_mismatch_prevents_replace_and_cleans_temp_file(
     assert not output_json.exists(), "Corrupted staging file replaced output path!"
     temp_files = list(tmp_path.glob(".pages.json.sangam-*"))
     assert len(temp_files) == 0, f"Temporary file leaked on failure: {temp_files}"
+
+
+def test_concurrent_agent_path_move_and_update_lock_coordination(
+    client: TestClient, settings
+) -> None:
+    """Verify that concurrent path move and document update by separate agent identities
+    acquire document lock before reading state, coordinating path locks on active disk path.
+    """
+    initial_path = "research/agent_move_source.md"
+    moved_path = "archive/agent_move_dest.md"
+
+    # Create document
+    res = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Agent Coordination Doc",
+            "content": "# Original content\n",
+            "path": initial_path,
+        },
+        headers=headers("create-agent-coordination-doc"),
+    )
+    assert res.status_code == 201
+    doc = res.json()
+    doc_id = doc["document_id"]
+    current_rev = doc["current_revision_id"]
+
+    results = []
+
+    def agent1_move():
+        resp = client.post(
+            f"/api/v1/documents/{doc_id}/move",
+            json={
+                "path": moved_path,
+                "expected_revision_id": current_rev,
+            },
+            headers={"X-Agent-ID": "agent-1", **headers("agent1-move")},
+        )
+        results.append(("move", resp))
+
+    def agent2_update():
+        resp = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={
+                "content": "# Updated by agent 2\n",
+                "expected_revision_id": current_rev,
+            },
+            headers={"X-Agent-ID": "agent-2", **headers("agent2-update")},
+        )
+        results.append(("update", resp))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(agent1_move)
+        f2 = executor.submit(agent2_update)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    status_codes = [resp.status_code for _, resp in results]
+    assert 200 in status_codes, "At least one agent operation should succeed"
+    for code in status_codes:
+        assert code in (200, 409), f"Unexpected status code: {code}"
+
+    # Verify final document state
+    fetch_resp = client.get(f"/api/v1/documents/{doc_id}", headers=headers("fetch-agent-final"))
+    assert fetch_resp.status_code == 200
+    final_doc = fetch_resp.json()
+
+    final_path = settings.workspace_root / final_doc["path"]
+    assert final_path.is_file(), f"Workspace file missing at {final_doc['path']}"
+    assert final_path.read_text(encoding="utf-8") == final_doc["content"]
+
+    # Ensure no orphaned temp files remain
+    orphaned_source = list((settings.workspace_root / "research").glob(".*.sangam-*"))
+    orphaned_dest = list((settings.workspace_root / "archive").glob(".*.sangam-*"))
+    assert len(orphaned_source) == 0, f"Found orphaned temp files in source: {orphaned_source}"
+    assert len(orphaned_dest) == 0, f"Found orphaned temp files in dest: {orphaned_dest}"
