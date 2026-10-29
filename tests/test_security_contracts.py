@@ -164,6 +164,38 @@ def test_search_documents_rejects_null_bytes_and_control_chars(
 
 
 @pytest.mark.parametrize(
+    "endpoint",
+    ["/api/v1/activity", "/api/v1/activity/summary", "/api/v1/activity/export.jsonl"],
+)
+@pytest.mark.parametrize(
+    "param_name,invalid_value",
+    [
+        ("actor_id", "agent\x00id"),
+        ("actor_id", "agent\x07id"),
+        ("token_id", "tok\x00en"),
+        ("action", "act\x00ion"),
+        ("resource_type", "type\x00res"),
+        ("resource_id", "res\x00id"),
+        ("path", "docs\x00path"),
+        ("error_code", "err\x00code"),
+        ("operation_id", "op\x00id"),
+    ],
+)
+def test_activity_filters_reject_null_bytes_and_control_chars(
+    client: TestClient, endpoint: str, param_name: str, invalid_value: str
+):
+    response = client.get(endpoint, params={param_name: invalid_value})
+    assert response.status_code == 422
+    assert "cannot contain" in response.json()["error"]["message"]
+
+
+def test_karakeep_search_rejects_null_bytes_and_control_chars(client: TestClient):
+    response = client.get("/api/v1/karakeep/bookmarks", params={"q": "term\x00null"})
+    assert response.status_code == 422
+    assert "cannot contain" in response.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
     "field_name,invalid_value",
     [("query", "search\x00term"), ("tag_id", "tag\x00id")],
 )
