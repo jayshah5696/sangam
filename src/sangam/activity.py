@@ -11,7 +11,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sangam.db import Database, utc_now
-from sangam.errors import NotFoundError, ServiceUnavailableError, ValidationError
+from sangam.errors import (
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationError,
+    validate_metadata_text,
+)
 from sangam.schemas import (
     ActivityActorSummary,
     ActivityBucket,
@@ -1577,21 +1582,23 @@ class ActivityService:
     ) -> tuple[list[str], list[object]]:
         conditions: list[str] = []
         parameters: list[object] = []
-        for column, value in (
-            ("e.actor_id", actor_id),
-            ("a.identity_kind", actor_kind),
-            ("e.outcome", outcome),
-            ("e.token_id", token_id),
-            ("e.action", action),
-            ("e.resource_type", resource_type),
-            ("e.resource_id", resource_id),
-            ("e.error_code", error_code),
-            ("e.operation_id", operation_id),
+        for column, value, label in (
+            ("e.actor_id", actor_id, "Activity actor ID"),
+            ("a.identity_kind", actor_kind, "Activity actor kind"),
+            ("e.outcome", outcome, "Activity outcome"),
+            ("e.token_id", token_id, "Activity token ID"),
+            ("e.action", action, "Activity action"),
+            ("e.resource_type", resource_type, "Activity resource type"),
+            ("e.resource_id", resource_id, "Activity resource ID"),
+            ("e.error_code", error_code, "Activity error code"),
+            ("e.operation_id", operation_id, "Activity operation ID"),
         ):
             if value:
+                validate_metadata_text(value, label)
                 conditions.append(f"{column} = ?")
                 parameters.append(value)
         if path:
+            validate_metadata_text(path, "Activity path")
             conditions.append("e.path LIKE ? ESCAPE '\\'")
             escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             parameters.append(f"%{escaped}%")
