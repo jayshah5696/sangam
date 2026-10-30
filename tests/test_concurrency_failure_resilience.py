@@ -2947,3 +2947,88 @@ def test_pdf_parser_hash_mismatch_prevents_replace_and_cleans_temp_file(
     assert not output_json.exists(), "Corrupted staging file replaced output path!"
     temp_files = list(tmp_path.glob(".pages.json.sangam-*"))
     assert len(temp_files) == 0, f"Temporary file leaked on failure: {temp_files}"
+
+
+def test_concurrent_document_duplication_and_update_precondition(
+    client: TestClient, settings
+) -> None:
+    """Verify that concurrent updates/duplicates enforce version preconditions."""
+    target_path = "research/duplicate_race.md"
+
+    # Create initial document
+    res = client.post(
+        "/api/v1/documents",
+        json={
+            "title": "Duplicate Race Doc",
+            "content": "Initial revision 1 content\n",
+            "path": target_path,
+        },
+        headers=headers("create-dup-race-doc"),
+    )
+    assert res.status_code == 201
+    doc = res.json()
+    doc_id = doc["document_id"]
+    rev_1 = doc["current_revision_id"]
+
+    results: list[tuple[str, int, dict]] = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(2)
+
+    def worker_update():
+        barrier.wait()
+        resp = client.patch(
+            f"/api/v1/documents/{doc_id}",
+            json={
+                "content": "Updated revision 2 content\n",
+                "expected_revision_id": rev_1,
+            },
+            headers=headers("update-dup-race"),
+        )
+        with lock:
+            results.append(
+                ("update", resp.status_code, resp.json() if resp.status_code == 200 else {})
+            )
+
+    def worker_duplicate():
+        barrier.wait()
+        resp = client.post(
+            f"/api/v1/documents/{doc_id}/duplicate",
+            json={
+                "expected_revision_id": rev_1,
+                "title": "Duplicate Race Copy",
+            },
+            headers=headers("duplicate-dup-race"),
+        )
+        with lock:
+            results.append(
+                ("duplicate", resp.status_code, resp.json() if resp.status_code == 201 else {})
+            )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(worker_update)
+        f2 = executor.submit(worker_duplicate)
+        f1.result(timeout=10)
+        f2.result(timeout=10)
+
+    # Both workers target expected_revision_id = rev_1 under document lock.
+    # Whoever executes first will succeed, and if update executes first,
+    # duplication against rev_1 will encounter a 409 ConflictError (or vice versa).
+    # Either both succeed (if duplicate runs first and reads rev_1, then update runs on rev_1)
+    # OR if update runs first (rev_1 -> rev_2), duplicate fails with 409 revision_conflict.
+    status_by_op = {op: status for op, status, _ in results}
+    assert 200 in (status_by_op.get("update"),) or 201 in (status_by_op.get("duplicate"),)
+
+    if status_by_op.get("update") == 200 and status_by_op.get("duplicate") == 409:
+        # Update ran first, duplicate correctly rejected stale revision expected_revision_id
+        pass
+    elif status_by_op.get("update") == 200 and status_by_op.get("duplicate") == 201:
+        # Duplicate ran first on rev_1, then update ran on rev_1
+        pass
+    else:
+        pytest.fail(f"Unexpected concurrency result status codes: {status_by_op}")
+
+    # Confirm workspace files remain clean with no temp artifacts
+    file_path = settings.workspace_root / target_path
+    assert file_path.is_file()
+    temp_files = list(file_path.parent.glob(".*.sangam-*"))
+    assert temp_files == []
