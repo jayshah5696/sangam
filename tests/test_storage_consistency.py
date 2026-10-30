@@ -355,9 +355,7 @@ def test_backup_barrier_and_pair_verification_cover_pdf_bytes(
         manager.verify(backup.backup_id)
 
 
-def test_backup_archive_skips_symlinks_and_traversal_targets(
-    client: TestClient, settings
-) -> None:
+def test_backup_archive_skips_symlinks_and_traversal_targets(client: TestClient, settings) -> None:
     # Set up files inside workspace
     _create_text(client, path="valid.md")
     manager = client.app.state.services.backups.manager
