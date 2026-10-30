@@ -1051,8 +1051,13 @@ class DocumentService:
     ) -> Document:
         validate_metadata_text(title, "Document title")
         source = self.get_document(document_id)
-        target_path = self._normalize_path(path) if path is not None else None
-        with self.mutations.paths(source.path, target_path):
+        raw_target_path = path or default_duplicate_path(source)
+        target_path = self._normalize_path(raw_target_path) if raw_target_path is not None else None
+        with (
+            self.mutations.paths(source.path, target_path),
+            self.mutations.document(document_id),
+        ):
+            source = self.get_document(document_id)
             if source.current_revision_id != expected_revision_id:
                 raise ConflictError(
                     "The source document changed since it was read",
