@@ -172,8 +172,12 @@ class BackupManager:
             source.close()
 
     def _archive_workspace(self, destination: Path) -> None:
+        root = self.workspace_root.resolve()
+
         def _add_path(archive: tarfile.TarFile, path: Path, arcname: str) -> None:
-            if path.name.startswith(".sangam-readiness-"):
+            if path.name.startswith(".sangam-readiness-") or path.is_symlink():
+                return
+            if not path.resolve(strict=False).is_relative_to(root):
                 return
             try:
                 archive.add(str(path), arcname=arcname, recursive=False)

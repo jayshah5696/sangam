@@ -380,9 +380,14 @@ class DiskWorkspaceFilesystem:
         files: dict[str, str] = {}
         root = self.root.resolve()
         for file_path in root.rglob("*"):
+            if file_path.is_symlink():
+                continue
             if file_path.suffix.lower() not in {".md", ".html", ".htm", ".pdf"}:
                 continue
             if not file_path.is_file():
+                continue
+            resolved = file_path.resolve(strict=False)
+            if not resolved.is_relative_to(root):
                 continue
             relative_parts = file_path.relative_to(root).parts
             if any(part.startswith(".") or ".sangam-" in part for part in relative_parts):

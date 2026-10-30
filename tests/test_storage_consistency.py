@@ -355,6 +355,38 @@ def test_backup_barrier_and_pair_verification_cover_pdf_bytes(
         manager.verify(backup.backup_id)
 
 
+def test_backup_archive_skips_symlinks_and_traversal_targets(
+    client: TestClient, settings
+) -> None:
+    # Set up files inside workspace
+    _create_text(client, path="valid.md")
+    manager = client.app.state.services.backups.manager
+
+    # Set up outside secret file and dir
+    outside_dir = settings.workspace_root.parent / "outside_backup_test"
+    outside_dir.mkdir(exist_ok=True)
+    outside_file = outside_dir / "secret.txt"
+    outside_file.write_text("secret payload", encoding="utf-8")
+
+    # Add symlinks in workspace
+    (settings.workspace_root / "linked_file.txt").symlink_to(outside_file)
+    (settings.workspace_root / "linked_dir").symlink_to(outside_dir, target_is_directory=True)
+
+    backup = manager.create()
+    verification = manager.verify(backup.backup_id)
+    assert verification.valid is True
+
+    backup_dir = manager.backup_root / backup.backup_id
+    with tarfile.open(backup_dir / "workspace.tar.gz", "r:gz") as archive:
+        member_names = archive.getnames()
+        assert "valid.md" in member_names
+        assert "linked_file.txt" not in member_names
+        assert "linked_dir" not in member_names
+        assert "linked_dir/secret.txt" not in member_names
+
+    shutil.rmtree(outside_dir, ignore_errors=True)
+
+
 def test_backup_delete_uses_lifecycle_lock_and_syncs_parent(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
