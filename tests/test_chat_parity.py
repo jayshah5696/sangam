@@ -17,7 +17,8 @@ from test_phase_seven_chat import create_thread
 from sangam.chat import agent_instructions
 from sangam.chat_capabilities import CreateDocumentInput
 from sangam.chat_context import ChatRequestContext
-from sangam.errors import AuthorizationError, NotFoundError
+from sangam.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from sangam.schemas import ApplyOrganizationPlan
 from sangam.security import Principal
 
 
@@ -240,7 +241,6 @@ def test_plan_restore_and_duplicate_are_refused_without_their_authority(
     source = create_document(client, "no-restore", path="n/doc.md")
     services = client.app.state.services
     agent = services.identity.authenticate(token, operation_id="restore-denied")
-    from sangam.schemas import ApplyOrganizationPlan
 
     restore = ApplyOrganizationPlan.model_validate(
         plan(
@@ -543,8 +543,6 @@ def test_plan_creates_a_tag_and_a_second_plan_applies_it(client: TestClient) -> 
 def test_a_plan_cannot_use_a_tag_it_creates_or_duplicate_an_existing_one(
     client: TestClient,
 ) -> None:
-    from sangam.errors import ConflictError, ValidationError
-
     document = create_document(client, "tag-same-plan", path="t/same.md")
     services = client.app.state.services
     run_plan(client, "call_tag_first", {"kind": "create_tag", "name": "exists"})
@@ -570,8 +568,6 @@ def test_a_plan_cannot_use_a_tag_it_creates_or_duplicate_an_existing_one(
 
 
 def test_only_an_administrator_can_plan_a_new_tag(client: TestClient) -> None:
-    from sangam.schemas import ApplyOrganizationPlan
-
     token = issue_agent_token(client, actor_id="agent:tagger", capabilities=("read", "tag"))
     services = client.app.state.services
     agent = services.identity.authenticate(token, operation_id="tag-denied")
@@ -668,8 +664,6 @@ def test_chat_unpublishes_and_changes_how_a_publication_is_shared(client: TestCl
 def test_a_stale_publication_version_or_missing_authority_is_refused_up_front(
     client: TestClient,
 ) -> None:
-    from sangam.errors import ConflictError
-
     document = create_document(client, "pub-refuse", path="pub/refuse.md")
     publication = publish(client, document, "pub-refuse")
 
@@ -758,8 +752,6 @@ def test_chat_adds_edits_and_deletes_a_pdf_note(client: TestClient) -> None:
 
 
 def test_pdf_annotation_requests_that_cannot_run_are_refused_up_front(client: TestClient) -> None:
-    from sangam.errors import ConflictError, ValidationError
-
     pdf = import_pdf(client, content=text_pdf(), key="annotate-refuse", path="a/refuse.pdf").json()
     text = create_document(client, "annotate-text", path="a/text.md")
     created = annotate(

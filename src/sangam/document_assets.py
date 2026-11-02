@@ -22,7 +22,7 @@ from urllib.parse import unquote, urlsplit
 
 from sangam.errors import NotFoundError, ValidationError, validate_metadata_text
 from sangam.schemas import Document, DocumentAsset, ImageMediaType
-from sangam.workspace import WorkspaceFilesystem
+from sangam.workspace import WorkspaceFilesystem, _canonicalize_relative_path
 
 if TYPE_CHECKING:
     from sangam.mutations import MutationCoordinator
@@ -105,8 +105,6 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
 
     resolved_path = "/".join(normalized_parts)
     try:
-        from sangam.workspace import _canonicalize_relative_path
-
         _canonicalize_relative_path(resolved_path, kind="Asset")
     except Exception as error:
         raise NotFoundError("Document asset not found") from error

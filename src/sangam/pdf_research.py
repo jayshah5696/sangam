@@ -39,7 +39,7 @@ from sangam.service import DocumentService
 from sangam.workspace import WorkspaceFilesystem
 
 
-class _ExtractionCancelled(Exception):
+class _ExtractionCancelledError(Exception):
     """Internal cooperative shutdown signal for PDF extraction workers."""
 
 
@@ -356,10 +356,10 @@ class PdfResearchService:
             return False
         try:
             if cancel_event is not None and cancel_event.is_set():
-                raise _ExtractionCancelled
+                raise _ExtractionCancelledError
             pages = self._parse_pages(document_id, cancel_event)
             if cancel_event is not None and cancel_event.is_set():
-                raise _ExtractionCancelled
+                raise _ExtractionCancelledError
             with self.database.transaction() as connection:
                 connection.execute("DELETE FROM pdf_pages WHERE document_id = ?", (document_id,))
                 connection.executemany(
@@ -375,7 +375,7 @@ class PdfResearchService:
                     """,
                     (len(pages), utc_now(), document_id),
                 )
-        except _ExtractionCancelled:
+        except _ExtractionCancelledError:
             with self.database.transaction() as connection:
                 connection.execute(
                     """
@@ -423,7 +423,7 @@ class PdfResearchService:
                 with spool_handle:
                     for chunk in self.workspace.iter_binary(document.path, chunk_size=65536):
                         if cancel_event is not None and cancel_event.is_set():
-                            raise _ExtractionCancelled
+                            raise _ExtractionCancelledError
                         spool_handle.write(chunk)
                         digest.update(chunk)
                     spool_handle.flush()
@@ -463,7 +463,7 @@ class PdfResearchService:
                 try:
                     while process.poll() is None:
                         if cancel_event is not None and cancel_event.is_set():
-                            raise _ExtractionCancelled
+                            raise _ExtractionCancelledError
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
                             raise ValidationError("PDF extraction execution deadline expired")

@@ -694,8 +694,6 @@ class PublicationService:
 
     @staticmethod
     def _relative_asset_references(content: str) -> set[str]:
-        import re
-
         references = set(re.findall(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)", content))
         references.update(
             match[1]
@@ -925,13 +923,12 @@ class PublicationService:
         fingerprint: str,
         resource_id: str,
     ) -> None:
-        resource_type = (
-            "document"
-            if operation == "document_trust"
-            else "publication_revision"
-            if operation == "expose_revision"
-            else "publication"
-        )
+        if operation == "document_trust":
+            resource_type = "document"
+        elif operation == "expose_revision":
+            resource_type = "publication_revision"
+        else:
+            resource_type = "publication"
         self.idempotency.record_mutation(
             connection,
             actor_id=actor_id,

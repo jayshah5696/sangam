@@ -33,6 +33,7 @@ from sangam.chat_skills import (
 )
 from sangam.errors import ValidationError
 from sangam.schemas import (
+    ApplyOrganizationPlan,
     Document,
     OrganizationOperation,
     OrganizationSnapshotItem,
@@ -130,8 +131,6 @@ class ApplyWorkspaceOrganizationPlanInput(StrictCapabilityModel):
 
     @model_validator(mode="after")
     def validate_plan(self) -> ApplyWorkspaceOrganizationPlanInput:
-        from sangam.schemas import ApplyOrganizationPlan
-
         ApplyOrganizationPlan.model_validate(self.model_dump(mode="json"))
         return self
 

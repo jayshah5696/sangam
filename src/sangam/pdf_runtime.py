@@ -87,7 +87,8 @@ class PdfExtractionScheduler:
                 logger.exception("PDF queue worker failed")
             self._stop.wait(0.25)
 
-    async def close(self, timeout: float) -> None:
+    # Join parser threads within the ownership deadline; cancellation cannot stop them.
+    async def close(self, timeout: float) -> None:  # noqa: ASYNC109
         self._stop.set()
         deadline = time.monotonic() + timeout
         for thread in self._threads:

@@ -6,6 +6,7 @@ import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 from test_chat_capability_lifecycle import prepare_effect, prepare_run, set_chat_autonomy
+from test_phase_seven_chat import create_thread
 
 from sangam.chat_capabilities import CreateDocumentInput
 from sangam.errors import AuthenticationError, AuthorizationError
@@ -138,7 +139,6 @@ def test_applying_a_proposal_names_the_proposal_in_the_ledger(client: TestClient
         json={"title": "Edited by chat", "content": "before", "path": "p/edit.md"},
         headers=headers("authority-proposal-doc"),
     ).json()
-    from test_phase_seven_chat import create_thread
 
     thread_id = create_thread(client, document_id=document["document_id"])
     principal = Principal.trusted_human(

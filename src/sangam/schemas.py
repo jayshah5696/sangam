@@ -305,8 +305,11 @@ class OrganizationDuplicateDocument(MutationRequest):
 
 
 class OrganizationCreateTag(MutationRequest):
-    """Create a tag. Later operations in the same plan cannot use it: tag IDs are assigned
-    on creation, so apply the tag in a second plan after inspecting the new ID."""
+    """Create a tag for use in a subsequent plan.
+
+    Later operations in the same plan cannot use it. Tag IDs are assigned
+    on creation, so apply the tag in a second plan after inspecting the new ID.
+    """
 
     kind: Literal["create_tag"]
     name: str = Field(min_length=1, max_length=60)
@@ -1179,18 +1182,18 @@ ProjectRole = Literal["source", "draft", "output", "note", "decision"]
 
 
 class ProjectTab(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    documentId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True, validate_by_name=True)
+    document_id: str = Field(alias="documentId", min_length=1)
     title: str
     pinned: bool
 
 
 class ProjectGroup(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True, validate_by_name=True)
     kind: Literal["group"]
     id: str = Field(min_length=1)
     tabs: list[ProjectTab] = Field(max_length=100)
-    activeTabId: str | None
+    active_tab_id: str | None = Field(alias="activeTabId")
 
 
 class ProjectSplit(BaseModel):
@@ -1204,17 +1207,19 @@ class ProjectSplit(BaseModel):
 
 
 class ProjectClosedTab(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    groupId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True, validate_by_name=True)
+    group_id: str = Field(alias="groupId", min_length=1)
     tab: ProjectTab
 
 
 class ProjectLayout(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    schemaVersion: Literal[1]
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True, validate_by_name=True)
+    schema_version: Literal[1] = Field(alias="schemaVersion")
     root: ProjectGroup | ProjectSplit
-    activeGroupId: str
-    recentlyClosed: list[ProjectClosedTab] = Field(default_factory=list, max_length=12)
+    active_group_id: str = Field(alias="activeGroupId")
+    recently_closed: list[ProjectClosedTab] = Field(
+        alias="recentlyClosed", default_factory=list, max_length=12
+    )
 
     def groups(self) -> list[ProjectGroup]:
         def visit(node: ProjectGroup | ProjectSplit) -> list[ProjectGroup]:
@@ -1238,12 +1243,12 @@ class ProjectLayout(BaseModel):
             raise ValueError("Layout node IDs must be unique")
         groups = self.groups()
         ids = [g.id for g in groups]
-        if len(groups) > 16 or len(set(ids)) != len(ids) or self.activeGroupId not in ids:
+        if len(groups) > 16 or len(set(ids)) != len(ids) or self.active_group_id not in ids:
             raise ValueError("Layout requires unique groups and a valid active group")
         for group in groups:
-            tabs = [t.documentId for t in group.tabs]
+            tabs = [t.document_id for t in group.tabs]
             if len(set(tabs)) != len(tabs) or (
-                group.activeTabId is not None and group.activeTabId not in tabs
+                group.active_tab_id is not None and group.active_tab_id not in tabs
             ):
                 raise ValueError("Active tab must belong to its group")
         return self

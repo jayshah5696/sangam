@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
+from test_phase_five_pdf_research import text_pdf
 
 from sangam.application import build_application_services
 from sangam.config import Settings
@@ -526,8 +527,6 @@ def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters
 
 
 def test_project_pdf_document_and_superseded_source_update(client: TestClient) -> None:
-    from test_phase_five_pdf_research import text_pdf
-
     pdf_bytes = text_pdf("Original research findings on efficiency.")
     create_pdf = client.post(
         "/api/v1/pdfs",

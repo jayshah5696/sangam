@@ -317,13 +317,17 @@ def attach_search_matches(
     )
     results: list[DocumentSummary] = []
     for document, matches in located:
+        resolved_matches = matches
         if matches[0].source == "metadata":
-            matches = [
+            resolved_matches = [
                 matches[0].model_copy(update={"snippet": snippets.get(document.document_id, "")})
             ]
         results.append(
             document.model_copy(
-                update={"search_matches": matches, "search_snippet": matches[0].snippet or None}
+                update={
+                    "search_matches": resolved_matches,
+                    "search_snippet": resolved_matches[0].snippet or None,
+                }
             )
         )
     return results

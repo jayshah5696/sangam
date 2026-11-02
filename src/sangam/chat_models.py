@@ -7,7 +7,23 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from agents.models.interface import Model
-from openai.types.responses import Response, ResponseStreamEvent
+from openai.types.responses import (
+    Response,
+    ResponseCompletedEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
+    ResponseCreatedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionCallArgumentsDoneEvent,
+    ResponseFunctionToolCall,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputText,
+    ResponseStreamEvent,
+    ResponseTextDeltaEvent,
+    ResponseTextDoneEvent,
+)
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from pydantic import ValidationError as PydanticError
 
@@ -530,24 +546,12 @@ class ScriptedModel(Model):
         raise NotImplementedError
 
     async def stream_response(
-        self, system_instructions: str | None, input: str | list[Any], *args: Any, **kwargs: Any
+        self,
+        system_instructions: str | None,
+        input: str | list[Any],  # noqa: A002 - Match the SDK's keyword argument.
+        *args: Any,
+        **kwargs: Any,
     ) -> AsyncIterator[ResponseStreamEvent]:
-        from openai.types.responses import (
-            ResponseCompletedEvent,
-            ResponseContentPartAddedEvent,
-            ResponseContentPartDoneEvent,
-            ResponseCreatedEvent,
-            ResponseFunctionCallArgumentsDeltaEvent,
-            ResponseFunctionCallArgumentsDoneEvent,
-            ResponseFunctionToolCall,
-            ResponseOutputItemAddedEvent,
-            ResponseOutputItemDoneEvent,
-            ResponseOutputMessage,
-            ResponseOutputText,
-            ResponseTextDeltaEvent,
-            ResponseTextDoneEvent,
-        )
-
         self.seen.append(input)
         step = self.steps.pop(0)
         sequence = 0

@@ -6,7 +6,7 @@ import uuid
 import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, Query, Request
@@ -291,7 +291,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.storage_ownership = storage_ownership
     app.state.storage_ownership_finalizer = weakref.finalize(app, storage_ownership.close)
 
-    def openapi_schema() -> dict:
+    def openapi_schema() -> dict[str, Any]:
         if app.openapi_schema:
             return app.openapi_schema
         schema = get_openapi(

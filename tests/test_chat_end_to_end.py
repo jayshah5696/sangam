@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 import pytest
+from conftest import issue_agent_token
 from fastapi.testclient import TestClient
 from test_chat_capability_lifecycle import set_chat_autonomy
 from test_phase_seven_chat import chatkit_request, create_thread_with_model
@@ -63,12 +64,11 @@ def resume_with(client: TestClient, thread_id: str, result: dict[str, Any]) -> l
 
 
 def assistant_text(events: list[dict[str, Any]]) -> str:
-    return "".join(
-        part["text"]
-        for event in events
-        if event["type"] == "thread.item.done" and event["item"]["type"] == "assistant_message"
-        for part in event["item"]["content"]
-    )
+    parts = []
+    for event in events:
+        if event["type"] == "thread.item.done" and event["item"]["type"] == "assistant_message":
+            parts.extend(part["text"] for part in event["item"]["content"])
+    return "".join(parts)
 
 
 CREATE_ATLAS = {
@@ -146,8 +146,6 @@ def test_yolo_mode_applies_the_effect_before_the_run_resumes(client: TestClient)
 
 
 def test_a_tool_the_run_was_not_given_cannot_be_called(client: TestClient) -> None:
-    from conftest import issue_agent_token
-
     token = issue_agent_token(
         client, actor_id="agent:caller", capabilities=("read", "search", "inference")
     )

@@ -443,7 +443,7 @@ def test_concurrent_read_write_atomic_file_replacement(client: TestClient, setti
     # Verify every read content is complete, valid, and non-zero-byte
     for content in read_results:
         assert len(content) > 0
-        assert content.startswith(b"base") or content.startswith(b"content revision iteration")
+        assert content.startswith((b"base", b"content revision iteration"))
 
     # Verify no temporary staging files exist in workspace directory
     parent_dir = settings.workspace_root

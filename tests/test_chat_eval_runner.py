@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 from sangam.chat_models import Call, Say, ScriptedModelProvider
+from sangam.web_research import source_id
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_chat_evals.py"
 spec = importlib.util.spec_from_file_location("run_chat_evals", SCRIPT)
@@ -151,8 +153,6 @@ def _web_item() -> dict:
 
 
 def _run_web_item(tmp_path: Path, answer: str) -> tuple[dict, dict]:
-    from sangam.web_research import source_id
-
     async def exercise() -> tuple[dict, dict]:
         env = evals.EvalEnvironment("sk-test", tmp_path, "review")
         env.seed(evals._seed_documents())
@@ -314,8 +314,6 @@ def test_ungraded_source_support_does_not_count_as_success() -> None:
 
 
 def test_source_judge_receives_observed_evidence_without_model_identity() -> None:
-    import json
-
     async def exercise() -> None:
         seen: list = []
         answer = f"The Flow costs $99. [source]({WEB_URL})"

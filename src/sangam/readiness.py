@@ -39,15 +39,15 @@ class ReadinessService:
         checks["database"] = self._database_check()
         checks["schema"] = self._schema_check()
         checks["writable_roots"] = self._writable_roots_check()
+        if startup_complete and startup_reconciliation_error is None:
+            reconciliation_detail = "complete"
+        elif startup_reconciliation_error is not None:
+            reconciliation_detail = "failed"
+        else:
+            reconciliation_detail = "not_complete"
         checks["startup_reconciliation"] = {
             "ok": startup_complete and startup_reconciliation_error is None,
-            "detail": (
-                "complete"
-                if startup_complete and startup_reconciliation_error is None
-                else "failed"
-                if startup_reconciliation_error is not None
-                else "not_complete"
-            ),
+            "detail": reconciliation_detail,
         }
         checks["pending_materializations"] = self._pending_materializations_check()
         checks["backup_freshness"] = self._backup_freshness_check()

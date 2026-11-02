@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 from functools import wraps
-from typing import Concatenate, TypeVar
+from typing import Concatenate, TypeVar, cast
 
 from chatkit.types import ThreadMetadata
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ from sangam.schemas import (
     AddProjectDocument,
     AddProjectThread,
     CreateProject,
+    Document,
     ProjectAnnotationItem,
     ProjectDetail,
     ProjectDocumentItem,
@@ -48,7 +49,8 @@ def atomic[T, **P](
         with self.database.transaction():
             return method(self, principal, *args, **kwargs)
 
-    return run
+    # wraps retains named parameters; the wrapper accepts every positional call in Concatenate.
+    return cast("Callable[Concatenate[ProjectService, Principal, P], T]", run)
 
 
 class DeletedProjectReference(BaseModel):
@@ -330,10 +332,10 @@ class ProjectService:
             if layout_json:
                 layout = ProjectLayout.model_validate_json(layout_json)
                 for group in layout.groups():
-                    group.tabs = [t for t in group.tabs if t.documentId in doc_ids]
-                    if not any(t.documentId == group.activeTabId for t in group.tabs):
-                        group.activeTabId = group.tabs[0].documentId if group.tabs else None
-                layout.recentlyClosed = []
+                    group.tabs = [t for t in group.tabs if t.document_id in doc_ids]
+                    if not any(t.document_id == group.active_tab_id for t in group.tabs):
+                        group.active_tab_id = group.tabs[0].document_id if group.tabs else None
+                layout.recently_closed = []
                 layout_json = layout.model_dump_json()
             brief_available = result.brief_document_id in doc_ids
             return result.model_copy(
@@ -490,42 +492,43 @@ class ProjectService:
                 WHERE pd.project_id=? ORDER BY pd.created_at, pd.document_id""",
                 (project_id,),
             ).fetchall()
-            docs = [
-                ProjectDocumentItem(
-                    **{
-                        k: r[k]
-                        for k in (
-                            "project_id",
-                            "document_id",
-                            "document_title",
-                            "document_path",
-                            "content_type",
-                            "role",
-                            "pinned_page",
-                            "notes",
-                            "created_at",
-                            "source_revision_id",
-                            "current_revision_id",
-                            "updated_at",
-                            "superseded_by_document_id",
-                            "superseded_by_title",
-                        )
-                    },
-                    source_updated=(
-                        (
-                            r["source_revision_id"] is not None
-                            and r["source_revision_id"] != r["current_revision_id"]
-                        )
-                        or bool(r["superseded_by_document_id"])
-                    ),
-                    excerpt=" ".join(
-                        line.strip()
-                        for line in (r["content"] or "").splitlines()
-                        if line.strip() and not line.lstrip().startswith("#")
-                    )[:240],
+            docs = []
+            for r in rows:
+                docs.append(
+                    ProjectDocumentItem(
+                        **{
+                            k: r[k]
+                            for k in (
+                                "project_id",
+                                "document_id",
+                                "document_title",
+                                "document_path",
+                                "content_type",
+                                "role",
+                                "pinned_page",
+                                "notes",
+                                "created_at",
+                                "source_revision_id",
+                                "current_revision_id",
+                                "updated_at",
+                                "superseded_by_document_id",
+                                "superseded_by_title",
+                            )
+                        },
+                        source_updated=(
+                            (
+                                r["source_revision_id"] is not None
+                                and r["source_revision_id"] != r["current_revision_id"]
+                            )
+                            or bool(r["superseded_by_document_id"])
+                        ),
+                        excerpt=" ".join(
+                            line.strip()
+                            for line in (r["content"] or "").splitlines()
+                            if line.strip() and not line.lstrip().startswith("#")
+                        )[:240],
+                    )
                 )
-                for r in rows
-            ]
             threads = []
             for t in conn.execute(
                 """SELECT pt.*, ct.data_json, ct.created_by, ct.document_id FROM project_threads pt
@@ -579,10 +582,10 @@ class ProjectService:
             if layout_json:
                 layout = ProjectLayout.model_validate_json(layout_json)
                 for group in layout.groups():
-                    group.tabs = [t for t in group.tabs if t.documentId in doc_ids]
-                    if group.activeTabId not in doc_ids:
-                        group.activeTabId = group.tabs[0].documentId if group.tabs else None
-                layout.recentlyClosed = []
+                    group.tabs = [t for t in group.tabs if t.document_id in doc_ids]
+                    if group.active_tab_id not in doc_ids:
+                        group.active_tab_id = group.tabs[0].document_id if group.tabs else None
+                layout.recently_closed = []
                 layout_json = layout.model_dump_json()
             return ProjectDetail(
                 project_id=project_id,
@@ -619,6 +622,7 @@ class ProjectService:
             raise ValidationError("Project name cannot be empty")
         project_id, now = f"proj_{uuid.uuid4().hex[:16]}", utc_now()
         brief_id = request.brief_document_id
+        brief: Document | None = None
         if brief_id:
             brief = self.documents.get_document(brief_id)
             if brief.content_type != "text/markdown":
@@ -661,7 +665,7 @@ class ProjectService:
                     now,
                 ),
             )
-            if brief_id:
+            if brief is not None:
                 conn.execute(
                     "INSERT INTO project_documents "
                     "(project_id,document_id,role,created_at,source_revision_id) "
@@ -716,17 +720,18 @@ class ProjectService:
             ):
                 # Choosing a draft changes selection and keeps the saved sources and splits.
                 layout = ProjectLayout.model_validate_json(row["workbench_state_json"])
-                group = next(
-                    (g for g in layout.groups() if any(t.documentId == active_id for t in g.tabs)),
-                    next(g for g in layout.groups() if g.id == layout.activeGroupId),
-                )
-                if not any(t.documentId == active_id for t in group.tabs):
+                group = next(g for g in layout.groups() if g.id == layout.active_group_id)
+                for candidate in layout.groups():
+                    if any(t.document_id == active_id for t in candidate.tabs):
+                        group = candidate
+                        break
+                if not any(t.document_id == active_id for t in group.tabs):
                     document = self.documents.get_document(active_id)
                     group.tabs.append(
                         ProjectTab(documentId=active_id, title=document.title, pinned=False)
                     )
-                group.activeTabId = active_id
-                layout.activeGroupId = group.id
+                group.active_tab_id = active_id
+                layout.active_group_id = group.id
                 fields["workbench_state_json"] = layout.model_dump_json()
             if request.active_thread_id:
                 self._thread(principal, request.active_thread_id)
@@ -740,10 +745,11 @@ class ProjectService:
                 member_ids = {
                     d.document_id for d in self.get_project(project_id, principal).documents
                 }
-                if any(t.documentId not in member_ids for g in layout.groups() for t in g.tabs):
-                    raise ValidationError("Layout tabs must be live project members")
+                for group in layout.groups():
+                    if any(t.document_id not in member_ids for t in group.tabs):
+                        raise ValidationError("Layout tabs must be live project members")
                 selected = next(
-                    g.activeTabId for g in layout.groups() if g.id == layout.activeGroupId
+                    g.active_tab_id for g in layout.groups() if g.id == layout.active_group_id
                 )
                 if active_id and selected != active_id:
                     raise ValidationError("Layout selected tab must match the active draft")

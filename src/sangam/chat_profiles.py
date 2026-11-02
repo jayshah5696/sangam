@@ -217,30 +217,29 @@ class ChatProfileService:
                     return MemoryEntry.model_validate_json(row["response_json"])
                 self.preflight_memory(principal, request)
                 current = self._memory(principal, request.memory_id, request.project_id)
-                state: Literal["active", "suggested", "forgotten"] = (
-                    "forgotten"
-                    if request.action == "forget"
-                    else "suggested"
-                    if request.action == "suggest"
-                    else "active"
-                )
-                content = (
-                    ""
-                    if state == "forgotten"
-                    else current.content
-                    if request.action == "accept" and current
-                    else request.content
-                )
-                source_thread = (
-                    None
-                    if state == "forgotten"
-                    else request.source_thread_id or (current.source_thread_id if current else None)
-                )
-                source_item = (
-                    None
-                    if state == "forgotten"
-                    else request.source_item_id or (current.source_item_id if current else None)
-                )
+                state: Literal["active", "suggested", "forgotten"]
+                if request.action == "forget":
+                    state = "forgotten"
+                elif request.action == "suggest":
+                    state = "suggested"
+                else:
+                    state = "active"
+                if state == "forgotten":
+                    content = ""
+                    source_thread = None
+                    source_item = None
+                else:
+                    content = (
+                        current.content
+                        if request.action == "accept" and current
+                        else request.content
+                    )
+                    source_thread = request.source_thread_id or (
+                        current.source_thread_id if current else None
+                    )
+                    source_item = request.source_item_id or (
+                        current.source_item_id if current else None
+                    )
                 result = MemoryEntry(
                     memory_id=request.memory_id,
                     project_id=request.project_id,
@@ -313,23 +312,16 @@ class ChatProfileService:
                 f"{filters} ORDER BY memory_id, scope LIMIT ? OFFSET ?",
                 params,
             ).fetchall()
-        entries = [
-            MemoryEntry(
-                project_id=row["scope"][8:] if row["scope"].startswith("project:") else None,
-                **{
-                    k: row[k]
-                    for k in (
-                        "memory_id",
-                        "content",
-                        "state",
-                        "version",
-                        "source_thread_id",
-                        "source_item_id",
-                    )
-                },
+        entries = []
+        for row in rows[: request.limit]:
+            values = dict(row)
+            scope = values.pop("scope")
+            entries.append(
+                MemoryEntry(
+                    project_id=scope[8:] if scope.startswith("project:") else None,
+                    **values,
+                )
             )
-            for row in rows[: request.limit]
-        ]
         return MemoryPage(entries=entries, has_more=len(rows) > request.limit)
 
     def search_memory(

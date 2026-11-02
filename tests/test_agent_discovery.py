@@ -66,11 +66,12 @@ def test_openapi_declares_bearer_security_and_stable_operation_ids(client: TestC
     )
     assert "security" not in schema["paths"]["/api/v1/health"]["get"]
 
-    operation_ids = [
-        operation["operationId"]
-        for path in schema["paths"].values()
-        for method, operation in path.items()
-        if method in {"get", "post", "put", "patch", "delete"}
-    ]
+    operation_ids = []
+    for path in schema["paths"].values():
+        operation_ids.extend(
+            operation["operationId"]
+            for method, operation in path.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        )
     assert len(operation_ids) == len(set(operation_ids))
     assert all(re.fullmatch(r"[a-z][A-Za-z0-9]*", operation_id) for operation_id in operation_ids)

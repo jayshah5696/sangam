@@ -13,7 +13,8 @@ from starlette.responses import ContentStream
 from starlette.types import Receive, Scope, Send
 
 from sangam.access import writes
-from sangam.chat import ChatRequestContext, SangamChatServer
+from sangam.chat import SangamChatServer
+from sangam.chat_context import ChatRequestContext
 from sangam.chat_continuity import HistoryPage, HistorySearch, TaskCorrection, TaskState
 from sangam.chat_profiles import (
     MemoryChange,

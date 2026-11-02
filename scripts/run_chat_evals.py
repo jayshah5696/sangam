@@ -22,7 +22,6 @@ It feature-detects whether ProposeUpdateInput has a ``mode`` field and reports
 can baseline main-branch code against patch-mode code.
 
 Examples:
-
     # full run, write JSON results
     uv run python scripts/run_chat_evals.py --output /tmp/evals.json
 
@@ -46,14 +45,26 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections import Counter
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from itertools import product
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal
 
+from agents import Agent, ModelSettings, RunConfig, Runner
+from chatkit.server import StreamingResult
 from pydantic import BaseModel, ConfigDict, Field
+
+from sangam.application import build_application_services, initialize_application_state
+from sangam.chat_context import ChatRequestContext
+from sangam.config import Settings
+from sangam.schemas import ApplyOrganizationPlan, CreateProject
+from sangam.security import Principal
+from sangam.ssrf_client import SafeCaptureClient
+from sangam.web_research import WebHit, WebResearchService
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATASET = Path(__file__).resolve().parent / "evals" / "chat_eval_dataset.json"
@@ -297,8 +308,6 @@ class FixtureWebProvider:
         published_after: Any,
         published_before: Any,
     ) -> list[Any]:
-        from sangam.web_research import WebHit
-
         wanted = self._words(query)
         scored = []
         for page in self.pages:
@@ -404,15 +413,14 @@ def validate_source_grade(
                 )
             ):
                 invalid = True
-    verdict = (
-        "insufficient_evidence"
-        if invalid
-        else "fail"
-        if any(claim.verdict == "fail" for claim in grade.claims)
-        else "insufficient_evidence"
-        if any(claim.verdict == "insufficient_evidence" for claim in grade.claims)
-        else "pass"
-    )
+    if invalid:
+        verdict = "insufficient_evidence"
+    elif any(claim.verdict == "fail" for claim in grade.claims):
+        verdict = "fail"
+    elif any(claim.verdict == "insufficient_evidence" for claim in grade.claims):
+        verdict = "insufficient_evidence"
+    else:
+        verdict = "pass"
     return {
         **grade.model_dump(mode="json"),
         "verdict": verdict,
@@ -425,11 +433,9 @@ async def grade_source_support(
     evidence: list[dict[str, str]],
     model: str,
     provider: Any,
-    timeout: float,
+    timeout_seconds: float,
 ) -> dict[str, Any]:
     """Run a separate, tool-free judge; failures remain ungraded, never passes."""
-    from agents import Agent, ModelSettings, RunConfig, Runner
-
     metadata = {
         "model": model,
         "rubric_sha256": hashlib.sha256(SOURCE_SUPPORT_RUBRIC.encode()).hexdigest(),
@@ -464,7 +470,7 @@ async def grade_source_support(
         ),
     )
     try:
-        async with asyncio.timeout(timeout):
+        async with asyncio.timeout(timeout_seconds):
             async for _event in result.stream_events():
                 pass
         grade = SourceSupportGrade.model_validate(result.final_output)
@@ -517,8 +523,8 @@ def resolve_api_key(env_file: str | None) -> str:
     for candidate in candidates:
         if not candidate.is_file():
             continue
-        for line in candidate.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
+        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
             if line.startswith(("SANGAM_OPENROUTER_API_KEY", "OPENROUTER_API_KEY")) and "=" in line:
                 name, _, value = line.partition("=")
                 value = value.strip().strip("'\"")
@@ -533,7 +539,8 @@ def resolve_api_key(env_file: str | None) -> str:
 
 def detect_variant() -> str:
     try:
-        from sangam.chat_capabilities import ProposeUpdateInput
+        # The evaluator also runs against older checkouts without this capability.
+        from sangam.chat_capabilities import ProposeUpdateInput  # noqa: PLC0415
     except ImportError:
         return "unknown"
     return (
@@ -545,9 +552,6 @@ class EvalEnvironment:
     def __init__(
         self, api_key: str, root: Path, autonomy_mode: str, *, web_off: bool = False
     ) -> None:
-        from sangam.application import build_application_services, initialize_application_state
-        from sangam.config import Settings
-
         self.root = root
         self.autonomy_mode = autonomy_mode
         self.web_off = web_off
@@ -566,8 +570,6 @@ class EvalEnvironment:
         self.tags_by_name: dict[str, Any] = {}
 
     def seed(self, seeds: dict[str, dict[str, str]]) -> None:
-        from sangam.security import Principal
-
         self.principal = Principal.trusted_human(
             actor_id="human:jay", display_name="Jay", operation_id="chat-evals"
         )
@@ -596,9 +598,6 @@ class EvalEnvironment:
 
     def enable_fixture_web(self) -> None:
         """Turn on web research with frozen pages and a frozen clock."""
-        from sangam.ssrf_client import SafeCaptureClient
-        from sangam.web_research import WebResearchService
-
         pages = json.loads(WEB_FIXTURES.read_text(encoding="utf-8"))["pages"]
         provider = FixtureWebProvider(pages)
         fetcher = SafeCaptureClient(
@@ -613,8 +612,6 @@ class EvalEnvironment:
 
     def seed_case(self, item: dict[str, Any]) -> None:
         """Establish each case's prerequisites without depending on earlier trials."""
-        from sangam.schemas import ApplyOrganizationPlan, CreateProject
-
         fixtures = item.get("fixtures", {})
         for seed_id in fixtures.get("trashed_documents", []):
             document = self.documents_by_seed[seed_id]
@@ -715,14 +712,8 @@ async def run_item(
     env: EvalEnvironment,
     model_id: str,
     reasoning_effort: str,
-    timeout: float,
+    timeout_seconds: float,
 ) -> dict[str, Any]:
-    from dataclasses import replace
-
-    from chatkit.server import StreamingResult
-
-    from sangam.chat_context import ChatRequestContext
-
     server = env.services.chat
     principal = env.principal
     document = env.documents_by_seed[item["document"]] if item.get("document") else None
@@ -815,9 +806,9 @@ async def run_item(
     started = time.monotonic()
     error: str | None = None
     try:
-        await asyncio.wait_for(drive(), timeout=timeout)
+        await asyncio.wait_for(drive(), timeout=timeout_seconds)
     except TimeoutError:
-        error = f"timeout after {timeout:g}s"
+        error = f"timeout after {timeout_seconds:g}s"
     except Exception as exc:  # noqa: BLE001 - record and continue
         error = f"{type(exc).__name__}: {exc}"
     finally:
@@ -885,6 +876,9 @@ async def run_item(
             "tag_ids": sorted(tag.tag_id for tag in current.tags),
             "tags": sorted(tag.name for tag in current.tags),
         }
+    source_evidence = []
+    for call in calls:
+        source_evidence.extend(call.source_evidence)
     return {
         "final_text": final_text,
         "error": error,
@@ -897,7 +891,7 @@ async def run_item(
         else None,
         "effects": effects,
         "web_sources": web_sources,
-        "source_evidence": [source for call in calls for source in call.source_evidence],
+        "source_evidence": source_evidence,
         "workspace_state": workspace_state,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -911,6 +905,14 @@ async def run_item(
 # ---------------------------------------------------------------------------
 
 CITATION_RE = re.compile(r"chatkit-link://|\[[^\]]+\]\((https?://|chatkit-link://)")
+
+
+def organization_operations(effects: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    """Yield organization operations from effect previews without changing their order."""
+    for effect in effects:
+        for operation in effect["preview"].get("operations", []):
+            if isinstance(operation, dict):
+                yield operation
 
 
 def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, bool]:
@@ -1012,10 +1014,7 @@ def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
         elif check.startswith("organization_kind:"):
             kind = check.split(":", 1)[1]
             passed = any(
-                operation.get("kind") == kind
-                for effect in effects
-                for operation in effect["preview"].get("operations", [])
-                if isinstance(operation, dict)
+                operation.get("kind") == kind for operation in organization_operations(effects)
             )
         elif check.startswith("organization_path:"):
             path = check.split(":", 1)[1]
@@ -1026,9 +1025,7 @@ def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
                     operation.get("expected_source_path"),
                     operation.get("destination_path"),
                 }
-                for effect in effects
-                for operation in effect["preview"].get("operations", [])
-                if isinstance(operation, dict)
+                for operation in organization_operations(effects)
             )
         elif check.startswith("workspace_path:"):
             _, seed_id, expected_path = check.split(":", 2)
@@ -1075,6 +1072,9 @@ def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
     repeated = max(len(trials) for trials in by_case.values()) > 1 if by_case else False
     trial_summary: dict[str, Any] = {}
     if repeated:
+        all_trials_passed = 0
+        for trials in by_case.values():
+            all_trials_passed += all(trial["passed"] for trial in trials)
         trial_summary = {
             "cases": len(by_case),
             "trials_per_case": max(len(trials) for trials in by_case.values()),
@@ -1082,15 +1082,14 @@ def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
                 sum(1 for trials in by_case.values() if trials[0]["passed"]) / len(by_case), 3
             ),
             "all_trials_pass_rate": round(
-                sum(1 for trials in by_case.values() if all(t["passed"] for t in trials))
-                / len(by_case),
+                all_trials_passed / len(by_case),
                 3,
             ),
         }
     source_grades = [item["source_support"] for item in items if item.get("source_support")]
+    verdict_counts = Counter(grade["verdict"] for grade in source_grades)
     source_summary = {
-        verdict: sum(grade["verdict"] == verdict for grade in source_grades)
-        for verdict in ("pass", "fail", "insufficient_evidence")
+        verdict: verdict_counts[verdict] for verdict in ("pass", "fail", "insufficient_evidence")
     }
     return {
         **trial_summary,
@@ -1132,14 +1131,17 @@ def load_baseline_evaluator(ref: str, directory: Path) -> tuple[ModuleType, str,
 async def run_source_judge_cases(args: argparse.Namespace) -> int:
     """Compare a judge with versioned draft labels without presenting them as human labels."""
     reference_path = Path(args.judge_cases)
-    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    reference_bytes = await asyncio.to_thread(reference_path.read_bytes)
+    reference = json.loads(reference_bytes)
     api_key = resolve_api_key(args.env_file)
     results = []
     baseline_metadata = None
     with tempfile.TemporaryDirectory(prefix="sangam-source-judge-") as tmp:
         baseline = None
         if args.baseline_ref:
-            baseline, commit, source_hash = load_baseline_evaluator(args.baseline_ref, Path(tmp))
+            baseline, commit, source_hash = await asyncio.to_thread(
+                load_baseline_evaluator, args.baseline_ref, Path(tmp)
+            )
             baseline_metadata = {"commit": commit, "runner_sha256": source_hash}
         env = EvalEnvironment(api_key, Path(tmp), "review")
         try:
@@ -1186,13 +1188,19 @@ async def run_source_judge_cases(args: argparse.Namespace) -> int:
     payload = {
         "ran_at": datetime.now(UTC).isoformat(),
         "model": args.judge_model,
-        "reference_sha256": hashlib.sha256(reference_path.read_bytes()).hexdigest(),
+        "reference_sha256": hashlib.sha256(reference_bytes).hexdigest(),
         "baseline": baseline_metadata,
         "label_origin": reference["label_origin"],
         "human_reviewed": reference["human_reviewed"],
-        "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-        "working_tree": subprocess.check_output(
-            ["git", "status", "--short"], text=True
+        "commit": (
+            await asyncio.to_thread(
+                subprocess.check_output, ["git", "rev-parse", "HEAD"], text=True
+            )
+        ).strip(),
+        "working_tree": (
+            await asyncio.to_thread(
+                subprocess.check_output, ["git", "status", "--short"], text=True
+            )
         ).splitlines(),
         "rubric_sha256": hashlib.sha256(SOURCE_SUPPORT_RUBRIC.encode()).hexdigest(),
         "pass_precision": true_pass / len(predicted_pass) if predicted_pass else None,
@@ -1202,7 +1210,9 @@ async def run_source_judge_cases(args: argparse.Namespace) -> int:
         "items": results,
     }
     if args.output:
-        Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        await asyncio.to_thread(
+            Path(args.output).write_text, json.dumps(payload, indent=2), encoding="utf-8"
+        )
     print(
         f"Reference agreement: {matched}/{len(results)}; "
         f"human_reviewed={reference['human_reviewed']}"
@@ -1214,7 +1224,8 @@ async def main_async(args: argparse.Namespace) -> int:
     if args.judge_cases:
         return await run_source_judge_cases(args)
     dataset_path = Path(args.dataset)
-    dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
+    dataset_bytes = await asyncio.to_thread(dataset_path.read_bytes)
+    dataset = json.loads(dataset_bytes)
     items = dataset["items"]
     if args.kind:
         items = [item for item in items if item["kind"] == args.kind]
@@ -1235,7 +1246,7 @@ async def main_async(args: argparse.Namespace) -> int:
         print(f"[evals] running {len(items)} items x {args.trials} trial(s)...\n")
 
         results: list[dict[str, Any]] = []
-        runs = [(item, trial) for item in items for trial in range(args.trials)]
+        runs = list(product(items, range(args.trials)))
         for index, (item, trial) in enumerate(runs):
             env = EvalEnvironment(
                 api_key, Path(tmp) / f"{index}", args.autonomy_mode, web_off=args.web_off
@@ -1326,19 +1337,30 @@ async def main_async(args: argparse.Namespace) -> int:
             "source_support_rubric_sha256": hashlib.sha256(
                 SOURCE_SUPPORT_RUBRIC.encode()
             ).hexdigest(),
-            "web_fixtures_sha256": hashlib.sha256(WEB_FIXTURES.read_bytes()).hexdigest(),
-            "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-            "working_tree": subprocess.check_output(
-                ["git", "status", "--short"],
-                text=True,
+            "web_fixtures_sha256": hashlib.sha256(
+                await asyncio.to_thread(WEB_FIXTURES.read_bytes)
+            ).hexdigest(),
+            "commit": (
+                await asyncio.to_thread(
+                    subprocess.check_output, ["git", "rev-parse", "HEAD"], text=True
+                )
+            ).strip(),
+            "working_tree": (
+                await asyncio.to_thread(
+                    subprocess.check_output, ["git", "status", "--short"], text=True
+                )
             ).splitlines(),
-            "dataset_sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
-            "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "dataset_sha256": hashlib.sha256(dataset_bytes).hexdigest(),
+            "runner_sha256": hashlib.sha256(
+                await asyncio.to_thread(Path(__file__).read_bytes)
+            ).hexdigest(),
             "aggregate": summary,
             "items": results,
         }
         if args.output:
-            Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            await asyncio.to_thread(
+                Path(args.output).write_text, json.dumps(payload, indent=2), encoding="utf-8"
+            )
             print(f"\n[evals] wrote {args.output}")
 
         print("\n=== Per-item ===")

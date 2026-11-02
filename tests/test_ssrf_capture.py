@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from unittest.mock import patch
 
+import httpx
 import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
@@ -10,6 +11,8 @@ from fastapi.testclient import TestClient
 from sangam.errors import ValidationError
 from sangam.ssrf_client import (
     SafeCaptureClient,
+    SafeCaptureResponse,
+    _PinnedBackend,
     is_prohibited_ip,
     resolve_and_validate_host,
     validate_capture_url,
@@ -247,8 +250,6 @@ def test_admin_only_capture_endpoint(client: TestClient) -> None:
 
     # Admin call (unauthenticated local session acts as admin)
     with patch("sangam.capture.SafeCaptureClient.fetch") as mock_fetch:
-        from sangam.ssrf_client import SafeCaptureResponse
-
         mock_fetch.return_value = SafeCaptureResponse(
             original_url="https://example.com/article",
             final_url="https://example.com/article",
@@ -278,8 +279,6 @@ def test_pdf_capture_endpoint(client: TestClient) -> None:
     """Verify that capturing a PDF document imports it into the workspace."""
     pdf_bytes = b"%PDF-1.4 dummy pdf content for testing imports"
     with patch("sangam.capture.SafeCaptureClient.fetch") as mock_fetch:
-        from sangam.ssrf_client import SafeCaptureResponse
-
         mock_fetch.return_value = SafeCaptureResponse(
             original_url="https://example.com/paper.pdf",
             final_url="https://example.com/paper.pdf",
@@ -305,8 +304,6 @@ def test_plain_text_capture_endpoint(client: TestClient) -> None:
     """Verify that capturing a plain text file saves it with provenance."""
     text_bytes = b"Raw text notes from an experiment."
     with patch("sangam.capture.SafeCaptureClient.fetch") as mock_fetch:
-        from sangam.ssrf_client import SafeCaptureResponse
-
         mock_fetch.return_value = SafeCaptureResponse(
             original_url="https://example.com/notes.txt",
             final_url="https://example.com/notes.txt",
@@ -330,8 +327,6 @@ def test_plain_text_capture_endpoint(client: TestClient) -> None:
 
 def test_timeout_raises_validation_error() -> None:
     """A hanging request exceeding timeout raises ValidationError."""
-    import httpx
-
     timeout_exc = httpx.TimeoutException("Connection timed out")
     with patch.object(httpx.Client, "stream", side_effect=timeout_exc):
         client = SafeCaptureClient(resolver=lambda h, p: ["93.184.216.34"])
@@ -342,8 +337,6 @@ def test_timeout_raises_validation_error() -> None:
 
 def test_pinned_backend_connects_to_ip() -> None:
     """Ensure PinnedBackend connects strictly to the pre-validated IP."""
-    from sangam.ssrf_client import _PinnedBackend
-
     backend = _PinnedBackend("93.184.216.34")
     with patch("httpcore._backends.sync.SyncBackend.connect_tcp") as mock_connect:
         backend.connect_tcp("malicious.example.com", 80)
@@ -362,8 +355,6 @@ def test_capture_url_attaches_to_project(client: TestClient) -> None:
     project_id = project_resp.json()["project_id"]
 
     with patch("sangam.capture.SafeCaptureClient.fetch") as mock_fetch:
-        from sangam.ssrf_client import SafeCaptureResponse
-
         mock_fetch.return_value = SafeCaptureResponse(
             original_url="https://example.com/project-article",
             final_url="https://example.com/project-article",

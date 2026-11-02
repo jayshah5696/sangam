@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
@@ -265,8 +267,6 @@ def test_comment_input_sanitization(client: TestClient) -> None:
 
 
 def test_concurrent_comment_resolution_version_precondition(client: TestClient) -> None:
-    import concurrent.futures
-
     doc = create_doc(client, "Doc Concurrency", "Concurrent comment resolution test text.")
     doc_id = doc["document_id"]
     rev_id = doc["current_revision_id"]

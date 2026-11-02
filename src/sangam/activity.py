@@ -986,6 +986,7 @@ class ActivityService:
             details=details,
         )
 
+        item: _AuditEventItem | None = None
         with self._queue_lock:
             if actual_size_bytes > reservation._reserved_bytes:
                 extra = actual_size_bytes - reservation._reserved_bytes
@@ -1041,7 +1042,7 @@ class ActivityService:
                     self._producers_done.notify_all()
                 self._queue_condition.notify_all()
 
-        if not can_queue:
+        if item is None:
             self._persist_row_direct(row)
             return
 
@@ -1530,7 +1531,10 @@ class ActivityService:
             buckets=[
                 ActivityBucket(
                     start=row["bucket"],
-                    **{key: row[key] or 0 for key in ("accepted", "denied", "conflict", "failed")},
+                    accepted=row["accepted"] or 0,
+                    denied=row["denied"] or 0,
+                    conflict=row["conflict"] or 0,
+                    failed=row["failed"] or 0,
                 )
                 for row in bucket_rows
             ],

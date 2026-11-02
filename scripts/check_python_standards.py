@@ -40,7 +40,7 @@ def check_source(source: str) -> list[Violation]:
                         node.lineno,
                         node.col_offset + 1,
                         "GPC001",
-                        "Use a loop instead of multiple for/filter clauses or nested comprehensions.",
+                        "Use a loop instead of multiple clauses or nested comprehensions.",
                     )
                 )
         elif isinstance(node, ast.IfExp):

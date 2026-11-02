@@ -1114,7 +1114,8 @@ class DocumentService:
         new_title = title.strip() if title and title.strip() else f"{source.title} copy"
         pdf_research = getattr(self, "pdf_research", None)
         if pdf_research is None:
-            from sangam.pdf_research import PdfResearchService
+            # PdfResearchService imports DocumentService; load the fallback after startup.
+            from sangam.pdf_research import PdfResearchService  # noqa: PLC0415
 
             pdf_research = PdfResearchService(
                 database=self.database,
@@ -1866,7 +1867,7 @@ class DocumentService:
             ordering = "bm25(document_search), d.document_id"
         elif sort == "relevance":
             ordering = "d.updated_at DESC, d.document_id"
-        elif sort != "relevance":
+        else:
             raise ValidationError(f"Unsupported search sort: {sort}")
         parameters.extend((limit, offset))
         with self.database.connection() as connection:

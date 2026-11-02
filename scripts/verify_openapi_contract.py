@@ -83,8 +83,7 @@ def main() -> None:
             "The classifier does not cover every OpenAPI feature."
         )
         raise SystemExit(1)
-    else:
-        print(f"OpenAPI contract matches the reviewed baseline: {actual}")
+    print(f"OpenAPI contract matches the reviewed baseline: {actual}")
 
 
 def _openapi_document() -> dict:

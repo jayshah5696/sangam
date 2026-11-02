@@ -19,11 +19,11 @@ class _KarakeepContentPayload(BaseModel):
 
     type: str = "unknown"
     url: str | None = None
-    sourceUrl: str | None = None
+    source_url: str | None = Field(default=None, alias="sourceUrl")
     title: str | None = None
-    fileName: str | None = None
+    file_name: str | None = Field(default=None, alias="fileName")
     author: str | None = None
-    htmlContent: str | None = None
+    html_content: str | None = Field(default=None, alias="htmlContent")
     text: str | None = None
     content: str | None = None
     description: str | None = None
@@ -39,16 +39,16 @@ class _KarakeepAssetPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
-    assetType: str = "unknown"
-    fileName: str | None = None
+    asset_type: str = Field(default="unknown", alias="assetType")
+    file_name: str | None = Field(default=None, alias="fileName")
 
 
 class _KarakeepBookmarkPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
-    createdAt: str
-    modifiedAt: str | None = None
+    created_at: str = Field(alias="createdAt")
+    modified_at: str | None = Field(default=None, alias="modifiedAt")
     title: str | None = None
     summary: str | None = None
     note: str | None = None
@@ -61,7 +61,7 @@ class _KarakeepSearchPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     bookmarks: list[_KarakeepBookmarkPayload]
-    nextCursor: str | None = None
+    next_cursor: str | None = Field(default=None, alias="nextCursor")
 
 
 @dataclass(frozen=True)
@@ -143,7 +143,7 @@ class KarakeepClient:
                 self._to_source(bookmark, raw_payload=raw_bookmark)
                 for bookmark, raw_bookmark in zip(payload.bookmarks, raw_bookmarks, strict=True)
             ),
-            next_cursor=payload.nextCursor,
+            next_cursor=payload.next_cursor,
         )
 
     def bookmark(self, bookmark_id: str) -> KarakeepSourceBookmark:
@@ -194,16 +194,16 @@ class KarakeepClient:
             if content.type in {"link", "text", "asset"}
             else "unknown"
         )
-        title = payload.title or content.title or content.fileName or "Untitled import"
-        source_url = content.url or content.sourceUrl
+        title = payload.title or content.title or content.file_name or "Untitled import"
+        source_url = content.url or content.source_url
         if source_url and urlsplit(source_url).scheme not in {"http", "https"}:
             source_url = None
         tags = tuple(dict.fromkeys(tag.name.strip() for tag in payload.tags if tag.name.strip()))
         assets = tuple(
             KarakeepAsset(
                 asset_id=asset.id,
-                asset_type=asset.assetType,
-                file_name=asset.fileName,
+                asset_type=asset.asset_type,
+                file_name=asset.file_name,
             )
             for asset in payload.assets
         )
@@ -218,11 +218,11 @@ class KarakeepClient:
             content_type=content_type,
             source_url=source_url,
             author=content.author,
-            created_at=payload.createdAt,
-            modified_at=payload.modifiedAt,
+            created_at=payload.created_at,
+            modified_at=payload.modified_at,
             tags=tags,
             assets=assets,
-            source_html=content.htmlContent or "",
+            source_html=content.html_content or "",
             source_text=content.text or content.content or "",
             fallback_text=fallback_text,
             source_payload_json=json.dumps(raw_payload, sort_keys=True, separators=(",", ":")),

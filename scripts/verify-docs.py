@@ -48,7 +48,9 @@ def verify_file(path: Path) -> list[str]:
 
 
 def main() -> int:
-    errors = [error for path in MARKDOWN_FILES for error in verify_file(path)]
+    errors = []
+    for path in MARKDOWN_FILES:
+        errors.extend(verify_file(path))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

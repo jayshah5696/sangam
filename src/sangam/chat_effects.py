@@ -222,13 +222,12 @@ class ChatEffectService:
             )
             result = {**summary.model_dump(mode="json"), "approved": True, "status": "registered"}
             return EffectOutcome(result, dict(result), "chat_skill", summary.skill_id)
-        else:
-            skill = self.skills.get_by_document(principal, manage_input.document_id)
-            if not skill:
-                raise NotFoundError("Skill not found for this document")
-            self.skills.unregister(principal, operation_key, skill.skill_id)
-            result = {"skill_id": skill.skill_id, "approved": True, "status": "unregistered"}
-            return EffectOutcome(result, dict(result), "chat_skill", skill.skill_id)
+        skill = self.skills.get_by_document(principal, manage_input.document_id)
+        if not skill:
+            raise NotFoundError("Skill not found for this document")
+        self.skills.unregister(principal, operation_key, skill.skill_id)
+        result = {"skill_id": skill.skill_id, "approved": True, "status": "unregistered"}
+        return EffectOutcome(result, dict(result), "chat_skill", skill.skill_id)
 
     def _task_correction_committed(self, actor: str, key: str) -> bool:
         with self.database.connection() as conn:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
+import threading
 from pathlib import Path
 
 import pytest
 
-from sangam.errors import InvalidPathError, ValidationError
+from sangam.errors import ConflictError, InvalidPathError, ValidationError
 from sangam.security import normalize_scope_prefix
 from sangam.workspace import DiskWorkspaceFilesystem
 
@@ -128,8 +131,6 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
 
 
 def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> None:
-    import threading
-
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     doc_path = "race_write.md"
 
@@ -164,8 +165,6 @@ def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> 
 def test_concurrent_move_document_prevents_overwrite_and_prunes_staging(
     tmp_path: Path,
 ) -> None:
-    import threading
-
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     workspace.write_atomic("source1.md", "source 1 content")
     workspace.write_atomic("source2.md", "source 2 content")
@@ -217,10 +216,6 @@ def test_concurrent_move_document_prevents_overwrite_and_prunes_staging(
 def test_concurrent_restore_trash_document_prevents_overwrite_and_prunes_staging(
     tmp_path: Path,
 ) -> None:
-    import threading
-
-    from sangam.errors import ConflictError
-
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
 
     # Create and trash two separate documents
@@ -273,8 +268,6 @@ def test_concurrent_restore_trash_document_prevents_overwrite_and_prunes_staging
 
 
 def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
-    import threading
-
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     doc_path = "concurrent.md"
     workspace.write_atomic(doc_path, "initial content")
@@ -328,9 +321,6 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
 def test_directory_fsync_oserror_resilience_during_concurrent_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import os
-    import threading
-
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     doc_path = "unsupported_fsync/doc.md"
     workspace.write_atomic(doc_path, "initial content")
@@ -341,7 +331,6 @@ def test_directory_fsync_oserror_resilience_during_concurrent_writes(
         # If the file descriptor corresponds to a directory, simulate unsupported fsync
         try:
             stat_res = os.fstat(fd)
-            import stat
 
             if stat.S_ISDIR(stat_res.st_mode):
                 raise OSError(22, "Invalid argument: fsync not supported on directory descriptor")
