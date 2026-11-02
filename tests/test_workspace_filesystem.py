@@ -105,6 +105,31 @@ def test_scan_ignores_sangam_temporary_files(tmp_path: Path) -> None:
     }
 
 
+def test_scan_documents_skips_symlinks_and_traversal_targets(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    workspace = DiskWorkspaceFilesystem(workspace_dir)
+    workspace.write_atomic("valid.md", "valid content")
+
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_doc = outside_dir / "secret.md"
+    outside_doc.write_text("secret content", encoding="utf-8")
+
+    # Symlink to outside file
+    (workspace_dir / "linked_secret.md").symlink_to(outside_doc)
+
+    # Symlink to outside directory
+    (workspace_dir / "linked_dir").symlink_to(outside_dir, target_is_directory=True)
+
+    # Symlink to inside file
+    (workspace_dir / "linked_valid.md").symlink_to(workspace_dir / "valid.md")
+
+    scanned = workspace.scan_documents()
+    assert scanned == {
+        "valid.md": hashlib.sha256(b"valid content").hexdigest(),
+    }
+
+
 def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
