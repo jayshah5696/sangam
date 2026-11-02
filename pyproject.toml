@@ -68,7 +68,22 @@ select = [
   "S307",    # No eval.
   "S506",    # No unsafe YAML loading.
   "S602",    # No subprocess shell execution.
+  "N",       # PEP 8 naming.
+  "A",       # Do not shadow builtins.
+  "C4",      # Prefer direct comprehensions and generator expressions.
+  "PIE",     # Remove redundant constructs and duplicate definitions.
+  "RET",     # Keep return paths explicit and avoid unnecessary nesting.
+  "PLC", "PLE", "PLW",  # Pylint convention, correctness, and warning checks.
+  "LOG",     # Correct logging API usage.
+  "ASYNC",   # Do not block or misuse asynchronous operations.
+  "D2", "D3", "D4",    # Check existing docstrings using Google's convention.
+  "RUF008", "RUF012",   # No accidental mutable dataclass or class defaults.
+  "RUF100",             # Remove obsolete lint suppressions.
+  "TRY002", "TRY203", "TRY400", "TRY401",  # Preserve useful exception evidence.
 ]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -76,10 +91,11 @@ addopts = "-q"
 
 [tool.mypy]
 python_version = "3.13"
+strict = true
 check_untyped_defs = true
 ignore_missing_imports = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
 warn_return_any = true
 warn_redundant_casts = true
-enable_error_code = ["exhaustive-match", "ignore-without-code"]
+enable_error_code = ["exhaustive-match", "ignore-without-code", "possibly-undefined", "unused-awaitable"]

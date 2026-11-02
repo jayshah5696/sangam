@@ -82,7 +82,8 @@ test-e2e-webkit-local args="":
 
 # Run the Python lint, format, type, API-contract, and test gates. Tests run in parallel.
 test-python:
-    uv run ruff check .
+    just lint-python
+    just test-python-standards
     uv run ruff format --check .
     just typecheck
     uv run python scripts/verify_openapi_contract.py
@@ -112,6 +113,15 @@ format-python args=".":
 # Check selected Python files.
 lint-python args=".":
     uv run ruff check {{ args }}
+    just python-standards
+
+# Check Google-derived expression rules that Ruff does not implement.
+python-standards:
+    uv run python scripts/check_python_standards.py
+
+# Exercise accepted and rejected syntax for the project Python lint rules.
+test-python-standards:
+    uv run pytest tests/test_python_standards.py
 
 # Explain OpenAPI changes against the reviewed contract.
 verify-openapi:
@@ -335,7 +345,7 @@ anti-slop:
 
 # Check Python and frontend code style, anti-slop rules, and linting.
 lint:
-    uv run ruff check .
+    just lint-python
     just lint-frontend
 
 # Check frontend lint rules, including type-aware correctness checks.
