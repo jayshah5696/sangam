@@ -67,7 +67,7 @@ def test_cli_reports_location_and_nonzero_exit_for_invalid_source(tmp_path: Path
     source = tmp_path / "invalid.py"
     source.write_text("items = [x for row in rows for x in row]\n", encoding="utf-8")
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(source)], capture_output=True, text=True
+        [sys.executable, str(SCRIPT), str(source)], capture_output=True, text=True, check=False
     )
     assert result.returncode == 1
     assert f"{source}:1:9: GPC001" in result.stdout
@@ -77,7 +77,7 @@ def test_cli_rejects_invalid_python_without_a_traceback(tmp_path: Path) -> None:
     source = tmp_path / "invalid.py"
     source.write_text("def broken(\n", encoding="utf-8")
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(source)], capture_output=True, text=True
+        [sys.executable, str(SCRIPT), str(source)], capture_output=True, text=True, check=False
     )
     assert result.returncode == 1
     assert "GPC000" in result.stdout
