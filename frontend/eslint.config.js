@@ -14,6 +14,22 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/**/*.{ts,tsx}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/switch-exhaustiveness-check': [
+        'error',
+        { considerDefaultExhaustiveForUnions: false },
+      ],
+      '@typescript-eslint/no-floating-promises': 'error',
+    },
+  },
+  {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
     languageOptions: {

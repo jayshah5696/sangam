@@ -24,7 +24,8 @@ blocks are validated by CI.
 
 ## Conventions
 
-- Backend: Python 3.13+, FastAPI, typed end to end (mypy strict). Follow the
+- Read [coding-standards.md](coding-standards.md) for enforced rules and their scope.
+- Backend: Python 3.13+, FastAPI, application-wide mypy checks. Follow the
   existing service-module layout under `src/sangam/`.
 - Frontend: React 19, TypeScript, TanStack Router/Query, CodeMirror 6.
   Read [ui-system.md](ui-system.md) before touching any UI; reuse semantic

@@ -60,7 +60,15 @@ target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = [
+  "E", "F", "I", "UP", "B", "SIM",
+  "BLE001",  # Catch specific exceptions, or preserve the traceback.
+  "DTZ",     # Use explicit timezones.
+  "G",       # Keep logging arguments separate from the format string.
+  "S307",    # No eval.
+  "S506",    # No unsafe YAML loading.
+  "S602",    # No subprocess shell execution.
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -71,3 +79,7 @@ python_version = "3.13"
 check_untyped_defs = true
 ignore_missing_imports = true
 warn_unused_ignores = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_redundant_casts = true
+enable_error_code = ["exhaustive-match", "ignore-without-code"]
