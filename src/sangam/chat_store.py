@@ -27,8 +27,8 @@ class OwnerContext(Protocol):
 TContext = TypeVar("TContext", bound=OwnerContext)
 T = TypeVar("T")
 
-_THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
-_ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
+_THREAD_ITEM_ADAPTER: TypeAdapter[ThreadItem] = TypeAdapter(ThreadItem)
+_ATTACHMENT_ADAPTER: TypeAdapter[Attachment] = TypeAdapter(Attachment)
 _CHAT_PAYLOAD_VERSION = 1
 
 

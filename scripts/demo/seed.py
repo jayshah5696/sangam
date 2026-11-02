@@ -173,7 +173,9 @@ try:
         },
         token=agent_token,
     )
-except Exception:
+except urllib.error.HTTPError as error:
+    if error.code != 403:
+        raise
     print("Agent creation denied as expected for read-only scope")
     created = None
 

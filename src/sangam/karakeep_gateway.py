@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 from urllib.parse import quote, urlsplit
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
 from sangam.errors import IntegrationError
@@ -132,14 +133,15 @@ class KarakeepClient:
         raw = self._request_json("/bookmarks/search", params=params)
         try:
             payload = _KarakeepSearchPayload.model_validate(raw)
+            raw_bookmarks = TypeAdapter(list[dict[str, JsonValue]]).validate_python(
+                raw.get("bookmarks", [])
+            )
         except PydanticValidationError as error:
             raise IntegrationError("Karakeep returned an invalid search response") from error
         return KarakeepSourcePage(
             bookmarks=tuple(
                 self._to_source(bookmark, raw_payload=raw_bookmark)
-                for bookmark, raw_bookmark in zip(
-                    payload.bookmarks, raw.get("bookmarks", []), strict=True
-                )
+                for bookmark, raw_bookmark in zip(payload.bookmarks, raw_bookmarks, strict=True)
             ),
             next_cursor=payload.nextCursor,
         )
@@ -156,7 +158,9 @@ class KarakeepClient:
             raise IntegrationError("Karakeep returned a different bookmark than requested")
         return self._to_source(payload, raw_payload=raw)
 
-    def _request_json(self, path: str, *, params: dict[str, object]) -> dict[str, object]:
+    def _request_json(
+        self, path: str, *, params: Mapping[str, str | int | bool]
+    ) -> dict[str, JsonValue]:
         try:
             response = httpx.get(
                 f"{self.base_url}{path}",
@@ -169,7 +173,7 @@ class KarakeepClient:
                 follow_redirects=False,
             )
             response.raise_for_status()
-            payload = response.json()
+            payload = TypeAdapter(dict[str, JsonValue]).validate_python(response.json())
         except (httpx.HTTPError, ValueError) as error:
             raise IntegrationError(
                 "Karakeep could not be reached or returned an invalid response"
@@ -184,7 +188,12 @@ class KarakeepClient:
     ) -> KarakeepSourceBookmark:
         content = payload.content or _KarakeepContentPayload()
         content_type: Literal["link", "text", "asset", "unknown"]
-        content_type = content.type if content.type in {"link", "text", "asset"} else "unknown"
+        # The membership check restricts the external string to these literal values.
+        content_type = (
+            cast(Literal["link", "text", "asset"], content.type)
+            if content.type in {"link", "text", "asset"}
+            else "unknown"
+        )
         title = payload.title or content.title or content.fileName or "Untitled import"
         source_url = content.url or content.sourceUrl
         if source_url and urlsplit(source_url).scheme not in {"http", "https"}:

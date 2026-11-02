@@ -473,7 +473,8 @@ async def grade_source_support(
         async for _event in result.stream_events():
             pass
         raise
-    except Exception as error:
+    # Record any provider failure as an inconclusive grade after draining its stream.
+    except Exception as error:  # noqa: BLE001
         result.cancel()
         # Drain the SDK stream to settle provider tasks after timeout or invalid JSON.
         with contextlib.suppress(Exception):

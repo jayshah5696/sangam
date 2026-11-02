@@ -133,23 +133,26 @@ def _estimate_value_bound(val: object, depth: int = 0) -> int:
     return 64
 
 
+type AuditEventRow = tuple[
+    str,
+    str,
+    str,
+    str | None,
+    str,
+    str,
+    str | None,
+    str | None,
+    str,
+    str | None,
+    str | None,
+    str,
+    str,
+]
+
+
 @dataclass
 class _AuditEventItem:
-    row: tuple[
-        str,
-        str,
-        str,
-        str | None,
-        str,
-        str,
-        str | None,
-        str | None,
-        str,
-        str | None,
-        str | None,
-        str,
-        str,
-    ]
+    row: AuditEventRow
     size_bytes: int
     future: concurrent.futures.Future[None]
     is_oversized: bool = False
@@ -359,7 +362,7 @@ class ActivityService:
             with self.database.transaction() as probe_conn:
                 probe_conn.execute("SELECT 1")
             return True
-        except Exception:
+        except (sqlite3.Error, OSError):
             return False
 
     def reconcile_event(self, event_id: str) -> str:
@@ -546,7 +549,8 @@ class ActivityService:
         connection: sqlite3.Connection | None = None
         try:
             connection = self.database.connect()
-        except Exception as error:
+        # Any worker startup failure must mark audit admission unhealthy.
+        except Exception as error:  # noqa: BLE001
             self._worker_healthy = False
             self._worker_error = error
             return
@@ -594,7 +598,7 @@ class ActivityService:
         return False
 
     @staticmethod
-    def _is_terminal_error(error: Exception) -> bool:
+    def _is_terminal_error(error: Exception | None) -> bool:
         if isinstance(error, sqlite3.DatabaseError):
             msg = str(error).lower()
             if "malformed" in msg or "corrupt" in msg or "not a database" in msg:
@@ -634,7 +638,8 @@ class ActivityService:
                         item.future.set_result(None)
                 last_error = None
                 break
-            except Exception as error:
+            # Deliver every commit failure to the producers through their futures.
+            except Exception as error:  # noqa: BLE001
                 with suppress(Exception):
                     connection.rollback()
                 last_error = error
@@ -681,7 +686,7 @@ class ActivityService:
         error_code: str | None = None,
         revision_id: str | None = None,
         details: dict[str, object] | None = None,
-    ) -> tuple[tuple[object, ...], int]:
+    ) -> tuple[AuditEventRow, int]:
         safe_details = {
             key: sanitize_sensitive_data(value)
             for key, value in (details or {}).items()
@@ -1370,13 +1375,13 @@ class ActivityService:
                 [*parameters, list_limit + 1],
             ).fetchall()
 
-            def document_rows(metric: str) -> list[object]:
+            def document_rows(metric: str) -> list[sqlite3.Row]:
                 metric_condition = {
                     "changed": f"e.outcome = 'accepted' AND e.action IN ({change_actions})",
                     "read": "e.outcome = 'accepted' AND e.action LIKE 'read%'",
                     "problem": "e.outcome IN ('denied', 'conflict', 'failed')",
                 }[metric]
-                return connection.execute(
+                rows: list[sqlite3.Row] = connection.execute(
                     f"""
                     SELECT e.resource_id AS document_id, d.title, d.path AS current_path,
                         MAX(e.path) AS historical_path, COUNT(*) AS count
@@ -1389,6 +1394,7 @@ class ActivityService:
                     """,
                     [*parameters, list_limit + 1],
                 ).fetchall()
+                return rows
 
             changed_rows = document_rows("changed")
             read_rows = document_rows("read")
@@ -1501,7 +1507,7 @@ class ActivityService:
                 """
             ).fetchone()
 
-        def documents(rows: list[object]) -> list[ActivityDocumentSummary]:
+        def documents(rows: list[sqlite3.Row]) -> list[ActivityDocumentSummary]:
             return [ActivityDocumentSummary.model_validate(dict(row)) for row in rows[:list_limit]]
 
         health = AgentAccessHealth(

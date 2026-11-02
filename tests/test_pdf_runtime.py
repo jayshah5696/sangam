@@ -269,7 +269,8 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
                             concurrent_errors.append(
                                 "Read zero bytes from output file during write!"
                             )
-                    except Exception as err:
+                    # Collect every worker failure for assertion after joining the threads.
+                    except Exception as err:  # noqa: BLE001
                         concurrent_errors.append(f"Read error during write: {err}")
                 time.sleep(0.001)
 

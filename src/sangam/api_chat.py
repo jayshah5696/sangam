@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Annotated, Literal
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
@@ -9,6 +9,8 @@ from uuid import uuid4
 from chatkit.server import NonStreamingResult, StreamingResult
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.responses import ContentStream
+from starlette.types import Receive, Scope, Send
 
 from sangam.access import writes
 from sangam.chat import ChatRequestContext, SangamChatServer
@@ -25,6 +27,7 @@ from sangam.chat_profiles import (
 from sangam.chat_runtime import ChatAdmissionLease, read_limited_body
 from sangam.chat_skills import RegisterSkillRequest, SkillSummary
 from sangam.errors import NotFoundError, ServiceUnavailableError, ValidationError
+from sangam.provider_connections import ProviderConnection as ResolvedProviderConnection
 from sangam.schemas import (
     AcknowledgeChatEffectsRequest,
     ApplyChatProposal,
@@ -462,11 +465,18 @@ def create_chat_router(
 
 
 class _LeasedStreamingResponse(StreamingResponse):
-    def __init__(self, response: StreamingResult, lease: ChatAdmissionLease, **kwargs: object):
-        super().__init__(response, **kwargs)
+    def __init__(
+        self,
+        response: ContentStream,
+        lease: ChatAdmissionLease,
+        *,
+        media_type: str | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(response, media_type=media_type, headers=headers)
         self._lease = lease
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
             await super().__call__(scope, receive, send)
         finally:
@@ -499,7 +509,7 @@ def _request_is_loopback(request: Request, origin: str | None) -> bool:
     return hostname in {"localhost", "127.0.0.1", "::1"}
 
 
-def _connection_schema(value) -> ProviderConnection:
+def _connection_schema(value: ResolvedProviderConnection) -> ProviderConnection:
     return ProviderConnection(
         connection_id=value.connection_id,
         name=value.name,

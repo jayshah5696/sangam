@@ -477,7 +477,8 @@ def test_concurrent_folder_metadata_atomic_write_and_cleanup(
                 try:
                     content = manifest_file.read_bytes()
                     read_results.append(content)
-                except Exception as exc:
+                # Collect every worker failure for assertion after joining the threads.
+                except Exception as exc:  # noqa: BLE001
                     read_errors.append(str(exc))
 
     reader_thread = threading.Thread(target=reader)

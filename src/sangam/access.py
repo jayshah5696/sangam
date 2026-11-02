@@ -431,6 +431,7 @@ class WorkspaceAccessService:
                             and replay.operation == "create"
                             and replay.revision_id is not None
                             and isinstance(body, DuplicateDocument)
+                            and body.expected_revision_id is not None
                             and self.documents.legacy_duplicate_replay_matches(
                                 connection,
                                 actor_id=principal.actor_id,
@@ -912,6 +913,7 @@ class WorkspaceAccessService:
     ) -> DocumentComment:
         if self.comments is None:
             raise ServiceUnavailableError("Document comments are not configured")
+        comments = self.comments
         current = self.documents.get_document(document_id)
         details: dict[str, object] = {
             "action_type": "comment",
@@ -926,7 +928,7 @@ class WorkspaceAccessService:
             capability=Capability.UPDATE,
             action=writes("comment", "document"),
             current=current,
-            operation=lambda: self.comments.create_comment(
+            operation=lambda: comments.create_comment(
                 document_id=document_id,
                 request=request,
                 actor_id=principal.actor_id,
@@ -944,6 +946,7 @@ class WorkspaceAccessService:
     ) -> DocumentComment:
         if self.comments is None:
             raise ServiceUnavailableError("Document comments are not configured")
+        comments = self.comments
         current = self.documents.get_document(document_id)
         details: dict[str, object] = {
             "action_type": "resolve_comment",
@@ -954,10 +957,10 @@ class WorkspaceAccessService:
         }
 
         def operation() -> DocumentComment:
-            comment = self.comments.get_comment(comment_id)
+            comment = comments.get_comment(comment_id)
             if comment.document_id != document_id:
                 raise NotFoundError(f"Comment not found: {comment_id}")
-            return self.comments.resolve_comment(
+            return comments.resolve_comment(
                 comment_id=comment_id,
                 resolved=request.resolved,
                 expected_version=request.expected_version,
@@ -1672,12 +1675,14 @@ class WorkspaceAccessService:
                     principal, operation=operation, idempotency_key=child_key
                 )
             except SangamError as error:
-                status = "conflicted" if isinstance(error, ConflictError) else "failed"
+                failure_status: Literal["conflicted", "failed"] = (
+                    "conflicted" if isinstance(error, ConflictError) else "failed"
+                )
                 results.append(
                     OrganizationPlanItemResult(
                         index=index,
                         kind=operation.kind,
-                        status=status,
+                        status=failure_status,
                         resource_type=_plan_resource_type(operation.kind),
                         resource_id=getattr(
                             operation, "document_id", getattr(operation, "folder_id", None)
@@ -1744,8 +1749,8 @@ class WorkspaceAccessService:
         completed = sum(item.status == "completed" for item in results)
         conflicted = sum(item.status == "conflicted" for item in results)
         failed = sum(item.status == "failed" for item in results)
-        skipped = sum(item.status == "skipped" for item in results)
-        status = (
+        skipped_count = sum(item.status == "skipped" for item in results)
+        status: Literal["completed", "partial", "failed"] = (
             "completed"
             if completed == len(normalized.operations)
             else "partial"
@@ -1756,7 +1761,7 @@ class WorkspaceAccessService:
             status=status,
             argument_digest=digest,
             completed=completed,
-            skipped=skipped,
+            skipped=skipped_count,
             conflicted=conflicted,
             failed=failed,
             items=results,
@@ -2562,7 +2567,8 @@ class WorkspaceAccessService:
                             revision_id=recorded_revision_id,
                             details=fail_details,
                         )
-                    except Exception as ae:
+                    # Chain any audit failure to the original operation error below.
+                    except Exception as ae:  # noqa: BLE001
                         audit_err = ae
                 elif audit_inserted or reservation.spent:
                     outcome = (
@@ -2588,7 +2594,8 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=fail_details or None,
                         )
-                    except Exception as ae:
+                    # Chain any audit failure to the original operation error below.
+                    except Exception as ae:  # noqa: BLE001
                         audit_err = ae
                 else:
                     outcome = (
@@ -2612,7 +2619,8 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=combined_details or None,
                         )
-                    except Exception as ae:
+                    # Chain any audit failure to the original operation error below.
+                    except Exception as ae:  # noqa: BLE001
                         audit_err = ae
 
                 if audit_err is not None:

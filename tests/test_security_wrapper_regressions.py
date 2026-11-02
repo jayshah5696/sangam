@@ -67,7 +67,8 @@ def _cross_create_replay_process(root: str, result_pipe) -> None:
                     headers=headers(f"create-{'b' if index == 0 else 'a'}"),
                 )
                 responses.append(response.status_code)
-            except Exception as error:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as error:  # noqa: BLE001
                 errors.append(repr(error))
 
         workers = [
@@ -369,7 +370,8 @@ def test_audit_readmission_refreshes_diff_after_waiting_for_capacity(client):
                     headers={**headers("waiting-update"), "If-Match": "*"},
                 )
             )
-        except Exception as error:
+        # Collect every worker failure for assertion after joining the threads.
+        except Exception as error:  # noqa: BLE001
             errors.append(repr(error))
 
     worker = threading.Thread(target=update, daemon=True)

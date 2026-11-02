@@ -450,7 +450,7 @@ class ReconciliationService:
 
     def _get_open_conflict(self, conflict_id: str, expected_type: str) -> sqlite3.Row:
         with self.database.connection() as connection:
-            conflict = connection.execute(
+            conflict: sqlite3.Row | None = connection.execute(
                 "SELECT * FROM reconciliation_conflicts WHERE conflict_id = ? AND status = 'open'",
                 (conflict_id,),
             ).fetchone()

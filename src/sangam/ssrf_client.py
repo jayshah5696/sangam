@@ -147,7 +147,7 @@ def resolve_and_validate_host(
     else:
         try:
             addr_info = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-            resolved_ips = [info[4][0] for info in addr_info]
+            resolved_ips = [str(info[4][0]) for info in addr_info]
         except socket.gaierror as exc:
             raise ValidationError(f"DNS resolution failed for '{hostname}': {exc}") from exc
 
@@ -342,13 +342,10 @@ class SafeCaptureClient:
                 raise ValidationError(f"Capture network request failed: {exc}") from exc
 
     def _extract_title(self, html_bytes: bytes) -> str | None:
-        try:
-            # Decode prefix to find <title>
-            sample = html_bytes[:65536].decode("utf-8", errors="ignore")
-            match = re.search(r"<title\b[^>]*>(.*?)</title>", sample, re.IGNORECASE | re.DOTALL)
-            if match:
-                title = re.sub(r"\s+", " ", match.group(1)).strip()
-                return title if title else None
-        except Exception:
-            pass
+        # Decode prefix to find <title>; invalid UTF-8 bytes are ignored.
+        sample = html_bytes[:65536].decode("utf-8", errors="ignore")
+        match = re.search(r"<title\b[^>]*>(.*?)</title>", sample, re.IGNORECASE | re.DOTALL)
+        if match:
+            title = re.sub(r"\s+", " ", match.group(1)).strip()
+            return title if title else None
         return None

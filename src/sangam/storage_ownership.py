@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from pathlib import Path
 from types import TracebackType
 
-if os.name == "nt":
+if sys.platform == "win32":
     import msvcrt
 else:
     import fcntl
@@ -44,7 +45,7 @@ class StorageOwnership:
 
     def _lock_descriptor(self, identity: Path, descriptor: int) -> None:
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 os.lseek(descriptor, 0, os.SEEK_SET)
                 msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
             else:

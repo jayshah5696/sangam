@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 import uuid
@@ -59,7 +60,8 @@ class ChatProposalRepository:
         if row is None:
             raise NotFoundError(f"Chat thread not found: {thread_id}")
         validate_action_ownership(principal, thread_owner=row["created_by"])
-        return row["created_by"]
+        owner_id: str = row["created_by"]
+        return owner_id
 
     def create(
         self,
@@ -306,7 +308,7 @@ class ChatProposalRepository:
     def _owned_row(
         connection: sqlite3.Connection, principal: Principal, proposal_id: str
     ) -> sqlite3.Row:
-        row = connection.execute(
+        row: sqlite3.Row | None = connection.execute(
             """
             SELECT proposal.*, thread.created_by AS proposal_owner_id,
                 context.actor_id AS evidence_actor_id,
@@ -451,6 +453,7 @@ class ChatProposalService:
                     content=resolved_content,
                 )
             except Exception:
+                logging.getLogger(__name__).exception("Automatic proposal application failed")
                 return visible
         return visible
 
@@ -460,7 +463,7 @@ class ChatProposalService:
         citations: list[ProposalCitationInput] | list[dict[str, str | int | None]],
     ) -> list[ChatProposalCitation]:
         try:
-            inputs = TypeAdapter(
+            inputs: list[ProposalCitationInput] = TypeAdapter(
                 Annotated[list[ProposalCitationInput], Field(max_length=20)]
             ).validate_python(citations)
         except PayloadValidationError as error:
@@ -842,7 +845,7 @@ def _patch_error(code: str, message: str) -> ValidationError:
 def _proposal_from_row(row: sqlite3.Row) -> ChatProposal:
     context_id = row["context_id"]
     evidence = None
-    evidence_status = "not_recorded"
+    evidence_status: Literal["not_recorded", "recorded", "unavailable"] = "not_recorded"
     if context_id is not None and row["evidence_actor_id"] == row["proposal_owner_id"]:
         evidence = ChatProposalEvidence(
             context_id=context_id,

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
 from sangam.errors import NotFoundError, ValidationError, validate_metadata_text
-from sangam.schemas import Document, DocumentAsset
+from sangam.schemas import Document, DocumentAsset, ImageMediaType
 from sangam.workspace import WorkspaceFilesystem
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 ATTACHMENTS_FOLDER = "attachments"
 
 # SVG is excluded on purpose: it is a script-capable document, not a picture.
-_SIGNATURES: dict[str, tuple[str, tuple[bytes, ...]]] = {
+_SIGNATURES: dict[ImageMediaType, tuple[str, tuple[bytes, ...]]] = {
     "image/png": (".png", (b"\x89PNG\r\n\x1a\n",)),
     "image/jpeg": (".jpg", (b"\xff\xd8\xff",)),
     "image/gif": (".gif", (b"GIF87a", b"GIF89a")),
@@ -114,7 +114,7 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
     return resolved_path
 
 
-def _matches_signature(media_type: str, content: bytes) -> bool:
+def _matches_signature(media_type: ImageMediaType, content: bytes) -> bool:
     signatures = _SIGNATURES[media_type][1]
     if not any(content.startswith(signature) for signature in signatures):
         return False

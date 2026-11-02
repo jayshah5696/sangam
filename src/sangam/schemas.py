@@ -97,12 +97,15 @@ class Document(DocumentSummary):
     content: str
 
 
+ImageMediaType = Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+
 class DocumentAsset(BaseModel):
     """An image stored beside its document; `reference` is relative to the document."""
 
     reference: str
     markdown: str
-    media_type: Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+    media_type: ImageMediaType
     size_bytes: int
 
 
@@ -360,6 +363,7 @@ class ApplyOrganizationPlan(MutationRequest):
     def reject_duplicate_state_changes(self) -> ApplyOrganizationPlan:
         seen: set[tuple[str, str]] = set()
         for operation in self.operations:
+            key: tuple[str, str]
             if operation.kind == "create_folder":
                 key = (operation.kind, operation.path)
             elif operation.kind == "create_tag":
@@ -368,13 +372,16 @@ class ApplyOrganizationPlan(MutationRequest):
                 # A copy changes no existing resource; copies may not share a path, which
                 # preflight checks.
                 continue
-            elif operation.kind in {
-                "move_document",
-                "materialize_document",
-                "trash_document",
-                "restore_document",
-                "update_document_metadata",
-            }:
+            elif isinstance(
+                operation,
+                (
+                    OrganizationMoveDocument,
+                    OrganizationMaterializeDocument,
+                    OrganizationTrashDocument,
+                    OrganizationRestoreDocument,
+                    OrganizationUpdateDocumentMetadata,
+                ),
+            ):
                 key = (
                     "document_path"
                     if operation.kind

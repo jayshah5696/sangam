@@ -6,7 +6,6 @@ import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import cast
 
 from agents import Agent, AgentOutputSchema, ModelSettings, RunConfig, Runner, StopAtTools
 from agents.models.interface import ModelProvider
@@ -27,7 +26,6 @@ from sangam.capabilities import Capability
 from sangam.chat_capabilities import (
     ChatCapability,
     ChatCapabilityRegistry,
-    ChatEntryPoint,
     EffectClass,
 )
 from sangam.chat_context import AgentRunContext, ChatRequestContext
@@ -302,7 +300,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             currently_allowed = self.capabilities.resolve(
                 principal=context.principal,
                 policy=self.workspace.policy,
-                entry_point=cast(ChatEntryPoint, turn_record.entry_point),
+                entry_point=turn_record.entry_point,
                 document=document,
                 model_supports_tools=selected_model.supports_tools,
             )
@@ -353,7 +351,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             resolved_capabilities = self.capabilities.resolve(
                 principal=context.principal,
                 policy=self.workspace.policy,
-                entry_point=cast(ChatEntryPoint, turn_record.entry_point),
+                entry_point=turn_record.entry_point,
                 document=document,
                 model_supports_tools=selected_model.supports_tools,
             )

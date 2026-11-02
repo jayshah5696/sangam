@@ -160,7 +160,7 @@ def pdf_pages(
 
 
 @app.command("annotations")
-def annotations(
+def list_annotations(
     document_id: str,
     query: Annotated[str | None, typer.Option("--query", "-q")] = None,
     include_deleted: Annotated[bool, typer.Option("--include-deleted")] = False,

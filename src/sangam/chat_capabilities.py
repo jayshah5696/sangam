@@ -546,8 +546,8 @@ class ChatCapability:
     version: int
     title: str
     description: str
-    input_schema: type[StrictCapabilityModel]
-    result_schema: type[StrictCapabilityModel]
+    input_schema: type[BaseModel]
+    result_schema: type[BaseModel]
     effect_class: EffectClass
     approval_policy: ApprovalPolicy
     required_authority: tuple[Capability, ...]

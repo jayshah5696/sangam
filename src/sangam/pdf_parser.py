@@ -36,11 +36,11 @@ def main() -> None:
     temporary = Path(temporary_name)
     try:
         try:
-            output = os.fdopen(descriptor, "wb")
+            output_file = os.fdopen(descriptor, "wb")
         except Exception:
             os.close(descriptor)
             raise
-        with output as handle:
+        with output_file as handle:
             handle.write(content_bytes)
             handle.flush()
             os.fsync(handle.fileno())

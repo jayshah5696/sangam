@@ -139,7 +139,8 @@ def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> 
         try:
             for _ in range(30):
                 workspace.write_atomic(doc_path, content)
-        except Exception as exc:
+        # Collect every worker failure for assertion after joining the threads.
+        except Exception as exc:  # noqa: BLE001
             errors.append(exc)
 
     t1 = threading.Thread(target=writer, args=("content A " * 100,))
@@ -180,7 +181,8 @@ def test_concurrent_move_document_prevents_overwrite_and_prunes_staging(
             workspace.move_document(src, destination_path)
             with lock:
                 results.append((src, None))
-        except Exception as exc:
+        # Collect every worker failure for assertion after joining the threads.
+        except Exception as exc:  # noqa: BLE001
             with lock:
                 results.append((src, exc))
 
@@ -245,7 +247,8 @@ def test_concurrent_restore_trash_document_prevents_overwrite_and_prunes_staging
             workspace.restore_trash_document(doc_id, destination_path, c_hash, size)
             with lock:
                 results.append((doc_id, None))
-        except Exception as exc:
+        # Collect every worker failure for assertion after joining the threads.
+        except Exception as exc:  # noqa: BLE001
             with lock:
                 results.append((doc_id, exc))
 
@@ -286,7 +289,8 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
             try:
                 content = workspace.read_document(doc_path)
                 read_results.append(content)
-            except Exception as exc:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as exc:  # noqa: BLE001
                 read_errors.append(str(exc))
 
     def writer(thread_id: int):
@@ -359,7 +363,8 @@ def test_directory_fsync_oserror_resilience_during_concurrent_writes(
             try:
                 content = workspace.read_document(doc_path)
                 read_results.append(content)
-            except Exception as exc:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as exc:  # noqa: BLE001
                 read_errors.append(str(exc))
 
     def writer(thread_id: int):
@@ -369,7 +374,8 @@ def test_directory_fsync_oserror_resilience_during_concurrent_writes(
                     workspace.write_atomic(
                         doc_path, f"unsupported fsync content from thread {thread_id} iteration {i}"
                     )
-                except Exception as exc:
+                # Collect every worker failure for assertion after joining the threads.
+                except Exception as exc:  # noqa: BLE001
                     write_errors.append(str(exc))
 
     reader_threads = [threading.Thread(target=reader) for _ in range(2)]

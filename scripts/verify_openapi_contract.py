@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import tempfile
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -53,7 +53,10 @@ def main() -> None:
         if not reason:
             parser.error("--update-baseline requires a non-empty --reason")
         payload = document
-        payload["x-sangam-baseline-review"] = {"date": date.today().isoformat(), "reason": reason}
+        payload["x-sangam-baseline-review"] = {
+            "date": datetime.now(UTC).date().isoformat(),
+            "reason": reason,
+        }
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         BASELINE.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         FINGERPRINT.write_text(actual + "\n", encoding="utf-8")

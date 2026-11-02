@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from collections.abc import Callable
 from functools import wraps
@@ -365,9 +366,9 @@ class ProjectService:
         self.database.clear_audit_target()
         self.database.set_audit_target(resource_id=project_id)
 
-    def _project(self, project_id: str, expected_version: int | None = None):
+    def _project(self, project_id: str, expected_version: int | None = None) -> sqlite3.Row:
         with self.database.connection() as conn:
-            row = conn.execute(
+            row: sqlite3.Row | None = conn.execute(
                 "SELECT * FROM projects WHERE project_id=?", (project_id,)
             ).fetchone()
             if row is None:
@@ -386,9 +387,9 @@ class ProjectService:
                 (utc_now(), project_id),
             )
 
-    def _thread(self, principal: Principal, thread_id: str):
+    def _thread(self, principal: Principal, thread_id: str) -> sqlite3.Row:
         with self.database.connection() as conn:
-            row = conn.execute(
+            row: sqlite3.Row | None = conn.execute(
                 "SELECT * FROM chat_threads WHERE thread_id=? AND created_by=?",
                 (thread_id, principal.actor_id),
             ).fetchone()
@@ -714,9 +715,7 @@ class ProjectService:
                 and row["workbench_state_json"]
             ):
                 # Choosing a draft changes selection and keeps the saved sources and splits.
-                layout = ProjectLayout.model_validate_json(
-                    self.get_project(project_id, principal).workbench_state_json
-                )
+                layout = ProjectLayout.model_validate_json(row["workbench_state_json"])
                 group = next(
                     (g for g in layout.groups() if any(t.documentId == active_id for t in g.tabs)),
                     next(g for g in layout.groups() if g.id == layout.activeGroupId),

@@ -902,7 +902,8 @@ class AssignmentService:
 
             await self.chat.admission.run_sync(checkpoint)
             await self.chat.admission.run_sync(self.commit_result, assignment.assignment_id)
-        except Exception as error:
+        # Persist any provider or worker failure so the assignment cannot remain running.
+        except Exception as error:  # noqa: BLE001
 
             def failed(failure: Exception = error) -> None:
                 principal = Principal.trusted_human(

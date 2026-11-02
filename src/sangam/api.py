@@ -16,6 +16,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.base import RequestResponseEndpoint
 
 from sangam import __version__
 from sangam.access import writes
@@ -199,6 +200,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds
                     )
                 except Exception:
+                    logger.exception("PDF scheduler cleanup failed during startup recovery")
                     ownership_is_safe = False
             if ownership_is_safe:
                 storage_ownership.close()
@@ -213,7 +215,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             unsafe_shutdown = False
             try:
                 await assignments.close()
-            except Exception as error:
+            # Defer the failure until all writers are stopped and lock ownership is decided.
+            except Exception as error:  # noqa: BLE001
                 shutdown_error = error
                 unsafe_shutdown = True
             if backup_task:
@@ -226,7 +229,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 except TimeoutError as error:
                     shutdown_error = error
                     unsafe_shutdown = True
-                except Exception as error:
+                # Defer unexpected backup failures through the common shutdown path.
+                except Exception as error:  # noqa: BLE001
                     shutdown_error = error
                     unsafe_shutdown = True
             try:
@@ -235,20 +239,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await pdf_scheduler.close(
                     timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds
                 )
-            except Exception as error:
+            # Retain ownership on any scheduler failure; report after the other writers stop.
+            except Exception as error:  # noqa: BLE001
                 if shutdown_error is None:
                     shutdown_error = error
                 unsafe_shutdown = True
             if hasattr(services, "chat") and hasattr(services.chat, "store_adapter"):
                 try:
                     await services.chat.close()
-                except Exception as error:
+                # Finish closing other writers before reporting this chat shutdown failure.
+                except Exception as error:  # noqa: BLE001
                     if shutdown_error is None:
                         shutdown_error = error
                     unsafe_shutdown = True
             try:
                 services.activity.close()
-            except Exception as error:
+            # The stored failure is raised after retaining ownership of unsafe storage.
+            except Exception as error:  # noqa: BLE001
                 if shutdown_error is None:
                     shutdown_error = error
                 unsafe_shutdown = True
@@ -535,10 +542,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.openapi_schema = schema
         return schema
 
-    app.openapi = openapi_schema
+    # FastAPI documents replacing this instance method to customize the schema.
+    app.openapi = openapi_schema  # type: ignore[method-assign]
 
     @app.middleware("http")
-    async def operation_context(request: Request, call_next):
+    async def operation_context(request: Request, call_next: RequestResponseEndpoint) -> Response:
         request.state.operation_id = str(uuid.uuid4())
         request.state.sanitized_headers = sanitize_headers(request.headers)
         response = await call_next(request)
@@ -611,7 +619,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     }
 
     @app.middleware("http")
-    async def trusted_preview_opaque_origin_cors(request: Request, call_next):
+    async def trusted_preview_opaque_origin_cors(
+        request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         is_preview_api = request.url.path in trusted_preview_api_paths
         expected_host = resolved_settings.trusted_preview_host
         is_preview_host = not expected_host or request.url.hostname == expected_host

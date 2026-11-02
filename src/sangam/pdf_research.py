@@ -385,7 +385,8 @@ class PdfResearchService:
                     (document_id,),
                 )
             return False
-        except Exception as error:
+        # Persist every parser failure for the UI and retry flow, including plugin errors.
+        except Exception as error:  # noqa: BLE001
             with self.database.transaction() as connection:
                 connection.execute(
                     """

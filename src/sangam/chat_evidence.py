@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import uuid
 from dataclasses import dataclass
+from typing import Literal
 
 from sangam.access import WorkspaceAccessService
 from sangam.db import Database, utc_now
@@ -22,7 +24,7 @@ class TurnContextRecord:
     actor_id: str
     thread_id: str | None
     user_item_id: str | None
-    entry_point: str
+    entry_point: Literal["workspace", "document"]
     document_id: str | None
     revision_id: str | None
     pdf_page_number: int | None
@@ -278,7 +280,8 @@ class ChatEvidenceRepository:
                 "WHERE run_id = ?",
                 (utc_now(), row["run_id"]),
             )
-            return row["run_id"]
+            run_id: str = row["run_id"]
+            return run_id
 
     def cancel_requested(self, run_id: str) -> bool:
         with self.database.connection() as connection:
@@ -423,7 +426,7 @@ class ChatEvidenceRepository:
             )
 
     @staticmethod
-    def _context_from_row(row) -> TurnContextRecord:
+    def _context_from_row(row: sqlite3.Row) -> TurnContextRecord:
         manifest = json.loads(row["capability_manifest_json"])
         return TurnContextRecord(
             context_id=row["context_id"],

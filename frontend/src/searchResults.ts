@@ -31,7 +31,9 @@ export function matchLocationLabel(match: SearchMatch): string | null {
       return match.page_number ? `Page ${match.page_number}` : null
     case 'annotation':
       return match.page_number ? `Note on page ${match.page_number}` : 'Note'
-    default:
+    case 'path':
+    case 'title':
+    case 'metadata':
       return null
   }
 }

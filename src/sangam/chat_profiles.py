@@ -217,7 +217,7 @@ class ChatProfileService:
                     return MemoryEntry.model_validate_json(row["response_json"])
                 self.preflight_memory(principal, request)
                 current = self._memory(principal, request.memory_id, request.project_id)
-                state = (
+                state: Literal["active", "suggested", "forgotten"] = (
                     "forgotten"
                     if request.action == "forget"
                     else "suggested"

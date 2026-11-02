@@ -31,6 +31,45 @@ async function readDocument(request: APIRequestContext, id: string) {
   return documentSchema.parse(await response.json())
 }
 
+test('skill command copy reports clipboard failure and waits for a successful retry', async ({
+  page,
+  request,
+}, testInfo) => {
+  const name = `copy-${randomUUID().slice(0, 8)}`
+  const skillDocument = await createDocument(
+    request,
+    `---\nname: ${name}\ndescription: Check clipboard feedback.\n---\n\nRead the document.`,
+  )
+  const registered = await request.post('/api/v1/chat/skills', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { document_id: skillDocument.document_id },
+  })
+  expect(registered.ok(), await registered.text()).toBeTruthy()
+  // Control only the browser permission boundary. Skill registration uses the real API.
+  await page.addInitScript(() => {
+    let attempts = 0
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          if (attempts++ === 0) throw new DOMException('Permission denied', 'NotAllowedError')
+          document.documentElement.dataset.copiedCommand = text
+        },
+      },
+    })
+  })
+  await page.goto('/settings?category=models')
+  const copy = page.getByRole('button', { name: `/${name}`, exact: true })
+  await copy.click()
+  await expect(page.getByRole('alert')).toContainText('Could not copy the slash command. Try again.')
+  await expect(copy).toHaveText(`/${name}`)
+  await page.screenshot({ path: testInfo.outputPath('skill-copy-failed.png'), fullPage: true })
+  await copy.click()
+  await expect(page.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('data-copied-command', `/${name}`)
+  await expect(page.getByText('Could not copy the slash command. Try again.')).toBeHidden()
+})
+
 test('claim matrix inspects passages, persists stance and exports the actual table', async ({
   page,
   request,

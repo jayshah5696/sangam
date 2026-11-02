@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 from datetime import UTC, datetime
 from importlib import resources
@@ -59,7 +60,7 @@ class ReadinessService:
         try:
             with self.database.connection() as connection:
                 connection.execute("SELECT 1").fetchone()
-        except Exception as error:
+        except (sqlite3.Error, OSError) as error:
             return {"ok": False, "detail": type(error).__name__}
         return {"ok": True, "detail": "reachable"}
 
@@ -77,7 +78,7 @@ class ReadinessService:
                         "SELECT version FROM schema_migrations ORDER BY version"
                     ).fetchall()
                 ]
-        except Exception as error:
+        except (sqlite3.Error, OSError) as error:
             return {"ok": False, "detail": type(error).__name__}
         if applied != packaged:
             return {
@@ -129,7 +130,7 @@ class ReadinessService:
                 count = connection.execute(
                     "SELECT count(*) FROM documents WHERE materialization_state = 'pending'"
                 ).fetchone()[0]
-        except Exception as error:
+        except (sqlite3.Error, OSError) as error:
             return {"ok": False, "detail": type(error).__name__}
         return {"ok": count == 0, "detail": "none" if count == 0 else "pending", "count": count}
 
@@ -144,7 +145,7 @@ class ReadinessService:
             if latest.tzinfo is None:
                 latest = latest.replace(tzinfo=UTC)
             age_seconds = max(0, int((datetime.now(UTC) - latest).total_seconds()))
-        except Exception as error:
+        except (OSError, ValueError) as error:
             return {"ok": False, "detail": type(error).__name__}
         fresh = age_seconds <= self.settings.backup_readiness_max_age_seconds
         return {

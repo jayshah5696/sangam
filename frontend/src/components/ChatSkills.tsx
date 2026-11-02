@@ -25,10 +25,15 @@ export function ChatSkills({ projectId }: { projectId?: string }) {
     },
   })
 
-  const copySlashCommand = (name: string) => {
-    navigator.clipboard.writeText(`/${name}`)
-    setCopiedSkill(name)
-    setTimeout(() => setCopiedSkill(null), 2000)
+  const copySlashCommand = async (name: string) => {
+    try {
+      await navigator.clipboard.writeText(`/${name}`)
+      setErrorMessage(null)
+      setCopiedSkill(name)
+      setTimeout(() => setCopiedSkill(null), 2000)
+    } catch {
+      setErrorMessage('Could not copy the slash command. Try again.')
+    }
   }
 
   return (
@@ -102,7 +107,7 @@ export function ChatSkills({ projectId }: { projectId?: string }) {
                 <div className="chat-skill-actions">
                   <button
                     className="secondary-action compact-button"
-                    onClick={() => copySlashCommand(skill.name)}
+                    onClick={() => void copySlashCommand(skill.name)}
                     title={`Copy /${skill.name}`}
                   >
                     {copiedSkill === skill.name ? (

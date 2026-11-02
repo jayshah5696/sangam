@@ -1664,7 +1664,8 @@ def test_two_expanding_producers_do_not_deadlock_on_empty_queue(client: TestClie
                     resource_id=doc_id,
                     details={"diff": payload},
                 )
-            except Exception as e:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         t1 = threading.Thread(target=worker, args=(res1, p1, "doc_p1"))
@@ -1930,7 +1931,8 @@ def test_full_budget_expansion_strictly_enforces_advertised_bound(client: TestCl
                     details={"diff": large_diff},
                 )
                 res1_completed.set()
-            except Exception as e:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as e:  # noqa: BLE001
                 res1_error.append(e)
 
         t1 = threading.Thread(target=worker1)
@@ -2061,7 +2063,8 @@ def test_two_expanding_producers_break_circular_wait_under_strict_capacity(
                     details={"diff": large_diff},
                 )
                 results[name] = "success"
-            except Exception as e:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as e:  # noqa: BLE001
                 results[name] = f"error: {e}"
                 errors.append(e)
 

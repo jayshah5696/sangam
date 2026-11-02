@@ -134,7 +134,8 @@ class KarakeepRepository:
             if current is None:
                 raise NotFoundError(f"Karakeep import not found: {import_id}")
             if current["document_id"]:
-                return current["document_id"]
+                document_id: str = current["document_id"]
+                return document_id
             created = IdempotencyStore.lookup(
                 connection, actor_id=KARAKEEP_ACTOR_ID, key=create_key
             )
@@ -233,7 +234,8 @@ class KarakeepRepository:
             ).fetchone()
             if row is None:
                 raise RuntimeError("Karakeep snapshot could not be loaded")
-            return row["snapshot_id"]
+            snapshot_id: str = row["snapshot_id"]
+            return snapshot_id
 
     def initial_snapshot(self, import_id: str) -> StoredSnapshot | None:
         with self.database.connection() as connection:

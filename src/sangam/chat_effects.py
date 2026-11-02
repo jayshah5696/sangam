@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 import uuid
@@ -532,7 +533,7 @@ class ChatEffectService:
         )
 
     def acknowledge(
-        self, principal: Principal, effect_ids: list[str]
+        self, principal: Principal, effect_ids: builtins.list[str]
     ) -> ChatEffectsAcknowledgementResult:
         if not effect_ids:
             raise ValidationError("At least one effect ID must be provided")
@@ -702,7 +703,9 @@ class ChatEffectService:
             )
         return self._execute(principal, effect_id, approved_by)
 
-    def _requester_principal(self, approver: Principal, requested_by: str, token_id: str | None):
+    def _requester_principal(
+        self, approver: Principal, requested_by: str, token_id: str | None
+    ) -> Principal:
         """The requester's own authority, read fresh, for an effect someone else approved."""
         if requested_by == approver.actor_id:
             return approver
