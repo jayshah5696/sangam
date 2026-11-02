@@ -16,7 +16,8 @@ function inboxState(document: DocumentSummary): InboxState {
       return { label: 'Extracting text', attention: false }
     case 'failed':
       return { label: 'Needs attention', attention: true }
-    default:
+    case null:
+    case 'ready':
       return {
         label:
           document.content_type === 'application/pdf'

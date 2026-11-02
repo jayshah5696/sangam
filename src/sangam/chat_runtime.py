@@ -96,7 +96,8 @@ class BoundedChatAdmission:
             finally:
                 raise
 
-    async def close(self, timeout: float = 35.0) -> None:
+    # Shutdown must drain owned writes before its deadline instead of cancelling them.
+    async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         async with self._condition:
             self._closing = True
             self._condition.notify_all()

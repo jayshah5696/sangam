@@ -443,7 +443,7 @@ def test_concurrent_read_write_atomic_file_replacement(client: TestClient, setti
     # Verify every read content is complete, valid, and non-zero-byte
     for content in read_results:
         assert len(content) > 0
-        assert content.startswith(b"base") or content.startswith(b"content revision iteration")
+        assert content.startswith((b"base", b"content revision iteration"))
 
     # Verify no temporary staging files exist in workspace directory
     parent_dir = settings.workspace_root
@@ -477,7 +477,8 @@ def test_concurrent_folder_metadata_atomic_write_and_cleanup(
                 try:
                     content = manifest_file.read_bytes()
                     read_results.append(content)
-                except Exception as exc:
+                # Collect every worker failure for assertion after joining the threads.
+                except Exception as exc:  # noqa: BLE001
                     read_errors.append(str(exc))
 
     reader_thread = threading.Thread(target=reader)

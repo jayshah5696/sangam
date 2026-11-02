@@ -9,11 +9,17 @@ import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
+from sangam.authorization import AuthorizationPolicy
+from sangam.capabilities import Capability
+from sangam.errors import AuthorizationError
+from sangam.mutations import MutationCoordinator
+from sangam.security import Principal, ScopeGrant, path_matches
+
 
 def create(client, path="docs/item.md", content="base", content_type="text/markdown"):
     response = client.post(
         "/api/v1/documents",
-        json=dict(title="Contract", path=path, content=content, content_type=content_type),
+        json={"title": "Contract", "path": path, "content": content, "content_type": content_type},
         headers=headers(f"create-{path}"),
     )
     assert response.status_code == 201, response.text
@@ -26,22 +32,17 @@ def create(client, path="docs/item.md", content="base", content_type="text/markd
 def test_invalid_scopes_never_issue_global_grants(client: TestClient, scope):
     response = client.post(
         "/api/v1/agent-tokens",
-        json=dict(
-            actor_id="agent:invalid",
-            display_name="Invalid",
-            label="Invalid",
-            scopes=[dict(capability="read", path_prefix=scope)],
-        ),
+        json={
+            "actor_id": "agent:invalid",
+            "display_name": "Invalid",
+            "label": "Invalid",
+            "scopes": [{"capability": "read", "path_prefix": scope}],
+        },
     )
     assert response.status_code == 422
 
 
 def test_authorization_error_details_omits_out_of_scope_paths():
-    from sangam.authorization import AuthorizationPolicy
-    from sangam.capabilities import Capability
-    from sangam.errors import AuthorizationError
-    from sangam.security import Principal, ScopeGrant
-
     policy = AuthorizationPolicy()
 
     # Path-scoped agent targeting an out-of-scope path
@@ -216,8 +217,6 @@ def test_pdf_search_and_annotations_reject_null_bytes(client: TestClient):
     ],
 )
 def test_path_matches_component_boundaries(prefix, path, expected):
-    from sangam.security import path_matches
-
     assert path_matches(prefix, path) is expected
 
 
@@ -234,7 +233,7 @@ def test_agent_scope_boundary_enforcement(client: TestClient):
     # Allowed in docs/
     allowed = client.post(
         "/api/v1/documents",
-        json=dict(title="Allowed", content="ok", path="docs/item.md"),
+        json={"title": "Allowed", "content": "ok", "path": "docs/item.md"},
         headers={**auth, **headers("boundary-allowed")},
     )
     assert allowed.status_code == 201
@@ -242,7 +241,7 @@ def test_agent_scope_boundary_enforcement(client: TestClient):
     # Denied in docs-private/
     denied = client.post(
         "/api/v1/documents",
-        json=dict(title="Denied", content="secret", path="docs-private/secret.md"),
+        json={"title": "Denied", "content": "secret", "path": "docs-private/secret.md"},
         headers={**auth, **headers("boundary-denied")},
     )
     assert denied.status_code == 403
@@ -254,7 +253,7 @@ def test_wildcard_issuance_and_recursive_access(client: TestClient, scope):
     auth = {"Authorization": f"Bearer {token}"}
     result = client.post(
         "/api/v1/documents",
-        json=dict(title="Allowed", content="ok", path="docs/nested/deep.md"),
+        json={"title": "Allowed", "content": "ok", "path": "docs/nested/deep.md"},
         headers={**auth, **headers("allowed")},
     )
     assert result.status_code == 201
@@ -264,7 +263,7 @@ def test_wildcard_issuance_and_recursive_access(client: TestClient, scope):
     )
     outside = client.post(
         "/api/v1/documents",
-        json=dict(title="Outside", content="ok", path="outside/item.md"),
+        json={"title": "Outside", "content": "ok", "path": "outside/item.md"},
         headers={**auth, **headers("outside")},
     )
     assert outside.status_code == (403 if scope.startswith("docs") else 201)
@@ -296,11 +295,16 @@ def test_write_tag_grammar_and_strong_list_or(client: TestClient, tag, status):
     assert result.status_code == status, result.text
     assert client.get(url).json()["content"] == ("changed" if status == 200 else "base")
     events = client.get("/api/v1/activity", params={"actor_kind": "human"}).json()
+    if status == 200:
+        expected_outcome = "accepted"
+    elif status == 412:
+        expected_outcome = "conflict"
+    else:
+        expected_outcome = "failed"
     assert any(
         e["action"] == "update"
         and e["resource_id"] == created.json()["document_id"]
-        and e["outcome"]
-        == ("accepted" if status == 200 else "conflict" if status == 412 else "failed")
+        and e["outcome"] == expected_outcome
         for e in events
     )
 
@@ -330,7 +334,11 @@ def test_metadata_trust_and_extraction_invalidate_json_validator(client: TestCli
     etag = client.get(url).headers["etag"]
     metadata = client.patch(
         url + "/metadata",
-        json=dict(expected_metadata_version=doc["metadata_version"], category="new", tag_ids=[]),
+        json={
+            "expected_metadata_version": doc["metadata_version"],
+            "category": "new",
+            "tag_ids": [],
+        },
         headers={**headers("metadata"), "If-Match": etag},
     )
     assert metadata.status_code == 200
@@ -340,17 +348,17 @@ def test_metadata_trust_and_extraction_invalidate_json_validator(client: TestCli
     assert next_tag.headers["etag"] != etag
     stale = client.patch(
         url + "/metadata",
-        json=dict(
-            expected_metadata_version=metadata.json()["metadata_version"],
-            category="bad",
-            tag_ids=[],
-        ),
+        json={
+            "expected_metadata_version": metadata.json()["metadata_version"],
+            "category": "bad",
+            "tag_ids": [],
+        },
         headers={**headers("stale-metadata"), "If-Match": etag},
     )
     assert stale.status_code == 412
     trust = client.patch(
         url + "/trust",
-        json=dict(expected_trust_version=doc["trust_version"], trust_level="trusted_interactive"),
+        json={"expected_trust_version": doc["trust_version"], "trust_level": "trusted_interactive"},
         headers={**headers("trust"), "If-Match": next_tag.headers["etag"]},
     )
     assert trust.status_code == 200
@@ -358,9 +366,10 @@ def test_metadata_trust_and_extraction_invalidate_json_validator(client: TestCli
     assert (
         client.patch(
             url + "/trust",
-            json=dict(
-                expected_trust_version=trust.json()["trust_version"], trust_level="untrusted"
-            ),
+            json={
+                "expected_trust_version": trust.json()["trust_version"],
+                "trust_level": "untrusted",
+            },
             headers={**headers("stale-trust"), "If-Match": etag},
         ).status_code
         == 412
@@ -374,17 +383,21 @@ def test_all_mutations_false_condition_and_stable_wildcard_replay(client: TestCl
     created = create(client, None if action == "materialize" else "docs/item.md")
     doc = created.json()
     url = f"/api/v1/documents/{doc['document_id']}"
-    method = "PATCH" if action == "update" else "DELETE" if action == "delete" else "POST"
+    if action == "update":
+        method = "PATCH"
+    elif action == "delete":
+        method = "DELETE"
+    else:
+        method = "POST"
     target = url if action in {"update", "delete"} else url + "/" + action
-    body = (
-        {"content": "changed"}
-        if action == "update"
-        else {"path": "docs/next.md"}
-        if action in {"move", "materialize", "duplicate"}
-        else {"revision_id": doc["current_revision_id"]}
-        if action == "restore"
-        else {}
-    )
+    if action == "update":
+        body = {"content": "changed"}
+    elif action in {"move", "materialize", "duplicate"}:
+        body = {"path": "docs/next.md"}
+    elif action == "restore":
+        body = {"revision_id": doc["current_revision_id"]}
+    else:
+        body = {}
     rejected = client.request(
         method, target, json=body, headers={**headers("false"), "If-Match": '"*"'}
     )
@@ -413,21 +426,21 @@ def test_body_conflicts_remain_409_and_header_failures_412(client: TestClient):
     url = f"/api/v1/documents/{created.json()['document_id']}"
     assert (
         client.patch(
-            url, json=dict(content="bad", expected_revision_id="stale"), headers=headers("body")
+            url, json={"content": "bad", "expected_revision_id": "stale"}, headers=headers("body")
         ).status_code
         == 409
     )
     assert (
         client.patch(
             url,
-            json=dict(content="bad", expected_revision_id="stale"),
+            json={"content": "bad", "expected_revision_id": "stale"},
             headers={**headers("both"), "If-Match": '"false"'},
         ).status_code
         == 412
     )
     assert (
         client.patch(
-            url, json=dict(content="bad"), headers={**headers("none"), "If-None-Match": "*"}
+            url, json={"content": "bad"}, headers={**headers("none"), "If-None-Match": "*"}
         ).status_code
         == 412
     )
@@ -585,9 +598,11 @@ def test_organization_ancestor_is_structural_and_pagination_filters_first(client
     folder = next(f for f in client.get("/api/v1/folders").json() if f["path"] == "root")
     changed_folder = client.patch(
         f"/api/v1/folders/{folder['folder_id']}",
-        json=dict(
-            expected_metadata_version=folder["metadata_version"], category="secret", tag_ids=[]
-        ),
+        json={
+            "expected_metadata_version": folder["metadata_version"],
+            "category": "secret",
+            "tag_ids": [],
+        },
         headers=headers("ancestor-metadata"),
     )
     assert changed_folder.status_code == 200, changed_folder.text
@@ -598,13 +613,13 @@ def test_organization_ancestor_is_structural_and_pagination_filters_first(client
     assert ancestor["category"] is None and ancestor["tags"] == []
     assert ancestor["document_count"] == 1
     page = client.get(
-        "/api/v1/organization", params=dict(item_type="folder", limit=1), headers=auth
+        "/api/v1/organization", params={"item_type": "folder", "limit": 1}, headers=auth
     )
     assert page.status_code == 200, page.text
     assert page.json()["items"] and page.json()["next_offset"] == 1
-    tags = client.get("/api/v1/organization", params=dict(item_type="tag"), headers=auth)
+    tags = client.get("/api/v1/organization", params={"item_type": "tag"}, headers=auth)
     assert tags.json()["items"] == []
-    events = client.get("/api/v1/activity", params=dict(actor_kind="agent")).json()
+    events = client.get("/api/v1/activity", params={"actor_kind": "agent"}).json()
     assert any(e["action"] == "list_organization" for e in events)
 
 
@@ -619,7 +634,7 @@ def test_rejected_read_headers_and_version_conflicts_have_no_accepted_audit(clie
     assert read.status_code == 412
     metadata = client.patch(
         url + "/metadata",
-        json=dict(expected_metadata_version=99, category="bad", tag_ids=[]),
+        json={"expected_metadata_version": 99, "category": "bad", "tag_ids": []},
         headers={
             **auth,
             **headers("bad-version"),
@@ -707,8 +722,6 @@ def test_openapi_declares_representation_etags_and_preconditions(client):
 
 
 def test_nested_document_pipeline_finishes_before_waiting_backup():
-    from sangam.mutations import MutationCoordinator
-
     coordinator = MutationCoordinator()
     acquired = threading.Event()
     enter_nested = threading.Event()
@@ -827,8 +840,6 @@ def test_organization_document_pages_use_one_authorized_order(client):
 
 
 def test_nested_cross_document_pipeline_does_not_wait_on_a_backup_blocked_owner():
-    from sangam.mutations import MutationCoordinator
-
     coordinator = MutationCoordinator()
     acquired = threading.Event()
     enter_nested = threading.Event()
@@ -902,9 +913,12 @@ def test_path_sanitization_rejects_whitespace_trailing_dots_and_reserved_names(
 ):
     response = client.post(
         "/api/v1/documents",
-        json=dict(
-            title="Invalid Path", path=invalid_path, content="test", content_type="text/markdown"
-        ),
+        json={
+            "title": "Invalid Path",
+            "path": invalid_path,
+            "content": "test",
+            "content_type": "text/markdown",
+        },
         headers=headers(f"create-invalid-{invalid_path}"),
     )
     assert response.status_code == 422
@@ -925,11 +939,11 @@ def test_token_scope_normalization_rejects_whitespace_dots_and_reserved_names(
 ):
     response = client.post(
         "/api/v1/agent-tokens",
-        json=dict(
-            actor_id="agent:invalidscope",
-            display_name="Invalid Scope",
-            label="Invalid Scope",
-            scopes=[dict(capability="read", path_prefix=invalid_scope)],
-        ),
+        json={
+            "actor_id": "agent:invalidscope",
+            "display_name": "Invalid Scope",
+            "label": "Invalid Scope",
+            "scopes": [{"capability": "read", "path_prefix": invalid_scope}],
+        },
     )
     assert response.status_code == 422

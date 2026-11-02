@@ -41,8 +41,11 @@ ALLOWED_MEDIA_TYPES = {"text/html", "text/plain", "application/pdf"}
 
 
 def is_prohibited_ip(ip_input: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Return True if the address belongs to loopback, private, link-local, multicast,
-    CGNAT, reserved, documentation, or cloud metadata ranges."""
+    """Return whether the address belongs to a prohibited network range.
+
+    Prohibited ranges include loopback, private, link-local, multicast,
+    CGNAT, reserved, documentation, or cloud metadata ranges.
+    """
     try:
         ip = ipaddress.ip_address(ip_input) if isinstance(ip_input, str) else ip_input
     except ValueError:
@@ -128,7 +131,9 @@ def resolve_and_validate_host(
     resolver: Callable[[str, int], list[str]] | None = None,
 ) -> str:
     """Resolve the hostname and verify that no resolved IP falls within a prohibited range.
-    Returns the first verified IP address for connection pinning."""
+
+    Returns the first verified IP address for connection pinning.
+    """
     # If hostname is already a raw IP literal:
     try:
         raw_ip = ipaddress.ip_address(hostname)
@@ -147,7 +152,7 @@ def resolve_and_validate_host(
     else:
         try:
             addr_info = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-            resolved_ips = [info[4][0] for info in addr_info]
+            resolved_ips = [str(info[4][0]) for info in addr_info]
         except socket.gaierror as exc:
             raise ValidationError(f"DNS resolution failed for '{hostname}': {exc}") from exc
 
@@ -178,8 +183,10 @@ class _PinnedBackend(SyncBackend):
 
 
 class PinnedTransport(httpx.HTTPTransport):
-    """Transport that pins the underlying TCP connection to a specific pre-validated IP,
-    completely preventing DNS rebinding while preserving SNI and Host headers."""
+    """Pin the TCP connection to a validated IP address.
+
+    Preserve SNI and Host headers while preventing DNS rebinding.
+    """
 
     def __init__(self, pinned_ip: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -204,8 +211,11 @@ class SafeCaptureResponse:
 
 
 class SafeCaptureClient:
-    """SSRF-guarded HTTP client with IP range checks, connection pinning, manual redirect following,
-    content-type allowlisting, and byte limit enforcement."""
+    """Fetch bounded content through validated, pinned connections.
+
+    Check IP ranges, follow redirects explicitly, and enforce allowed content types
+    and response byte limits.
+    """
 
     def __init__(
         self,
@@ -342,13 +352,10 @@ class SafeCaptureClient:
                 raise ValidationError(f"Capture network request failed: {exc}") from exc
 
     def _extract_title(self, html_bytes: bytes) -> str | None:
-        try:
-            # Decode prefix to find <title>
-            sample = html_bytes[:65536].decode("utf-8", errors="ignore")
-            match = re.search(r"<title\b[^>]*>(.*?)</title>", sample, re.IGNORECASE | re.DOTALL)
-            if match:
-                title = re.sub(r"\s+", " ", match.group(1)).strip()
-                return title if title else None
-        except Exception:
-            pass
+        # Decode prefix to find <title>; invalid UTF-8 bytes are ignored.
+        sample = html_bytes[:65536].decode("utf-8", errors="ignore")
+        match = re.search(r"<title\b[^>]*>(.*?)</title>", sample, re.IGNORECASE | re.DOTALL)
+        if match:
+            title = re.sub(r"\s+", " ", match.group(1)).strip()
+            return title if title else None
         return None

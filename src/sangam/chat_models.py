@@ -1,10 +1,29 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from agents.models.interface import Model
+from openai.types.responses import (
+    Response,
+    ResponseCompletedEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
+    ResponseCreatedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionCallArgumentsDoneEvent,
+    ResponseFunctionToolCall,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputText,
+    ResponseStreamEvent,
+    ResponseTextDeltaEvent,
+    ResponseTextDoneEvent,
+)
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from pydantic import ValidationError as PydanticError
 
@@ -12,6 +31,7 @@ from sangam.db import Database, utc_now
 from sangam.errors import ConflictError, IntegrationError, ValidationError
 from sangam.provider_connections import (
     DiscoveredModel,
+    ProviderConnection,
     ProviderConnectionService,
     model_ref,
     split_model_ref,
@@ -244,7 +264,7 @@ class ChatModelSettingsRepository:
         return state
 
     @staticmethod
-    def _insert(connection, state: ModelSettingsState) -> None:
+    def _insert(connection: sqlite3.Connection, state: ModelSettingsState) -> None:
         connection.execute(
             """
             INSERT INTO chat_model_settings(
@@ -374,7 +394,7 @@ class ChatModelCatalog:
         return self.as_schema()
 
 
-def _catalog_from_discovered(connection, item: DiscoveredModel) -> CatalogModel:
+def _catalog_from_discovered(connection: ProviderConnection, item: DiscoveredModel) -> CatalogModel:
     compatibility: ModelCompatibility
     if item.supports_tools is False:
         compatibility = "unsupported"
@@ -394,7 +414,7 @@ def _catalog_from_discovered(connection, item: DiscoveredModel) -> CatalogModel:
     )
 
 
-def _state_from_row(row) -> ModelSettingsState:
+def _state_from_row(row: sqlite3.Row) -> ModelSettingsState:
     try:
         entries = _CATALOG_ADAPTER.validate_python(json.loads(row["catalog_json"]))
         catalog = tuple(_entry_to_model(entry) for entry in entries)
@@ -500,9 +520,7 @@ Step = Say | Call
 
 def _scripted_response(
     output: list[Any], status: Literal["completed", "in_progress"] = "completed"
-):
-    from openai.types.responses import Response
-
+) -> Response:
     return Response(
         id="resp_scripted",
         object="response",
@@ -528,24 +546,12 @@ class ScriptedModel(Model):
         raise NotImplementedError
 
     async def stream_response(
-        self, system_instructions: str | None, input: str | list[Any], *args: Any, **kwargs: Any
-    ):
-        from openai.types.responses import (
-            ResponseCompletedEvent,
-            ResponseContentPartAddedEvent,
-            ResponseContentPartDoneEvent,
-            ResponseCreatedEvent,
-            ResponseFunctionCallArgumentsDeltaEvent,
-            ResponseFunctionCallArgumentsDoneEvent,
-            ResponseFunctionToolCall,
-            ResponseOutputItemAddedEvent,
-            ResponseOutputItemDoneEvent,
-            ResponseOutputMessage,
-            ResponseOutputText,
-            ResponseTextDeltaEvent,
-            ResponseTextDoneEvent,
-        )
-
+        self,
+        system_instructions: str | None,
+        input: str | list[Any],  # noqa: A002 - Match the SDK's keyword argument.
+        *args: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[ResponseStreamEvent]:
         self.seen.append(input)
         step = self.steps.pop(0)
         sequence = 0

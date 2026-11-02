@@ -10,8 +10,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
+from typing import TypedDict
 
 _MIGRATION_NAME = re.compile(r"^(?P<version>[0-9]{3})_[a-z0-9_]+\.sql$")
+
+
+class AuditTarget(TypedDict, total=False):
+    resource_id: str
+    revision_id: str
+    path: str
+    details: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -78,8 +86,9 @@ class Database:
         if details is not None:
             target.setdefault("details", {}).update(details)
 
-    def get_audit_target(self) -> dict[str, object]:
-        return getattr(self._local, "audit_target", None) or {}
+    def get_audit_target(self) -> AuditTarget:
+        target: AuditTarget | None = getattr(self._local, "audit_target", None)
+        return target or {}
 
     def clear_audit_target(self) -> None:
         self._local.audit_target = None

@@ -6,6 +6,7 @@ import json
 from datetime import UTC, date, datetime
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError as PydanticValidationError
@@ -15,8 +16,9 @@ from test_phase_seven_chat import create_thread_with_model
 
 from sangam.chat_capabilities import WebSearchInput
 from sangam.chat_models import Call, Say
+from sangam.errors import ValidationError
 from sangam.ssrf_client import SafeCaptureClient
-from sangam.web_research import WebHit, WebResearchService, source_id
+from sangam.web_research import BraveSearchProvider, WebHit, WebResearchService, source_id
 
 PAGE_URL = "https://news.example.com/standalone-headset"
 PAGE_HTML = (
@@ -148,11 +150,6 @@ def test_web_search_input_is_bounded() -> None:
 
 
 def test_brave_adapter_maps_results_and_sends_a_date_range(monkeypatch: pytest.MonkeyPatch) -> None:
-    import httpx
-
-    from sangam.errors import ValidationError
-    from sangam.web_research import BraveSearchProvider
-
     sent: dict[str, Any] = {}
 
     def fake_get(url: str, **kwargs: Any) -> httpx.Response:

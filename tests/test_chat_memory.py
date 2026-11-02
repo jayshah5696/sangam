@@ -2,6 +2,7 @@
 
 from fastapi.testclient import TestClient
 
+from sangam.chat_context import ChatRequestContext
 from sangam.chat_profiles import MemorySearch
 from sangam.security import Principal
 
@@ -85,8 +86,6 @@ def test_memory_actor_project_relevance_and_revision_checks(client: TestClient):
 
 
 def test_used_memory_is_current_and_forgetting_does_not_delete_transcript(client: TestClient):
-    from sangam.chat_context import ChatRequestContext
-
     owner = Principal.trusted_human(actor_id="human:jay", display_name="Jay", operation_id="test")
     chat = client.app.state.services.chat
     assert change(client).status_code == 200

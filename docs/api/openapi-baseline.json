@@ -5584,7 +5584,7 @@
       },
       "OrganizationCreateTag": {
         "additionalProperties": false,
-        "description": "Create a tag. Later operations in the same plan cannot use it: tag IDs are assigned\non creation, so apply the tag in a second plan after inspecting the new ID.",
+        "description": "Create a tag for use in a subsequent plan.\n\nLater operations in the same plan cannot use it. Tag IDs are assigned\non creation, so apply the tag in a second plan after inspecting the new ID.",
         "properties": {
           "color": {
             "default": "#527ea3",
@@ -39161,7 +39161,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-10-20",
-    "reason": "Release v0.13.7"
+    "date": "2026-11-02",
+    "reason": "PR #553: format the OrganizationCreateTag description as a Google-style docstring; request and response fields are unchanged."
   }
 }

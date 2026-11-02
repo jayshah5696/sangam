@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
+import subprocess
+import sys
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from pypdf import PdfWriter
 from starlette.requests import Request
 from test_phase_five_pdf_research import text_pdf
 
-from sangam.errors import ValidationError
+from sangam import pdf_parser
+from sangam.errors import ConflictError, ValidationError
 from sangam.pdf_runtime import PdfExtractionScheduler, spooled_pdf_body
 
 
@@ -24,13 +30,13 @@ class BoundedReads(io.BytesIO):
 def test_streamed_pdf_import_hashes_copies_and_replays_without_unbounded_reads(client):
     service = client.app.state.services.pdf_research
     source = text_pdf("streamed import") + b"\n" * 200000
-    arguments = dict(
-        title="Stream",
-        path="stream.pdf",
-        supersedes_document_id=None,
-        actor_id="human:jay",
-        idempotency_key="stream",
-    )
+    arguments = {
+        "title": "Stream",
+        "path": "stream.pdf",
+        "supersedes_document_id": None,
+        "actor_id": "human:jay",
+        "idempotency_key": "stream",
+    }
     document = service.import_pdf(content=BoundedReads(source), **arguments)
     replay = service.import_pdf(content=BoundedReads(source), **arguments)
     assert replay.document_id == document.document_id
@@ -154,11 +160,6 @@ def test_pdf_parser_limits_fail_durably_without_partial_pages(client, limit):
 
 
 def test_pdf_parser_writes_atomically_and_cleans_temp_files(tmp_path, monkeypatch):
-    import json
-    import sys
-
-    from sangam import pdf_parser
-
     writer = PdfWriter()
     writer.add_blank_page(width=100, height=100)
     source_file = tmp_path / "source.pdf"
@@ -181,11 +182,6 @@ def test_pdf_parser_writes_atomically_and_cleans_temp_files(tmp_path, monkeypatc
 
 
 def test_pdf_parser_unlinks_temp_file_on_failure(tmp_path, monkeypatch):
-    import os
-    import sys
-
-    from sangam import pdf_parser
-
     writer = PdfWriter()
     writer.add_blank_page(width=100, height=100)
     source_file = tmp_path / "source.pdf"
@@ -237,10 +233,6 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
         pages = real_parse_pages(doc_id, cancel_event)
 
         # Execute direct python entry point to test atomic replace behavior
-        import subprocess
-        import sys
-        import tempfile
-        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmpdir:
             src_pdf = Path(tmpdir) / "source.pdf"
@@ -269,7 +261,8 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
                             concurrent_errors.append(
                                 "Read zero bytes from output file during write!"
                             )
-                    except Exception as err:
+                    # Collect every worker failure for assertion after joining the threads.
+                    except Exception as err:  # noqa: BLE001
                         concurrent_errors.append(f"Read error during write: {err}")
                 time.sleep(0.001)
 
@@ -343,8 +336,6 @@ def test_pdf_research_spooling_hash_mismatch_unlinks_staging(client, monkeypatch
         yield b"%PDF-corrupt-bytes"
 
     monkeypatch.setattr(service.workspace, "iter_binary", bad_iter_binary)
-
-    from sangam.errors import ConflictError
 
     with pytest.raises(ConflictError, match="PDF bytes differ from expected content hash"):
         service._parse_pages(document.document_id, cancel_event=None)

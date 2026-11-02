@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
+from test_phase_five_pdf_research import import_pdf, text_pdf
 
 
 def create_document(client: TestClient, *, title: str, path: str, key: str) -> dict[str, object]:
@@ -269,8 +270,6 @@ def test_plan_applies_exact_tags_and_trashes_documents_with_preconditions(
 
 
 def test_mixed_content_organization_plan_with_pdf(client: TestClient, settings) -> None:
-    from test_phase_five_pdf_research import import_pdf, text_pdf
-
     md_doc = create_document(client, title="Markdown Note", path="incoming/note.md", key="plan-md")
     html_resp = client.post(
         "/api/v1/documents",

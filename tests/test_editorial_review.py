@@ -147,13 +147,13 @@ def test_citations_pin_revision_validate_quote_and_do_not_lie_about_location(
         },
         headers=headers("editorial-evidence"),
     ).json()
-    arguments = dict(
-        thread_id=thread,
-        document_id=document["document_id"],
-        expected_revision_id=document["current_revision_id"],
-        content="cited proposal",
-        summary="Cited change",
-    )
+    arguments = {
+        "thread_id": thread,
+        "document_id": document["document_id"],
+        "expected_revision_id": document["current_revision_id"],
+        "content": "cited proposal",
+        "summary": "Cited change",
+    }
     cited = service.create(
         principal,
         **arguments,
@@ -187,13 +187,13 @@ def test_late_reads_and_identical_wording_in_other_run_keep_their_own_evidence(c
     first_run = create_test_run(
         client, principal, thread_id=thread, document_id=document["document_id"]
     )
-    arguments = dict(
-        thread_id=thread,
-        document_id=document["document_id"],
-        expected_revision_id=document["current_revision_id"],
-        content="same wording",
-        summary="Run-specific change",
-    )
+    arguments = {
+        "thread_id": thread,
+        "document_id": document["document_id"],
+        "expected_revision_id": document["current_revision_id"],
+        "content": "same wording",
+        "summary": "Run-specific change",
+    }
     first = service.create(principal, **arguments, run_id=first_run, rationale="Repeated rationale")
     evidence.record_run_source(
         first_run,
@@ -498,13 +498,13 @@ def test_pdf_citations_use_owned_pages_annotations_and_recheck_deleted_locators(
         )
         assert response.status_code == 201
         annotations.append(response.json())
-    arguments = dict(
-        thread_id=thread,
-        document_id=document["document_id"],
-        expected_revision_id=document["current_revision_id"],
-        content="PDF-backed wording",
-        summary="PDF support",
-    )
+    arguments = {
+        "thread_id": thread,
+        "document_id": document["document_id"],
+        "expected_revision_id": document["current_revision_id"],
+        "content": "PDF-backed wording",
+        "summary": "PDF support",
+    }
     citation = {
         "document_id": first["document_id"],
         "page_number": 1,
@@ -636,13 +636,13 @@ def test_repeated_passages_require_an_exact_locator_instead_of_guessing(client, 
         json={"title": "Repeated passages", "content": prefix + "Repeated quote."},
         headers=headers("repeated-editorial-source"),
     ).json()
-    arguments = dict(
-        thread_id=thread,
-        document_id=document["document_id"],
-        expected_revision_id=document["current_revision_id"],
-        content="Disambiguated",
-        summary="Exact location",
-    )
+    arguments = {
+        "thread_id": thread,
+        "document_id": document["document_id"],
+        "expected_revision_id": document["current_revision_id"],
+        "content": "Disambiguated",
+        "summary": "Exact location",
+    }
     citation = {"document_id": source["document_id"], "snippet": "Repeated quote."}
     with pytest.raises(ValidationError, match="unique|ambiguous"):
         service.create(principal, **arguments, citations=[citation])

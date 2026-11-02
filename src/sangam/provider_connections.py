@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 from dataclasses import dataclass, field, replace
 from typing import Literal
 from urllib.parse import urlsplit
@@ -224,7 +225,7 @@ class ProviderConnectionRepository:
         )
 
     @staticmethod
-    def _from_row(row) -> ProviderConnection:
+    def _from_row(row: sqlite3.Row) -> ProviderConnection:
         try:
             stored = _StoredConnection.model_validate(dict(row))
         except PydanticValidationError as error:

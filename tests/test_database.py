@@ -241,7 +241,9 @@ def test_activity_filter_query_plans_use_investigation_indexes(tmp_path: Path) -
                 ("authorization_denied",),
             ).fetchall(),
         }
-    descriptions = {name: " ".join(row["detail"] for row in rows) for name, rows in plans.items()}
+    descriptions = {}
+    for name, rows in plans.items():
+        descriptions[name] = " ".join(row["detail"] for row in rows)
     assert "operation_events_token_created_idx" in descriptions["token"]
     assert "operation_events_resource_created_idx" in descriptions["resource"]
     assert "operation_events_error_created_idx" in descriptions["error"]

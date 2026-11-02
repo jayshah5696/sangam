@@ -17,8 +17,11 @@ from uuid import uuid4
 
 import httpx
 
+from sangam.application import build_application_services
 from sangam.assignments import Assignment
+from sangam.config import Settings
 from sangam.schemas import ChatProposal, Document, ProjectDetail
+from sangam.security import Principal
 
 
 def main() -> None:
@@ -181,9 +184,6 @@ def main() -> None:
             # Seed an ordinary revision-pinned proposal through the same domain
             # service used by capabilities, while the server is stopped.
             stop()
-            from sangam.application import build_application_services
-            from sangam.config import Settings
-            from sangam.security import Principal
 
             settings = Settings(
                 database_path=Path(env["SANGAM_DATABASE_PATH"]),

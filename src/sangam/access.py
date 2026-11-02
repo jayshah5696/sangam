@@ -194,7 +194,7 @@ def compute_document_diff(
             0,
             {
                 "line_ending": detect_line_ending(new_content),
-                "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+                "final_newline": new_content.endswith(("\n", "\r")),
             },
         )
 
@@ -217,7 +217,7 @@ def compute_document_diff(
             0,
             {
                 "line_ending": detect_line_ending(new_content),
-                "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+                "final_newline": new_content.endswith(("\n", "\r")),
             },
         )
 
@@ -227,7 +227,7 @@ def compute_document_diff(
     in_hunks = False
 
     for idx, line in enumerate(raw_diff):
-        if idx < 2 and (line.startswith("---") or line.startswith("+++")):
+        if idx < 2 and (line.startswith(("---", "+++"))):
             formatted_lines.append(line + "\n")
             continue
 
@@ -240,12 +240,8 @@ def compute_document_diff(
             formatted_lines.append(line + "\n")
             continue
 
-        has_newline = line.endswith("\n") or line.endswith("\r")
-        clean_line = (
-            line[:-1]
-            if line.endswith("\n")
-            else (line[:-2] + "\r" if line.endswith("\r\n") else line)
-        )
+        has_newline = line.endswith(("\n", "\r"))
+        clean_line = line[:-1] if line.endswith("\n") else line
 
         if line.startswith("+"):
             lines_added += 1
@@ -266,7 +262,7 @@ def compute_document_diff(
 
     metadata: dict[str, object] = {
         "line_ending": detect_line_ending(new_content),
-        "final_newline": new_content.endswith("\n") or new_content.endswith("\r"),
+        "final_newline": new_content.endswith(("\n", "\r")),
     }
     diff = "".join(formatted_lines)
     safe_old = sanitize_sensitive_text(old_content)
@@ -278,7 +274,7 @@ def compute_document_diff(
     return diff, lines_added, lines_removed, metadata
 
 
-class _RetryHttpMutation(Exception):
+class _RetryHttpMutationError(Exception):
     """Restart admission or lock selection before any storage side effect."""
 
     def __init__(self, estimated_bytes: int, replay_document_id: str | None = None) -> None:
@@ -405,7 +401,7 @@ class WorkspaceAccessService:
                 if needed_bound > admitted_bound:
                     # Do not expand an audit reservation inside a transaction,
                     # or wait for capacity while retaining document locks.
-                    raise _RetryHttpMutation(needed_bound + 2048)
+                    raise _RetryHttpMutationError(needed_bound + 2048)
 
                 if not has_conditions and action != "duplicate":
                     return store(expected or current.current_revision_id)
@@ -431,6 +427,7 @@ class WorkspaceAccessService:
                             and replay.operation == "create"
                             and replay.revision_id is not None
                             and isinstance(body, DuplicateDocument)
+                            and body.expected_revision_id is not None
                             and self.documents.legacy_duplicate_replay_matches(
                                 connection,
                                 actor_id=principal.actor_id,
@@ -450,7 +447,7 @@ class WorkspaceAccessService:
                         if replay.resource_id not in locked_document_ids:
                             # Re-enter with all locks in one order. Never acquire
                             # an arbitrary replay target while holding its source.
-                            raise _RetryHttpMutation(admitted_bound, replay.resource_id)
+                            raise _RetryHttpMutationError(admitted_bound, replay.resource_id)
                         with self.documents.mutations.document(replay.resource_id):
                             result = self.documents.get_document(
                                 replay.resource_id, include_deleted=True
@@ -480,7 +477,7 @@ class WorkspaceAccessService:
                     details=details,
                     estimated_bytes=admitted_bound,
                 )
-            except _RetryHttpMutation as retry:
+            except _RetryHttpMutationError as retry:
                 admitted_bound = max(admitted_bound, retry.estimated_bytes)
                 if retry.replay_document_id is not None:
                     locked_document_ids.add(retry.replay_document_id)
@@ -912,6 +909,7 @@ class WorkspaceAccessService:
     ) -> DocumentComment:
         if self.comments is None:
             raise ServiceUnavailableError("Document comments are not configured")
+        comments = self.comments
         current = self.documents.get_document(document_id)
         details: dict[str, object] = {
             "action_type": "comment",
@@ -926,7 +924,7 @@ class WorkspaceAccessService:
             capability=Capability.UPDATE,
             action=writes("comment", "document"),
             current=current,
-            operation=lambda: self.comments.create_comment(
+            operation=lambda: comments.create_comment(
                 document_id=document_id,
                 request=request,
                 actor_id=principal.actor_id,
@@ -944,6 +942,7 @@ class WorkspaceAccessService:
     ) -> DocumentComment:
         if self.comments is None:
             raise ServiceUnavailableError("Document comments are not configured")
+        comments = self.comments
         current = self.documents.get_document(document_id)
         details: dict[str, object] = {
             "action_type": "resolve_comment",
@@ -954,10 +953,10 @@ class WorkspaceAccessService:
         }
 
         def operation() -> DocumentComment:
-            comment = self.comments.get_comment(comment_id)
+            comment = comments.get_comment(comment_id)
             if comment.document_id != document_id:
                 raise NotFoundError(f"Comment not found: {comment_id}")
-            return self.comments.resolve_comment(
+            return comments.resolve_comment(
                 comment_id=comment_id,
                 resolved=request.resolved,
                 expected_version=request.expected_version,
@@ -1515,16 +1514,15 @@ class WorkspaceAccessService:
         allowed = self.policy.allowed_prefixes(principal, Capability.READ)
         document_prefixes = allowed
         if normalized_prefix is not None:
-            document_prefixes = (
-                (normalized_prefix,)
-                if allowed is None
-                else tuple(
+            if allowed is None:
+                document_prefixes = (normalized_prefix,)
+            else:
+                document_prefixes = tuple(
                     normalized_prefix if path_matches(prefix, normalized_prefix) else prefix
                     for prefix in allowed
                     if path_matches(prefix, normalized_prefix)
                     or path_matches(normalized_prefix, prefix)
                 )
-            )
         items: list[
             OrganizationDocumentSnapshot | OrganizationFolderSnapshot | OrganizationTagSnapshot
         ] = []
@@ -1672,12 +1670,14 @@ class WorkspaceAccessService:
                     principal, operation=operation, idempotency_key=child_key
                 )
             except SangamError as error:
-                status = "conflicted" if isinstance(error, ConflictError) else "failed"
+                failure_status: Literal["conflicted", "failed"] = (
+                    "conflicted" if isinstance(error, ConflictError) else "failed"
+                )
                 results.append(
                     OrganizationPlanItemResult(
                         index=index,
                         kind=operation.kind,
-                        status=status,
+                        status=failure_status,
                         resource_type=_plan_resource_type(operation.kind),
                         resource_id=getattr(
                             operation, "document_id", getattr(operation, "folder_id", None)
@@ -1744,19 +1744,19 @@ class WorkspaceAccessService:
         completed = sum(item.status == "completed" for item in results)
         conflicted = sum(item.status == "conflicted" for item in results)
         failed = sum(item.status == "failed" for item in results)
-        skipped = sum(item.status == "skipped" for item in results)
-        status = (
-            "completed"
-            if completed == len(normalized.operations)
-            else "partial"
-            if completed
-            else "failed"
-        )
+        skipped_count = sum(item.status == "skipped" for item in results)
+        status: Literal["completed", "partial", "failed"]
+        if completed == len(normalized.operations):
+            status = "completed"
+        elif completed:
+            status = "partial"
+        else:
+            status = "failed"
         response = OrganizationPlanResult(
             status=status,
             argument_digest=digest,
             completed=completed,
-            skipped=skipped,
+            skipped=skipped_count,
             conflicted=conflicted,
             failed=failed,
             items=results,
@@ -2539,7 +2539,7 @@ class WorkspaceAccessService:
                     self.documents.database.post_commit_hook(audit_post_commit_hook),
                 ):
                     result = operation()
-            except _RetryHttpMutation:
+            except _RetryHttpMutationError:
                 # The operation has unwound its locks and commit hooks without
                 # writing. Admission releases this unused ticket before retry.
                 raise
@@ -2562,16 +2562,16 @@ class WorkspaceAccessService:
                             revision_id=recorded_revision_id,
                             details=fail_details,
                         )
-                    except Exception as ae:
+                    # Chain any audit failure to the original operation error below.
+                    except Exception as ae:  # noqa: BLE001
                         audit_err = ae
                 elif audit_inserted or reservation.spent:
-                    outcome = (
-                        "denied"
-                        if isinstance(error, AuthorizationError)
-                        else "conflict"
-                        if isinstance(error, ConflictError)
-                        else "failed"
-                    )
+                    if isinstance(error, AuthorizationError):
+                        outcome = "denied"
+                    elif isinstance(error, ConflictError):
+                        outcome = "conflict"
+                    else:
+                        outcome = "failed"
                     fail_details = dict(recorded_details)
                     if isinstance(error, SangamError) and error.details:
                         fail_details.update(error.details)
@@ -2588,16 +2588,16 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=fail_details or None,
                         )
-                    except Exception as ae:
+                    # Chain any audit failure to the original operation error below.
+                    except Exception as ae:  # noqa: BLE001
                         audit_err = ae
                 else:
-                    outcome = (
-                        "denied"
-                        if isinstance(error, AuthorizationError)
-                        else "conflict"
-                        if isinstance(error, ConflictError)
-                        else "failed"
-                    )
+                    if isinstance(error, AuthorizationError):
+                        outcome = "denied"
+                    elif isinstance(error, ConflictError):
+                        outcome = "conflict"
+                    else:
+                        outcome = "failed"
                     combined_details = dict(details or {})
                     if isinstance(error, SangamError) and error.details:
                         combined_details.update(error.details)
@@ -2612,7 +2612,8 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=combined_details or None,
                         )
-                    except Exception as ae:
+                    # Chain any audit failure to the original operation error below.
+                    except Exception as ae:  # noqa: BLE001
                         audit_err = ae
 
                 if audit_err is not None:
