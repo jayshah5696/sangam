@@ -1,5 +1,7 @@
-"""Tests for user-authored chat skills:
-registration, scoping, diagnostics, pinning, and execution."""
+"""Test user-authored chat skills.
+
+Cover registration, scoping, diagnostics, pinning, and execution.
+"""
 
 from __future__ import annotations
 

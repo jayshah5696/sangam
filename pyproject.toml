@@ -16,7 +16,7 @@ dependencies = [
   "openai-chatkit>=1.6.5,<2",
   "pydantic-settings>=2.10,<3",
   "pyjwt[crypto]>=2.15.1,<3",
-  "pypdf>=6.21.2,<7",
+  "pypdf>=6.21.4,<7",
   "typer>=0.27.3,<1",
   "uvicorn[standard]>=0.54.0,<1",
 ]
@@ -60,7 +60,30 @@ target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = [
+  "E", "F", "I", "UP", "B", "SIM",
+  "BLE001",  # Catch specific exceptions, or preserve the traceback.
+  "DTZ",     # Use explicit timezones.
+  "G",       # Keep logging arguments separate from the format string.
+  "S307",    # No eval.
+  "S506",    # No unsafe YAML loading.
+  "S602",    # No subprocess shell execution.
+  "N",       # PEP 8 naming.
+  "A",       # Do not shadow builtins.
+  "C4",      # Prefer direct comprehensions and generator expressions.
+  "PIE",     # Remove redundant constructs and duplicate definitions.
+  "RET",     # Keep return paths explicit and avoid unnecessary nesting.
+  "PLC", "PLE", "PLW",  # Pylint convention, correctness, and warning checks.
+  "LOG",     # Correct logging API usage.
+  "ASYNC",   # Do not block or misuse asynchronous operations.
+  "D2", "D3", "D4",    # Check existing docstrings using Google's convention.
+  "RUF008", "RUF012",   # No accidental mutable dataclass or class defaults.
+  "RUF100",             # Remove obsolete lint suppressions.
+  "TRY002", "TRY203", "TRY400", "TRY401",  # Preserve useful exception evidence.
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -68,6 +91,11 @@ addopts = "-q"
 
 [tool.mypy]
 python_version = "3.13"
+strict = true
 check_untyped_defs = true
 ignore_missing_imports = true
 warn_unused_ignores = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_redundant_casts = true
+enable_error_code = ["exhaustive-match", "ignore-without-code", "possibly-undefined", "unused-awaitable"]

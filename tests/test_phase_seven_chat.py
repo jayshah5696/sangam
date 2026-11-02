@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import AsyncIterator, Sequence
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1148,7 +1149,7 @@ class _RecordingResponsesModel(Model):
     async def stream_response(  # type: ignore[override]
         self,
         system_instructions: str | None,
-        input: str | list[Any],
+        input: str | list[Any],  # noqa: A002 - Match the SDK's keyword argument.
         *args: Any,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
@@ -1710,8 +1711,6 @@ def test_execution_budget_defaults_support_longer_runs() -> None:
 def create_test_run(
     client: TestClient, principal: Principal, thread_id: str, document_id: str | None = None
 ) -> str:
-    import uuid
-
     chat = client.app.state.services.chat
     entry_point = "document" if document_id else "workspace"
     turn = chat.evidence.create_turn_context(

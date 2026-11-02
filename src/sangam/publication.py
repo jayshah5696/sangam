@@ -552,9 +552,10 @@ class PublicationService:
     def trusted_preview_content(self, raw_token: str) -> str:
         verified = self.preview_tokens.verify(raw_token)
         self._trusted_preview_document(verified)
-        return self._revision_content(
+        content: str = self._revision_content(
             document_id=verified.document_id, revision_id=verified.revision_id
         )["content"]
+        return content
 
     def trusted_preview_assets(self, raw_token: str) -> tuple[str, ...]:
         verified = self.preview_tokens.verify(raw_token)
@@ -640,7 +641,7 @@ class PublicationService:
                 evidence_items = [
                     PublishedEvidenceItem.model_validate(item) for item in json.loads(raw_evidence)
                 ]
-            except Exception:
+            except (ValueError, TypeError):
                 evidence_items = []
         return PublicationContent(
             publication_id=row["publication_id"],
@@ -693,8 +694,6 @@ class PublicationService:
 
     @staticmethod
     def _relative_asset_references(content: str) -> set[str]:
-        import re
-
         references = set(re.findall(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)", content))
         references.update(
             match[1]
@@ -714,7 +713,7 @@ class PublicationService:
 
     def _revision_content(self, *, document_id: str, revision_id: str) -> sqlite3.Row:
         with self.database.connection() as connection:
-            row = connection.execute(
+            row: sqlite3.Row | None = connection.execute(
                 "SELECT content FROM revisions WHERE document_id = ? AND revision_id = ?",
                 (document_id, revision_id),
             ).fetchone()
@@ -757,7 +756,7 @@ class PublicationService:
         if raw_evidence:
             try:
                 values["evidence"] = json.loads(raw_evidence)
-            except Exception:
+            except (ValueError, TypeError):
                 values["evidence"] = []
         else:
             values["evidence"] = []
@@ -924,13 +923,12 @@ class PublicationService:
         fingerprint: str,
         resource_id: str,
     ) -> None:
-        resource_type = (
-            "document"
-            if operation == "document_trust"
-            else "publication_revision"
-            if operation == "expose_revision"
-            else "publication"
-        )
+        if operation == "document_trust":
+            resource_type = "document"
+        elif operation == "expose_revision":
+            resource_type = "publication_revision"
+        else:
+            resource_type = "publication"
         self.idempotency.record_mutation(
             connection,
             actor_id=actor_id,

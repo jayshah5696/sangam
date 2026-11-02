@@ -11,7 +11,7 @@ from sangam.db import Database, utc_now
 from sangam.errors import IdempotencyError
 
 
-def request_hash(payload: dict[str, Any]) -> str:
+def request_hash(payload: dict[str, Any] | list[Any]) -> str:
     conditional = conditional_fingerprint()
     if conditional is not None:
         return conditional

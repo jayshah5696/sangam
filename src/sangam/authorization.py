@@ -47,10 +47,11 @@ class AuthorizationPolicy:
         """
         if principal.administrator or principal.identity_kind == "system":
             return None
-        grants_by_capability = [
-            [grant.path_prefix for grant in principal.scopes if grant.capability == capability]
-            for capability in capabilities
-        ]
+        grants_by_capability = []
+        for capability in capabilities:
+            grants_by_capability.append(
+                [grant.path_prefix for grant in principal.scopes if grant.capability == capability]
+            )
         if not grants_by_capability or any(not grants for grants in grants_by_capability):
             return ()
         intersections = grants_by_capability[0]

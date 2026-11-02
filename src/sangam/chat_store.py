@@ -27,8 +27,8 @@ class OwnerContext(Protocol):
 TContext = TypeVar("TContext", bound=OwnerContext)
 T = TypeVar("T")
 
-_THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
-_ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
+_THREAD_ITEM_ADAPTER: TypeAdapter[ThreadItem] = TypeAdapter(ThreadItem)
+_ATTACHMENT_ADAPTER: TypeAdapter[Attachment] = TypeAdapter(Attachment)
 _CHAT_PAYLOAD_VERSION = 1
 
 
@@ -42,6 +42,7 @@ class BoundedThreadRunner:
         self._waiting_count = 0
         self._shutting_down = False
         self._active_futures: set[concurrent.futures.Future[Any]] = set()
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
         self._cond: asyncio.Condition | None = None
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=max_concurrency,
@@ -84,7 +85,9 @@ class BoundedThreadRunner:
                         c.notify_all()
 
                 if not loop.is_closed():
-                    asyncio.create_task(_coro())
+                    cleanup_task = asyncio.create_task(_coro())
+                    self._cleanup_tasks.add(cleanup_task)
+                    cleanup_task.add_done_callback(self._cleanup_tasks.discard)
 
             with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(_cleanup)
@@ -107,7 +110,8 @@ class BoundedThreadRunner:
 
         return await asyncio.wrap_future(fut)
 
-    async def close(self, timeout: float = 35.0) -> None:
+    # Shutdown owns in-flight writes; it must bound draining without cancelling them.
+    async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         cond = self._get_cond()
         async with cond:
             self._shutting_down = True
@@ -148,7 +152,8 @@ class SQLiteChatKitStore(Store[TContext]):
     async def _run_bounded(self, func: Callable[..., T], *args: Any) -> T:
         return await self._runner.run(func, *args)
 
-    async def close(self, timeout: float = 35.0) -> None:
+    # Forward the shutdown deadline to the runner that owns in-flight writes.
+    async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         await self._runner.close(timeout=timeout)
 
     @staticmethod

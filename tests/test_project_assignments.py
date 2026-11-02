@@ -5,6 +5,7 @@ from conftest import headers, issue_agent_token
 from fastapi.testclient import TestClient
 
 from sangam.application import build_application_services
+from sangam.assignments import AssignmentService, CreateAssignment, ReviewResult
 from sangam.config import Settings
 from sangam.errors import ConflictError, ValidationError
 from sangam.schemas import AddProjectDocument, CreateProject
@@ -81,8 +82,6 @@ def test_briefing_boundary_does_not_move_on_reads(client: TestClient):
 
 
 def test_controls_recovery_scope_and_exact_quotes(settings: Settings):
-    from sangam.assignments import AssignmentService, CreateAssignment, ReviewResult
-
     services = build_application_services(settings)
     principal = Principal.trusted_human(
         actor_id=settings.trusted_human_actor_id, display_name="Local", operation_id="review-test"
@@ -132,9 +131,6 @@ def test_controls_recovery_scope_and_exact_quotes(settings: Settings):
 
 
 def test_invalid_model_result_never_becomes_an_artifact(settings: Settings):
-    from sangam.assignments import AssignmentService, CreateAssignment, ReviewResult
-    from sangam.schemas import CreateProject
-
     services = build_application_services(settings)
     principal = Principal.trusted_human(
         actor_id=settings.trusted_human_actor_id,
@@ -166,9 +162,6 @@ def test_invalid_model_result_never_becomes_an_artifact(settings: Settings):
 
 
 def test_child_assignment_scope_and_budget_constraints(settings: Settings):
-    from sangam.assignments import AssignmentService, CreateAssignment
-    from sangam.schemas import CreateProject
-
     services = build_application_services(settings)
     principal = Principal.trusted_human(
         actor_id=settings.trusted_human_actor_id, display_name="Local", operation_id="child-test"
@@ -273,9 +266,6 @@ def test_child_assignment_scope_and_budget_constraints(settings: Settings):
 
 
 def test_pause_and_stop_propagation_to_children(settings: Settings):
-    from sangam.assignments import AssignmentService, CreateAssignment
-    from sangam.schemas import CreateProject
-
     services = build_application_services(settings)
     principal = Principal.trusted_human(
         actor_id=settings.trusted_human_actor_id, display_name="Local", operation_id="cascade-test"
@@ -328,9 +318,6 @@ def test_pause_and_stop_propagation_to_children(settings: Settings):
 
 
 def test_assignment_activity_and_judgment_state(settings: Settings):
-    from sangam.assignments import AssignmentService, CreateAssignment
-    from sangam.schemas import CreateProject
-
     services = build_application_services(settings)
     principal = Principal.trusted_human(
         actor_id=settings.trusted_human_actor_id, display_name="Local", operation_id="activity-test"

@@ -141,7 +141,7 @@ export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassificatio
         return 'status-assumption'
       case 'No evidence':
         return 'status-no-evidence'
-      default:
+      case 'Not checked':
         return 'status-not-checked'
     }
   }

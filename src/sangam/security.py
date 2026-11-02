@@ -8,6 +8,7 @@ import re
 import secrets
 import sqlite3
 import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
@@ -227,10 +228,10 @@ def sanitize_sensitive_text(value: str) -> str:
     return _SECRET_ASSIGNMENT_PATTERN.sub(r"\1=[REDACTED]", redacted_bearer)
 
 
-def sanitize_headers(headers: object) -> dict[str, str]:
+def sanitize_headers(headers: Mapping[str, str] | Iterable[tuple[str, str]]) -> dict[str, str]:
     """Strip sensitive headers such as tokens, cookies, and JWT assertions."""
     result: dict[str, str] = {}
-    items = headers.items() if hasattr(headers, "items") else headers
+    items = headers.items() if isinstance(headers, Mapping) else headers
     for key, value in items:
         norm_key = str(key).strip().casefold()
         if norm_key in SENSITIVE_HEADER_NAMES or (

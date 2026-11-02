@@ -3,22 +3,38 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
+import os
 import sqlite3
+import sys
+import tempfile
 import threading
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from chatkit.types import (
+    AssistantMessageContent,
+    AssistantMessageItem,
+    FileAttachment,
+    InferenceOptions,
+    ThreadMetadata,
+    UserMessageItem,
+    UserMessageTextContent,
+)
 from conftest import headers
 from fastapi.testclient import TestClient
 from test_phase_five_pdf_research import import_pdf, text_pdf
 
-from sangam.activity import ActivityService
+import sangam.pdf_parser as pdf_parser
+from sangam.activity import ActivityService, AuditReservation, _estimate_value_bound
 from sangam.api import create_app
-from sangam.chat_store import BoundedThreadRunner
+from sangam.chat_context import ChatRequestContext
+from sangam.chat_store import BoundedThreadRunner, SQLiteChatKitStore
 from sangam.config import Settings
 from sangam.db import Database
-from sangam.errors import ServiceUnavailableError
+from sangam.errors import NotFoundError, ServiceUnavailableError, ValidationError
 from sangam.security import Principal
 
 
@@ -263,8 +279,7 @@ def test_chat_store_cancellation_holds_permit_until_worker_completes() -> None:
         task = asyncio.create_task(runner.run(slow_sync_worker))
 
         # Wait for thread to actually start executing
-        while not worker_started.is_set():
-            await asyncio.sleep(0.01)
+        assert await asyncio.to_thread(worker_started.wait, 2.0)
 
         assert runner._active_workers == 1
 
@@ -278,8 +293,7 @@ def test_chat_store_cancellation_holds_permit_until_worker_completes() -> None:
 
         # Allow the synchronous worker to complete
         worker_can_finish.set()
-        while not worker_finished.is_set():
-            await asyncio.sleep(0.01)
+        assert await asyncio.to_thread(worker_finished.wait, 2.0)
 
         # Give asyncio loop a slice to process done_callback
         await asyncio.sleep(0.05)
@@ -359,8 +373,7 @@ def test_chat_store_cancellation_before_executor_start_releases_permit() -> None
 
     async def scenario():
         t1 = asyncio.create_task(runner.run(first_task))
-        while not first_started.is_set():
-            await asyncio.sleep(0.01)
+        assert await asyncio.to_thread(first_started.wait, 2.0)
 
         assert runner._active_workers == 1
 
@@ -397,8 +410,7 @@ def test_chat_store_shutdown_times_out_and_raises_runtime_error_on_unfinished_wr
 
     async def scenario():
         t = asyncio.create_task(runner.run(hanging_task))
-        while not worker_started.is_set():
-            await asyncio.sleep(0.01)
+        assert await asyncio.to_thread(worker_started.wait, 2.0)
 
         with pytest.raises(RuntimeError, match="ChatKitStore shutdown timed out with 1 operations"):
             await runner.close(timeout=0.05)
@@ -533,12 +545,6 @@ def test_audit_service_oversized_event_commits_without_deadlock_or_truncation(
 def test_chat_store_attachments_column_created_by_and_ownership_isolation(
     client: TestClient,
 ) -> None:
-    from chatkit.types import FileAttachment
-
-    from sangam.chat_context import ChatRequestContext
-    from sangam.chat_store import SQLiteChatKitStore
-    from sangam.errors import NotFoundError
-
     database = client.app.state.services.activity.database
     store = SQLiteChatKitStore(database)
 
@@ -594,18 +600,6 @@ def test_chat_store_attachments_column_created_by_and_ownership_isolation(
 
 
 def test_chat_store_pagination_returns_continuation_cursor(client: TestClient) -> None:
-    from datetime import UTC, datetime
-
-    from chatkit.types import (
-        InferenceOptions,
-        ThreadMetadata,
-        UserMessageItem,
-        UserMessageTextContent,
-    )
-
-    from sangam.chat_context import ChatRequestContext
-    from sangam.chat_store import SQLiteChatKitStore
-
     database = client.app.state.services.activity.database
     store = SQLiteChatKitStore(database)
 
@@ -809,7 +803,8 @@ def test_app_lifespan_reports_chat_shutdown_error_while_preserving_activity_clea
 
     orig_close = runner.close
 
-    async def fast_close(timeout: float = 0.05) -> None:
+    # Match the shutdown method under test, which owns its bounded drain.
+    async def fast_close(timeout: float = 0.05) -> None:  # noqa: ASYNC109
         await orig_close(timeout=0.05)
 
     runner.close = fast_close
@@ -1108,8 +1103,6 @@ def test_set_audit_target_outside_transaction_raises_and_cleans_up_on_exit(
 def test_pdf_move_delete_restore_audit_records_correct_revisions_and_isolates_same_thread(
     client: TestClient, settings
 ) -> None:
-    from test_phase_five_pdf_research import import_pdf, text_pdf
-
     db = Database(settings.database_path)
     source = text_pdf("Audit Revision Tracking PDF")
     imported = import_pdf(
@@ -1411,10 +1404,6 @@ def test_overlap_write_transaction_and_oversized_audit_event(client: TestClient)
 
 def test_recursive_payload_bound_covers_nested_structures_and_numeric_boundaries() -> None:
     """Area 3 acceptance: Nested payloads, unicode, escaping, and numeric bounds."""
-    import json
-
-    from sangam.activity import _estimate_value_bound
-
     test_values = [
         None,
         True,
@@ -1537,10 +1526,6 @@ def test_worker_recovery_from_transient_lock_and_uncertain_reconciliation(
 
 def test_annotation_validation_rejects_control_characters(client: TestClient) -> None:
     """Area 8 acceptance: Annotation color and tags reject control characters."""
-    from test_phase_five_pdf_research import import_pdf, text_pdf
-
-    from sangam.errors import ValidationError
-
     pdf_bytes = text_pdf("Annotation Validation Test PDF")
     imported = import_pdf(
         client,
@@ -1615,10 +1600,6 @@ def test_materialization_failure_does_not_corrupt_unrelated_reservation_accounti
 
 def test_nested_structures_deep_bound_vs_actual_json() -> None:
     """Probe 2: 12 nested lists wrapping a 100,000-char string must estimate bound >= actual."""
-    import json
-
-    from sangam.activity import _estimate_value_bound
-
     s = "a" * 100_000
     val = s
     for _ in range(12):
@@ -1664,7 +1645,8 @@ def test_two_expanding_producers_do_not_deadlock_on_empty_queue(client: TestClie
                     resource_id=doc_id,
                     details={"diff": payload},
                 )
-            except Exception as e:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         t1 = threading.Thread(target=worker, args=(res1, p1, "doc_p1"))
@@ -1806,7 +1788,6 @@ def test_worker_recovery_from_real_sqlite_write_lock(client: TestClient, setting
 
 def test_document_update_persists_actual_diff_not_placeholder(client: TestClient) -> None:
     """Finding 1: Document updates and restores persist real diffs, not placeholders."""
-
     # 1. Create document
     create_resp = client.post(
         "/api/v1/documents",
@@ -1899,6 +1880,7 @@ def test_document_update_persists_actual_diff_not_placeholder(client: TestClient
 
 def test_full_budget_expansion_strictly_enforces_advertised_bound(client: TestClient) -> None:
     """Finding 2: 16 KB budget with two 8 KB reservations; Res 1 expands to 12 KB diff.
+
     Peak total memory must NEVER exceed 16,384 bytes. Res 1 must wait until Res 2 finishes.
     """
     activity_svc = client.app.state.services.activity
@@ -1930,7 +1912,8 @@ def test_full_budget_expansion_strictly_enforces_advertised_bound(client: TestCl
                     details={"diff": large_diff},
                 )
                 res1_completed.set()
-            except Exception as e:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as e:  # noqa: BLE001
                 res1_error.append(e)
 
         t1 = threading.Thread(target=worker1)
@@ -1989,8 +1972,9 @@ def test_transactional_admitted_oversized_owner_permitted(client: TestClient) ->
 def test_failure_audit_persistence_failure_is_not_swallowed(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Finding 3: When audit persistence fails during request failure handling,
-    the original error is preserved, chained with audit failure, reporting audit_persisted=False.
+    """Preserve the original error when recording its audit failure also fails.
+
+    Chain the audit failure and report audit_persisted=False.
     """
     create_resp = client.post(
         "/api/v1/documents",
@@ -1999,8 +1983,6 @@ def test_failure_audit_persistence_failure_is_not_swallowed(
     )
     assert create_resp.status_code == 201
     doc_id = create_resp.json()["document_id"]
-
-    from sangam.activity import AuditReservation
 
     def failing_reservation_record(self, *args, **kwargs):
         raise RuntimeError("Simulated audit queue failure")
@@ -2029,6 +2011,7 @@ def test_two_expanding_producers_break_circular_wait_under_strict_capacity(
     client: TestClient,
 ) -> None:
     """Reviewer Finding 1: Two expanding reservations must not deadlock each other until timeout.
+
     Under a strict 16 KB budget with two 8 KB reservations expanding to 12 KB each,
     producers yield provisional byte credits in FIFO order to acquire complete event capacity,
     finishing without timeout while peak total memory stays strictly <= 16,384 bytes.
@@ -2061,7 +2044,8 @@ def test_two_expanding_producers_break_circular_wait_under_strict_capacity(
                     details={"diff": large_diff},
                 )
                 results[name] = "success"
-            except Exception as e:
+            # Collect every worker failure for assertion after joining the threads.
+            except Exception as e:  # noqa: BLE001
                 results[name] = f"error: {e}"
                 errors.append(e)
 
@@ -2093,9 +2077,9 @@ def test_two_expanding_producers_break_circular_wait_under_strict_capacity(
 
 
 def test_audit_diff_preserves_line_endings_and_diff_header_lines(client: TestClient) -> None:
-    """Reviewer Finding 2: Audit diffs must distinguish line-ending additions/removals,
-    missing-final-newline, and CRLF vs LF changes, while retaining correct counts for content
-    resembling diff headers.
+    """Distinguish line endings and final newlines in audit diffs.
+
+    Retain correct counts for content that resembles diff headers.
     """
     db = client.app.state.services.activity.database
 
@@ -2194,17 +2178,10 @@ def test_audit_diff_preserves_line_endings_and_diff_header_lines(client: TestCli
 def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_response(
     client: TestClient,
 ) -> None:
-    """Verification Gate: Reject SSE error events, require completed assistant response,
-    and verify item ID and content match SQLite chat_thread_items.
+    """Require a completed assistant response that matches persisted chat data.
+
+    Reject SSE error events and verify the item ID and content in SQLite.
     """
-    import json
-    from datetime import UTC, datetime
-
-    from chatkit.types import AssistantMessageContent, AssistantMessageItem, ThreadMetadata
-
-    from sangam.chat_context import ChatRequestContext
-    from sangam.chat_store import SQLiteChatKitStore
-
     # 1. Five-event error sequence simulation
     error_stream_events = [
         {
@@ -2558,8 +2535,6 @@ def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestCl
     assert "Atomic PDF Extraction Test Content" in pages[0].text
 
     # Verify no orphan temporary files exist in system temp directory or workspace
-    import tempfile
-    from pathlib import Path
 
     temp_dir = Path(tempfile.gettempdir())
     orphaned_temp_files = list(temp_dir.glob(".pages.json.sangam-*"))
@@ -2892,11 +2867,6 @@ def test_concurrent_document_writes_with_if_match_and_atomic_staging(
 def test_pdf_parser_hash_mismatch_prevents_replace_and_cleans_temp_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    import os
-    import sys
-
-    import sangam.pdf_parser as pdf_parser
-
     source_pdf = tmp_path / "source.pdf"
     output_json = tmp_path / "pages.json"
     source_pdf.write_bytes(b"%PDF-1.4 dummy")

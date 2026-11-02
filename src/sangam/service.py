@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 from sangam.actors import ActorService
 from sangam.db import Database, utc_now
@@ -35,6 +36,9 @@ from sangam.schemas import (
 from sangam.search import SearchIndex
 from sangam.search_passages import attach_search_matches
 from sangam.workspace import WorkspaceFilesystem
+
+if TYPE_CHECKING:
+    from sangam.pdf_research import PdfResearchService
 
 
 def _content_hash(content: str) -> str:
@@ -149,7 +153,7 @@ class DocumentService:
         self.search_index = search_index
         self.mutations = mutations
         self.max_document_bytes = max_document_bytes
-        self.pdf_research = None
+        self.pdf_research: PdfResearchService | None = None
 
     def _validate_content_size(self, content: str) -> None:
         size_bytes = len(content.encode("utf-8"))
@@ -291,7 +295,8 @@ class DocumentService:
             ).fetchone()
         if row is None:
             raise NotFoundError(f"Revision not found for document: {revision_id}")
-        return row["content"]
+        content: str = row["content"]
+        return content
 
     def finish_replayed_write(self, document_id: str) -> Document:
         """Complete a replayed write: materialize a pending head and re-index it.
@@ -1109,7 +1114,8 @@ class DocumentService:
         new_title = title.strip() if title and title.strip() else f"{source.title} copy"
         pdf_research = getattr(self, "pdf_research", None)
         if pdf_research is None:
-            from sangam.pdf_research import PdfResearchService
+            # PdfResearchService imports DocumentService; load the fallback after startup.
+            from sangam.pdf_research import PdfResearchService  # noqa: PLC0415
 
             pdf_research = PdfResearchService(
                 database=self.database,
@@ -1861,7 +1867,7 @@ class DocumentService:
             ordering = "bm25(document_search), d.document_id"
         elif sort == "relevance":
             ordering = "d.updated_at DESC, d.document_id"
-        elif sort != "relevance":
+        else:
             raise ValidationError(f"Unsupported search sort: {sort}")
         parameters.extend((limit, offset))
         with self.database.connection() as connection:
@@ -1885,7 +1891,7 @@ class DocumentService:
     def rebuild_search_index(self) -> int:
         count = 0
 
-        def count_and_yield():
+        def count_and_yield() -> Iterator[Document]:
             nonlocal count
             for doc in self.iter_documents(include_deleted=True):
                 if not doc.deleted:

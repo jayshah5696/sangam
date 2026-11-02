@@ -14,7 +14,20 @@ from test_phase_seven_chat import install_fake_model
 
 from sangam.capabilities import Capability
 from sangam.chat_capabilities import CreateDocumentInput, WorkspaceSearchInput
-from sangam.errors import AuthenticationError, AuthorizationError, NotFoundError, ValidationError
+from sangam.chat_effects import build_effect_failure_record, classify_effect_retry_safety
+from sangam.errors import (
+    AuthenticationError,
+    AuthorizationError,
+    ConflictError,
+    CredentialConflictError,
+    IdempotencyError,
+    IntegrationError,
+    InvalidPathError,
+    MaterializationError,
+    NotFoundError,
+    ValidationError,
+)
+from sangam.schemas import TokenScope
 from sangam.security import Principal, ScopeGrant
 
 
@@ -581,7 +594,6 @@ def test_cancelling_a_thread_clears_a_pending_effect_after_the_run_ended(
 def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
     client: TestClient,
 ) -> None:
-    from sangam.schemas import TokenScope
 
     # Real agents authenticate with a token; the effect is later run with that token's grants.
     identity = client.app.state.services.identity
@@ -927,20 +939,6 @@ def test_create_document_rejects_missing_and_unsupported_content_type(
 
 
 def test_retry_classification_safety() -> None:
-    from sangam.chat_effects import build_effect_failure_record, classify_effect_retry_safety
-    from sangam.errors import (
-        AuthenticationError,
-        AuthorizationError,
-        ConflictError,
-        CredentialConflictError,
-        IdempotencyError,
-        IntegrationError,
-        InvalidPathError,
-        MaterializationError,
-        NotFoundError,
-        ValidationError,
-    )
-
     non_retryable = [
         InvalidPathError("Invalid path: notes/topic"),
         ValidationError("Invalid input"),
@@ -966,7 +964,6 @@ def test_retry_classification_safety() -> None:
 
 
 def test_preflight_rejection_create_document(client: TestClient) -> None:
-    from sangam.errors import ConflictError, InvalidPathError, ValidationError
 
     # Collision with existing document
     client.post(
@@ -1015,8 +1012,6 @@ def test_preflight_rejection_create_document(client: TestClient) -> None:
 
 
 def test_preflight_rejection_organization_plan(client: TestClient) -> None:
-    from sangam.errors import ConflictError, InvalidPathError
-
     doc = client.post(
         "/api/v1/documents",
         headers=headers("org-preflight-doc"),
@@ -1061,8 +1056,6 @@ def test_preflight_rejection_organization_plan(client: TestClient) -> None:
 
 
 def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
-    from sangam.security import Principal
-
     prepared = prepare_effect(
         client,
         capability_id="create_document",
@@ -1110,8 +1103,6 @@ def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
         json={"effect_ids": [effect_id]},
     )
     assert ack_again.status_code == 200
-
-    from sangam.schemas import TokenScope
 
     # Issue token for other agent to register actor in DB
     client.app.state.services.identity.issue_agent_token(

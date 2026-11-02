@@ -66,6 +66,7 @@ class DocumentCommentService:
         with self.database.transaction() as connection:
             self.actors.require_known(connection, actor_id)
 
+            hash_val: str | None = None
             if idempotency_key:
                 hash_val = request_hash(
                     {
@@ -111,7 +112,7 @@ class DocumentCommentService:
                     now,
                 ),
             )
-            if idempotency_key:
+            if idempotency_key and hash_val is not None:
                 self.idempotency.record_mutation(
                     connection,
                     actor_id=actor_id,

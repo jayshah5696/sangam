@@ -46,7 +46,7 @@ class KarakeepService:
         return self.client is not None
 
     def connection_health(self) -> KarakeepConnection:
-        if not self.configured:
+        if self.client is None:
             return KarakeepConnection(
                 configured=False,
                 connected=False,

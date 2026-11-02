@@ -5,7 +5,13 @@ import json
 from conftest import headers
 from fastapi.testclient import TestClient
 
-from sangam.security import sanitize_headers, sanitize_sensitive_data, sanitize_sensitive_text
+from sangam.activity import ActivityService
+from sangam.security import (
+    Principal,
+    sanitize_headers,
+    sanitize_sensitive_data,
+    sanitize_sensitive_text,
+)
 
 
 def test_sensitive_header_and_data_sanitization() -> None:
@@ -1066,9 +1072,6 @@ def test_certificate_and_keystore_sanitization() -> None:
 
 def test_activity_service_auto_populates_action_type_and_target_file() -> None:
     """Verify ActivityService auto-populates action_type and target_file if omitted from details."""
-    from sangam.activity import ActivityService
-    from sangam.security import Principal
-
     principal = Principal.trusted_human(
         actor_id="human:chronicle", display_name="Chronicle Test", operation_id="op_123"
     )

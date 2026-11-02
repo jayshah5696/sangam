@@ -6,7 +6,6 @@ import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import cast
 
 from agents import Agent, AgentOutputSchema, ModelSettings, RunConfig, Runner, StopAtTools
 from agents.models.interface import ModelProvider
@@ -27,7 +26,6 @@ from sangam.capabilities import Capability
 from sangam.chat_capabilities import (
     ChatCapability,
     ChatCapabilityRegistry,
-    ChatEntryPoint,
     EffectClass,
 )
 from sangam.chat_context import AgentRunContext, ChatRequestContext
@@ -191,7 +189,8 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             return self._model_provider
         return self.provider_connections.model_provider(connection_id)
 
-    async def close(self, timeout: float = 35.0) -> None:
+    # Keep both storage owners' shutdown deadlines without cancelling committed work.
+    async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         try:
             await self.admission.close(timeout=timeout)
         finally:
@@ -302,7 +301,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             currently_allowed = self.capabilities.resolve(
                 principal=context.principal,
                 policy=self.workspace.policy,
-                entry_point=cast(ChatEntryPoint, turn_record.entry_point),
+                entry_point=turn_record.entry_point,
                 document=document,
                 model_supports_tools=selected_model.supports_tools,
             )
@@ -353,7 +352,7 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             resolved_capabilities = self.capabilities.resolve(
                 principal=context.principal,
                 policy=self.workspace.policy,
-                entry_point=cast(ChatEntryPoint, turn_record.entry_point),
+                entry_point=turn_record.entry_point,
                 document=document,
                 model_supports_tools=selected_model.supports_tools,
             )
@@ -439,9 +438,9 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             store=self.store,
             request_context=request_context,
         )
+        result = None
         try:
             stream_failed = False
-            result = None
             continuity_input_tokens = continuity_output_tokens = 0
             task_state = await self.admission.run_sync(
                 self.continuity.get, context.principal, thread.id
@@ -576,7 +575,9 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             )
             if not sources:
                 return input_tokens, output_tokens
-            allowed = {item for note in state.notes for item in note.source_item_ids}
+            allowed: set[str] = set()
+            for note in state.notes:
+                allowed.update(note.source_item_ids)
             allowed.update(entry.item_id for entry in sources)
             output_schema = AgentOutputSchema(TaskDraft)
             # TaskDraft's note schema limits provenance to the observed message IDs.

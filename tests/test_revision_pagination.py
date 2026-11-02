@@ -55,7 +55,7 @@ def test_revision_pages_are_bounded_stable_and_fetch_exact_content(client: TestC
     assert [item["revision_id"] for item in second_page["items"]] == list(
         reversed(document_ids[-4:-2])
     )
-    assert set(item["revision_id"] for item in first_page["items"]).isdisjoint(
+    assert {item["revision_id"] for item in first_page["items"]}.isdisjoint(
         item["revision_id"] for item in second_page["items"]
     )
 

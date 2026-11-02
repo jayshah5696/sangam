@@ -35,7 +35,7 @@ BOOKMARK = {
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+    def do_GET(self) -> None:
         path = urlsplit(self.path).path
         if path == "/api/v1/bookmarks/search":
             self._respond({"bookmarks": [BOOKMARK], "nextCursor": None})
@@ -54,8 +54,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format: str, *args: object) -> None:
-        del format, args
+    def log_message(self, message_format: str, *args: object) -> None:
+        del message_format, args
 
 
 if __name__ == "__main__":

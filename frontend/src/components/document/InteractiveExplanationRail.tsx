@@ -117,7 +117,7 @@ export function InteractiveExplanationRail({
         return <GitBranch size="var(--icon-detail)" />
       case 'diagram':
         return <Layers size="var(--icon-detail)" />
-      default:
+      case 'custom':
         return <FileText size="var(--icon-detail)" />
     }
   }

@@ -243,8 +243,13 @@ class BackupManager:
         with tarfile.open(backup_dir / "workspace.tar.gz", "r:gz") as archive:
             for member in archive.getmembers():
                 member_count += 1
-                path = PurePosixPath(member.name)
-                if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+                member_path = PurePosixPath(member.name)
+                if (
+                    member_path.is_absolute()
+                    or ".." in member_path.parts
+                    or member.issym()
+                    or member.islnk()
+                ):
                     raise ValidationError("Workspace backup contains an unsafe archive member")
                 if member.name in member_names:
                     raise ValidationError("Workspace backup contains a duplicate archive member")

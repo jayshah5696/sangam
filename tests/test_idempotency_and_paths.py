@@ -6,6 +6,10 @@ import pytest
 from conftest import headers
 from fastapi.testclient import TestClient
 
+from sangam.errors import ValidationError
+from sangam.pdf_research import PdfResearchService
+from sangam.security import normalize_scope_prefix
+
 
 def test_create_retry_returns_same_document_and_revision(client: TestClient) -> None:
     body = {"title": "Once", "content": "Only one revision"}
@@ -106,9 +110,6 @@ def test_duplicate_materialized_path_is_rejected(client: TestClient) -> None:
     ],
 )
 def test_whitespace_padded_traversal_in_token_scope_is_rejected(invalid_scope: str) -> None:
-    from sangam.errors import ValidationError
-    from sangam.security import normalize_scope_prefix
-
     with pytest.raises(ValidationError):
         normalize_scope_prefix(invalid_scope)
 
@@ -128,8 +129,6 @@ def test_whitespace_padded_traversal_in_token_scope_is_rejected(invalid_scope: s
     ],
 )
 def test_wildcard_scope_prefix_normalization(raw_scope: str, expected: str | None) -> None:
-    from sangam.security import normalize_scope_prefix
-
     assert normalize_scope_prefix(raw_scope) == expected
 
 
@@ -173,9 +172,6 @@ def test_revision_summary_rejects_null_bytes_and_control_characters(
 def test_pdf_research_metadata_rejects_null_bytes_and_control_characters(
     bad_char: str,
 ) -> None:
-    from sangam.errors import ValidationError
-    from sangam.pdf_research import PdfResearchService
-
     with pytest.raises(ValidationError):
         PdfResearchService._normalize_annotation_fields(
             annotation_type="comment",

@@ -193,7 +193,8 @@ def test_concurrent_project_mutations(settings: Settings) -> None:
                     pinned_page=idx + 1,
                 ),
             )
-        except Exception as e:
+        # Collect every worker failure for assertion after joining the threads.
+        except Exception as e:  # noqa: BLE001
             errors.append(e)
 
     def update_layout_worker(worker_idx: int) -> None:
@@ -217,7 +218,8 @@ def test_concurrent_project_mutations(settings: Settings) -> None:
                     ),
                 ),
             )
-        except Exception as e:
+        # Collect every worker failure for assertion after joining the threads.
+        except Exception as e:  # noqa: BLE001
             errors.append(e)
 
     with ThreadPoolExecutor(max_workers=8) as executor:

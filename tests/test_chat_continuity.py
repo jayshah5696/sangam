@@ -6,10 +6,11 @@ from datetime import UTC, datetime
 
 import pytest
 from chatkit.types import UserMessageItem, UserMessageTextContent
-from test_phase_seven_chat import create_thread
+from pydantic import ValidationError as SchemaError
+from test_phase_seven_chat import create_thread, install_fake_model, send_user_message
 
 from sangam.chat_context import ChatRequestContext
-from sangam.chat_continuity import HistorySearch, TaskDraft, TaskNote
+from sangam.chat_continuity import ChatContinuityService, HistorySearch, TaskDraft, TaskNote
 from sangam.errors import ConflictError, NotFoundError, ValidationError
 from sangam.security import Principal
 
@@ -149,7 +150,6 @@ def test_task_context_never_reports_background_work_or_grants_authority(client):
     assert "Await publication decision" in prompt
     assert len(prompt.encode()) < 20000
     # A fresh service instance reads persisted state, rather than process-local memory.
-    from sangam.chat_continuity import ChatContinuityService
 
     chat = client.app.state.services.chat
     restored = ChatContinuityService(chat.evidence.database, chat.workspace, chat.projects)
@@ -157,8 +157,6 @@ def test_task_context_never_reports_background_work_or_grants_authority(client):
 
 
 def test_production_turn_compacts_before_history_leaves_model_window(client):
-    from test_phase_seven_chat import install_fake_model, send_user_message
-
     thread = create_thread(client)
     seed(client, thread, "objective", "Write an Atlas launch report in French, at most 300 words")
     for index in range(4):
@@ -194,8 +192,6 @@ def test_production_turn_compacts_before_history_leaves_model_window(client):
 
 
 def test_summary_budget_and_duplicate_keys_are_rejected():
-    from pydantic import ValidationError as SchemaError
-
     note = TaskNote(key="same", kind="objective", text="Task", source_item_ids=["source"])
     with pytest.raises(SchemaError):
         TaskDraft(notes=[note, note])

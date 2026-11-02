@@ -82,7 +82,8 @@ test-e2e-webkit-local args="":
 
 # Run the Python lint, format, type, API-contract, and test gates. Tests run in parallel.
 test-python:
-    uv run ruff check .
+    just lint-python
+    just test-python-standards
     uv run ruff format --check .
     just typecheck
     uv run python scripts/verify_openapi_contract.py
@@ -112,6 +113,15 @@ format-python args=".":
 # Check selected Python files.
 lint-python args=".":
     uv run ruff check {{ args }}
+    just python-standards
+
+# Check Google-derived expression rules that Ruff does not implement.
+python-standards:
+    uv run python scripts/check_python_standards.py
+
+# Exercise accepted and rejected syntax for the project Python lint rules.
+test-python-standards:
+    uv run pytest tests/test_python_standards.py
 
 # Explain OpenAPI changes against the reviewed contract.
 verify-openapi:
@@ -141,16 +151,9 @@ benchmark-search-startup count="250" baseline_source="":
     if [[ -n "{{ baseline_source }}" ]]; then args+=(--baseline-source "{{ baseline_source }}"); fi
     uv run python scripts/benchmark_search_startup.py "${args[@]}"
 
-# Type-check the provider and chat boundary introduced by the architecture foundation.
+# Type-check the entire Python application.
 typecheck:
-    uv run mypy \
-        src/sangam/provider_connections.py \
-        src/sangam/chat_models.py \
-        src/sangam/chat_context.py \
-        src/sangam/chat.py \
-        src/sangam/chat_tools.py \
-        src/sangam/assignments.py \
-        src/sangam/api_assignments.py
+    uv run mypy src/sangam
 
 # Check browser client formatting, build, lint, and unit tests.
 test-frontend:
@@ -342,7 +345,11 @@ anti-slop:
 
 # Check Python and frontend code style, anti-slop rules, and linting.
 lint:
-    uv run ruff check .
+    just lint-python
+    just lint-frontend
+
+# Check frontend lint rules, including type-aware correctness checks.
+lint-frontend:
     pnpm --dir frontend run lint
 
 # Validate development and production Compose configurations.

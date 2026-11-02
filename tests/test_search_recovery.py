@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from conftest import headers
 from fastapi.testclient import TestClient
+from test_phase_five_pdf_research import import_pdf, text_pdf
 
 from sangam.api import create_app
 from sangam.config import Settings
@@ -86,8 +87,6 @@ def test_committed_search_fields_are_repaired(client, sql, term, visible):
 
 
 def test_tag_author_pdf_and_annotation_changes_mark_search_dirty(client):
-    from test_phase_five_pdf_research import import_pdf, text_pdf
-
     response = import_pdf(client, content=text_pdf("originalpage"), key="dirty-pdf")
     assert response.status_code == 201
     document = response.json()

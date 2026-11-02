@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Protocol
 
 import httpx
@@ -75,7 +75,7 @@ class BraveSearchProvider:
         params: dict[str, str | int] = {"q": query, "count": limit}
         if published_after or published_before:
             start = (published_after or date(2000, 1, 1)).isoformat()
-            end = (published_before or date.today()).isoformat()
+            end = (published_before or datetime.now(UTC).date()).isoformat()
             params["freshness"] = f"{start}to{end}"
         try:
             response = httpx.get(

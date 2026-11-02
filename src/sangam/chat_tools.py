@@ -340,8 +340,9 @@ class ChatToolset:
                         title=document.title,
                         path=document.path or "",
                     )
-            return {
-                "results": [
+            results = []
+            for document in documents:
+                results.append(
                     self._document_source(
                         document,
                         snippet=document.search_snippet,
@@ -355,9 +356,8 @@ class ChatToolset:
                             None,
                         ),
                     )
-                    for document in documents
-                ]
-            }
+                )
+            return {"results": results}
 
         return await self._run_tool(
             ctx, self.policies["search_workspace"], validated.query, operation
@@ -1224,9 +1224,10 @@ class ChatToolset:
             "citations": citations,
         }
         task.status_indicator = "complete"
-        task.content = f"{outcome.capitalize()} · {policy.effect} · {duration_ms} ms" + (
-            f" · {citations} citation{'s' if citations != 1 else ''}" if citations else ""
-        )
+        task.content = f"{outcome.capitalize()} · {policy.effect} · {duration_ms} ms"
+        if citations:
+            suffix = "s" if citations != 1 else ""
+            task.content += f" · {citations} citation{suffix}"
         await ctx.context.update_workflow_task(task, task_index)
         result = self._bounded_text(
             json.dumps(payload, ensure_ascii=False),
