@@ -218,9 +218,9 @@ test-frontend-unit args="":
 test-e2e args="":
     pnpm --dir frontend run test:e2e {{ args }}
 
-# Install the browser engines used by the Playwright suite, or only the named engines.
-install-browsers browsers="chromium webkit":
-    pnpm --dir frontend exec playwright install --with-deps {{ browsers }}
+# Install browser engines and host libraries. Pass an empty deps argument for downloads only.
+install-browsers browsers="chromium webkit" deps="--with-deps":
+    pnpm --dir frontend exec playwright install {{ deps }} {{ browsers }}
 
 # Run empirical verification, performance benchmark, and chat agent evals across isolated Sangam services.
 verify-behavior port="8765" count="25" eval_limit="3":
