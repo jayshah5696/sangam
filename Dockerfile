@@ -4,6 +4,7 @@ WORKDIR /app/frontend
 RUN npm install -g pnpm@11.24.0
 COPY pyproject.toml /app/pyproject.toml
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+COPY frontend/patches/ ./patches/
 RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm run build
