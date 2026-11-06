@@ -140,7 +140,7 @@ test('multi-selection uses one server plan for tags and moving, then survives re
   await expect(menu.getByRole('menuitem', { name: 'Move to…' })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(firstRow).toBeFocused()
-  await tree.getByRole('treeitem', { name: target, exact: true }).click()
+  await tree.getByRole('treeitem', { name: `${target} 2`, exact: true }).click()
   await page.getByRole('button', { name: 'New folder', exact: true }).first().click()
   const folderPath = page.getByLabel('New folder path')
   await expect(folderPath).toHaveValue(`${target}/`)

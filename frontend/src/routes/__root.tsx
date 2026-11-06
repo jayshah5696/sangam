@@ -253,7 +253,7 @@ function PrimarySidebar({
       role={modal ? 'dialog' : undefined}
     >
       <header className="sidebar-brandbar ui-rail-header">
-        <Link to="/" className="sidebar-brand" aria-label="Sangam home">
+        <Link to="/" className="sidebar-brand">
           <img src="/sangam-mark.svg" alt="" />
           <span>
             <strong>Sangam</strong>

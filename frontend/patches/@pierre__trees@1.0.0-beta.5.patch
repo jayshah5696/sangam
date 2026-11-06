@@ -1,0 +1,73 @@
+diff --git a/dist/model/publicTypes.d.ts b/dist/model/publicTypes.d.ts
+--- a/dist/model/publicTypes.d.ts
++++ b/dist/model/publicTypes.d.ts
+@@ -293,11 +293,15 @@
+ interface FileTreeRowDecorationText {
+   text: string;
+   title?: string;
++  /** Include the visible decoration in the row's accessible name. */
++  includeInLabel?: boolean;
+ }
+ interface FileTreeRowDecorationIcon {
+   icon: RemappedIcon;
+   title?: string;
++  /** Include the visible decoration in the row's accessible name. */
++  includeInLabel?: boolean;
+ }
+ type FileTreeRowDecoration = FileTreeRowDecorationText | FileTreeRowDecorationIcon;
+ interface FileTreeRowDecorationContext {
+   item: FileTreeContextMenuItem;
+diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
+--- a/dist/render/FileTreeView.js
++++ b/dist/render/FileTreeView.js
+@@ -352,6 +352,6 @@
+ 	].join(", ")) ?? menuElement);
+ }
+-function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false, customDecoration = null, decorationLaneEnabled = false, dragTargetFlattenedSegmentPath = null, gitDecoration = null, gitLaneActive = false, renameInput = null, showDecorativeActionAffordance = false } = {}) {
++function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false, customDecoration = null, decorationId, decorationLaneEnabled = false, dragTargetFlattenedSegmentPath = null, gitDecoration = null, gitLaneActive = false, renameInput = null, showDecorativeActionAffordance = false } = {}) {
+ 	const targetPath = getFileTreeRowPath(row);
+ 	return /* @__PURE__ */ jsxs(Fragment, { children: [
+ 		row.depth > 0 ? /* @__PURE__ */ jsx("div", {
+@@ -375,6 +375,7 @@
+ 		}),
+ 		decorationLaneEnabled ? /* @__PURE__ */ jsx("div", {
+ 			"data-item-section": "decoration",
++			id: decorationId,
+ 			children: customDecoration != null ? renderRowDecoration(customDecoration, resolveIcon) : null
+ 		}) : null,
+ 		gitLaneActive ? /* @__PURE__ */ jsx("div", {
+@@ -405,6 +406,9 @@
+ 	const showDecorativeActionAffordance = actionLaneEnabled && contextMenuButtonVisibility === "always";
+ 	const isRenamingRow = renameView.getPath() === targetPath;
+ 	const renamingValue = isRenamingRow ? renameView.getValue() : "";
++	const baseRowDomId = row.isFocused || customDecoration?.includeInLabel ? getFileTreeFocusedRowDomId(instanceId, targetPath, isParked) : void 0;
++	const rowDomId = isSticky && baseRowDomId != null ? `${baseRowDomId}__sticky` : baseRowDomId;
++	const decorationId = customDecoration?.includeInLabel && rowDomId != null ? `${rowDomId}__decoration` : void 0;
+ 	const renameInput = isSticky || !isRenamingRow ? null : /* @__PURE__ */ jsx(RenameInput, {
+ 		ref: registerRenameInput,
+ 		ariaLabel: `Rename ${getFileTreeRowAriaLabel(row)}`,
+@@ -420,6 +424,7 @@
+ 	const rowContent = renderFileTreeRowContent(row, resolveIcon, {
+ 		actionLaneEnabled,
+ 		customDecoration,
++		decorationId,
+ 		decorationLaneEnabled,
+ 		dragTargetFlattenedSegmentPath: dragTarget?.flattenedSegmentPath ?? null,
+ 		gitDecoration,
+@@ -430,7 +435,7 @@
+ 	const commonProps = {
+ 		...computeFileTreeRowElementAttributes({
+ 			ariaLabel: getFileTreeRowAriaLabel(row),
+-			domId: row.isFocused ? getFileTreeFocusedRowDomId(instanceId, targetPath, isParked) : void 0,
++			domId: rowDomId,
+ 			extraStyle: style,
+ 			features: {
+ 				actionLaneEnabled,
+@@ -454,6 +459,7 @@
+ 			targetPath
+ 		}),
+ 		key,
++		"aria-labelledby": decorationId != null ? `${rowDomId} ${decorationId}` : void 0,
+ 		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
+ 			if (shouldSuppressContextMenu()) {
+ 				event.preventDefault();

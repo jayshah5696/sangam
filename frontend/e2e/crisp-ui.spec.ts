@@ -212,8 +212,8 @@ test('file tree labels remain bound to their rows through collapse, focus, and r
   await page.goto(`/documents/${active.document_id}`)
   await page.locator('#workspace-tab-files').click()
   const tree = page.locator('.sangam-file-tree')
-  const agents = tree.getByRole('treeitem', { name: firstFolder, exact: true })
-  const agentic = tree.getByRole('treeitem', { name: secondFolder, exact: true })
+  const agents = tree.getByRole('treeitem', { name: `${firstFolder} 1`, exact: true })
+  const agentic = tree.getByRole('treeitem', { name: `${secondFolder} 1`, exact: true })
   await expect(agents).toBeVisible()
   await expect(agentic).toBeVisible()
   if ((await agents.getAttribute('aria-expanded')) !== 'true') await agents.click()
@@ -245,7 +245,7 @@ test('file tree labels remain bound to their rows through collapse, focus, and r
   const renamedFolder = `${secondFolder}-reviewed`
   await rename.fill(renamedFolder)
   await rename.press('Enter')
-  await expect(tree.getByRole('treeitem', { name: renamedFolder, exact: true })).toBeVisible()
+  await expect(tree.getByRole('treeitem', { name: `${renamedFolder} 1`, exact: true })).toBeVisible()
   await expect(tree.locator('[data-sangam-label]')).toHaveCount(0)
 
   await agents.focus()

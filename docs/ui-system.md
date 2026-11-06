@@ -401,7 +401,8 @@ File and folder labels in the workspace tree use one LTR text run with standard
 end ellipsis (`text-overflow: ellipsis`). Sangam does not use middle truncation
 or RTL layout for file extensions.
 
-- The full file or folder name remains the accessible name (`aria-label`).
+- `aria-label` holds the full file or folder name. Counted rows include the
+  visible count in their computed accessible name through `aria-labelledby`.
 - The visible label is rendered via a `::after` pseudo-element reading
   `attr(aria-label)`. Do not cache a second label in component state, DOM data
   attributes, or mutation observers.
@@ -414,6 +415,16 @@ or RTL layout for file extensions.
   `[data-item-section="content"]`, guarded by `:not(:has([data-item-rename-input]))`.
 - Overrides live in the `unsafeCSS` boundary of `FileExplorer.tsx` and name
   the upstream issue (`pierrecomputer/pierre#939`) as the removal condition.
+- Folder and draft counts remain visible in the decoration lane.
+  `frontend/patches/@pierre__trees@1.0.0-beta.5.patch` adds the optional
+  `includeInLabel` decoration property to Pierre's renderer and type declarations.
+  When supplied, `aria-labelledby` references the row itself and its decoration.
+  The self-reference uses the row's existing `aria-label`, so counts join the
+  accessible name without duplicating the visible label. The renderer keeps IDs
+  distinct for flow, sticky, and parked rows. This needs no observers or cached
+  labels. Remove the patch when Pierre provides an equivalent public API. The
+  patch is pinned to beta.5; check upstream support and rerun the accessible-name
+  tests before upgrading.
 - Changes to tree label rendering require desktop, breakpoint, and true
   touch-mobile browser coverage.
 

@@ -9,6 +9,7 @@ import type {
   FileTreeDropResult,
   FileTreeRenameEvent,
   FileTreeRenamingItem,
+  FileTreeRowDecoration,
   FileTreeRowDecorationContext,
 } from '@pierre/trees'
 import { prepareFileTreeInput } from '@pierre/trees'
@@ -63,7 +64,7 @@ type TreeCallbacks = {
   onDropComplete: (event: FileTreeDropResult) => void
   canRename: (item: FileTreeRenamingItem) => boolean
   onRename: (event: FileTreeRenameEvent) => void
-  renderRowDecoration: (context: FileTreeRowDecorationContext) => { text: string; title: string } | null
+  renderRowDecoration: (context: FileTreeRowDecorationContext) => FileTreeRowDecoration | null
 }
 
 type ExplorerSort = 'modified' | 'name-asc' | 'name-desc'
@@ -352,12 +353,13 @@ export function FileExplorerPanel() {
         return {
           text: String(folder.document_count),
           title: `${folder.document_count} documents`,
+          includeInLabel: true,
         }
       if (normalizedPath === adapterRef.current.draftsRootPath) {
         const count = [...adapterRef.current.documentByTreePath.values()].filter(
           (document) => !document.path,
         ).length
-        return { text: String(count), title: `${count} drafts` }
+        return { text: String(count), title: `${count} drafts`, includeInLabel: true }
       }
       return null
     },

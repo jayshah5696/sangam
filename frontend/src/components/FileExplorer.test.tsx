@@ -190,7 +190,11 @@ describe('FileExplorerPanel', () => {
 
     render(<FileExplorerPanel />)
 
-    expect(state.decorations[0]).toEqual({ text: '3', title: '3 documents' })
+    expect(state.decorations[0]).toEqual({
+      text: '3',
+      title: '3 documents',
+      includeInLabel: true,
+    })
   })
 
   it('restores selection and keyboard focus by document ID after a draft rename', async () => {
