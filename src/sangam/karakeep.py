@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import hashlib
 
-from sangam.errors import ConflictError, IntegrationError, ValidationError
+from sangam.errors import (
+    ConflictError,
+    IntegrationError,
+    ValidationError,
+    validate_metadata_text,
+)
 from sangam.karakeep_extraction import KarakeepExtractor
 from sangam.karakeep_gateway import KarakeepGateway
 from sangam.karakeep_repository import (
@@ -65,6 +70,7 @@ class KarakeepService:
     def search_bookmarks(
         self, *, query: str, limit: int, cursor: str | None
     ) -> KarakeepBookmarkPage:
+        validate_metadata_text(query, "Search query")
         page = self._require_client().search(query=query, limit=limit, cursor=cursor)
         imported = self.repository.imported_states()
         bookmarks = []
