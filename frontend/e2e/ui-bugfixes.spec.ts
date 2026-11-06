@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright'
 import { randomUUID } from 'node:crypto'
 import type { Page, TestInfo } from '@playwright/test'
 import { z } from 'zod'
@@ -44,7 +45,7 @@ ${Array.from({ length: 12 }, (_, index) => `<section><h2>Note ${index + 1}</h2><
 async function revealSidebar(page: Page) {
   await openIfClosed(
     page.getByRole('button', { name: /^Show (workspace|settings) sidebar$/ }),
-    page.getByRole('link', { name: 'Sangam home', exact: true }),
+    page.getByRole('link', { name: /^Sangam (Documents, plainly\.|Settings)$/ }),
   )
 }
 
@@ -58,6 +59,93 @@ async function expectNoHorizontalOverflow(page: Page) {
     await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
   ).toBeLessThanOrEqual(1)
 }
+
+test('brand and tree counts keep visible labels in accessible names', async ({ page, request }, testInfo) => {
+  const folder = `Counted notes ${randomUUID().slice(0, 6)}`
+  const createdFolder = await request.post('/api/v1/folders', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { path: folder },
+  })
+  expect(createdFolder.ok(), await createdFolder.text()).toBeTruthy()
+  for (const index of [1, 2]) {
+    const response = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: { title: `Counted note ${index}`, content: '# Counted note', path: `${folder}/${index}.md` },
+    })
+    expect(response.ok(), await response.text()).toBeTruthy()
+  }
+  const draft = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { title: `Counted draft ${randomUUID()}`, content: '# Draft' },
+  })
+  expect(draft.ok(), await draft.text()).toBeTruthy()
+
+  await page.goto('/')
+  await revealSidebar(page)
+  await expect(page.getByRole('link', { name: 'Sangam Documents, plainly.', exact: true })).toBeVisible()
+  const tree = page.locator('.sangam-file-tree')
+  const row = tree.getByRole('treeitem', { name: folder })
+  const drafts = tree.getByRole('treeitem', { name: /^Drafts\b/ })
+  // The shared suite can leave hundreds of drafts above this virtualized row.
+  await expect(drafts).toBeVisible()
+  if ((await drafts.getAttribute('aria-expanded')) === 'true') await drafts.click()
+  await expect(row).toBeVisible()
+  const folderCount = row.locator('[data-item-section="decoration"]')
+  const draftCount = drafts.locator('[data-item-section="decoration"]')
+  await expect(folderCount).toHaveText('2')
+  const checkNames = async (documents: number) => {
+    await expect(row).toHaveAccessibleName(`${folder} ${documents}`)
+    await expect(folderCount).toHaveText(String(documents))
+    await expect(folderCount).toBeVisible()
+    // A reload can change the loaded page of drafts in the shared workspace.
+    // Its accessible name must match the count that is actually visible.
+    await expect(draftCount).toHaveText(/^[1-9]\d*$/)
+    await expect(drafts).toHaveAccessibleName(`Drafts ${await draftCount.innerText()}`)
+    await expect(draftCount).toBeVisible()
+    // Focus this interaction regression on names. The primary-routes test
+    // retains the full WCAG scan, including the seeded count rows.
+    const results = await new AxeBuilder({ page }).withRules(['label-content-name-mismatch']).analyze()
+    expect(results.violations).toEqual([])
+    await expectNoHorizontalOverflow(page)
+  }
+  await checkNames(2)
+  // A collapse and re-expansion must retain the count and the row's name.
+  await row.click()
+  await row.click()
+  await checkNames(2)
+  await capture(page, testInfo, 'accessible-counts-workspace')
+
+  const added = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { title: 'Another counted note', content: '# Another note', path: `${folder}/3.md` },
+  })
+  expect(added.ok(), await added.text()).toBeTruthy()
+  await page.reload()
+  await revealSidebar(page)
+  await checkNames(3)
+
+  if (testInfo.project.name === 'chromium-desktop') {
+    // The sidebar becomes a drawer at 1100px. Include the minimum width too.
+    for (const width of [1101, 1099, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/')
+      await revealSidebar(page)
+      await checkNames(3)
+      await capture(page, testInfo, `accessible-counts-${width}`)
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
+  }
+
+  // The same chrome switches its visible brand label on the Settings route.
+  await page.goto('/settings')
+  await revealSidebar(page)
+  await expect(page.getByRole('link', { name: 'Sangam Settings', exact: true })).toBeVisible()
+  const settingsResults = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze()
+  expect(settingsResults.violations).toEqual([])
+  await capture(page, testInfo, 'accessible-brand-settings')
+})
 
 test('HTML preview keeps collapsed source text compact and expanded text scrollable', async ({
   page,
