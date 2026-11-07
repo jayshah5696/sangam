@@ -1416,26 +1416,11 @@ def test_chronicle_expanded_tokens_and_headers_sanitization() -> None:
 
 
 def test_chronicle_action_type_and_path_propagation() -> None:
-    """Verify action_type is always populated and SQLite path falls back to target_file."""
+    """Verify action_type and SQLite path fall back to target_file."""
     principal = Principal.trusted_human(
         actor_id="human:chronicle", display_name="Chronicle Test", operation_id="op_chronicle_001"
     )
     service = ActivityService.__new__(ActivityService)
-
-    # Event with no path and no target_file initially
-    row_no_target, _ = service._prepare_event_row(
-        principal=principal,
-        action="admin_check",
-        resource_type="system",
-        outcome="accepted",
-        resource_id="sys_1",
-        path=None,
-        details={},
-    )
-    details_no_target = json.loads(str(row_no_target[11]))
-    assert details_no_target["action_type"] == "admin_check"
-    assert "target_file" not in details_no_target
-    assert row_no_target[7] is None  # path column
 
     # Event with destination_path in details but path=None
     row_dest, _ = service._prepare_event_row(

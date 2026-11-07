@@ -313,6 +313,24 @@ class SanitizingLogFilter(logging.Filter):
         return True
 
 
+def configure_sanitizing_logging() -> None:
+    """Attach SanitizingLogFilter to root and server loggers to prevent stdout leaks."""
+    sanitizing_filter = SanitizingLogFilter()
+    root_logger = logging.getLogger()
+    if not any(isinstance(f, SanitizingLogFilter) for f in root_logger.filters):
+        root_logger.addFilter(sanitizing_filter)
+    for handler in root_logger.handlers:
+        if not any(isinstance(f, SanitizingLogFilter) for f in handler.filters):
+            handler.addFilter(sanitizing_filter)
+    for name in ("uvicorn", "uvicorn.access", "uvicorn.error", "sangam"):
+        target_logger = logging.getLogger(name)
+        if not any(isinstance(f, SanitizingLogFilter) for f in target_logger.filters):
+            target_logger.addFilter(sanitizing_filter)
+        for handler in target_logger.handlers:
+            if not any(isinstance(f, SanitizingLogFilter) for f in handler.filters):
+                handler.addFilter(sanitizing_filter)
+
+
 class AccessIdentityVerifier(Protocol):
     def verify(self, raw_token: str) -> str: ...
 
