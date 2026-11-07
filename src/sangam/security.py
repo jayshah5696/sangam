@@ -299,8 +299,10 @@ class SanitizingLogFilter(logging.Filter):
         if isinstance(record.msg, str):
             record.msg = sanitize_sensitive_text(record.msg)
         if record.args:
-            if isinstance(record.args, dict):
-                record.args = sanitize_sensitive_data(record.args)
+            if isinstance(record.args, Mapping):
+                sanitized_dict = sanitize_sensitive_data(record.args)
+                if isinstance(sanitized_dict, Mapping):
+                    record.args = sanitized_dict
             elif isinstance(record.args, tuple):
                 record.args = tuple(
                     sanitize_sensitive_data(arg)
