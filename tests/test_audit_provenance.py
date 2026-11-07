@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from conftest import headers
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from sangam.activity import ActivityService
 from sangam.security import (
     Principal,
+    SanitizingLogFilter,
     sanitize_headers,
     sanitize_sensitive_data,
     sanitize_sensitive_text,
@@ -1335,3 +1337,118 @@ def test_saved_view_audit_provenance(client: TestClient) -> None:
     delete_evt = actions["delete_view"]
     assert delete_evt["actor_kind"] == "human"
     assert delete_evt["details"]["name"] == "Audit Test View"
+
+
+def test_chronicle_sanitizing_log_filter() -> None:
+    """Verify SanitizingLogFilter strips sensitive tokens and secrets from log messages and args."""
+    filter_instance = SanitizingLogFilter()
+
+    # 1. Message containing Bearer token and password assignment
+    record1 = logging.LogRecord(
+        name="test_logger",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg=(
+            "Processing request with token sgm_agt_12345678.secret_bearer_value "
+            "and PASSWD=my_db_pass"
+        ),
+        args=(),
+        exc_info=None,
+    )
+    assert filter_instance.filter(record1) is True
+    assert "sgm_agt_12345678.secret_bearer_value" not in record1.msg
+    assert "my_db_pass" not in record1.msg
+    assert "[REDACTED]" in record1.msg
+
+    # 2. Log record with format string and args dictionary
+    payload_args = {
+        "api_key": "sk-proj-1234567890abcdef12345678",
+        "doc_title": "Project Overview",
+        "credentials": "user_cred_data",
+    }
+    record2 = logging.LogRecord(
+        name="test_logger",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=2,
+        msg="Failed payload: %s",
+        args=(payload_args,),
+        exc_info=None,
+    )
+    assert filter_instance.filter(record2) is True
+    sanitized_arg = record2.args[0] if isinstance(record2.args, tuple) else record2.args
+    assert isinstance(sanitized_arg, dict)
+    assert sanitized_arg["api_key"] == "[REDACTED]"
+    assert sanitized_arg["credentials"] == "[REDACTED]"
+    assert sanitized_arg["doc_title"] == "Project Overview"
+
+
+def test_chronicle_expanded_tokens_and_headers_sanitization() -> None:
+    """Verify newly added token patterns and sensitive headers are sanitized."""
+    # Extended token formats
+    text = (
+        "AWS STS: ASIAIOSFODNN7EXAMPLE "
+        "GitHub Server: ghs_1234567890abcdef12345678 "
+        "GitHub OAuth: gho_1234567890abcdef12345678 "
+        "Google OAuth: ya29.a0AfH6SMDIabcdef1234567890 "
+        "PyPI token: pypi-AgEIcHlwaS5vcmcCJDEyMzQ1Njc4LT "
+        "SendGrid: SG.1234567890abcdef123456.1234567890abcdef1234567890abcdef1234567890a"
+    )
+    sanitized = sanitize_sensitive_text(text)
+    assert "ASIAIOSFODNN7EXAMPLE" not in sanitized
+    assert "ghs_1234567890abcdef12345678" not in sanitized
+    assert "gho_1234567890abcdef12345678" not in sanitized
+    assert "ya29.a0AfH6SMDIabcdef1234567890" not in sanitized
+    assert "pypi-AgEIcHlwaS5vcmcCJDEyMzQ1Njc4LT" not in sanitized
+    assert "SG.1234567890abcdef123456" not in sanitized
+
+    # Extended sensitive headers
+    headers_to_check = {
+        "x-amzn-oidc-data": "oidc_raw_data_token",
+        "x-hub-signature-256": "sha256=abcdef1234567890",
+        "x-gitlab-token": "glpat-secret-token-val",
+        "forwarded-authorization": "Bearer secret_fwd_token",
+    }
+    sanitized_hdrs = sanitize_headers(headers_to_check)
+    for header_name in headers_to_check:
+        assert sanitized_hdrs[header_name] == "[REDACTED]"
+
+
+def test_chronicle_action_type_and_path_propagation() -> None:
+    """Verify action_type is always populated and SQLite path falls back to target_file."""
+    principal = Principal.trusted_human(
+        actor_id="human:chronicle", display_name="Chronicle Test", operation_id="op_chronicle_001"
+    )
+    service = ActivityService.__new__(ActivityService)
+
+    # Event with no path and no target_file initially
+    row_no_target, _ = service._prepare_event_row(
+        principal=principal,
+        action="admin_check",
+        resource_type="system",
+        outcome="accepted",
+        resource_id="sys_1",
+        path=None,
+        details={},
+    )
+    details_no_target = json.loads(str(row_no_target[11]))
+    assert details_no_target["action_type"] == "admin_check"
+    assert "target_file" not in details_no_target
+    assert row_no_target[7] is None  # path column
+
+    # Event with destination_path in details but path=None
+    row_dest, _ = service._prepare_event_row(
+        principal=principal,
+        action="move",
+        resource_type="document",
+        outcome="accepted",
+        resource_id="doc_move_1",
+        path=None,
+        details={"destination_path": "docs/final_location.md"},
+    )
+    details_dest = json.loads(str(row_dest[11]))
+    assert details_dest["action_type"] == "move"
+    assert details_dest["target_file"] == "docs/final_location.md"
+    # Row's path column must be populated from target_file
+    assert row_dest[7] == "docs/final_location.md"

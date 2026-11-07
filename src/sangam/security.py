@@ -66,6 +66,19 @@ SENSITIVE_HEADER_NAMES: set[str] = {
     "x-webhook-secret",
     "x-app-secret",
     "x-session-secret",
+    "x-amzn-oidc-data",
+    "x-amzn-oidc-accesstoken",
+    "x-amzn-oidc-identity",
+    "x-jwt-assertion",
+    "x-sig",
+    "x-signature",
+    "x-hub-signature",
+    "x-hub-signature-256",
+    "x-auth-request-access-token",
+    "forwarded-authorization",
+    "x-forwarded-authorization",
+    "x-forwarded-jwt",
+    "x-gitlab-token",
 }
 
 _SENSITIVE_HEADER_KEYWORDS: tuple[str, ...] = (
@@ -151,6 +164,15 @@ _SENSITIVE_DATA_KEY_TERMS: tuple[str, ...] = (
     "p12",
     "pfx",
     "keystore",
+    "sts_token",
+    "jwt_token",
+    "api_sig",
+    "access_secret",
+    "session_key",
+    "user_secret",
+    "admin_token",
+    "master_key",
+    "encryption_passphrase",
 )
 
 _SAFE_KEY_EXCEPTIONS: set[str] = {
@@ -176,7 +198,7 @@ _SAFE_HEADER_EXCEPTIONS: set[str] = {
 }
 
 _TOKEN_PATTERN = re.compile(
-    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-proj-[a-zA-Z0-9_-]{16,}|sk-ant-[a-zA-Z0-9_-]{16,}|sk-[a-zA-Z0-9_-]{12,}|ghp_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{16,}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[baprs]-[a-zA-Z0-9_-]{10,}|hf_[a-zA-Z0-9_-]{16,}|AIzaSy[a-zA-Z0-9_-]{33}|sk_(?:live|test)_[a-zA-Z0-9]{10,}|rk_(?:live|test)_[a-zA-Z0-9]{10,}|whsec_[a-zA-Z0-9]{10,}|sq0(?:idp|atp)-[a-zA-Z0-9_-]{10,})\b"
+    r"\b(sgm_[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?|v1\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|sk-proj-[a-zA-Z0-9_-]{16,}|sk-ant-[a-zA-Z0-9_-]{16,}|sk-[a-zA-Z0-9_-]{12,}|gh[opusr]_[a-zA-Z0-9_-]{16,}|github_pat_[a-zA-Z0-9_-]{16,}|A[KS]IA[0-9A-Z]{16}|glpat-[a-zA-Z0-9_-]{16,}|xox[a-z]-[a-zA-Z0-9_-]{10,}|hf_[a-zA-Z0-9_-]{16,}|AIzaSy[a-zA-Z0-9_-]{33}|ya29\.[a-zA-Z0-9_-]+|sk_(?:live|test)_[a-zA-Z0-9]{10,}|rk_(?:live|test)_[a-zA-Z0-9]{10,}|whsec_[a-zA-Z0-9]{10,}|sq0(?:idp|atp)-[a-zA-Z0-9_-]{10,}|npm_[a-zA-Z0-9]{36}|pypi-[a-zA-Z0-9_-]{30,}|SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43})\b"
 )
 
 _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\s\"']+)(@)")
@@ -184,7 +206,7 @@ _URI_CREDENTIAL_PATTERN = re.compile(r"\b([a-zA-Z0-9+.-]+://)([^:\s\"'@]+):([^@\
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9_\-\.~+/=]+")
 
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b([a-z0-9_-]*(?:secret|token|password|passwd|passphrase|db_pass|pass_|private_key|api_key|auth_key|access_key|credential|priv_key|tls_key|env_var|env_val|key|dsn|database_url|connection_string|conn_str)[a-z0-9_-]*)\s*[:=]\s*('(?:\\[\s\S]|[^'])*'|\"(?:\\[\s\S]|[^\"])*\"|[^\s'\"\\,{}]+)"
+    r"(?i)\b([a-z0-9_-]*(?:secret|token|password|passwd|passphrase|db_pass|pass_|private_key|api_key|auth_key|access_key|credential|priv_key|tls_key|env_var|env_val|key|dsn|database_url|connection_string|conn_str|cert|certificate|signature|jwt|p12|pfx|keystore|sts_token)[a-z0-9_-]*)\s*[:=]\s*('(?:\\[\s\S]|[^'])*'|\"(?:\\[\s\S]|[^\"])*\"|[^\s'\"\\,{}]+)"
 )
 
 _RESERVED_NAMES: set[str] = {
@@ -268,6 +290,25 @@ def sanitize_sensitive_data(value: object) -> object:
             return set(sanitized_items) if isinstance(value, set) else frozenset(sanitized_items)
         return sanitized_items
     return value
+
+
+class SanitizingLogFilter(logging.Filter):
+    """Scrubs sensitive tokens, headers, and secrets before log record formatting."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = sanitize_sensitive_text(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = sanitize_sensitive_data(record.args)
+            elif isinstance(record.args, tuple):
+                record.args = tuple(
+                    sanitize_sensitive_data(arg)
+                    if isinstance(arg, (dict, list, str, tuple, set, frozenset))
+                    else arg
+                    for arg in record.args
+                )
+        return True
 
 
 class AccessIdentityVerifier(Protocol):
