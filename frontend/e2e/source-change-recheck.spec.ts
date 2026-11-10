@@ -273,7 +273,21 @@ Safety margins were maintained across all cycles.
     await updateBtn.click()
     await expect(draftModal).toHaveCount(0)
 
-    // Recheck alert should now be gone because the draft citation revision was updated to head
+    // The notice must disappear because the citation was updated, not because its
+    // revision parameter was lost and the link stopped being recognized.
     await expect(page.getByRole('alert', { name: 'Source changed alert' })).toHaveCount(0)
+    await expect
+      .poll(async () => {
+        const response = await request.get(`/api/v1/documents/${draftDoc.document_id}`)
+        expect(response.ok(), await response.text()).toBeTruthy()
+        return documentSchema.parse(await response.json()).content
+      })
+      .toBe(draftContent.replace(`revision=${rev1}`, `revision=${sourceV2.current_revision_id}`))
+    await page.getByRole('radio', { name: 'preview', exact: true }).click()
+    await expect(page.getByRole('link', { name: 'Source: Cold Storage Protocol' })).toHaveAttribute(
+      'href',
+      `/documents/${sourceDoc.document_id}?revision=${sourceV2.current_revision_id}`,
+    )
+    await page.screenshot({ path: testInfo.outputPath('updated-source-citation.png') })
   })
 })

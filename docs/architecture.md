@@ -1,6 +1,6 @@
 # Sangam architecture
 
-Sangam is a small, self-hosted document server for humans and agents. One person and a set of scoped AI agents edit ordinary files through the same revision-aware API. Every mutation carries an actor, an expected revision, and an idempotency key; every agent edit lands as a human-reviewed proposal, never as a silent direct write.
+Sangam is a small, self-hosted document server for humans and agents. One person and a set of scoped AI agents edit ordinary files through the same revision-aware API. Document updates carry an actor, an expected revision, and an idempotency key. Chat edits to existing documents use human-reviewed proposals. Scoped API tokens can write directly within their grants, and chat's YOLO mode executes supported effects without approval prompts.
 
 ## Core concepts
 
@@ -50,7 +50,7 @@ flowchart LR
 Two rendering zones exist for HTML:
 
 - **Safe zone** — workspace documents and published pages are sanitized (DOMPurify) and rendered without scripting.
-- **Trusted preview zone** — interactive HTML/JavaScript executes under `/trusted-preview`. Since v0.3.0 this is same-origin; access is gated by a short-lived HMAC token (`SANGAM_PREVIEW_HMAC_SECRET`, which has a development default). Production compose deployments pin explicit parent origins, the preview base URL, and optional `connect-src` allowances.
+- **Trusted preview zone** — interactive HTML/JavaScript executes under `/trusted-preview`. Access is gated by a short-lived HMAC token (`SANGAM_PREVIEW_HMAC_SECRET`, which has a development default). Development permits a same-origin configuration. Production requires an HTTPS preview host isolated from both the publication host and parent origins, a non-default secret, and explicit parent origins. Optional `connect-src` allowances must use HTTPS or WSS.
 
 Whether saved HTML revisions may execute JavaScript at all is itself a workspace policy: `GET/PUT /api/v1/settings/html-javascript` (on by default, optimistic versioning, every change attributed and recorded). Disabling it makes even trusted previews inert until re-enabled.
 

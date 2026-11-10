@@ -36,6 +36,19 @@ verify-projects port="8872":
     source "$TMPDIR/.sangam-active-verification"
     uv run python scripts/verify_projects.py
 
+# Prove malformed input, CLI gateway errors, and backup retention on disposable services.
+verify-input-failures port="8896":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-input-control.XXXXXX")"
+    export SANGAM_BACKUP_RETENTION_COUNT=2
+    unset SANGAM_TOKEN
+    trap './scripts/control-sangam.sh cleanup; rm -rf "$TMPDIR"' EXIT
+    ./scripts/control-sangam.sh launch "{{ port }}"
+    ./scripts/control-sangam.sh doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/verify_input_failures.py
+
 # Run focused backend behavior regressions.
 verify-assignments:
     uv run python scripts/verify_assignments.py

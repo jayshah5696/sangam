@@ -91,7 +91,11 @@ class ValidatedCaptureUrl:
 
 def validate_capture_url(url: str) -> ValidatedCaptureUrl:
     """Validate that the capture URL uses http/https, standard ports, and has a host."""
-    parsed = urlsplit(url.strip())
+    try:
+        parsed = urlsplit(url.strip())
+        port = parsed.port
+    except ValueError as error:
+        raise ValidationError("URL must contain a valid hostname and port.") from error
     scheme = parsed.scheme.lower()
     if scheme not in ("http", "https"):
         raise ValidationError(
@@ -104,7 +108,6 @@ def validate_capture_url(url: str) -> ValidatedCaptureUrl:
     if parsed.username or parsed.password:
         raise ValidationError("Credentials in URLs are not permitted.")
 
-    port = parsed.port
     if port is not None:
         expected_port = 80 if scheme == "http" else 443
         if port != expected_port:

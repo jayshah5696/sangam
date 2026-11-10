@@ -345,7 +345,7 @@ export function DocumentWorkspace({
     if (oldRev && content.includes(oldRev)) {
       const updatedContent = content.replaceAll(
         new RegExp('([?&]revision=)' + oldRev, 'g'),
-        '' + newRevisionId,
+        (_match, prefix: string) => `${prefix}${newRevisionId}`,
       )
       handleEditorChange(updatedContent)
     }
