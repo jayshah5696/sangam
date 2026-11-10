@@ -96,6 +96,11 @@ ALLOWED_AUDIT_DETAIL_KEYS = {
     "end",
     "name",
     "replaced",
+    "parent_revision_id",
+    "hunks",
+    "changed_lines",
+    "file_hash",
+    "content_hash",
 }
 
 
@@ -716,6 +721,12 @@ class ActivityService:
                 safe_details["target_file"] = sanitize_sensitive_text(str(safe_details["path"]))
         if "action_type" not in safe_details and "target_file" in safe_details:
             safe_details["action_type"] = action
+        if (
+            path is None
+            and "target_file" in safe_details
+            and isinstance(safe_details["target_file"], str)
+        ):
+            path = safe_details["target_file"]
 
         detail_json = json.dumps(safe_details, sort_keys=True)
         size_bytes = len(detail_json.encode("utf-8")) + 256
@@ -726,10 +737,10 @@ class ActivityService:
             principal.token_id,
             action,
             resource_type,
-            resource_id,
+            sanitize_sensitive_text(resource_id) if resource_id is not None else None,
             sanitize_sensitive_text(path) if path is not None else None,
             outcome,
-            error_code,
+            sanitize_sensitive_text(error_code) if error_code is not None else None,
             revision_id,
             detail_json,
             utc_now(),
