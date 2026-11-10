@@ -121,14 +121,17 @@ jobs:
           just-version: "1.40.0"
       - run: uv sync --frozen
       - run: pnpm --dir frontend install --frozen-lockfile
-      - name: Resolve the Playwright version
+      - name: Resolve the Playwright version and runner distribution
         id: playwright
-        run: echo "version=$(pnpm --dir frontend exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+        run: |
+          source /etc/os-release
+          echo "distribution=${ID}-${VERSION_ID}" >> "$GITHUB_OUTPUT"
+          echo "version=$(pnpm --dir frontend exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
       - name: Cache browser downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ matrix.engines }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.distribution }}-${{ steps.playwright.outputs.version }}-${{ matrix.engines }}
       - run: just install-browsers "${{ matrix.engines }}"
       - name: Browser tests
         run: just test-e2e "${{ matrix.projects }}"
