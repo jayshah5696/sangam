@@ -8,6 +8,7 @@ from typing import Protocol
 
 import httpx
 from markdownify import markdownify
+from pydantic import BaseModel, Field
 
 from sangam.db import Database, utc_now
 from sangam.errors import NotFoundError, ValidationError
@@ -55,6 +56,21 @@ class WebSearchProvider(Protocol):
     ) -> list[WebHit]: ...
 
 
+class _BraveResult(BaseModel):
+    url: str | None = None
+    title: str | None = None
+    description: str | None = None
+    page_age: str | None = None
+
+
+class _BraveWebResults(BaseModel):
+    results: list[_BraveResult] = Field(default_factory=list)
+
+
+class _BraveResponse(BaseModel):
+    web: _BraveWebResults = Field(default_factory=_BraveWebResults)
+
+
 class BraveSearchProvider:
     """Brave Search API adapter. Only the derived public query leaves Sangam."""
 
@@ -85,22 +101,19 @@ class BraveSearchProvider:
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
-            payload = response.json()
+            payload = _BraveResponse.model_validate_json(response.content)
         except (httpx.HTTPError, ValueError) as error:
             raise ValidationError("The web search provider is unavailable.") from error
         hits: list[WebHit] = []
-        for item in payload.get("web", {}).get("results", [])[:limit]:
-            url = item.get("url")
-            if not isinstance(url, str):
+        for item in payload.web.results[:limit]:
+            if item.url is None:
                 continue
             hits.append(
                 WebHit(
-                    title=str(item.get("title") or url),
-                    url=url,
-                    snippet=str(item.get("description") or ""),
-                    published_at=item.get("page_age")
-                    if isinstance(item.get("page_age"), str)
-                    else None,
+                    title=item.title or item.url,
+                    url=item.url,
+                    snippet=item.description or "",
+                    published_at=item.page_age,
                 )
             )
         return hits
@@ -150,7 +163,7 @@ class WebResearchService:
             for hit in hits
         ]
         if run_id:
-            self._record(run_id, query, sources)
+            return self._record(run_id, query, sources)
         return sources
 
     def read(self, run_id: str | None, source_id_value: str, offset: int) -> WebPage:
@@ -194,14 +207,21 @@ class WebResearchService:
             ).fetchall()
         return [row["query"] for row in rows]
 
-    def _record(self, run_id: str, query: str, sources: list[WebSource]) -> None:
+    def _record(self, run_id: str, query: str, sources: list[WebSource]) -> list[WebSource]:
+        recorded: list[WebSource] = []
         with self.database.transaction() as connection:
+            urls = {
+                row["url"]
+                for row in connection.execute(
+                    "SELECT url FROM chat_web_sources WHERE run_id = ?", (run_id,)
+                )
+            }
             for source in sources:
-                count = connection.execute(
-                    "SELECT COUNT(*) AS count FROM chat_web_sources WHERE run_id = ?", (run_id,)
-                ).fetchone()["count"]
-                if count >= MAX_SOURCES_PER_RUN:
-                    break
+                if source.url in urls:
+                    recorded.append(source)
+                    continue
+                if len(urls) >= MAX_SOURCES_PER_RUN:
+                    continue
                 connection.execute(
                     """
                     INSERT INTO chat_web_sources(
@@ -219,6 +239,9 @@ class WebResearchService:
                         query,
                     ),
                 )
+                urls.add(source.url)
+                recorded.append(source)
+        return recorded
 
     def _recorded(self, run_id: str | None, source_id_value: str) -> WebSource:
         if not run_id:

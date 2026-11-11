@@ -48,9 +48,17 @@ def _request(
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as error:
-        payload = error.response.json()
-        if operation_id := error.response.headers.get("X-Operation-ID"):
-            payload.setdefault("error", {})["operation_id"] = operation_id
+        try:
+            payload = error.response.json()
+        except ValueError:
+            payload = {
+                "error": {
+                    "message": f"HTTP {error.response.status_code}: {error.response.reason_phrase}"
+                }
+            }
+        operation_id = error.response.headers.get("X-Operation-ID")
+        if operation_id and isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+            payload["error"]["operation_id"] = operation_id
         typer.echo(json.dumps(payload, indent=2), err=True)
         raise typer.Exit(1) from error
     except httpx.HTTPError as error:

@@ -181,3 +181,73 @@ def test_brave_adapter_maps_results_and_sends_a_date_range(monkeypatch: pytest.M
     monkeypatch.setattr(httpx, "get", failing_get)
     with pytest.raises(ValidationError):
         provider.search("vr", limit=1, published_after=None, published_before=None)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [],
+        {"web": None},
+        {"web": []},
+        {"web": {"results": {}}},
+        {"web": {"results": [None]}},
+        {"web": {"results": [{"url": 42}]}},
+    ],
+)
+def test_brave_adapter_rejects_malformed_success_payloads(
+    monkeypatch: pytest.MonkeyPatch, body: Any
+) -> None:
+    def fake_get(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    with pytest.raises(ValidationError, match="provider is unavailable"):
+        BraveSearchProvider("key").search(
+            "vr", limit=1, published_after=None, published_before=None
+        )
+
+
+def test_search_only_returns_readable_sources_at_the_run_limit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    web, provider = enable_web(client)
+    script_model(client, [Say("Ready.")])
+    create_thread_with_model(client, "Prepare a web research run.")
+    with web.database.connection() as connection:
+        run_id = connection.execute("SELECT run_id FROM chat_runs").fetchone()["run_id"]
+
+    def search_batch(query: str, **kwargs: Any) -> list[WebHit]:
+        return [
+            WebHit(f"Source {index}", f"https://news.example.com/{index}", "", None)
+            for index in query.split(",")
+        ]
+
+    monkeypatch.setattr(provider, "search", search_batch)
+
+    def search(indices: list[int]) -> list[str]:
+        return [
+            source.url
+            for source in web.search(
+                run_id,
+                ",".join(map(str, indices)),
+                limit=10,
+                published_after=None,
+                published_before=None,
+            )
+        ]
+
+    for start in range(0, 40, 10):
+        assert len(search(list(range(start, start + 10)))) == 10
+    assert len(search(list(range(40, 49)))) == 9
+    # A duplicate must not consume the last slot. A rejected new source must not
+    # prevent a later, already-recorded source from being returned.
+    assert search([0, 49, 50, 1]) == [
+        "https://news.example.com/0",
+        "https://news.example.com/49",
+        "https://news.example.com/1",
+    ]
+    assert search([51, 2]) == ["https://news.example.com/2"]
+    assert len(web.retrieved_source_ids(run_id)) == 50
+    page = web.read(run_id, source_id("https://news.example.com/49"), 0)
+    assert page.content.startswith("# Standalone headset")
+    assert len(web.retrieved_source_ids(run_id)) == 50

@@ -66,7 +66,10 @@ def resolve_asset_reference(document_path: str | None, reference: str) -> str:
     if any(ord(char) < 32 or ord(char) == 127 for char in unquoted):
         raise NotFoundError("Document asset not found")
 
-    parsed = urlsplit(unquoted)
+    try:
+        parsed = urlsplit(unquoted)
+    except ValueError as error:
+        raise NotFoundError("Document asset not found") from error
     if parsed.scheme or parsed.netloc:
         raise NotFoundError("Document asset not found")
 

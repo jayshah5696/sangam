@@ -701,15 +701,23 @@ class PublicationService:
                 r"\b(?:src|href)\s*=\s*(['\"])(.*?)\1", content, flags=re.IGNORECASE
             )
         )
-        return {
-            reference
-            for reference in references
-            if reference
-            and not urlsplit(reference).scheme
-            and not urlsplit(reference).netloc
-            and not reference.startswith("#")
-            and (not reference.startswith("/") or reference.startswith(f"/{ATTACHMENTS_FOLDER}/"))
-        }
+        relative_references: set[str] = set()
+        for reference in references:
+            try:
+                parsed = urlsplit(reference)
+            except ValueError:
+                continue
+            if (
+                reference
+                and not parsed.scheme
+                and not parsed.netloc
+                and not reference.startswith("#")
+                and (
+                    not reference.startswith("/") or reference.startswith(f"/{ATTACHMENTS_FOLDER}/")
+                )
+            ):
+                relative_references.add(reference)
+        return relative_references
 
     def _revision_content(self, *, document_id: str, revision_id: str) -> sqlite3.Row:
         with self.database.connection() as connection:
