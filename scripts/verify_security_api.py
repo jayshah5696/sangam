@@ -244,24 +244,50 @@ def main() -> None:
         + "\n".join(secrets)
         + "\n-----BEGIN PRIVATE KEY-----\nPRIVATE-MATERIAL\n-----END PRIVATE KEY-----",
     )
+    expanded_secrets = [
+        "ASIA1234567890123456",
+        "ghs_abcdefghijklmnopqrstuv",
+        "gho_abcdefghijklmnopqrstuv",
+        "ghu_abcdefghijklmnopqrstuv",
+        "ghr_abcdefghijklmnopqrstuv",
+        "ya29.abcdefghijklmnopqrstuv",
+        "pypi-" + "a" * 32,
+        "npm_" + "a" * 36,
+        "SG." + "a" * 22 + "." + "b" * 43,
+    ]
+    audit_ids = [audit_doc.json()["document_id"]]
+    for secret in expanded_secrets:
+        created = create("proof/" + secret + ".md")
+        audit_ids.append(created.json()["document_id"])
+    stored_rows = []
     with sqlite3.connect(os.environ["SANGAM_DATABASE_PATH"]) as connection:
-        rows = connection.execute(
-            "SELECT path, detail_json FROM operation_events WHERE resource_id = ?",
-            (audit_doc.json()["document_id"],),
-        ).fetchall()
-        assert rows
-        stored = json.dumps(rows)
+        for document_id in audit_ids:
+            rows = connection.execute(
+                "SELECT path, detail_json FROM operation_events WHERE resource_id = ?",
+                (document_id,),
+            ).fetchall()
+            assert rows, document_id
+            for path, detail_json in rows:
+                details = json.loads(detail_json)
+                assert "[REDACTED]" in path
+                assert details["target_file"] == path
+                assert details["action_type"] == "create"
+            stored_rows.extend(rows)
+        stored = json.dumps(stored_rows)
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     activity = request("GET", "/activity?actor_kind=human", 200)
     export = request("GET", "/activity/export.jsonl?actor_kind=human", 200)
     for text in [stored, activity.text, export.text]:
         assert "[REDACTED]" in text
-        assert not any(secret in text for secret in [*secrets, "PRIVATE-MATERIAL"])
+        assert not any(
+            secret in text for secret in [*secrets, *expanded_secrets, "PRIVATE-MATERIAL"]
+        )
     report = {
         "ok": True,
         "checks": evidence,
         "sqlite_quick_check": "ok",
         "redaction_surfaces": ["persisted rows", "activity JSON", "JSONL"],
+        "redacted_document_count": len(audit_ids),
         "replay_revision": first.json()["current_revision_id"],
     }
     path = Path(os.environ["SANGAM_ARTIFACTS_DIR"]) / "security-api.json"
