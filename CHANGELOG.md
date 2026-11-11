@@ -7,6 +7,33 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.14.0] - 2026-11-10
+
+### Security
+
+- Hardened credential sanitization and log redaction (#532, #557, #564): extended sanitization regex to redact credentials (e.g., Anthropic, OpenAI, Google tokens, sensitive headers like `x-webhook-secret`, `x-app-secret`, `x-session-secret`, and sensitive key terms `app_key`, `bot_token`, `deploy_key`, `ssh_key`, `user_token`) in both structured audit logs and Python standard logging via `SanitizingLogFormatter`.
+- Asset reference path sanitization & directory traversal prevention (#504, #512, #535, #562): strict validation and normalization of document asset paths, rejecting parent references (`..`) and empty paths, and safely excluding malformed relative asset references in publication content.
+- Comment resolution authorization order (#509, #535): fixed evaluation order to check caller permissions before comment existence/preconditions, avoiding unauthorized existence probing.
+- Backup retention manifest validation (#562): backup list and retention checks now verify that `manifest.backup_id` matches the storage directory name, rejecting tampered or corrupt manifest IDs from redirecting deletion.
+- SSRF and URL validation hardening (#562): URL parser translates malformed URL errors (invalid ports, unbalanced IPv6 brackets, invalid unicode delimiters) into HTTP 422 validation errors instead of unhandled 500 exceptions.
+- PDF parser atomic staging validation (#506, #535): content hash validation on temporary staging files before atomic replacement to prevent partial or corrupted PDF text extraction writes.
+
+### Added
+
+- Google-derived Python coding standards (#552, #553): enforced custom AST linter (`scripts/check_python_standards.py`) and updated codebase to comply with standards across all Python modules.
+- Accessibility improvements (#560): updated FileExplorer tree counts and workspace branding to include visible text in accessible names, and adopted Axe-core 4.14 for accessibility testing.
+
+### Fixed
+
+- Exception-safe directory synchronization (#510, #523, #535): directory descriptor fsync now safely handles `OSError` (e.g., when syncing directories on filesystems that do not support directory fsync) and ensures file descriptors are closed in `finally` blocks.
+- Backup creation robustness (#562): archive operations no longer suppress filesystem read errors; unreadable attachments or directories abort backup creation cleanly to prevent incomplete backups from passing verification.
+- CLI error resilience (#562): robust handling of non-JSON and malformed upstream gateway errors in CLI request handler.
+- Citation update URL fix (#562): preserved query parameter prefix (`?revision=`) when updating draft citations in DocumentWorkspace.
+
+### Dependencies
+
+- Consolidated dependency upgrades (#517, #520, #553, #557): updated pypdf to 6.21.4, httpx2 to 2.14.0, @oxlint/plugins to 1.88.0, and updated core frontend packages.
+
 ## [0.13.7] - 2026-10-20
 
 ### Added
@@ -617,7 +644,10 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.13.5...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/jayshah5696/sangam/compare/v0.13.7...v0.14.0
+[0.13.7]: https://github.com/jayshah5696/sangam/compare/v0.13.6...v0.13.7
+[0.13.6]: https://github.com/jayshah5696/sangam/compare/v0.13.5...v0.13.6
 [0.13.5]: https://github.com/jayshah5696/sangam/compare/v0.13.4...v0.13.5
 [0.13.4]: https://github.com/jayshah5696/sangam/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/jayshah5696/sangam/compare/v0.13.2...v0.13.3
