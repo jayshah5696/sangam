@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -1378,7 +1378,7 @@ wheels = [
 
 [[package]]
 name = "sangam"
-version = "0.13.7"
+version = "0.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
