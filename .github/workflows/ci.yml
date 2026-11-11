@@ -18,7 +18,7 @@ concurrency:
 jobs:
   python:
     name: Python lint, types, and tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -46,7 +46,7 @@ jobs:
 
   frontend:
     name: Frontend, docs, and distribution config
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -78,7 +78,7 @@ jobs:
 
   e2e:
     name: Browser tests (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -150,7 +150,7 @@ jobs:
     name: Source, UI, and docs
     needs: [python, frontend, e2e]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Require every source, UI, and browser job to pass
         env:
@@ -166,7 +166,7 @@ jobs:
 
   artifacts:
     name: Wheel and sdist clean install
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -178,7 +178,7 @@ jobs:
 
   container:
     name: Container, Compose, and blocking scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - run: ./scripts/validate-compose.sh

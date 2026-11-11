@@ -96,7 +96,12 @@ from sangam.schemas import (
     UpdateHtmlJavascriptSettings,
     UpdatePublication,
 )
-from sangam.security import Principal, PublicationAccess, sanitize_headers
+from sangam.security import (
+    Principal,
+    PublicationAccess,
+    configure_sanitizing_logging,
+    sanitize_headers,
+)
 from sangam.storage_ownership import StorageOwnership
 
 logger = logging.getLogger(__name__)
@@ -125,6 +130,7 @@ def _camel_case(value: str) -> str:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    configure_sanitizing_logging()
     resolved_settings = settings or Settings()
     storage_ownership = StorageOwnership(
         (
