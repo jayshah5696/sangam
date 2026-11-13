@@ -82,8 +82,8 @@ class PdfResearchService:
     ) -> Document:
         normalized_path = self.workspace.normalize_document_path(path)
         with (
+            self.mutations.mutation(),
             self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key),
-            self.mutations.path(normalized_path),
         ):
             return self._import_pdf_locked(
                 title=title,
@@ -146,17 +146,16 @@ class PdfResearchService:
         if duplicate is not None:
             return self.documents.get_document(duplicate.resource_id)
 
-        with self.database.connection() as connection:
-            existing = connection.execute(
-                "SELECT document_id FROM documents WHERE path = ? AND deleted = 0",
-                (normalized_path,),
-            ).fetchone()
-            if existing is not None:
-                raise ValidationError("A document already uses that path")
-
         document_id = str(uuid.uuid4())
         revision_id = str(uuid.uuid4())
-        with self.mutations.document(document_id):
+        with self.mutations.document(document_id), self.mutations.path(normalized_path):
+            with self.database.connection() as connection:
+                existing = connection.execute(
+                    "SELECT document_id FROM documents WHERE path = ? AND deleted = 0",
+                    (normalized_path,),
+                ).fetchone()
+                if existing is not None:
+                    raise ValidationError("A document already uses that path")
             created_file = not self.workspace.is_document_file(normalized_path)
             file_written_by_this_call = False
             if created_file:
