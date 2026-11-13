@@ -9,8 +9,9 @@ import sqlite3
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Concatenate
 
 from sangam.actors import ActorService
 from sangam.db import Database, utc_now
@@ -39,6 +40,22 @@ from sangam.workspace import WorkspaceFilesystem
 
 if TYPE_CHECKING:
     from sangam.pdf_research import PdfResearchService
+
+
+def _serialize_document[**P, R](
+    function: Callable[Concatenate[DocumentService, P], R],
+) -> Callable[Concatenate[DocumentService, P], R]:
+    """Read a document's path only after owning its mutation pipeline."""
+
+    @wraps(function)
+    def wrapped(self: DocumentService, /, *args: P.args, **kwargs: P.kwargs) -> R:
+        document_id = kwargs.get("document_id")
+        if not isinstance(document_id, str):
+            raise TypeError("document_id must be supplied by keyword")
+        with self.mutations.document(document_id):
+            return function(self, *args, **kwargs)
+
+    return wrapped
 
 
 def _content_hash(content: str) -> str:
@@ -619,18 +636,18 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         normalized_path = self._normalize_path(path) if path is not None else None
+        fingerprint = request_hash(
+            {
+                "title": title,
+                "content": content,
+                "path": normalized_path,
+                "content_type": content_type,
+            }
+        )
         with (
+            self.mutations.mutation(),
             self.mutations.creation(actor_id=actor_id, idempotency_key=idempotency_key),
-            self.mutations.paths(normalized_path),
         ):
-            fingerprint = request_hash(
-                {
-                    "title": title,
-                    "content": content,
-                    "path": normalized_path,
-                    "content_type": content_type,
-                }
-            )
             with self.database.connection() as connection:
                 duplicate = self.idempotency.document_result(
                     connection,
@@ -639,17 +656,29 @@ class DocumentService:
                     operation="create",
                     request_hash=fingerprint,
                 )
-            document_id = duplicate[0] if duplicate else str(uuid.uuid4())
-            with self.mutations.document(document_id):
-                return self._create_document_locked(
-                    title=title,
-                    content=content,
-                    path=path,
-                    content_type=content_type,
-                    actor_id=actor_id,
-                    idempotency_key=idempotency_key,
-                    document_id=document_id,
-                )
+            if duplicate is None:
+                document_id = str(uuid.uuid4())
+                with self.mutations.document(document_id), self.mutations.paths(normalized_path):
+                    return self._create_document_locked(
+                        title=title,
+                        content=content,
+                        path=path,
+                        content_type=content_type,
+                        actor_id=actor_id,
+                        idempotency_key=idempotency_key,
+                        document_id=document_id,
+                    )
+        document_id = duplicate[0]
+        with self.mutations.document(document_id):
+            return self._create_document_locked(
+                title=title,
+                content=content,
+                path=path,
+                content_type=content_type,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+                document_id=document_id,
+            )
 
     def create_draft_in_transaction(
         self, *, title: str, content: str, actor_id: str, idempotency_key: str
@@ -836,6 +865,7 @@ class DocumentService:
         self.search_index.sync(result)
         return result
 
+    @_serialize_document
     def _append_revision(
         self,
         *,
@@ -1055,9 +1085,9 @@ class DocumentService:
         idempotency_key: str,
     ) -> Document:
         validate_metadata_text(title, "Document title")
-        source = self.get_document(document_id)
-        target_path = self._normalize_path(path) if path is not None else None
-        with self.mutations.paths(source.path, target_path):
+        source_bytes: bytes | None = None
+        with self.mutations.document(document_id):
+            source = self.get_document(document_id)
             if source.current_revision_id != expected_revision_id:
                 raise ConflictError(
                     "The source document changed since it was read",
@@ -1068,40 +1098,46 @@ class DocumentService:
                     },
                 )
             if source.content_type == "application/pdf":
-                return self._duplicate_pdf_document(
-                    source=source,
-                    title=title,
-                    path=path,
-                    actor_id=actor_id,
-                    idempotency_key=idempotency_key,
-                )
-            return self.create_document(
-                title=title or f"{source.title} copy",
-                content=source.content,
+                if not source.path:
+                    raise ValidationError("Cannot duplicate an unmaterialized PDF")
+                with self.mutations.path(source.path):
+                    source_bytes = self.workspace.read_binary(source.path)
+                actual_hash = hashlib.sha256(source_bytes).hexdigest()
+                if actual_hash != source.content_hash:
+                    raise ConflictError(
+                        "Source PDF content does not match stored content hash",
+                        details={"expected_hash": source.content_hash, "actual_hash": actual_hash},
+                    )
+        if source.content_type == "application/pdf":
+            if source_bytes is None:
+                raise RuntimeError("PDF snapshot was not captured")
+            return self._duplicate_pdf_document(
+                source=source,
+                source_bytes=source_bytes,
+                title=title,
                 path=path,
-                content_type=source.content_type,
                 actor_id=actor_id,
                 idempotency_key=idempotency_key,
             )
+        return self.create_document(
+            title=title or f"{source.title} copy",
+            content=source.content,
+            path=path,
+            content_type=source.content_type,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+        )
 
     def _duplicate_pdf_document(
         self,
         *,
         source: Document,
+        source_bytes: bytes,
         title: str | None,
         path: str | None,
         actor_id: str,
         idempotency_key: str,
     ) -> Document:
-        if not source.path:
-            raise ValidationError("Cannot duplicate an unmaterialized PDF")
-        source_bytes = self.workspace.read_binary(source.path)
-        actual_hash = hashlib.sha256(source_bytes).hexdigest()
-        if actual_hash != source.content_hash:
-            raise ConflictError(
-                "Source PDF content does not match stored content hash",
-                details={"expected_hash": source.content_hash, "actual_hash": actual_hash},
-            )
         destination_path = self._normalize_path(path or default_duplicate_path(source) or "")
         self._validate_path_type(destination_path, "application/pdf")
         with self.database.connection() as connection:
@@ -1199,6 +1235,7 @@ class DocumentService:
             idempotency_key=idempotency_key,
         )
 
+    @_serialize_document
     def _move_pdf_document(
         self,
         *,
@@ -1308,6 +1345,7 @@ class DocumentService:
             deleted=True,
         )
 
+    @_serialize_document
     def _delete_pdf_document(
         self,
         *,
@@ -1546,6 +1584,7 @@ class DocumentService:
             deleted=False,
         )
 
+    @_serialize_document
     def _restore_pdf_document(
         self,
         *,
@@ -1642,8 +1681,8 @@ class DocumentService:
         if document.deleted or not document.path:
             return
         with (
-            self.mutations.path(document.path),
             self.mutations.document(document.document_id),
+            self.mutations.path(document.path),
         ):
             with self.database.connection() as connection:
                 latest = connection.execute(
@@ -1689,11 +1728,8 @@ class DocumentService:
 
     def rematerialize_document(self, document_id: str) -> Document:
         """Rewrite a materialized document from the canonical database head."""
-        document = self.get_document(document_id)
-        with (
-            self.mutations.paths(document.path),
-            self.mutations.document(document_id),
-        ):
+        with self.mutations.document(document_id):
+            document = self.get_document(document_id)
             if document.content_type == "application/pdf":
                 raise ValidationError(
                     "Missing PDF bytes must be restored from backup; they are not stored in SQLite"

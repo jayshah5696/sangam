@@ -10,6 +10,8 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -17,7 +19,7 @@ from conftest import headers
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 
-from sangam.errors import ValidationError
+from sangam.errors import ConflictError, ValidationError
 from sangam.service import DocumentService
 
 
@@ -65,6 +67,247 @@ def _start_paused_backup(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     backup_future = executor.submit(manager.create)
     assert snapshot_complete.wait(timeout=5)
     return manager, executor, backup_future, release_archive
+
+
+@pytest.mark.parametrize("source_type", ["text", "pdf"])
+def test_duplicate_rechecks_source_after_concurrent_change(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, source_type: str
+) -> None:
+    if source_type == "text":
+        created = _create_text(client, path="duplicate/source.md")
+    else:
+        response = client.post(
+            "/api/v1/pdfs",
+            params={"title": "Source", "path": "duplicate/source.pdf"},
+            content=_pdf_bytes(),
+            headers={**headers("duplicate-source-pdf"), "Content-Type": "application/pdf"},
+        )
+        assert response.status_code == 201
+        created = response.json()
+
+    service: DocumentService = client.app.state.services.documents
+    original_get = service.get_document
+    snapshot_read = threading.Event()
+    resume = threading.Event()
+
+    def paused_get(document_id: str, *, include_deleted: bool = False):
+        document = original_get(document_id, include_deleted=include_deleted)
+        if threading.current_thread().name == "duplicate-snapshot" and not snapshot_read.is_set():
+            snapshot_read.set()
+            assert resume.wait(timeout=10)
+        return document
+
+    monkeypatch.setattr(service, "get_document", paused_get)
+    outcomes: list[object] = []
+
+    def duplicate() -> None:
+        try:
+            outcomes.append(
+                service.duplicate_document(
+                    document_id=created["document_id"],
+                    expected_revision_id=created["current_revision_id"],
+                    title=None,
+                    path=None,
+                    actor_id=created["created_by"],
+                    idempotency_key="duplicate-stale-snapshot",
+                )
+            )
+        except Exception as error:  # noqa: BLE001 - propagate worker failures to the test
+            outcomes.append(error)
+
+    thread = threading.Thread(target=duplicate, name="duplicate-snapshot", daemon=True)
+    thread.start()
+    try:
+        assert snapshot_read.wait(timeout=5)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            if source_type == "text":
+                changed = executor.submit(
+                    client.patch,
+                    f"/api/v1/documents/{created['document_id']}",
+                    json={"expected_revision_id": created["current_revision_id"], "content": "new"},
+                    headers=headers("duplicate-source-update"),
+                )
+            else:
+                changed = executor.submit(
+                    client.post,
+                    f"/api/v1/documents/{created['document_id']}/move",
+                    json={
+                        "expected_revision_id": created["current_revision_id"],
+                        "path": "duplicate/moved.pdf",
+                    },
+                    headers=headers("duplicate-source-move"),
+                )
+            # A source lock may serialize the change behind the paused snapshot.
+            try:
+                response = changed.result(timeout=1)
+                changed_first = True
+            except FutureTimeoutError:
+                changed_first = False
+            finally:
+                resume.set()
+            if not changed_first:
+                response = changed.result(timeout=10)
+            assert response.status_code == 200, response.text
+    finally:
+        resume.set()
+        thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert len(outcomes) == 1
+    if changed_first:
+        assert isinstance(outcomes[0], ConflictError), outcomes[0]
+        assert len(service.list_documents()) == 1
+    else:
+        assert not isinstance(outcomes[0], Exception), outcomes[0]
+        assert len(service.list_documents()) == 2
+
+
+def test_create_retry_does_not_hold_path_while_waiting_for_update(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = _create_text(client, path="retry.md")
+    service: DocumentService = client.app.state.services.documents
+    access = client.app.state.services.workspace_access
+    original_store = access._store_document_write
+    original_document = service.mutations.document
+    update_has_document = threading.Event()
+    retry_waiting = threading.Event()
+    update_finished = threading.Event()
+    release_update = threading.Event()
+    outcomes: list[object] = []
+
+    def pause_update(*args, **kwargs):
+        update_has_document.set()
+        assert release_update.wait(timeout=10)
+        return original_store(*args, **kwargs)
+
+    @contextmanager
+    def observe_document(document_id: str):
+        if threading.current_thread().name == "create-retry":
+            retry_waiting.set()
+            if not update_finished.wait(timeout=3):
+                raise TimeoutError("update could not finish while create retry waited")
+        with original_document(document_id):
+            yield
+
+    monkeypatch.setattr(access, "_store_document_write", pause_update)
+    monkeypatch.setattr(service.mutations, "document", observe_document)
+
+    def update() -> None:
+        try:
+            outcomes.append(
+                client.patch(
+                    f"/api/v1/documents/{created['document_id']}",
+                    json={"expected_revision_id": created["current_revision_id"], "content": "new"},
+                    headers=headers("retry-update"),
+                )
+            )
+        finally:
+            update_finished.set()
+
+    def retry() -> None:
+        try:
+            outcomes.append(
+                service.create_document(
+                    title="Race",
+                    content="base",
+                    path="retry.md",
+                    actor_id=created["created_by"],
+                    idempotency_key="create-retry.md",
+                )
+            )
+        except Exception as error:  # noqa: BLE001 - propagate worker failures to the test
+            outcomes.append(error)
+
+    update_thread = threading.Thread(target=update, daemon=True)
+    retry_thread = threading.Thread(target=retry, name="create-retry", daemon=True)
+    update_thread.start()
+    try:
+        assert update_has_document.wait(timeout=5)
+        retry_thread.start()
+        assert retry_waiting.wait(timeout=5)
+    finally:
+        release_update.set()
+        update_thread.join(timeout=10)
+        if retry_thread.ident is not None:
+            retry_thread.join(timeout=10)
+
+    assert not update_thread.is_alive()
+    assert not retry_thread.is_alive()
+    assert len(outcomes) == 2
+    assert not any(isinstance(result, Exception) for result in outcomes), outcomes
+    assert any(getattr(result, "status_code", None) == 200 for result in outcomes)
+    assert service.get_document(created["document_id"]).content == "new"
+
+
+def test_move_finishes_before_stale_update_and_backup(
+    client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = _create_text(client, path="move-race/before.md")
+    service: DocumentService = client.app.state.services.documents
+    manager = client.app.state.services.backups.manager
+    original_write = service.workspace.write_atomic
+    move_writing = threading.Event()
+    release_move = threading.Event()
+    backup_waiting = threading.Event()
+    original_backup = manager.mutations.backup
+
+    def paused_write(path: str, content: str) -> str:
+        if path == "move-race/after.md":
+            move_writing.set()
+            assert release_move.wait(timeout=10)
+        return original_write(path, content)
+
+    @contextmanager
+    def observed_backup():
+        backup_waiting.set()
+        with original_backup():
+            yield
+
+    monkeypatch.setattr(service.workspace, "write_atomic", paused_write)
+    monkeypatch.setattr(manager.mutations, "backup", observed_backup)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        move = executor.submit(
+            client.post,
+            f"/api/v1/documents/{created['document_id']}/move",
+            json={
+                "expected_revision_id": created["current_revision_id"],
+                "path": "move-race/after.md",
+            },
+            headers=headers("move-race"),
+        )
+        try:
+            assert move_writing.wait(timeout=5)
+            update = executor.submit(
+                client.patch,
+                f"/api/v1/documents/{created['document_id']}",
+                json={"expected_revision_id": created["current_revision_id"], "content": "stale"},
+                headers=headers("move-race-stale-update"),
+            )
+            _wait_for_pipeline_attempt(service, created["document_id"])
+            backup = executor.submit(manager.create)
+            assert backup_waiting.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with service.mutations._condition:
+                    if service.mutations._waiting_backups:
+                        break
+                time.sleep(0.01)
+            else:
+                pytest.fail("Backup did not reach the generation barrier")
+        finally:
+            release_move.set()
+        assert move.result(timeout=10).status_code == 200
+        assert update.result(timeout=10).status_code == 409
+        snapshot = backup.result(timeout=10)
+
+    assert manager.verify(snapshot.backup_id).valid
+    assert not (settings.workspace_root / "move-race/before.md").exists()
+    assert (settings.workspace_root / "move-race/after.md").read_text() == "base"
+    with tarfile.open(manager.backup_root / snapshot.backup_id / "workspace.tar.gz") as archive:
+        archived = archive.extractfile("move-race/after.md")
+        assert archived is not None
+        assert archived.read() == b"base"
 
 
 def test_document_pipeline_serializes_revision_materialization_and_search(
@@ -308,13 +551,13 @@ def test_backup_barrier_and_pair_verification_cover_pdf_bytes(
     manager, executor, backup_future, release_archive = _start_paused_backup(client, monkeypatch)
     pdf_service = client.app.state.services.pdf_research
     import_attempted = threading.Event()
-    original_import = pdf_service._import_pdf_locked
+    original_import = pdf_service.import_pdf
 
     def observed_import(**kwargs):
         import_attempted.set()
         return original_import(**kwargs)
 
-    monkeypatch.setattr(pdf_service, "_import_pdf_locked", observed_import)
+    monkeypatch.setattr(pdf_service, "import_pdf", observed_import)
     new_pdf = executor.submit(
         client.post,
         "/api/v1/pdfs",
