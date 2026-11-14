@@ -54,8 +54,8 @@ importers:
         specifier: 1.162.4
         version: 1.162.4
       '@tanstack/react-query':
-        specifier: 5.104.2
-        version: 5.104.2(react@19.2.8)
+        specifier: 5.107.1
+        version: 5.107.1(@types/react@19.2.18)(react@19.2.8)
       '@tanstack/react-router':
         specifier: 1.170.38
         version: 1.170.38(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -917,13 +917,17 @@ packages:
     resolution: {integrity: sha512-utTS5L2OkeYUzXGohL1Z8sefu1GLNOJcxe8Hd6iIdc/Xo1K1nDB2JEp4iSFhvYh33xKC9V91TxrS8qfrpoKobQ==}
     engines: {node: '>=20.19'}
 
-  '@tanstack/query-core@5.104.2':
-    resolution: {integrity: sha512-/qbsxJK5c3Ve1aFIULWYNcT2jeRUAiD4HME6Eu2ZdpofHoVgAjpkQhLg5xHuOoBkTPQUJLfP7zOxy0qsBcqROA==}
+  '@tanstack/query-core@5.107.1':
+    resolution: {integrity: sha512-PSyAik11oQBEVOiVy5hjZWHmoUqOXqK1WYy4v55mcxozEfKaQgpUMsgnXhWjuESzSht8JfzqMS1m6M/9CpNgvg==}
 
-  '@tanstack/react-query@5.104.2':
-    resolution: {integrity: sha512-xKmzWGhadbE5wGS/ZmXShRITnI9oItox5GO14KvFZco3+vhTAyXS1erYzJWdiY280zapAGJXFUL9nHgwP6SV/g==}
+  '@tanstack/react-query@5.107.1':
+    resolution: {integrity: sha512-udCOOLp3ZAheUrIHLCe+ZZge6nr2ZUrGMSWcCuXsjY1Bf2JeeE09oxst97PILiCY6N8xo/7bIo3Hvz13zh06FA==}
     peerDependencies:
+      '@types/react': ^18 || ^19
       react: ^18 || ^19
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   '@tanstack/react-router@1.170.38':
     resolution: {integrity: sha512-iHM9b0aDJbuvftmkiQXawzoqsdV68p2Re2safbVLCnxafe+iLKV++2i3hI/BMAP6uR92/Mjw94JKJJfD7pbwHQ==}
@@ -3433,12 +3437,14 @@ snapshots:
 
   '@tanstack/history@1.162.4': {}
 
-  '@tanstack/query-core@5.104.2': {}
+  '@tanstack/query-core@5.107.1': {}
 
-  '@tanstack/react-query@5.104.2(react@19.2.8)':
+  '@tanstack/react-query@5.107.1(@types/react@19.2.18)(react@19.2.8)':
     dependencies:
-      '@tanstack/query-core': 5.104.2
+      '@tanstack/query-core': 5.107.1
       react: 19.2.8
+    optionalDependencies:
+      '@types/react': 19.2.18
 
   '@tanstack/react-router@1.170.38(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
