@@ -37,7 +37,7 @@
 .mcp-path { margin: var(--space-1) 0 0; font-size: var(--text-control); }
 .mcp-status { padding: var(--space-2) var(--space-4); color: var(--muted); font-size: var(--text-control); }
 .mcp-editor { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid var(--line); }
-.mcp-editor .markdown-editor, .mcp-editor .cm-editor { height: 100%; }
+.mcp-editor .editor, .mcp-editor .cm-editor { height: 100%; min-height: 0; }
 .mcp-editor .cm-scroller { overflow: auto; }
 .mcp-editor pre { padding: var(--space-4); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mcp-document-footer { padding: var(--space-3) var(--space-4); flex-wrap: wrap; color: var(--muted); font-size: var(--text-control); }

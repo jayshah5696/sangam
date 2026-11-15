@@ -47,6 +47,11 @@ test('real MCP host finds through Monty, recovers a checkpoint, and saves one re
   const app = page.frameLocator('iframe[title="Sangam document workspace"]')
   await expect(app.getByText(`MCP walkthrough ${suffix}`, { exact: true })).toBeVisible()
   const editor = app.getByRole('textbox', { name: 'Document content' })
+  const editorRegion = await app.getByRole('region', { name: 'Document editor' }).boundingBox()
+  const editorCanvas = await app.locator('.cm-editor').boundingBox()
+  expect(editorRegion).not.toBeNull()
+  expect(editorCanvas).not.toBeNull()
+  expect(Math.abs((editorCanvas?.height ?? 0) - (editorRegion?.height ?? 0))).toBeLessThan(5)
   await editor.click()
   await editor.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A')
   await expect
