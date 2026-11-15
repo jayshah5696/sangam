@@ -1,5 +1,10 @@
 # Chat capabilities and durable effects
 
+The experimental [MCP App](mcp.md) uses the same document read/write services.
+Its external-host workspace IDs and draft checkpoints are UI recovery state.
+Internal chat does not control those host views by design. Document search and
+revision-aware editing retain the parity described below.
+
 Sangam chat is a bounded interface to the document server. The model may choose from capabilities that deterministic application code has already authorized. It cannot grant itself a tool, write SQLite or the workspace, or turn a proposal into an applied revision. See [architecture.md](architecture.md) for the core trust model and [operations/integrations.md](operations/integrations.md) for provider configuration. To measure changes to this contract, run the eval suite in [chat-evals.md](chat-evals.md).
 
 The [architecture diagram](assets/chat-capability-lifecycle.html) shows the complete request and effect path. A static [reference image](assets/chat-capability-lifecycle.png) is available for reviews and pull requests.

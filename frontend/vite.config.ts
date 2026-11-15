@@ -35,12 +35,16 @@ export default defineConfig({
     __SANGAM_VERSION__: JSON.stringify(sangamVersion),
   },
   build: {
+    rollupOptions: {
+      input: { main: 'index.html', mcpHost: 'mcp-host.html' },
+    },
     // CodeMirror and the complete Mermaid renderer are optional lazy chunks.
     chunkSizeWarningLimit: 700,
     manifest: true,
   },
   server: {
     proxy: {
+      '/mcp': process.env.SANGAM_DEV_BACKEND_URL ?? 'http://127.0.0.1:8000',
       '/api': process.env.SANGAM_DEV_BACKEND_URL ?? 'http://127.0.0.1:8000',
     },
   },

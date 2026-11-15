@@ -1,0 +1,542 @@
+"""One compact MCP entry point over Sangam's existing authorized services."""
+
+import asyncio
+import hashlib
+import json
+import sys
+from collections.abc import Callable
+from contextlib import AsyncExitStack
+from functools import partial
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from mcp.server import MCPServer
+from mcp.server.apps import Apps
+from mcp.server.mcpserver.context import Context
+from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import JsonValue, TypeAdapter
+from pydantic import ValidationError as SchemaError
+from pydantic_monty import AsyncMonty, MontyError
+from starlette.datastructures import Headers
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from sangam.application import ApplicationServices
+from sangam.capabilities import Capability
+from sangam.config import Settings
+from sangam.db import utc_now
+from sangam.errors import (
+    AuthenticationError,
+    AuthorizationError,
+    ConflictError,
+    IdempotencyError,
+    SangamError,
+    ValidationError,
+)
+from sangam.mcp_models import (
+    AppAction,
+    DocumentPassage,
+    ExecutionStatus,
+    OperationInput,
+    ReadDocument,
+    RefreshWorkspace,
+    SearchApp,
+    SearchDocuments,
+    SearchHit,
+    SearchResults,
+    UpdateDocument,
+    WriteResult,
+)
+from sangam.mcp_state import McpState
+from sangam.schemas import UpdateDocument as DocumentUpdate
+from sangam.security import Principal
+
+APP_URI = "ui://sangam/document-workspace.html"
+JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
+OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
+    "documents.search": (
+        SearchDocuments,
+        "documents_search",
+        "read",
+        "search, read",
+        "Search permitted Markdown documents. Paginate with offset; "
+        "results are current revision metadata.",
+    ),
+    "documents.read": (
+        ReadDocument,
+        "documents_read",
+        "read",
+        "read",
+        "Read a bounded Markdown passage. Returns current_revision_id; "
+        "offset and length count characters.",
+    ),
+    "documents.update": (
+        UpdateDocument,
+        "documents_update",
+        "write",
+        "update",
+        "Update a Markdown document using expected_revision_id and a stable operation_key. "
+        "Reuse the original key and exact arguments after a lost response.",
+    ),
+    "executions.get": (
+        ExecutionStatus,
+        "executions_get",
+        "read",
+        "current source access",
+        "Inspect an owned execution and original write evidence. "
+        "Never replay the original program to recover.",
+    ),
+}
+OUTPUT_SCHEMAS = {
+    "documents.search": SearchResults.model_json_schema(),
+    "documents.read": DocumentPassage.model_json_schema(),
+    "documents.update": WriteResult.model_json_schema(),
+    "executions.get": {
+        "type": "object",
+        "description": "Owned execution output or recovery status.",
+    },
+}
+
+
+def result(value: dict[str, JsonValue], *, failed: bool = False) -> CallToolResult:
+    return CallToolResult(
+        content=[
+            TextContent(type="text", text=json.dumps(value, ensure_ascii=False, allow_nan=False))
+        ],
+        structured_content=value,
+        is_error=failed,
+    )
+
+
+def failure(error: SangamError) -> CallToolResult:
+    return result({"error": {"code": error.code, "message": error.message}}, failed=True)
+
+
+class PrivateMcp:
+    """Authenticate the mounted ASGI transport, including discovery and resources."""
+
+    def __init__(self, app: ASGIApp, services: ApplicationServices) -> None:
+        self.app = app
+        self.services = services
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            header = Headers(scope=scope).get("authorization", "")
+            scheme, _, token = header.partition(" ")
+            try:
+                if scheme.lower() != "bearer" or not token.strip():
+                    raise AuthenticationError("An explicit Sangam bearer key is required for MCP.")
+                await asyncio.to_thread(
+                    self.services.identity.authenticate,
+                    token.strip(),
+                    operation_id=f"mcp:{uuid4().hex}",
+                )
+            except AuthenticationError:
+                response = JSONResponse(
+                    {"error": "authentication_required"},
+                    status_code=401,
+                    headers={
+                        "WWW-Authenticate": 'Bearer realm="Sangam MCP"',
+                        "Cache-Control": "no-store",
+                    },
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+class SangamMcp:
+    def __init__(self, services: ApplicationServices, settings: Settings) -> None:
+        self.services = services
+        self.settings = settings
+        self.state = McpState(services, settings)
+        self.active = 0
+        self.closing = False
+        self.pending: set[asyncio.Task[Any]] = set()
+        self.stack = AsyncExitStack()
+        self.pool = AsyncMonty(
+            binary_path=Path(sys.executable).parent / "sangam-monty-worker",
+            min_processes=0,
+            max_processes=2,
+            max_checkouts_per_worker=1,
+            checkout_timeout=1.0,
+            request_timeout=5.0,
+        )
+        self.server = MCPServer(
+            "Sangam",
+            extensions=[Apps()],
+            version="0.1.0",
+            instructions=(
+                "Use search to discover typed operations, then execute restricted Python "
+                "with a fresh execution_key. Only the final expression is returned. "
+                "Read before updating; retain operation keys. Present opens the editable "
+                "document App. Saved writes survive Python failure. Inspect executions.get "
+                "after interruption; never replay a mutating program."
+            ),
+        )
+        self._register()
+        allowed_origins: list[str] = []
+        for host in settings.mcp_allowed_hosts:
+            allowed_origins.extend((f"http://{host}", f"https://{host}"))
+        transport = self.server.streamable_http_app(
+            streamable_http_path="/",
+            stateless_http=True,
+            json_response=True,
+            max_request_body_size=settings.max_document_bytes
+            + settings.mcp_max_source_bytes
+            + 16_384,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=list(settings.mcp_allowed_hosts),
+                allowed_origins=allowed_origins,
+            ),
+        )
+        self.app = PrivateMcp(transport, services)
+
+    async def start(self) -> None:
+        self.state.interrupt_previous_runs()
+        self.state.cleanup()
+        await self.stack.enter_async_context(self.pool)
+        await self.stack.enter_async_context(self.server.session_manager.run())
+
+    async def close(self) -> None:
+        self.closing = True
+        await self.stack.aclose()
+        if self.pending:
+            # A cancelled host wait cannot cancel a SQLite commit on its thread.
+            # Drain it before api.py closes services or releases storage ownership.
+            await asyncio.wait_for(
+                asyncio.gather(*self.pending, return_exceptions=True), timeout=10
+            )
+
+    async def blocking[T](self, operation: Callable[[], T]) -> T:
+        if self.closing:
+            raise ValidationError("MCP is shutting down. Reconnect and inspect the original keys.")
+        task = asyncio.create_task(asyncio.to_thread(operation))
+        self.pending.add(task)
+        task.add_done_callback(self.pending.discard)
+        return await asyncio.shield(task)
+
+    @staticmethod
+    def credential(ctx: Context) -> str:
+        headers = ctx.headers or {}
+        value = headers.get("authorization", "")
+        return value.partition(" ")[2].strip()
+
+    def principal(self, token: str) -> Principal:
+        return self.services.identity.authenticate(token, operation_id=f"mcp:{uuid4().hex}")
+
+    def _register(self) -> None:
+        @self.server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+        async def search(query: str, ctx: Context, limit: int = 5) -> CallToolResult:
+            """Discover complete Sangam operation contracts, not document content."""
+            self.principal(self.credential(ctx))
+            terms = query.lower().replace("_", ".").split()
+            matches = []
+            for operation_id, (
+                schema,
+                callable_name,
+                effect,
+                permissions,
+                description,
+            ) in OPERATIONS.items():
+                text = f"{operation_id} {description}".lower()
+                score = sum(term in text for term in terms)
+                if score or not terms:
+                    matches.append(
+                        (
+                            score,
+                            operation_id,
+                            {
+                                "operation_id": operation_id,
+                                "contract_version": 1,
+                                "callable": callable_name,
+                                "effect": effect,
+                                "permissions": permissions,
+                                "description": description,
+                                "input_schema": schema.model_json_schema(),
+                                "output_schema": OUTPUT_SCHEMAS[operation_id],
+                                "invocation": f"await {callable_name}(**keyword_arguments)",
+                            },
+                        )
+                    )
+            matches.sort(key=lambda item: (-item[0], item[1]))
+            return result(
+                JSON_OBJECT.validate_python(
+                    {"operations": [item[2] for item in matches[: max(1, min(limit, 5))]]}
+                )
+            )
+
+        @self.server.tool(
+            annotations=ToolAnnotations(
+                read_only_hint=False,
+                destructive_hint=True,
+                idempotent_hint=False,
+                open_world_hint=False,
+            )
+        )
+        async def execute(code: str, execution_key: str, ctx: Context) -> CallToolResult:
+            """Run fresh restricted Python; return its final expression and retain recovery keys."""
+            token = self.credential(ctx)
+            try:
+                return await self.execute(token, code, execution_key)
+            except SangamError as error:
+                return failure(error)
+
+        @self.server.tool(
+            meta={"ui": {"resourceUri": APP_URI}},
+            annotations=ToolAnnotations(
+                read_only_hint=False, destructive_hint=False, open_world_hint=False
+            ),
+        )
+        async def present(
+            document_id: str, ctx: Context, workspace_id: str | None = None
+        ) -> CallToolResult:
+            """Open a Markdown document App, or reopen an explicit recoverable workspace."""
+            try:
+                principal = self.principal(self.credential(ctx))
+                self.state.cleanup()
+                value = (
+                    await self.blocking(partial(self.state.read, principal, workspace_id))
+                    if workspace_id
+                    else await self.blocking(partial(self.state.open, principal, document_id))
+                )
+                if workspace_id:
+                    # Reopening is deliberate activity; passive refresh is not.
+                    with self.state.database.transaction() as connection:
+                        connection.execute(
+                            "UPDATE mcp_workspaces SET updated_at = ? WHERE workspace_id = ?",
+                            (utc_now(), workspace_id),
+                        )
+                return result(value)
+            except SangamError as error:
+                return failure(error)
+
+        @self.server.tool(
+            meta={"ui": {"visibility": ["app"]}},
+            annotations=ToolAnnotations(
+                read_only_hint=False, destructive_hint=False, open_world_hint=False
+            ),
+        )
+        async def mcp_app(action: AppAction, ctx: Context) -> CallToolResult:
+            """Typed document App interactions under the connection's current grants."""
+            try:
+                principal = self.principal(self.credential(ctx))
+                if isinstance(action, SearchApp):
+                    response = await asyncio.to_thread(
+                        self.search_documents,
+                        principal,
+                        SearchDocuments(
+                            query=action.query, limit=action.limit, offset=action.offset
+                        ),
+                    )
+                    return result(response.model_dump(mode="json"))
+                if isinstance(action, RefreshWorkspace):
+                    return result(
+                        await asyncio.to_thread(self.state.read, principal, action.workspace_id)
+                    )
+                return result(await self.blocking(partial(self.state.change, principal, action)))
+            except SangamError as error:
+                return failure(error)
+
+        @self.server.resource(APP_URI, mime_type="text/html;profile=mcp-app")
+        def app_html() -> str:
+            path = self.settings.frontend_dist / "mcp-app" / "mcp-app.html"
+            if not path.is_file():
+                raise ValidationError("MCP App assets are not built. Run just build-frontend.")
+            return path.read_text()
+
+        @self.server.resource("sangam://execution/{execution_key}", mime_type="application/json")
+        def execution_resource(execution_key: str, ctx: Context) -> str:
+            """Inspect recovery evidence even when new execution admission is full."""
+            ExecutionStatus(execution_key=execution_key)
+            principal = self.principal(self.credential(ctx))
+            self.state.cleanup()
+            return json.dumps(self.state.status(principal, execution_key), allow_nan=False)
+
+    def search_documents(self, principal: Principal, query: SearchDocuments) -> SearchResults:
+        documents = self.services.workspace_access.search_documents(
+            principal,
+            query=query.query,
+            tag_id=None,
+            category=None,
+            actor_id=None,
+            sort="relevance",
+            content_type="text/markdown",
+            limit=query.limit,
+            offset=query.offset,
+        )
+        return SearchResults(
+            items=[
+                SearchHit(
+                    document_id=document.document_id,
+                    title=document.title,
+                    path=document.path,
+                    current_revision_id=document.current_revision_id,
+                )
+                for document in documents
+            ],
+            next_offset=query.offset + len(documents) if len(documents) == query.limit else None,
+        )
+
+    async def execute(self, token: str, code: str, execution_key: str) -> CallToolResult:
+        principal = self.principal(token)
+        ExecutionStatus(execution_key=execution_key)
+        if len(code.encode()) > self.settings.mcp_max_source_bytes:
+            raise ValidationError("Python source exceeds the configured byte limit.")
+        self.state.cleanup()
+        if not self.state.begin(
+            principal,
+            execution_key,
+            hashlib.sha256(code.encode()).hexdigest(),
+            capacity=not self.closing and self.active < 2,
+        ):
+            cached = self.state.status(principal, execution_key)
+            return result(
+                cached,
+                failed=cached.get("status") in {"failed", "interrupted"} or "error" in cached,
+            )
+        self.active += 1
+        callback_error: SangamError | None = None
+        callbacks = 0
+
+        async def call(operation_id: str, **arguments: JsonValue) -> JsonValue:
+            nonlocal callbacks, callback_error
+            callbacks += 1
+            try:
+                if callbacks > 32:
+                    raise ValidationError(
+                        "Callback limit reached. Stop and inspect execution status."
+                    )
+                # Never trust the principal captured at tool entry after a long wait.
+                current = self.principal(token)
+                schema = OPERATIONS[operation_id][0]
+                parsed = schema.model_validate(arguments)
+                return await self.blocking(partial(self.dispatch, current, execution_key, parsed))
+            except SangamError as error:
+                callback_error = error
+                raise
+            except SchemaError as error:
+                callback_error = ValidationError(
+                    "Operation arguments do not match the discovered schema."
+                )
+                raise callback_error from error
+
+        external_lookup = {}
+        for operation_id, (_, name, *_) in OPERATIONS.items():
+            external_lookup[name] = partial(call, operation_id)
+        failed = False
+        try:
+            async with (
+                asyncio.timeout(10),
+                self.pool.checkout(
+                    limits={
+                        "max_memory": 32_000_000,
+                        "max_feed_duration_secs": 1.0,
+                        "max_recursion_depth": 100,
+                        "max_suspensions": 64,
+                        "max_total_sleep_secs": 0,
+                    }
+                ) as session,
+            ):
+                output = await session.feed_run(
+                    code,
+                    external_lookup=external_lookup,
+                    print_callback=lambda _stream, _text: None,
+                )
+            output = JSON_VALUE.validate_python(output)
+            encoded = json.dumps(output, allow_nan=False)
+            if len(encoded.encode()) > self.settings.mcp_max_result_bytes:
+                raise ValidationError(
+                    "Program output exceeds the response limit. "
+                    "Select a smaller result or read a bounded passage."
+                )
+            if callback_error is not None:
+                raise callback_error
+            value: dict[str, JsonValue] = {"output": output}
+        except (MontyError, TimeoutError, SchemaError, ValueError, SangamError) as error:
+            failed = True
+            message = callback_error.message if callback_error else str(error)[:1000]
+            value = {
+                "execution_key": execution_key,
+                "status": "failed",
+                "error": {
+                    "code": callback_error.code if callback_error else "execution_failed",
+                    "message": message,
+                },
+                "writes": self.state.writes(principal, execution_key, authorize=False),
+                "recovery": (
+                    "Inspect original operation keys through executions_get in a fresh execute. "
+                    "Do not replay this program."
+                ),
+            }
+        except asyncio.CancelledError:
+            value = {
+                "execution_key": execution_key,
+                "status": "interrupted",
+                "message": "Execution interrupted. Inspect original write keys before continuing.",
+            }
+            self.state.finish(principal, execution_key, value, failed=True)
+            raise
+        finally:
+            self.active -= 1
+        self.state.finish(principal, execution_key, value, failed=failed)
+        self.state.authorize_dependencies(self.principal(token), execution_key)
+        return result(value, failed=failed)
+
+    def dispatch(
+        self,
+        principal: Principal,
+        execution_key: str,
+        operation: SearchDocuments | ReadDocument | UpdateDocument | ExecutionStatus,
+    ) -> JsonValue:
+        if isinstance(operation, ExecutionStatus):
+            response = self.state.status(principal, operation.execution_key)
+            self.state.inherit_dependencies(principal, execution_key, operation.execution_key)
+            return response
+        if isinstance(operation, SearchDocuments):
+            search_response = self.search_documents(principal, operation)
+            for item in search_response.items:
+                self.state.dependency(principal, execution_key, item.document_id)
+            return search_response.model_dump(mode="json")
+        if isinstance(operation, ReadDocument):
+            document = self.services.workspace_access.get_document(principal, operation.document_id)
+            self.state.require_markdown(document)
+            self.state.dependency(principal, execution_key, document.document_id)
+            end = operation.offset + operation.length
+            return {
+                "document_id": document.document_id,
+                "title": document.title,
+                "current_revision_id": document.current_revision_id,
+                "content": document.content[operation.offset : end],
+                "next_offset": end if end < len(document.content) else None,
+            }
+        document = self.services.documents.get_document(operation.document_id)
+        self.services.authorization.require(principal, Capability.UPDATE, document.path)
+        self.state.require_markdown(document)
+        self.state.dependency(principal, execution_key, document.document_id, Capability.UPDATE)
+        self.state.before_write(
+            principal, execution_key, operation.operation_key, document.document_id
+        )
+        try:
+            saved = self.services.workspace_access.write_document(
+                principal,
+                document_id=document.document_id,
+                action="update",
+                body=DocumentUpdate(
+                    expected_revision_id=operation.expected_revision_id, content=operation.content
+                ),
+                idempotency_key=operation.operation_key,
+            )
+        except (ValidationError, AuthorizationError, ConflictError, IdempotencyError):
+            self.state.reject_write(principal, execution_key, operation.operation_key)
+            raise
+        self.state.confirm_write(principal, execution_key, operation.operation_key)
+        return {
+            "document_id": saved.document_id,
+            "current_revision_id": saved.current_revision_id,
+            "operation_key": operation.operation_key,
+        }

@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     backups_enabled: bool = True
     frontend_dist: Path = Field(default=Path("frontend/dist"))
     max_document_bytes: int = Field(default=2_000_000, ge=1_024, le=50_000_000)
+    mcp_enabled: bool = False
+    mcp_allowed_hosts: tuple[str, ...] = ("127.0.0.1:*", "localhost:*", "testserver")
+    mcp_max_source_bytes: int = Field(default=16_000, ge=1_024, le=100_000)
+    mcp_max_result_bytes: int = Field(default=64_000, ge=4_096, le=1_000_000)
+    mcp_max_workspaces_per_actor: int = Field(default=50, ge=1, le=1000)
+    mcp_max_executions_per_actor: int = Field(default=10_000, ge=10, le=1_000_000)
+    mcp_draft_quota_bytes: int = Field(default=10_000_000, ge=1_024)
+    mcp_result_retention_days: int = Field(default=7, ge=1, le=365)
+    mcp_workspace_retention_days: int = Field(default=30, ge=1, le=365)
     max_pdf_bytes: int = Field(default=100_000_000, ge=1_024, le=1_000_000_000)
     pdf_extraction_shutdown_timeout_seconds: float = Field(default=5.0, ge=0.1, le=60.0)
     pdf_extraction_workers: int = Field(default=2, ge=1, le=8)

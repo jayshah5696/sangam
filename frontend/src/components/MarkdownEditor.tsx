@@ -247,6 +247,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           : undefined,
         extensions: [
           lineNumbers(),
+          EditorView.contentAttributes.of({ 'aria-label': 'Document content' }),
           history(),
           contentType === 'text/html' ? html() : markdown(),
           contentType === 'text/markdown'

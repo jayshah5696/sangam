@@ -14,6 +14,7 @@ export SANGAM_DATABASE_PATH="$run_root/database/sangam.sqlite3"
 export SANGAM_WORKSPACE_ROOT="$run_root/workspace"
 export SANGAM_BACKUP_ROOT="$run_root/backups"
 export SANGAM_BACKUPS_ENABLED=false
+export SANGAM_MCP_ENABLED=true
 export SANGAM_FRONTEND_DIST="$repository_root/frontend/dist"
 export SANGAM_TRUSTED_PREVIEW_BASE_URL="http://preview.localhost:$port/trusted-preview"
 export SANGAM_TRUSTED_PREVIEW_HOST="preview.localhost"
