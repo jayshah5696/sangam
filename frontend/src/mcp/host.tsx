@@ -28,14 +28,51 @@ function McpHost() {
   const bridge = useRef<AppBridge | null>(null)
   const mount = useRef<HTMLDivElement | null>(null)
   const opened = useRef<{ layoutId: string } | null>(null)
+  const resourceWatch = useRef<Awaited<ReturnType<Client['listen']>> | null>(null)
+  const currentWorkspace = useRef<string | null>(null)
 
   function rememberWorkspace(workspace: Workspace) {
+    const previous = currentWorkspace.current
+    currentWorkspace.current = workspace.workspace_id
     opened.current = { layoutId: workspace.layout.layout_id }
     const url = new URL(location.href)
     url.searchParams.set('document', workspace.document.document_id)
     url.searchParams.set('workspace', workspace.workspace_id)
     url.searchParams.set('layout', workspace.layout.layout_id)
     history.replaceState(null, '', url)
+    if (previous !== workspace.workspace_id) void watchWorkspace(workspace.workspace_id)
+  }
+
+  async function watchWorkspace(workspaceId: string) {
+    const connection = client.current
+    if (!connection || !connection.getServerCapabilities()?.resources?.subscribe) return
+    const previous = resourceWatch.current
+    resourceWatch.current = null
+    await previous?.close()
+    try {
+      const watch = await connection.listen({ resourceSubscriptions: [`sangam://workspace/${workspaceId}`] })
+      if (currentWorkspace.current !== workspaceId) await watch.close()
+      else {
+        resourceWatch.current = watch
+        setTrace((previous) => [...previous.slice(-19), 'Subscribed to workspace resource changes.'])
+        void watch.closed.then((reason) => {
+          if (resourceWatch.current === watch) {
+            resourceWatch.current = null
+            setTrace((previous) => [
+              ...previous.slice(-19),
+              `Resource stream ended (${reason}). App polling remains active.`,
+            ])
+          }
+        })
+      }
+    } catch (failure) {
+      setTrace((previous) => [
+        ...previous.slice(-19),
+        failure instanceof Error
+          ? failure.message
+          : 'Resource subscription unavailable. App polling remains active.',
+      ])
+    }
   }
 
   async function run(operation: () => Promise<void>) {
@@ -56,6 +93,7 @@ function McpHost() {
       { name: 'Sangam local MCP host', version: '0.1.0' },
       {
         capabilities: { extensions: { 'io.modelcontextprotocol/ui': {} } },
+        versionNegotiation: { mode: 'auto' },
       },
     )
     await next.connect(
@@ -64,6 +102,17 @@ function McpHost() {
       }),
     )
     await next.listTools()
+    next.setNotificationHandler('notifications/resources/updated', async (notification) => {
+      const workspaceId = currentWorkspace.current
+      const target = bridge.current
+      if (!workspaceId || !target || notification.params.uri !== `sangam://workspace/${workspaceId}`) return
+      const response = resourceSchema.parse(await next.readResource({ uri: notification.params.uri }))
+      const text = response.contents[0]?.text
+      if (!text) throw new Error('Workspace resource returned no snapshot.')
+      const snapshot = workspaceSchema.parse(JSON.parse(text))
+      if (bridge.current === target && currentWorkspace.current === workspaceId)
+        await target.sendToolResult({ content: [], structuredContent: snapshot })
+    })
     client.current = next
     setConnected(true)
     setKey('')
@@ -105,6 +154,9 @@ function McpHost() {
     const connection = client.current
     const container = mount.current
     if (!connection || !container) return
+    currentWorkspace.current = null
+    await resourceWatch.current?.close()
+    resourceWatch.current = null
     if (bridge.current) await bridge.current.teardownResource({})
     const reply = await connection.callTool({ name: 'present', arguments: args })
     if (reply.isError) {

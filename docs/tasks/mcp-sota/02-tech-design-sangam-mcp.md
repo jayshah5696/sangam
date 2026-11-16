@@ -113,10 +113,27 @@ later inspection of commits that finish after the client stops waiting.
 
 The App displays one active Markdown editor. Split panes, persistent cursor
 locations, PDF pages, binary upload, registered skills, OAuth issuance, native Tasks,
-subscriptions, proposals, and assistant delegation remain broader design
+proposals, and assistant delegation remain broader design
 scope. Their presence elsewhere in this document does not claim they are
 implemented. [MCP setup and contracts](../../mcp.md) describe the current
 slice and its reproducible verification commands.
+
+On November 16, the user requested continued implementation in this order:
+Apps and events, PDF support, centralized skills, then Sangam assistant requests
+and the remaining workspace actions. This authorizes implementation beyond the
+original minimal slice. The complete design is not yet implemented.
+
+The first shared primitive is an authorized resource reference. Workspace,
+document, and execution resources use the same reader for explicit reads and
+native `subscriptions/listen` change observation. Streams carry URI invalidation
+hints and close when current authority is lost. They have bounded subscriptions
+and buffers. Current state is observed once per second, so writes through the
+normal UI and REST participate without a separate MCP write path or event log.
+The App consumes fresh snapshots through its standard bridge and uses the same
+merge rules as polling. It preserves local drafts and explicit conflict actions.
+PDF status, skill snapshots, and assistant jobs should reuse this reference/read/
+observe pattern as those operations are added. Typed operations remain the action
+primitive behind the compact public tools.
 
 MCP is an external entry point to selected authorized Sangam workflows. The
 compact tools are the access mechanism; the useful result is working with

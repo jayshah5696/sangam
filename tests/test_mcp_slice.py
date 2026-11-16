@@ -74,6 +74,53 @@ def app_action(client: TestClient, token: str, action: dict) -> dict:
     return rpc(client, token, "mcp_app", {"action": action})
 
 
+def test_workspace_resource_uses_current_authority_and_preserves_dirty_state(
+    mcp_client: TestClient,
+) -> None:
+    """Resource reads must not save drafts or reveal another actor's checkpoint."""
+    document = seed(mcp_client)
+    token = issue_agent_token(mcp_client, capabilities=("read", "search", "update"))
+    opened = rpc(mcp_client, token, "present", {"document_id": document["document_id"]})[
+        "structuredContent"
+    ]
+    workspace_id = opened["workspace_id"]
+    app_action(
+        mcp_client,
+        token,
+        {
+            "type": "checkpoint",
+            "workspace_id": workspace_id,
+            "expected_version": opened["version"],
+            "content": "# Unsaved resource draft",
+        },
+    )
+
+    def read(key: str) -> dict:
+        response = mcp_client.post(
+            "/mcp",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "resources/read",
+                "params": {"uri": f"sangam://workspace/{workspace_id}"},
+            },
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    resource = read(token)
+    assert "error" not in resource, resource
+    snapshot = json.loads(resource["result"]["contents"][0]["text"])
+    assert snapshot["draft"] == "# Unsaved resource draft"
+    assert snapshot["document"]["content"] == document["content"]
+    other = issue_agent_token(mcp_client, actor_id="agent:other-resource-reader")
+    assert "error" in read(other)
+
+
 def test_private_mcp_has_no_single_user_fallback(mcp_client: TestClient) -> None:
     response = mcp_client.post(
         "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}

@@ -120,6 +120,12 @@ test('a concurrent saved revision preserves the draft and reports the conflict',
   request,
   browserName,
 }) => {
+  let subscribed = false
+  const listenRequest = z.object({ method: z.literal('subscriptions/listen') })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/mcp/')
+      subscribed ||= listenRequest.safeParse(request.postDataJSON()).success
+  })
   const suffix = randomUUID()
   const created = await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': suffix },
@@ -146,6 +152,7 @@ test('a concurrent saved revision preserves the draft and reports the conflict',
   await page.getByLabel('Find a document').fill(suffix)
   await page.getByRole('button', { name: 'Search documents', exact: true }).click()
   await page.getByRole('button', { name: `Open Concurrent ${suffix}` }).click()
+  await expect.poll(() => subscribed).toBe(true)
   const app = page.frameLocator('iframe[title="Sangam document workspace"]')
   const editor = app.getByRole('textbox', { name: 'Document content' })
   await editor.click()
@@ -160,7 +167,6 @@ test('a concurrent saved revision preserves the draft and reports the conflict',
     data: { content: '# Saved elsewhere', expected_revision_id: original.current_revision_id },
   })
   expect(changed.status()).toBe(200)
-  await app.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect(app.getByText('Saved document changed', { exact: true })).toBeVisible()
   await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText('# Keep this draft')
   await app.getByRole('button', { name: 'Save', exact: true }).click()

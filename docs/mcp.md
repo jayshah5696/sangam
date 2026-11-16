@@ -93,6 +93,30 @@ document checkpoint IDs are explicit references, not credentials.
 
 ## Recovery and persistence
 
+### Resource changes
+
+The native `2026-07-28` protocol supports `subscriptions/listen` for explicit
+`sangam://workspace/{workspace_id}`, `sangam://document/{document_id}`, and
+`sangam://execution/{execution_key}` references. The same authorized reader
+serves resource reads and observes changes. Workspace reads include the draft
+and saved revision separately. Document resources return metadata.
+
+Each stream checks canonical state once per second, including changes made
+through REST or the normal UI. Notifications contain only a changed URI.
+They do not start model work or guarantee delivery of every intermediate state.
+After reconnecting, subscribe again and fetch current state. Revocation, expiry,
+or loss of access ends the stream. Each stream has an independent authority
+check; another subscriber cannot cause private data to cross connections.
+
+The initial bounds are 64 streams per server, 25 resource references per stream,
+and 64 buffered notifications. These are conservative defaults. There is no
+event replay store or second scheduler. The local host negotiates modern MCP
+and forwards fresh workspace snapshots through the Apps bridge. Clean views
+refresh automatically; drafts and explicit conflict resolution are preserved.
+The App retains bounded polling for hosts without resource notifications.
+
+### Execution recovery
+
 Execution starts fresh in a separate Monty worker. There are no interpreter
 variables across calls, filesystem callbacks, general network callbacks, shell,
 or application objects. The launcher clears inherited environment secrets.

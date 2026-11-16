@@ -6,14 +6,104 @@ import asyncio
 import json
 import os
 import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
 import httpx
 import httpx2
+from mcp.client.client import Client
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.client.subscriptions import ResourceUpdated
+from mcp.shared.exceptions import MCPError
 from mcp_demo import seed_demo
+
+
+async def verify_events(base: str, token: str, workspace: dict) -> dict:
+    """Check wire acknowledgement, draft invalidation, refetch and cancellation."""
+    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}) as http:
+
+        @asynccontextmanager
+        async def transport():
+            async with streamable_http_client(base + "/mcp", http_client=http) as streams:
+                yield streams[0], streams[1]
+
+        async with Client(transport(), cache=None) as client:
+            uri = f"sangam://workspace/{workspace['workspace_id']}"
+            try:
+                async with client.listen(resource_subscriptions=["sangam://workspace/not-owned"]):
+                    raise AssertionError("Unauthorized subscription was acknowledged")
+            except MCPError:
+                pass
+            async with client.listen(resource_subscriptions=[uri]) as subscription:
+                assert subscription.honored.resource_subscriptions == [uri]
+                reply = await client.call_tool(
+                    "mcp_app",
+                    {
+                        "action": {
+                            "type": "checkpoint",
+                            "workspace_id": workspace["workspace_id"],
+                            "expected_version": workspace["version"],
+                            "content": "# Event draft",
+                        }
+                    },
+                )
+                assert not reply.is_error
+                event = await asyncio.wait_for(anext(subscription), 5)
+                assert isinstance(event, ResourceUpdated) and event.uri == uri
+                resource = await client.read_resource(uri)
+                snapshot = json.loads(resource.contents[0].text)
+                assert snapshot["draft"] == "# Event draft"
+                assert snapshot["document"]["content"] == workspace["document"]["content"]
+            # Reconnect/refetch recovers state without replaying missed events.
+            async with client.listen(resource_subscriptions=[uri]):
+                restored = json.loads((await client.read_resource(uri)).contents[0].text)
+                reply = await client.call_tool(
+                    "mcp_app",
+                    {
+                        "action": {
+                            "type": "discard",
+                            "workspace_id": workspace["workspace_id"],
+                            "expected_version": restored["version"],
+                        }
+                    },
+                )
+                assert not reply.is_error and reply.structured_content is not None
+                return reply.structured_content
+
+
+async def verify_event_revocation(base: str, rest: httpx.AsyncClient, document_id: str) -> None:
+    issued = await rest.post(
+        "/api/v1/agent-tokens",
+        json={
+            "actor_id": "agent:resource-events",
+            "display_name": "Event verification",
+            "label": "Disposable event key",
+            "scopes": [{"capability": "read", "path_prefix": "mcp-demo/"}],
+        },
+    )
+    issued.raise_for_status()
+    key = issued.json()
+    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {key['token']}"}) as http:
+
+        @asynccontextmanager
+        async def transport():
+            async with streamable_http_client(base + "/mcp", http_client=http) as streams:
+                yield streams[0], streams[1]
+
+        async with (
+            Client(transport(), cache=None) as client,
+            client.listen(
+                resource_subscriptions=[f"sangam://document/{document_id}"]
+            ) as subscription,
+        ):
+            (await rest.delete(f"/api/v1/agent-tokens/{key['token_id']}")).raise_for_status()
+            try:
+                await asyncio.wait_for(anext(subscription), 5)
+                raise AssertionError("Revoked stream delivered an event")
+            except StopAsyncIteration:
+                pass
 
 
 async def verify() -> None:
@@ -57,6 +147,7 @@ async def verify() -> None:
             assert opened.structured_content is not None
             workspace = opened.structured_content
             assert len(workspace["layout"]["tabs"]) == 2
+            workspace = await verify_events(base, issued.token, workspace)
             app_search = await session.call_tool(
                 "mcp_app",
                 {"action": {"type": "search", "query": "companion", "limit": 10, "offset": 0}},
@@ -135,6 +226,7 @@ async def verify() -> None:
         assert (
             await rest.post("/mcp/", headers={"Authorization": f"Bearer {issued.token}"}, json={})
         ).status_code == 401
+        await verify_event_revocation(base, rest, document.document_id)
     with sqlite3.connect(os.environ["SANGAM_DATABASE_PATH"]) as database:
         assert database.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         count = database.execute(
@@ -154,6 +246,7 @@ async def verify() -> None:
             "App resource",
             "draft checkpoint",
             "App search and multiple-document restoration",
+            "native subscription acknowledgement, draft invalidation and reconnect refetch",
             "write-before-failure evidence",
             "duplicate delivery without a second commit",
             "recovery after a dependency is trashed",

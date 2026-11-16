@@ -77,8 +77,19 @@ function DocumentApp() {
     const contentBeforeRead = content.current
     const previous = current.current
     const next = await requestWorkspace(request)
+    if (request.type === 'refresh') applyRefresh(next, previous, contentBeforeRead, replaceText)
+    else apply(next, replaceText && content.current === contentBeforeRead)
+    return next
+  }
+
+  function applyRefresh(
+    next: Workspace,
+    previous: Workspace | null,
+    contentBeforeRead: string,
+    replaceText: boolean,
+  ) {
+    if (previous && next.version < previous.version) return
     if (
-      request.type === 'refresh' &&
       previous &&
       next.version !== previous.version &&
       next.draft !== previous.draft &&
@@ -88,7 +99,6 @@ function DocumentApp() {
       setSharedConflict(true)
     }
     apply(next, replaceText && content.current === contentBeforeRead)
-    return next
   }
 
   async function checkpoint() {
@@ -165,6 +175,11 @@ function DocumentApp() {
         return
       }
       const next = workspaceSchema.parse(event.structuredContent)
+      if (current.current?.workspace_id === next.workspace_id) {
+        const clean = current.current.draft === null && content.current === current.current.document.content
+        applyRefresh(next, current.current, content.current, clean)
+        return
+      }
       if (
         current.current &&
         content.current !== (current.current.draft ?? current.current.document.content)

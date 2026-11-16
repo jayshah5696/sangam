@@ -34,6 +34,7 @@ from sangam.errors import (
     SangamError,
     ValidationError,
 )
+from sangam.mcp_events import ResourceSubscriptions
 from sangam.mcp_models import (
     ActivateDocument,
     AppAction,
@@ -188,6 +189,7 @@ class SangamMcp:
         self.server = MCPServer(
             "Sangam",
             extensions=[Apps()],
+            middleware=[ResourceSubscriptions(self.read_resource)],
             version="0.1.0",
             instructions=(
                 "Use search to discover typed operations, then execute restricted Python "
@@ -390,10 +392,49 @@ class SangamMcp:
         @self.server.resource("sangam://execution/{execution_key}", mime_type="application/json")
         def execution_resource(execution_key: str, ctx: Context) -> str:
             """Inspect recovery evidence even when new execution admission is full."""
-            ExecutionStatus(execution_key=execution_key)
-            principal = self.principal(self.credential(ctx))
-            self.state.cleanup()
-            return json.dumps(self.state.status(principal, execution_key), allow_nan=False)
+            return json.dumps(
+                self.read_resource(self.credential(ctx), f"sangam://execution/{execution_key}"),
+                allow_nan=False,
+            )
+
+        @self.server.resource("sangam://workspace/{workspace_id}", mime_type="application/json")
+        def workspace_resource(workspace_id: str, ctx: Context) -> str:
+            return json.dumps(
+                self.read_resource(self.credential(ctx), f"sangam://workspace/{workspace_id}")
+            )
+
+        @self.server.resource("sangam://document/{document_id}", mime_type="application/json")
+        def document_resource(document_id: str, ctx: Context) -> str:
+            return json.dumps(
+                self.read_resource(self.credential(ctx), f"sangam://document/{document_id}")
+            )
+
+    def read_resource(self, token: str, uri: str) -> dict[str, JsonValue]:
+        """One authorization/read path for resource reads and change observation."""
+        principal = self.principal(token)
+        for prefix in ("sangam://workspace/", "sangam://execution/", "sangam://document/"):
+            if not uri.startswith(prefix):
+                continue
+            identifier = uri.removeprefix(prefix)
+            ReadDocument(document_id=identifier)
+            if prefix == "sangam://workspace/":
+                return self.state.read(principal, identifier)
+            if prefix == "sangam://execution/":
+                self.state.cleanup()
+                return self.state.status(principal, identifier)
+            document = self.services.workspace_access.get_document(principal, identifier)
+            return {
+                "document_id": document.document_id,
+                "current_revision_id": document.current_revision_id,
+                "title": document.title,
+                "path": document.path,
+                "content_type": document.content_type,
+                "metadata_version": document.metadata_version,
+                "pdf_extraction_status": document.pdf_extraction_status,
+                "pdf_page_count": document.pdf_page_count,
+                "pdf_extraction_error": document.pdf_extraction_error,
+            }
+        raise ValidationError("Unsupported Sangam resource reference")
 
     def search_documents(self, principal: Principal, query: SearchDocuments) -> SearchResults:
         documents = self.services.workspace_access.search_documents(
