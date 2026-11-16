@@ -111,8 +111,15 @@ In-flight receipts explicitly mark output as unavailable and identify their
 write evidence as incomplete. Cancellation retains write references and permits
 later inspection of commits that finish after the client stops waiting.
 
-The App displays one active Markdown editor. Split panes, persistent cursor
-locations, PDF pages, binary upload, registered skills, OAuth issuance, native Tasks,
+The App displays one active Markdown editor and an optional comparison pane.
+The comparison shows a saved document or acknowledged draft checkpoint as text;
+selecting its tab makes it editable. Migration `040` stores a comparison reference
+per layout and a versioned cursor/scroll location per document checkpoint. View
+writes require read access and leave draft versions and document revisions alone.
+The reference and locations survive restart. Current grants filter comparison
+content just as they filter tabs. Narrow hosts expand comparison into the document
+area instead of forcing two small columns. Two simultaneous editors,
+PDF pages, binary upload, registered skills, OAuth issuance, native Tasks,
 proposals, and assistant delegation remain broader design
 scope. Their presence elsewhere in this document does not claim they are
 implemented. [MCP setup and contracts](../../mcp.md) describe the current

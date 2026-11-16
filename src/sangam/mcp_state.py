@@ -18,11 +18,14 @@ from sangam.mcp_models import (
     ActivateDocument,
     CheckpointDraft,
     CloseDocument,
+    CompareDocument,
     DiscardDraft,
     ExecutionReceipt,
     OpenDocument,
     ReadDocument,
     SaveDraft,
+    TextLocation,
+    UpdateView,
     WorkspaceLayout,
     WorkspaceTab,
 )
@@ -174,6 +177,10 @@ class McpState:
                 "WHERE t.layout_id = ? ORDER BY t.position",
                 (row["layout_id"],),
             ).fetchall()
+            comparison = connection.execute(
+                "SELECT comparison_workspace_id FROM mcp_layout_views WHERE layout_id = ?",
+                (row["layout_id"],),
+            ).fetchone()
         tabs: list[WorkspaceTab] = []
         visible: set[str] = set()
         for tab in rows:
@@ -201,6 +208,9 @@ class McpState:
             else workspace_id,
             tabs=tabs,
             unavailable_count=len(rows) - len(tabs),
+            comparison_workspace_id=comparison[0]
+            if comparison and comparison[0] in visible
+            else None,
         )
 
     def open(
@@ -263,10 +273,13 @@ class McpState:
             return self.read(principal, selected)
 
     def navigate(
-        self, principal: Principal, action: OpenDocument | ActivateDocument | CloseDocument
+        self,
+        principal: Principal,
+        action: OpenDocument | ActivateDocument | CloseDocument | CompareDocument,
     ) -> dict[str, JsonValue]:
         with self.lock:
-            self._row(principal, action.workspace_id)
+            source = self._row(principal, action.workspace_id)
+            self.services.workspace_access.get_document(principal, source["document_id"])
             layout = self._layout_row(principal, action.workspace_id)
             if layout["version"] != action.expected_layout_version:
                 raise ConflictError(
@@ -278,7 +291,8 @@ class McpState:
                     principal, action.document_id
                 )
                 self.require_markdown(document)
-            else:
+            elif not isinstance(action, CompareDocument) or action.target_workspace_id is not None:
+                assert action.target_workspace_id is not None
                 target = self._row(principal, action.target_workspace_id)
                 if (
                     self._layout_row(principal, action.target_workspace_id)["layout_id"]
@@ -287,7 +301,7 @@ class McpState:
                     raise ValidationError("Document belongs to a different workspace layout.")
                 if isinstance(action, CloseDocument) and target["draft"] is not None:
                     raise ConflictError("Save or discard this document's draft before closing it.")
-                if isinstance(action, ActivateDocument):
+                if isinstance(action, (ActivateDocument, CompareDocument)):
                     self.services.workspace_access.get_document(principal, target["document_id"])
             selected = action.workspace_id
             with self.database.transaction() as connection:
@@ -298,6 +312,14 @@ class McpState:
                     )
                 elif isinstance(action, ActivateDocument):
                     selected = action.target_workspace_id
+                elif isinstance(action, CompareDocument):
+                    if action.target_workspace_id == selected:
+                        raise ValidationError("Choose a different document for comparison.")
+                    connection.execute(
+                        "INSERT INTO mcp_layout_views VALUES (?, ?) ON CONFLICT(layout_id) "
+                        "DO UPDATE SET comparison_workspace_id = excluded.comparison_workspace_id",
+                        (layout["layout_id"], action.target_workspace_id),
+                    )
                 else:
                     view = self._layout_view(principal, layout, action.workspace_id)
                     remaining = [
@@ -343,12 +365,37 @@ class McpState:
 
     def read(self, principal: Principal, workspace_id: str) -> dict[str, JsonValue]:
         with self.lock:
+            value = self._document_view(principal, workspace_id)
+            layout = self._layout_view(
+                principal, self._layout_row(principal, workspace_id), workspace_id
+            )
+            value["layout"] = layout.model_dump(mode="json")
+            target = layout.comparison_workspace_id
+            value["comparison"] = (
+                self._document_view(principal, target)
+                if target and target != workspace_id
+                else None
+            )
+            return value
+
+    def _document_view(self, principal: Principal, workspace_id: str) -> dict[str, JsonValue]:
+        with self.lock:
             row = self._row(principal, workspace_id)
             document = self.services.workspace_access.get_document(principal, row["document_id"])
             self.require_markdown(document)
+            with self.database.connection() as connection:
+                view = connection.execute(
+                    "SELECT * FROM mcp_document_views WHERE workspace_id = ?", (workspace_id,)
+                ).fetchone()
             return {
                 "workspace_id": workspace_id,
                 "version": row["version"],
+                "view_version": view["version"] if view else 1,
+                "location": TextLocation.model_validate_json(view["location_json"]).model_dump(
+                    mode="json"
+                )
+                if view
+                else TextLocation().model_dump(mode="json"),
                 "base_revision_id": row["base_revision_id"],
                 "draft": row["draft"],
                 "conflict": row["draft"] is not None
@@ -363,10 +410,31 @@ class McpState:
                     "content": document.content,
                     "current_revision_id": document.current_revision_id,
                 },
-                "layout": self._layout_view(
-                    principal, self._layout_row(principal, workspace_id), workspace_id
-                ).model_dump(mode="json"),
             }
+
+    def update_view(self, principal: Principal, action: UpdateView) -> dict[str, JsonValue]:
+        with self.lock:
+            current = self._document_view(principal, action.workspace_id)
+            if current["view_version"] != action.expected_view_version:
+                raise ConflictError(
+                    "View location changed in another view. Refresh before saving it."
+                )
+            with self.database.transaction() as connection:
+                connection.execute(
+                    "INSERT INTO mcp_document_views VALUES (?, ?, ?) ON CONFLICT(workspace_id) "
+                    "DO UPDATE SET version = excluded.version, "
+                    "location_json = excluded.location_json",
+                    (
+                        action.workspace_id,
+                        action.expected_view_version + 1,
+                        action.location.model_dump_json(),
+                    ),
+                )
+                connection.execute(
+                    "UPDATE mcp_layouts SET updated_at = ? WHERE layout_id = ?",
+                    (utc_now(), self._layout_row(principal, action.workspace_id)["layout_id"]),
+                )
+            return self.read(principal, action.workspace_id)
 
     def change(
         self, principal: Principal, action: CheckpointDraft | DiscardDraft | SaveDraft

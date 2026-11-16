@@ -34,7 +34,14 @@ Keep that terminal running. Use `just mcp-demo 8874` for another port.
    service committed that document's revision. Open normal Sangam to check it.
 8. Close a clean tab with its close button. Save or explicitly discard a dirty
    draft before closing its tab. Arrow keys, Home, and End move between tabs.
-9. Expand **Connection and tool trace** to inspect the actual MCP calls.
+9. Select a different tab's **Compare** button to read it beside the active
+   editor. The pane labels saved content and draft checkpoints separately.
+   On narrow screens, expand **Comparison** to use the document area, then
+   collapse it to return to editing. **Edit this document** selects its tab.
+10. Cursor and scroll locations are saved separately from drafts. Reopening
+    restores each document's location and the comparison reference. Closing a
+    clean tab removes its saved view. **Remove comparison** leaves both tabs open.
+11. Expand **Connection and tool trace** to inspect the actual MCP calls.
 
 To see a conflict, keep a checkpointed App draft, save a different revision in
 normal Sangam, then refresh the App. The draft survives, the App shows the new
@@ -175,8 +182,11 @@ capacity until they settle.
 See [Configuration](configuration.md#mcp) for source/output limits, quotas, and
 retention settings. Existing document byte limits still govern writes and drafts.
 
-The App uses tabs with one active Markdown editor. Split panes, persistent cursor
-locations, HTML/PDF editing, binary upload, OAuth issuance, native Skills/Tasks,
+The App uses tabs with one active Markdown editor and an optional comparison
+pane. Comparison shows text and is read-only; select its tab to edit it.
+View locations use their own optimistic version and require current read access.
+Saving a location creates no document revision and does not change the draft version.
+Two simultaneous editors, HTML/PDF editing, binary upload, OAuth issuance, native Skills/Tasks,
 proposals, and assistant delegation remain outside this implementation. See the
 [broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md).
 Local bridge verification does not establish compatibility with every external host.

@@ -42,6 +42,7 @@
 .mcp-tab-button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); background: var(--accent-soft); }
 .mcp-draft-mark { flex: none; color: var(--accent); }
 .mcp-tab-close { flex: none; min-height: var(--control-height); padding-inline: var(--space-2); border: 0; background: var(--surface); color: var(--muted); font-size: var(--text-control); }
+.mcp-app .mcp-tab-close { min-width: var(--control-height); }
 .mcp-path, .mcp-results span { font-family: var(--font-mono); }
 .mcp-document-header { flex: none; padding: var(--space-4); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .mcp-document-identity { min-width: 0; flex: 1; }
@@ -50,6 +51,16 @@
 .mcp-path { margin: var(--space-1) 0 0; font-size: var(--text-control); }
 .mcp-status { padding: var(--space-2) var(--space-4); color: var(--muted); font-size: var(--text-control); }
 .mcp-editor { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid var(--line); }
+.mcp-document-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.mcp-document-body > .mcp-editor { min-width: 0; }
+.mcp-comparison { flex: 1; min-width: 0; overflow: auto; padding: var(--space-3) var(--space-4); border-left: 1px solid var(--line); }
+.mcp-comparison:not([open]) { flex: none; }
+.mcp-comparison summary { cursor: pointer; min-height: var(--control-height); align-content: center; }
+.mcp-comparison h2 { font: inherit; font-weight: 650; }
+.mcp-comparison h2, .mcp-comparison .mcp-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-comparison section > p, .mcp-comparison h2 { margin-block: var(--space-2); }
+.mcp-comparison .mcp-controls { flex-wrap: wrap; justify-content: flex-start; }
+.mcp-comparison pre { font-family: var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mcp-editor .editor, .mcp-editor .cm-editor { height: 100%; min-height: 0; }
 .mcp-editor .cm-scroller { overflow: auto; }
 .mcp-editor pre { padding: var(--space-4); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -60,12 +71,16 @@
 .mcp-trace { padding-block: var(--space-4); color: var(--muted); }
 .mcp-trace li { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-control); }
 @media (max-width: 600px) {
+  .mcp-document-body { flex-direction: column; }
+  .mcp-document-body:has(.mcp-comparison[open]) > .mcp-editor { display: none; }
+  .mcp-comparison { border-left: 0; border-top: 1px solid var(--line); }
   .mcp-host { padding: var(--space-3); }
   .mcp-search, .mcp-results button { flex-direction: column; align-items: stretch; }
   .mcp-document-header { align-items: start; }
   .mcp-document-header .mcp-controls { width: 100%; justify-content: flex-end; }
 }
 @media (pointer: coarse) {
+  .mcp-app .mcp-tab-close { min-width: var(--control-touch); }
   .mcp-host button, .mcp-app button, .mcp-host input, .mcp-app input { min-height: var(--control-touch); }
   .mcp-host input, .mcp-app input { font-size: var(--text-input-mobile); }
 }

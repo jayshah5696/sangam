@@ -39,6 +39,7 @@ from sangam.mcp_models import (
     ActivateDocument,
     AppAction,
     CloseDocument,
+    CompareDocument,
     DocumentPassage,
     ExecutionFailure,
     ExecutionOutput,
@@ -53,6 +54,7 @@ from sangam.mcp_models import (
     SearchHit,
     SearchResults,
     UpdateDocument,
+    UpdateView,
     WriteResult,
 )
 from sangam.mcp_state import McpState
@@ -374,9 +376,15 @@ class SangamMcp:
                     return result(
                         await asyncio.to_thread(self.state.read, principal, action.workspace_id)
                     )
-                if isinstance(action, (OpenDocument, ActivateDocument, CloseDocument)):
+                if isinstance(
+                    action, (OpenDocument, ActivateDocument, CloseDocument, CompareDocument)
+                ):
                     return result(
                         await self.blocking(partial(self.state.navigate, principal, action))
+                    )
+                if isinstance(action, UpdateView):
+                    return result(
+                        await self.blocking(partial(self.state.update_view, principal, action))
                     )
                 return result(await self.blocking(partial(self.state.change, principal, action)))
             except SangamError as error:

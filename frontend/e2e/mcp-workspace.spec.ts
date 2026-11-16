@@ -351,6 +351,43 @@ test('App search opens several documents, restores drafts and active tab, and sa
         .content,
     ).toBe(document.content)
   }
+  await app.getByRole('button', { name: `Compare ${firstTitle}`, exact: true }).click()
+  const comparison = app.getByRole('region', { name: 'Comparison document' })
+  if ((await app.locator('details.mcp-comparison').getAttribute('open')) === null)
+    await app.getByText('Comparison', { exact: true }).click()
+  await expect(comparison).toContainText('# First recoverable draft')
+  await expect(comparison.getByText('Draft checkpoint', { exact: true })).toBeVisible()
+  await comparison.locator('pre').scrollIntoViewIfNeeded()
+  await expect(comparison.locator('pre')).toBeInViewport()
+  await comparison.getByRole('button', { name: 'Edit this document', exact: true }).scrollIntoViewIfNeeded()
+  await expect(comparison.getByRole('button', { name: 'Edit this document', exact: true })).toBeInViewport()
+  await page
+    .locator('iframe[title="Sangam document workspace"]')
+    .screenshot({ path: testInfo.outputPath('mcp-comparison.png') })
+  await app.getByText('Comparison', { exact: true }).click()
+  const editor = app.getByRole('textbox', { name: 'Document content' })
+  const viewRequest = z.object({
+    params: z.object({
+      arguments: z.object({
+        action: z.object({
+          type: z.literal('view'),
+          location: z.object({ anchor: z.literal(0), head: z.literal(3) }),
+        }),
+      }),
+    }),
+  })
+  const viewSaved = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/mcp/' &&
+      viewRequest.safeParse(response.request().postDataJSON()).success,
+  )
+  await editor.focus()
+  await editor.press('Home')
+  await editor.press('Shift+ArrowRight')
+  await editor.press('Shift+ArrowRight')
+  await editor.press('Shift+ArrowRight')
+  expect((await viewSaved).ok()).toBe(true)
   await page.reload()
   await page.getByLabel('Sangam API key').fill(token)
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
@@ -362,6 +399,11 @@ test('App search opens several documents, restores drafts and active tab, and sa
   await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText(
     '# Second recoverable draft',
   )
+  await app.getByRole('textbox', { name: 'Document content' }).focus()
+  await expect
+    .poll(() => editor.evaluate((element) => element.ownerDocument.getSelection()?.toString()))
+    .toBe('# S')
+  await expect(app.locator('details.mcp-comparison')).toHaveCount(1)
   await expect(app.getByRole('button', { name: `Close ${secondTitle}`, exact: true })).toBeDisabled()
   await page
     .locator('iframe[title="Sangam document workspace"]')

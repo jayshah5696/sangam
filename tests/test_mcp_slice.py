@@ -128,6 +128,93 @@ def test_private_mcp_has_no_single_user_fallback(mcp_client: TestClient) -> None
     assert response.status_code == 401
 
 
+def test_comparison_and_location_restore_without_touching_content(mcp_client: TestClient) -> None:
+    """View writes need read access; stale views and foreign references must fail."""
+    first, second = seed(mcp_client, "mcp/first.md"), seed(mcp_client, "mcp/second.md")
+    token = issue_agent_token(mcp_client, path_prefix="mcp/")
+    opened = rpc(
+        mcp_client,
+        token,
+        "present",
+        {
+            "document_id": first["document_id"],
+            "additional_document_ids": [second["document_id"]],
+        },
+    )["structuredContent"]
+    first_id, second_id = [tab["workspace_id"] for tab in opened["layout"]["tabs"]]
+    compared = app_action(
+        mcp_client,
+        token,
+        {
+            "type": "compare",
+            "workspace_id": first_id,
+            "target_workspace_id": second_id,
+            "expected_layout_version": opened["layout"]["version"],
+        },
+    )
+    assert not compared.get("isError"), compared
+    view = compared["structuredContent"]
+    assert view["comparison"]["document"]["document_id"] == second["document_id"]
+    location = {"kind": "text", "anchor": 4, "head": 12, "scroll_top": 96}
+    changed = app_action(
+        mcp_client,
+        token,
+        {
+            "type": "view",
+            "workspace_id": first_id,
+            "expected_view_version": view["view_version"],
+            "location": location,
+        },
+    )
+    assert not changed.get("isError"), changed
+    assert changed["structuredContent"]["version"] == opened["version"]
+    stale = app_action(
+        mcp_client,
+        token,
+        {
+            "type": "view",
+            "workspace_id": first_id,
+            "expected_view_version": view["view_version"],
+            "location": location,
+        },
+    )
+    assert stale["isError"]
+    restored = rpc(mcp_client, token, "present", {"layout_id": view["layout"]["layout_id"]})[
+        "structuredContent"
+    ]
+    assert restored["location"] == location
+    assert restored["comparison"]["workspace_id"] == second_id
+    other = rpc(mcp_client, token, "present", {"document_id": second["document_id"]})[
+        "structuredContent"
+    ]
+    assert app_action(
+        mcp_client,
+        token,
+        {
+            "type": "compare",
+            "workspace_id": first_id,
+            "target_workspace_id": other["workspace_id"],
+            "expected_layout_version": restored["layout"]["version"],
+        },
+    )["isError"]
+    closed = app_action(
+        mcp_client,
+        token,
+        {
+            "type": "close",
+            "workspace_id": first_id,
+            "target_workspace_id": second_id,
+            "expected_layout_version": restored["layout"]["version"],
+        },
+    )
+    assert not closed.get("isError"), closed
+    assert closed["structuredContent"]["comparison"] is None
+    assert (
+        mcp_client.get(f"/api/v1/documents/{first['document_id']}").json()["current_revision_id"]
+        == first["current_revision_id"]
+    )
+
+
 @pytest.mark.parametrize("built_frontend", [False, True])
 def test_both_mcp_paths_authenticate_with_production_route_topology(
     settings: Settings, tmp_path: Path, built_frontend: bool
@@ -751,6 +838,29 @@ def test_multi_document_layout_keeps_drafts_active_tab_and_current_authority(
         )["structuredContent"]
         assert second_view["document"]["document_id"] == second["document_id"]
         assert second_view["layout"]["tabs"][0]["has_draft"] is True
+        compared = app_action(
+            client,
+            token,
+            {
+                "type": "compare",
+                "workspace_id": second_view["workspace_id"],
+                "target_workspace_id": tabs[0]["workspace_id"],
+                "expected_layout_version": second_view["layout"]["version"],
+            },
+        )
+        assert not compared.get("isError"), compared
+        position = {"kind": "text", "anchor": 2, "head": 6, "scroll_top": 40}
+        located = app_action(
+            client,
+            token,
+            {
+                "type": "view",
+                "workspace_id": second_view["workspace_id"],
+                "expected_view_version": second_view["view_version"],
+                "location": position,
+            },
+        )
+        assert not located.get("isError"), located
         assert (
             client.get(f"/api/v1/documents/{first['document_id']}").json()["content"]
             == first["content"]
@@ -764,6 +874,8 @@ def test_multi_document_layout_keeps_drafts_active_tab_and_current_authority(
         )["structuredContent"]
         assert recovered["layout"]["active_workspace_id"] == second_view["workspace_id"]
         assert len(recovered["layout"]["tabs"]) == 2
+        assert recovered["comparison"]["draft"] == "# First draft"
+        assert recovered["location"] == position
         first_view = app_action(
             restarted,
             token,
@@ -781,6 +893,8 @@ def test_multi_document_layout_keeps_drafts_active_tab_and_current_authority(
         )["structuredContent"]
         assert [tab["document_id"] for tab in filtered["layout"]["tabs"]] == [second["document_id"]]
         assert filtered["layout"]["unavailable_count"] == 1
+        assert filtered["comparison"] is None
+        assert filtered["layout"]["comparison_workspace_id"] is None
         assert "guide.md" not in str(filtered)
         restored = rpc(
             restarted, narrowed, "present", {"layout_id": recovered["layout"]["layout_id"]}

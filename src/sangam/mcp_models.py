@@ -81,6 +81,7 @@ class WorkspaceLayout(BaseModel):
     active_workspace_id: str
     tabs: list[WorkspaceTab]
     unavailable_count: int
+    comparison_workspace_id: str | None = None
 
 
 class WriteEvidence(BaseModel):
@@ -129,6 +130,24 @@ class LayoutAction(WorkspaceAction):
     expected_layout_version: int = Field(ge=1)
 
 
+class TextLocation(Input):
+    kind: Literal["text"] = "text"
+    anchor: int = Field(default=0, ge=0, le=10_000_000)
+    head: int = Field(default=0, ge=0, le=10_000_000)
+    scroll_top: float = Field(default=0, ge=0, le=1_000_000_000, allow_inf_nan=False)
+
+
+class UpdateView(WorkspaceAction):
+    type: Literal["view"]
+    expected_view_version: int = Field(ge=1)
+    location: TextLocation
+
+
+class CompareDocument(LayoutAction):
+    type: Literal["compare"]
+    target_workspace_id: Identifier | None
+
+
 class OpenDocument(LayoutAction):
     type: Literal["open"]
     document_id: Identifier
@@ -171,6 +190,8 @@ AppAction = Annotated[
     | SearchApp
     | OpenDocument
     | ActivateDocument
-    | CloseDocument,
+    | CloseDocument
+    | CompareDocument
+    | UpdateView,
     Field(discriminator="type"),
 ]

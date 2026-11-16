@@ -11,6 +11,7 @@ import {
   type AppAction,
   type SearchResults,
   type Workspace,
+  type ViewLocation,
 } from './contracts'
 import '../styles.css'
 import '../styles/mcp-workspace.css'
@@ -18,7 +19,7 @@ import '../styles/mcp-workspace.css'
 const app = new App({ name: 'Sangam document workspace', version: '0.1.0' }, {})
 type SaveAttempt = { request: Extract<AppAction, { type: 'save' }>; content: string }
 type WorkspaceAction = Exclude<AppAction, { type: 'search' }>
-type NavigationAction = Extract<AppAction, { type: 'open' | 'activate' | 'close' }>
+type NavigationAction = Extract<AppAction, { type: 'open' | 'activate' | 'close' | 'compare' }>
 
 function DocumentApp() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
@@ -29,6 +30,7 @@ function DocumentApp() {
   const [sharedConflict, setSharedConflict] = useState(false)
   const [navigating, setNavigating] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [locationChanged, setLocationChanged] = useState(0)
   const [query, setQuery] = useState('')
   const [searchedQuery, setSearchedQuery] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null)
@@ -36,6 +38,7 @@ function DocumentApp() {
   const checkpointBlocked = useRef(false)
   const current = useRef<Workspace | null>(null)
   const content = useRef('')
+  const location = useRef<ViewLocation | null>(null)
   const queue = useRef(Promise.resolve())
   const saveAttempt = useRef<SaveAttempt | null>(null)
   const retryAction = useRef<(() => Promise<void>) | null>(null)
@@ -50,6 +53,17 @@ function DocumentApp() {
 
   function apply(next: Workspace, replaceText: boolean) {
     if (current.current?.workspace_id === next.workspace_id && current.current.version > next.version) return
+    if (current.current?.workspace_id === next.workspace_id) {
+      if (current.current.view_version > next.view_version) {
+        next.view_version = current.current.view_version
+        next.location = current.current.location
+      }
+      if (current.current.layout.version > next.layout.version) {
+        next.layout = current.current.layout
+        next.comparison = current.current.comparison
+      }
+    }
+    if (current.current?.workspace_id !== next.workspace_id) location.current = next.location
     current.current = next
     setWorkspace(next)
     if (replaceText) {
@@ -116,6 +130,27 @@ function DocumentApp() {
     })
   }
 
+  async function checkpointView() {
+    const state = current.current
+    const value = location.current
+    if (!state || !value || JSON.stringify(value) === JSON.stringify(state.location)) return
+    await action({
+      type: 'view',
+      workspace_id: state.workspace_id,
+      expected_view_version: state.view_version,
+      location: value,
+    })
+  }
+
+  const backupView = useEffectEvent(() => {
+    if (!navigating) void enqueue(checkpointView, false)
+  })
+  useEffect(() => {
+    if (!locationChanged) return
+    const timer = window.setTimeout(() => backupView(), 600)
+    return () => window.clearTimeout(timer)
+  }, [locationChanged])
+
   function enqueue(operation: () => Promise<void>, clearError = true) {
     queue.current = queue.current.then(async () => {
       setBusy(true)
@@ -160,6 +195,7 @@ function DocumentApp() {
     try {
       await queue.current
       await checkpoint()
+      await checkpointView()
       return {}
     } catch (failure) {
       setNavigating(false)
@@ -242,6 +278,7 @@ function DocumentApp() {
     flushSync(() => setNavigating(true))
     try {
       await checkpoint()
+      await checkpointView()
       const state = current.current
       if (!state) return
       const next = await requestWorkspace(makeRequest(state))
@@ -432,6 +469,24 @@ function DocumentApp() {
             </button>
             <button
               className="mcp-tab-close"
+              aria-label={`Compare ${tab.title}`}
+              title="Open this document for comparison"
+              disabled={controlsDisabled || tab.workspace_id === workspace.workspace_id}
+              onClick={() => {
+                void enqueue(() =>
+                  navigate((state) => ({
+                    type: 'compare',
+                    workspace_id: state.workspace_id,
+                    target_workspace_id: tab.workspace_id,
+                    expected_layout_version: state.layout.version,
+                  })),
+                )
+              }}
+            >
+              ⇄
+            </button>
+            <button
+              className="mcp-tab-close"
               aria-label={`Close ${tab.title}`}
               title="Save or discard drafts before closing documents"
               disabled={
@@ -551,21 +606,83 @@ function DocumentApp() {
             description="Your local edits are preserved. Copy them if needed, then resolve the shared draft to load the other view's checkpoint."
           />
         )}
-        <section className="mcp-editor" aria-label="Document editor">
-          {workspace.can_update ? (
-            <MarkdownEditor
-              key={workspace.workspace_id}
-              value={text}
-              readOnly={navigating}
-              onChange={(value) => {
-                content.current = value
-                setText(value)
-              }}
-            />
-          ) : (
-            <pre>{text}</pre>
+        <div className={`mcp-document-body${workspace.comparison ? ' mcp-with-comparison' : ''}`}>
+          <section className="mcp-editor" aria-label="Document editor">
+            {workspace.can_update ? (
+              <MarkdownEditor
+                key={workspace.workspace_id}
+                value={text}
+                initialViewState={{
+                  anchor: workspace.location.anchor,
+                  head: workspace.location.head,
+                  scrollTop: workspace.location.scroll_top,
+                }}
+                onViewStateChange={(value) => {
+                  if (current.current?.workspace_id !== workspace.workspace_id) return
+                  location.current = {
+                    kind: 'text',
+                    anchor: value.anchor,
+                    head: value.head,
+                    scroll_top: value.scrollTop,
+                  }
+                  setLocationChanged((version) => version + 1)
+                }}
+                readOnly={navigating}
+                onChange={(value) => {
+                  content.current = value
+                  setText(value)
+                }}
+              />
+            ) : (
+              <pre>{text}</pre>
+            )}
+          </section>
+          {workspace.comparison && (
+            <details
+              className="mcp-comparison"
+              key={workspace.comparison.workspace_id}
+              open={window.matchMedia('(min-width: 601px)').matches}
+            >
+              <summary>Comparison</summary>
+              <section aria-label="Comparison document">
+                <h2 title={workspace.comparison.document.title}>{workspace.comparison.document.title}</h2>
+                <p className="mcp-path" title={workspace.comparison.document.path ?? ''}>
+                  {workspace.comparison.document.path}
+                </p>
+                <p>{workspace.comparison.draft === null ? 'Saved revision' : 'Draft checkpoint'}</p>
+                <pre>{workspace.comparison.draft ?? workspace.comparison.document.content}</pre>
+                <div className="mcp-controls">
+                  <button
+                    className="secondary-action"
+                    disabled={controlsDisabled}
+                    onClick={() => {
+                      const target = workspace.comparison?.workspace_id
+                      if (target) void activate(target)
+                    }}
+                  >
+                    Edit this document
+                  </button>
+                  <button
+                    className="secondary-action"
+                    disabled={controlsDisabled}
+                    onClick={() => {
+                      void enqueue(() =>
+                        navigate((state) => ({
+                          type: 'compare',
+                          workspace_id: state.workspace_id,
+                          target_workspace_id: null,
+                          expected_layout_version: state.layout.version,
+                        })),
+                      )
+                    }}
+                  >
+                    Remove comparison
+                  </button>
+                </div>
+              </section>
+            </details>
           )}
-        </section>
+        </div>
         <footer className="mcp-document-footer">
           <span>Save commits a revision. Draft backup does not.</span>
           {dirty && !discarding && (
