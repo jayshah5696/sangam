@@ -446,7 +446,7 @@ function DocumentApp() {
               aria-label={tab.title}
               aria-selected={tab.workspace_id === workspace.workspace_id}
               tabIndex={tab.workspace_id === workspace.workspace_id ? 0 : -1}
-              disabled={controlsDisabled}
+              disabled={navigating}
               ref={(button) => {
                 if (button) tabButtons.current.set(tab.workspace_id, button)
                 else tabButtons.current.delete(tab.workspace_id)

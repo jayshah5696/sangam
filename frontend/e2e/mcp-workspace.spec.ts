@@ -391,15 +391,37 @@ test('another view cannot silently replace a locally edited shared draft', async
     return stateSchema.parse(await reply.json()).result.structuredContent
   }
   const initial = await otherView({ type: 'refresh', workspace_id: workspaceId })
-  await otherView({
-    type: 'checkpoint',
-    workspace_id: workspaceId,
-    expected_version: initial.version,
-    content: '# Other view checkpoint',
+  const checkpointStarted = Promise.withResolvers<void>()
+  const releaseCheckpoint = Promise.withResolvers<void>()
+  const checkpointAction = z.object({
+    params: z.object({ arguments: z.object({ action: z.object({ type: z.literal('checkpoint') }) }) }),
+  })
+  await page.route('**/mcp/', async (route) => {
+    if (
+      route.request().method() !== 'POST' ||
+      !checkpointAction.safeParse(route.request().postDataJSON()).success
+    ) {
+      await route.continue()
+      return
+    }
+    checkpointStarted.resolve()
+    await releaseCheckpoint.promise
+    await route.continue()
   })
   await editor.click()
   await editor.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A')
   await page.keyboard.insertText('# Keep my local edits')
+  await checkpointStarted.promise
+  try {
+    await otherView({
+      type: 'checkpoint',
+      workspace_id: workspaceId,
+      expected_version: initial.version,
+      content: '# Other view checkpoint',
+    })
+  } finally {
+    releaseCheckpoint.resolve()
+  }
   await expect(app.getByText('Shared draft changed', { exact: true })).toBeVisible()
   await expect(editor).toHaveText('# Keep my local edits')
   expect((await otherView({ type: 'refresh', workspace_id: workspaceId })).draft).toBe(
@@ -498,7 +520,37 @@ test('App search opens several documents, restores drafts and active tab, and sa
   await replace('# Second recoverable draft')
   await app.getByRole('tab', { name: firstTitle, exact: true }).click()
   await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText('# First recoverable draft')
-  await app.getByRole('tab', { name: firstTitle, exact: true }).press('ArrowRight')
+  const firstTab = app.getByRole('tab', { name: firstTitle, exact: true })
+  await expect(firstTab).toBeEnabled()
+  const refreshStarted = Promise.withResolvers<void>()
+  const releaseRefresh = Promise.withResolvers<void>()
+  const refreshAction = z.object({
+    params: z.object({ arguments: z.object({ action: z.object({ type: z.literal('refresh') }) }) }),
+  })
+  let holdRefresh = true
+  await page.route('**/mcp/', async (route) => {
+    if (
+      !holdRefresh ||
+      route.request().method() !== 'POST' ||
+      !refreshAction.safeParse(route.request().postDataJSON()).success
+    ) {
+      await route.fallback()
+      return
+    }
+    holdRefresh = false
+    const response = await route.fetch()
+    refreshStarted.resolve()
+    await releaseRefresh.promise
+    await route.fulfill({ response })
+  })
+  await refreshStarted.promise
+  try {
+    // Background polling must not remove focus or swallow an arrow-key action.
+    await expect(firstTab).toBeEnabled()
+    await firstTab.press('ArrowRight')
+  } finally {
+    releaseRefresh.resolve()
+  }
   await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText(
     '# Second recoverable draft',
   )

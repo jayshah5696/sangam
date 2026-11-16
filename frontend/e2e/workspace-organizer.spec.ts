@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { z } from 'zod'
 
 import { expect, test } from './fixtures'
 
@@ -146,9 +147,10 @@ test('multi-selection uses one server plan for tags and moving, then survives re
   await expect(folderPath).toHaveValue(`${target}/`)
   await folderPath.fill('root-child')
   await page.getByRole('button', { name: 'Create', exact: true }).click()
+  await expect(folderPath).toBeHidden()
   const foldersResponse = await request.get('/api/v1/folders')
-  // SAFETY: GET /api/v1/folders returns validated folder entities.
-  const currentFolders = (await foldersResponse.json()) as Array<{ path: string }>
+  expect(foldersResponse.ok(), await foldersResponse.text()).toBeTruthy()
+  const currentFolders = z.array(z.object({ path: z.string() })).parse(await foldersResponse.json())
   expect(currentFolders.map((folder) => folder.path)).toContain('root-child')
   await expect(page.locator('body')).toHaveJSProperty('scrollWidth', page.viewportSize()!.width)
 
