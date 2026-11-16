@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 Identifier = Annotated[str, Field(min_length=1, max_length=200)]
 
@@ -67,12 +67,83 @@ class WriteResult(BaseModel):
     operation_key: str
 
 
+class WorkspaceTab(BaseModel):
+    workspace_id: str
+    document_id: str
+    title: str
+    path: str | None
+    has_draft: bool
+
+
+class WorkspaceLayout(BaseModel):
+    layout_id: str
+    version: int
+    active_workspace_id: str
+    tabs: list[WorkspaceTab]
+    unavailable_count: int
+
+
+class WriteEvidence(BaseModel):
+    operation_key: str
+    document_id: str
+    outcome: Literal["committed", "rejected", "unknown"]
+    revision_id: str | None
+
+
+class ExecutionOutput(BaseModel):
+    output: JsonValue
+
+
+class ExecutionError(BaseModel):
+    code: str
+    message: str
+
+
+class ExecutionFailure(BaseModel):
+    execution_key: str
+    status: Literal["failed", "interrupted"]
+    error: ExecutionError | None = None
+    writes: list[WriteEvidence] = Field(default_factory=list)
+    message: str | None = None
+    recovery: str | None = None
+
+
+class ExecutionReceipt(BaseModel):
+    execution_key: str
+    status: Literal["running", "completed", "failed", "interrupted"]
+    output_available: Literal[False] = False
+    reason: Literal["in_progress", "interrupted", "result_expired"]
+    writes: list[WriteEvidence]
+    message: str
+
+
 class WorkspaceAction(Input):
     workspace_id: Identifier
 
 
 class RefreshWorkspace(WorkspaceAction):
     type: Literal["refresh"]
+
+
+class LayoutAction(WorkspaceAction):
+    expected_layout_version: int = Field(ge=1)
+
+
+class OpenDocument(LayoutAction):
+    type: Literal["open"]
+    document_id: Identifier
+
+
+class TargetWorkspace(LayoutAction):
+    target_workspace_id: Identifier
+
+
+class ActivateDocument(TargetWorkspace):
+    type: Literal["activate"]
+
+
+class CloseDocument(TargetWorkspace):
+    type: Literal["close"]
 
 
 class CheckpointDraft(WorkspaceAction):
@@ -93,6 +164,13 @@ class SaveDraft(WorkspaceAction):
 
 
 AppAction = Annotated[
-    RefreshWorkspace | CheckpointDraft | DiscardDraft | SaveDraft | SearchApp,
+    RefreshWorkspace
+    | CheckpointDraft
+    | DiscardDraft
+    | SaveDraft
+    | SearchApp
+    | OpenDocument
+    | ActivateDocument
+    | CloseDocument,
     Field(discriminator="type"),
 ]

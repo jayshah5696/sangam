@@ -16,9 +16,28 @@ export const workspaceSchema = z.object({
   can_update: z.boolean(),
   document: documentSchema,
   saved_revision_id: z.string().optional(),
+  layout: z.object({
+    layout_id: z.string(),
+    version: z.number().int(),
+    active_workspace_id: z.string(),
+    unavailable_count: z.number().int(),
+    tabs: z.array(
+      z.object({
+        workspace_id: z.string(),
+        document_id: z.string(),
+        title: z.string(),
+        path: z.string().nullable(),
+        has_draft: z.boolean(),
+      }),
+    ),
+  }),
 })
 export type Workspace = z.infer<typeof workspaceSchema>
-export const hitsSchema = z.object({ items: z.array(documentSchema.omit({ content: true })) })
+export const hitsSchema = z.object({
+  items: z.array(documentSchema.omit({ content: true })),
+  next_offset: z.number().int().nullable(),
+})
+export type SearchResults = z.infer<typeof hitsSchema>
 export const programHitsSchema = z.object({ output: hitsSchema })
 export const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) })
 export const resourceSchema = z.object({ contents: z.array(z.object({ text: z.string() })) })
@@ -28,5 +47,13 @@ export type AppAction =
   | { type: 'checkpoint'; workspace_id: string; expected_version: number; content: string }
   | { type: 'save'; workspace_id: string; expected_version: number; operation_key: string }
   | { type: 'discard'; workspace_id: string; expected_version: number }
+  | { type: 'search'; query: string; limit: number; offset: number }
+  | { type: 'open'; workspace_id: string; document_id: string; expected_layout_version: number }
+  | {
+      type: 'activate' | 'close'
+      workspace_id: string
+      target_workspace_id: string
+      expected_layout_version: number
+    }
 
-export type PresentArguments = { document_id: string; workspace_id?: string }
+export type PresentArguments = { document_id: string; workspace_id?: string } | { layout_id: string }

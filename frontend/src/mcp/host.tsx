@@ -9,6 +9,7 @@ import {
   resourceSchema,
   workspaceSchema,
   type PresentArguments,
+  type Workspace,
 } from './contracts'
 import '../styles.css'
 import '../styles/mcp-workspace.css'
@@ -26,7 +27,16 @@ function McpHost() {
   const client = useRef<Client | null>(null)
   const bridge = useRef<AppBridge | null>(null)
   const mount = useRef<HTMLDivElement | null>(null)
-  const opened = useRef<{ documentId: string; workspaceId: string } | null>(null)
+  const opened = useRef<{ layoutId: string } | null>(null)
+
+  function rememberWorkspace(workspace: Workspace) {
+    opened.current = { layoutId: workspace.layout.layout_id }
+    const url = new URL(location.href)
+    url.searchParams.set('document', workspace.document.document_id)
+    url.searchParams.set('workspace', workspace.workspace_id)
+    url.searchParams.set('layout', workspace.layout.layout_id)
+    history.replaceState(null, '', url)
+  }
 
   async function run(operation: () => Promise<void>) {
     setBusy(true)
@@ -61,7 +71,9 @@ function McpHost() {
     const params = new URL(location.href).searchParams
     const documentId = params.get('document')
     const workspaceId = params.get('workspace')
-    if (documentId && workspaceId) await open(documentId, workspaceId)
+    const layoutId = params.get('layout')
+    if (layoutId) await open({ layout_id: layoutId })
+    else if (documentId && workspaceId) await open({ document_id: documentId, workspace_id: workspaceId })
   }
 
   async function search() {
@@ -89,13 +101,11 @@ function McpHost() {
     ])
   }
 
-  async function open(documentId: string, workspaceId?: string) {
+  async function open(args: PresentArguments) {
     const connection = client.current
     const container = mount.current
     if (!connection || !container) return
     if (bridge.current) await bridge.current.teardownResource({})
-    const args: PresentArguments = { document_id: documentId }
-    if (workspaceId) args.workspace_id = workspaceId
     const reply = await connection.callTool({ name: 'present', arguments: args })
     if (reply.isError) {
       const parsed = errorSchema.safeParse(reply.structuredContent)
@@ -121,6 +131,10 @@ function McpHost() {
     next.oncalltool = async (params) => {
       if (params.name !== 'mcp_app') throw new Error('This App can call only its typed interaction tool.')
       const result = await connection.callTool(params)
+      if (!result.isError) {
+        const current = workspaceSchema.safeParse(result.structuredContent)
+        if (current.success) rememberWorkspace(current.data)
+      }
       setTrace((previous) => [
         ...previous.slice(-19),
         'App bridge → mcp_app → current grants → shared document services',
@@ -134,11 +148,7 @@ function McpHost() {
     bridge.current = next
     const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'">`
     iframe.srcdoc = html.replace('<head>', `<head>${csp}`)
-    opened.current = { documentId, workspaceId: workspace.workspace_id }
-    const url = new URL(location.href)
-    url.searchParams.set('document', documentId)
-    url.searchParams.set('workspace', workspace.workspace_id)
-    history.replaceState(null, '', url)
+    rememberWorkspace(workspace)
     setTrace((previous) => [
       ...previous,
       'present → fetched ui:// HTML → standard AppBridge → sandboxed iframe',
@@ -205,7 +215,7 @@ function McpHost() {
               disabled={busy || !opened.current}
               onClick={() => {
                 const state = opened.current
-                if (state) void run(() => open(state.documentId, state.workspaceId))
+                if (state) void run(() => open({ layout_id: state.layoutId }))
               }}
             >
               Reopen App
@@ -219,7 +229,7 @@ function McpHost() {
                     className="secondary-action"
                     disabled={busy}
                     onClick={() => {
-                      void run(() => open(hit.document_id))
+                      void run(() => open({ document_id: hit.document_id }))
                     }}
                     aria-label={`Open ${hit.title}`}
                   >

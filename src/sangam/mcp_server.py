@@ -26,7 +26,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from sangam.application import ApplicationServices
 from sangam.capabilities import Capability
 from sangam.config import Settings
-from sangam.db import utc_now
 from sangam.errors import (
     AuthenticationError,
     AuthorizationError,
@@ -36,9 +35,15 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.mcp_models import (
+    ActivateDocument,
     AppAction,
+    CloseDocument,
     DocumentPassage,
+    ExecutionFailure,
+    ExecutionOutput,
+    ExecutionReceipt,
     ExecutionStatus,
+    OpenDocument,
     OperationInput,
     ReadDocument,
     RefreshWorkspace,
@@ -94,10 +99,9 @@ OUTPUT_SCHEMAS = {
     "documents.search": SearchResults.model_json_schema(),
     "documents.read": DocumentPassage.model_json_schema(),
     "documents.update": WriteResult.model_json_schema(),
-    "executions.get": {
-        "type": "object",
-        "description": "Owned execution output or recovery status.",
-    },
+    "executions.get": TypeAdapter(
+        ExecutionOutput | ExecutionFailure | ExecutionReceipt
+    ).json_schema(),
 }
 
 
@@ -145,6 +149,22 @@ class PrivateMcp:
                 )
                 await response(scope, receive, send)
                 return
+        await self.app(scope, receive, send)
+
+
+class McpEndpointPath:
+    """Route both endpoint spellings through the authenticated MCP mount."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        root = scope.get("root_path", "").rstrip("/")
+        if scope["type"] == "http" and scope["path"] in {"/mcp", f"{root}/mcp"}:
+            scope = dict(scope)
+            scope["path"] += "/"
+            if "raw_path" in scope:
+                scope["raw_path"] += b"/"
         await self.app(scope, receive, send)
 
 
@@ -293,24 +313,38 @@ class SangamMcp:
             ),
         )
         async def present(
-            document_id: str, ctx: Context, workspace_id: str | None = None
+            ctx: Context,
+            document_id: str | None = None,
+            workspace_id: str | None = None,
+            additional_document_ids: list[str] | None = None,
+            layout_id: str | None = None,
         ) -> CallToolResult:
             """Open a Markdown document App, or reopen an explicit recoverable workspace."""
             try:
                 principal = self.principal(self.credential(ctx))
                 self.state.cleanup()
-                value = (
-                    await self.blocking(partial(self.state.read, principal, workspace_id))
-                    if workspace_id
-                    else await self.blocking(partial(self.state.open, principal, document_id))
-                )
-                if workspace_id:
-                    # Reopening is deliberate activity; passive refresh is not.
-                    with self.state.database.transaction() as connection:
-                        connection.execute(
-                            "UPDATE mcp_workspaces SET updated_at = ? WHERE workspace_id = ?",
-                            (utc_now(), workspace_id),
+                if layout_id:
+                    if document_id or workspace_id or additional_document_ids:
+                        raise ValidationError(
+                            "Reopen with layout_id alone, or open with document_id "
+                            "and optional document references."
                         )
+                    return result(
+                        await self.blocking(partial(self.state.restore, principal, layout_id))
+                    )
+                if document_id is None:
+                    raise ValidationError(
+                        "Provide document_id to open documents, or layout_id to reopen a workspace."
+                    )
+                value = await self.blocking(
+                    partial(
+                        self.state.open,
+                        principal,
+                        document_id,
+                        workspace_id=workspace_id,
+                        additional_document_ids=additional_document_ids,
+                    )
+                )
                 return result(value)
             except SangamError as error:
                 return failure(error)
@@ -337,6 +371,10 @@ class SangamMcp:
                 if isinstance(action, RefreshWorkspace):
                     return result(
                         await asyncio.to_thread(self.state.read, principal, action.workspace_id)
+                    )
+                if isinstance(action, (OpenDocument, ActivateDocument, CloseDocument)):
+                    return result(
+                        await self.blocking(partial(self.state.navigate, principal, action))
                     )
                 return result(await self.blocking(partial(self.state.change, principal, action)))
             except SangamError as error:
@@ -392,7 +430,9 @@ class SangamMcp:
             principal,
             execution_key,
             hashlib.sha256(code.encode()).hexdigest(),
-            capacity=not self.closing and self.active < 2,
+            # A cancelled wait can leave a canonical write finishing on its
+            # thread. Keep those callbacks inside the same admission bound.
+            capacity=not self.closing and self.active < 2 and len(self.pending) < 2,
         ):
             cached = self.state.status(principal, execution_key)
             return result(
@@ -400,11 +440,11 @@ class SangamMcp:
                 failed=cached.get("status") in {"failed", "interrupted"} or "error" in cached,
             )
         self.active += 1
-        callback_error: SangamError | None = None
+        callback_errors: dict[str, SangamError] = {}
         callbacks = 0
 
         async def call(operation_id: str, **arguments: JsonValue) -> JsonValue:
-            nonlocal callbacks, callback_error
+            nonlocal callbacks
             callbacks += 1
             try:
                 if callbacks > 32:
@@ -417,13 +457,16 @@ class SangamMcp:
                 parsed = schema.model_validate(arguments)
                 return await self.blocking(partial(self.dispatch, current, execution_key, parsed))
             except SangamError as error:
-                callback_error = error
-                raise
+                message = f"mcp_callback_{uuid4().hex}: {error.message}"
+                callback_errors[message] = error
+                raise RuntimeError(message) from error
             except SchemaError as error:
                 callback_error = ValidationError(
                     "Operation arguments do not match the discovered schema."
                 )
-                raise callback_error from error
+                message = f"mcp_callback_{uuid4().hex}: {callback_error.message}"
+                callback_errors[message] = callback_error
+                raise RuntimeError(message) from error
 
         external_lookup = {}
         for operation_id, (_, name, *_) in OPERATIONS.items():
@@ -454,11 +497,14 @@ class SangamMcp:
                     "Program output exceeds the response limit. "
                     "Select a smaller result or read a bounded passage."
                 )
-            if callback_error is not None:
-                raise callback_error
             value: dict[str, JsonValue] = {"output": output}
         except (MontyError, TimeoutError, SchemaError, ValueError, SangamError) as error:
             failed = True
+            callback_error = (
+                callback_errors.get(str(error.exception()))
+                if isinstance(error, MontyError)
+                else None
+            )
             message = callback_error.message if callback_error else str(error)[:1000]
             value = {
                 "execution_key": execution_key,
@@ -477,6 +523,9 @@ class SangamMcp:
             value = {
                 "execution_key": execution_key,
                 "status": "interrupted",
+                "output_available": False,
+                "reason": "interrupted",
+                "writes": self.state.writes(principal, execution_key, authorize=False),
                 "message": "Execution interrupted. Inspect original write keys before continuing.",
             }
             self.state.finish(principal, execution_key, value, failed=True)

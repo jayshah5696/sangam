@@ -50,7 +50,7 @@ from sangam.errors import (
     ServiceUnavailableError,
     ValidationError,
 )
-from sangam.mcp_server import SangamMcp
+from sangam.mcp_server import McpEndpointPath, SangamMcp
 from sangam.pdf_runtime import PdfExtractionScheduler
 from sangam.schemas import (
     ActivityProblemAcknowledgement,
@@ -308,7 +308,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     app.state.services = services
+    app.state.mcp_runtime = mcp_runtime
     if mcp_runtime is not None:
+        app.add_middleware(McpEndpointPath)
         app.mount("/mcp", mcp_runtime.app)
 
         @app.get("/mcp-host.html", include_in_schema=False)

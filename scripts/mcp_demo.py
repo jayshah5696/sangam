@@ -10,7 +10,7 @@ import httpx
 from sangam.schemas import Document, IssuedAgentToken
 
 
-def seed_demo(base_url: str) -> tuple[Document, IssuedAgentToken]:
+def seed_demo(base_url: str) -> tuple[Document, Document, IssuedAgentToken]:
     with httpx.Client(base_url=base_url, timeout=30) as client:
         response = client.post(
             "/api/v1/documents",
@@ -28,6 +28,21 @@ def seed_demo(base_url: str) -> tuple[Document, IssuedAgentToken]:
         )
         response.raise_for_status()
         document = Document.model_validate(response.json())
+        companion_response = client.post(
+            "/api/v1/documents",
+            headers={"Idempotency-Key": "mcp-demo-companion"},
+            json={
+                "title": "Walkthrough companion notes",
+                "path": "mcp-demo/companion.md",
+                "content_type": "text/markdown",
+                "content": (
+                    "# Companion notes\n\nFind walkthrough documents inside the App. "
+                    "Open both documents and switch between their drafts.\n"
+                ),
+            },
+        )
+        companion_response.raise_for_status()
+        companion = Document.model_validate(companion_response.json())
         issued = client.post(
             "/api/v1/agent-tokens",
             json={
@@ -41,14 +56,14 @@ def seed_demo(base_url: str) -> tuple[Document, IssuedAgentToken]:
             },
         )
         issued.raise_for_status()
-        return document, IssuedAgentToken.model_validate(issued.json())
+        return document, companion, IssuedAgentToken.model_validate(issued.json())
 
 
 def main() -> None:
     root = Path(os.environ["SANGAM_VERIFY_RUN_DIR"])
     if not root.name.startswith("sangam-verify-"):
         raise RuntimeError("The MCP demo requires the isolated verification instance.")
-    document, issued = seed_demo(os.environ["SANGAM_API_URL"])
+    document, companion, issued = seed_demo(os.environ["SANGAM_API_URL"])
     key_path = root / "mcp-demo-key.txt"
     descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w") as output:
@@ -56,6 +71,7 @@ def main() -> None:
     print(f"MCP host: {os.environ['SANGAM_API_URL']}/mcp-host.html")
     print(f"Disposable scoped key file: {key_path}")
     print(f"Walkthrough document: {document.document_id}")
+    print(f"Companion document: {companion.document_id}")
     print("Paste the file's contents into Sangam API key, connect, then search for walkthrough.")
     print("The disposable instance stays running until you press Ctrl+C.")
 

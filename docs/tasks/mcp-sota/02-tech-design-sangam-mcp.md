@@ -1,7 +1,7 @@
 ---
 type: technical-design
 status: draft
-approval: "Decisions 1 through 22 approved by user; Option 2 minimal Markdown MCP/App implementation approved on November 15; broader capabilities remain design scope"
+approval: "Decisions 1 through 22 approved by user; Option 2 implementation and subsequent App search and multiple-document work approved on November 15; remaining capabilities are broader design scope"
 source: "User discussion and 01-research-november-2026.md"
 revision: "a14b27cc1df1a60092d6d48bdb36db8c0a092eb6"
 design_date: "2026-11-12"
@@ -72,13 +72,15 @@ claimed by this document review.
 On November 15, the user approved Option 2 and requested a real end-to-end
 implementation, a PR, a local walkthrough, and verification. The implemented
 workflow is API-key connection, operation discovery, fresh Monty execution to
-find a Markdown document, an editable MCP App, recoverable draft checkpoints,
-and a revision-aware Save. It uses the same server and existing permissions.
+find Markdown documents, an editable MCP App, recoverable draft checkpoints,
+and a revision-aware Save. The user subsequently selected search and multiple
+open documents inside the App as the next implementation addition. It uses the
+same server and existing permissions.
 There is one execution tool and no additional write-approval mode.
 
 The catalog contains `documents.search`, `documents.read`, `documents.update`,
-and `executions.get`. The App-only dispatcher has typed search, refresh,
-checkpoint, save, and discard actions. The authenticated
+and `executions.get`. The App-only dispatcher has typed search, open, activate,
+close, refresh, checkpoint, save, and discard actions. The authenticated
 `sangam://execution/{execution_key}` resource makes recovery available when
 new execution admission is full. A local host uses the official MCP client
 and AppBridge with an opaque sandboxed frame. It is a working test host,
@@ -90,8 +92,27 @@ drafts survive until Save or Discard. Clean workspace layouts retain the
 workspace count, draft bytes, and execution receipt count. Its worker limits
 are conservative defaults awaiting production capacity measurements.
 
-The App opens one Markdown document at a time. Multiple-document layouts,
-PDF pages, binary upload, registered skills, OAuth issuance, native Tasks,
+The App now stores a versioned open-document layout with an active document and
+separate draft checkpoints for each document. Migration `039` preserves existing
+checkpoint IDs, drafts, and versions while assigning each legacy view a layout.
+`present` accepts an initial document plus additional document IDs, or a layout
+ID to restore the active view. A supplied document/checkpoint pair must match.
+App search is a direct typed bridge action. Search results and tab metadata
+recheck current grants. Closing a dirty tab requires Save or explicit Discard.
+Navigation acknowledges the outgoing draft before changing documents and keeps
+the editor read-only during the transition. The active reference and open tabs
+survive reloading the host and reconnecting. One acknowledged draft protects the
+entire layout from idle cleanup; closing a clean tab frees its checkpoint quota.
+
+The public endpoint accepts both `/mcp` and `/mcp/` with built frontend assets.
+Recovery authorizes retained source metadata even after a document is trashed.
+Caught Python callback exceptions do not force failure of a completed program.
+In-flight receipts explicitly mark output as unavailable and identify their
+write evidence as incomplete. Cancellation retains write references and permits
+later inspection of commits that finish after the client stops waiting.
+
+The App displays one active Markdown editor. Split panes, persistent cursor
+locations, PDF pages, binary upload, registered skills, OAuth issuance, native Tasks,
 subscriptions, proposals, and assistant delegation remain broader design
 scope. Their presence elsewhere in this document does not claim they are
 implemented. [MCP setup and contracts](../../mcp.md) describe the current
@@ -2016,9 +2037,11 @@ OAuth-only clients are not supported until this path is implemented and tested.
 
 #### 4. Dependency, deployment, and host compatibility
 
-The inspected checkout is `a14b27cc1df1a60092d6d48bdb36db8c0a092eb6`.
-Its lockfile supplies MCP 2.3.0; Monty and an OAuth issuer are not declared
-dependencies. Local SDK source includes Apps helpers. Skills helpers and native
+The original research inspected `a14b27cc1df1a60092d6d48bdb36db8c0a092eb6`.
+That lockfile supplied MCP 2.3.0 without Monty or an OAuth issuer. The current
+implementation pins Monty's client/runtime together at 1.6.0 and retains MCP
+2.3.0. An OAuth issuer remains outside the implemented scope.
+Local SDK source includes Apps helpers. Skills helpers and native
 Tasks support were not established in that locked package. Current
 [SDK Skills documentation](https://py.sdk.modelcontextprotocol.io/advanced/skills/)
 does describe a built-in Skills extension, so current documentation alone
