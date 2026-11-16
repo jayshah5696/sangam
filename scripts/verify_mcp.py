@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -108,7 +109,7 @@ async def verify_event_revocation(base: str, rest: httpx.AsyncClient, document_i
 
 async def verify() -> None:
     base = os.environ["SANGAM_API_URL"]
-    document, companion, issued = await asyncio.to_thread(seed_demo, base)
+    document, companion, pdf, issued = await asyncio.to_thread(seed_demo, base)
     async with httpx.AsyncClient(base_url=base, timeout=30) as rest:
         for path in ("/mcp", "/mcp/"):
             assert (await rest.post(path, json={})).status_code == 401
@@ -137,6 +138,50 @@ async def verify() -> None:
             )
             assert not result.is_error
             assert document.document_id in str(result.structured_content)
+            for _ in range(100):
+                status = await session.call_tool(
+                    "execute",
+                    {
+                        "code": f"await pdf_status(document_id='{pdf.document_id}')",
+                        "execution_key": str(uuid4()),
+                    },
+                )
+                assert status.structured_content is not None
+                if status.structured_content["output"]["status"] == "ready":
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("PDF extraction did not finish")
+            page = await session.call_tool(
+                "execute",
+                {
+                    "code": f"await pdf_pages_read(document_id='{pdf.document_id}', page_number=1)",
+                    "execution_key": str(uuid4()),
+                },
+            )
+            assert page.structured_content is not None and page.structured_content["output"]["text"]
+            note_key = str(uuid4())
+            note_code = (
+                f"await pdf_annotations_create(document_id='{pdf.document_id}', "
+                "page_number=1, note='HTTP PDF note', operation_key='mcp-http-pdf-note')\n1 / 0"
+            )
+            noted = await session.call_tool(
+                "execute", {"code": note_code, "execution_key": note_key}
+            )
+            assert noted.is_error and noted.structured_content is not None
+            assert noted.structured_content["writes"][0]["resource_type"] == "annotation"
+            assert noted.structured_content["writes"][0]["outcome"] == "committed"
+            replayed = await session.call_tool(
+                "execute", {"code": note_code, "execution_key": note_key}
+            )
+            assert replayed.structured_content == noted.structured_content
+            assert len((await rest.get(f"/api/v1/pdfs/{pdf.document_id}/annotations")).json()) == 1
+            assert (
+                hashlib.sha256(
+                    (await rest.get(f"/api/v1/pdfs/{pdf.document_id}/content")).content
+                ).hexdigest()
+                == pdf.content_hash
+            )
             opened = await session.call_tool(
                 "present",
                 {
@@ -244,6 +289,7 @@ async def verify() -> None:
             "catalog discovery",
             "real Monty search",
             "App resource",
+            "PDF page reads, annotation commit recovery, duplicate prevention and immutable bytes",
             "draft checkpoint",
             "App search and multiple-document restoration",
             "native subscription acknowledgement, draft invalidation and reconnect refetch",

@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom'
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { MarkdownEditor } from '../components/MarkdownEditor'
 import { StateMessage } from '../components/ui/StateMessage'
+import { PdfPane } from './PdfPane'
 import {
   errorSchema,
   hitsSchema,
@@ -18,7 +19,10 @@ import '../styles/mcp-workspace.css'
 
 const app = new App({ name: 'Sangam document workspace', version: '0.1.0' }, {})
 type SaveAttempt = { request: Extract<AppAction, { type: 'save' }>; content: string }
-type WorkspaceAction = Exclude<AppAction, { type: 'search' }>
+type WorkspaceAction = Exclude<
+  AppAction,
+  { type: 'search' | 'pdf_bytes' | 'pdf_page' | 'pdf_search' | 'pdf_annotations' | 'pdf_note' }
+>
 type NavigationAction = Extract<AppAction, { type: 'open' | 'activate' | 'close' | 'compare' }>
 
 function DocumentApp() {
@@ -41,6 +45,7 @@ function DocumentApp() {
   const location = useRef<ViewLocation | null>(null)
   const queue = useRef(Promise.resolve())
   const saveAttempt = useRef<SaveAttempt | null>(null)
+  const unsavedPdfNote = useRef(false)
   const retryAction = useRef<(() => Promise<void>) | null>(null)
   const tabButtons = useRef(new Map<string, HTMLButtonElement>())
   const pendingTabFocus = useRef<string | null>(null)
@@ -189,6 +194,7 @@ function DocumentApp() {
   })
 
   const prepareTeardown = useEffectEvent(async () => {
+    if (unsavedPdfNote.current) throw new Error('Save or discard the page note before reopening the App.')
     // The host can remove this frame after the acknowledgement. Apply the
     // editing guard synchronously before taking the final checkpoint.
     flushSync(() => setNavigating(true))
@@ -271,6 +277,7 @@ function DocumentApp() {
   }
 
   async function navigate(makeRequest: (state: Workspace) => NavigationAction) {
+    if (unsavedPdfNote.current) throw new Error('Save or discard the page note before changing documents.')
     if (saveAttempt.current)
       throw new Error(
         'Resolve the pending Save before switching or closing documents. Retry the Save or explicitly discard the draft.',
@@ -525,7 +532,9 @@ function DocumentApp() {
         role="tabpanel"
         aria-labelledby={`tab-${workspace.workspace_id}`}
       >
-        <header className="mcp-document-header">
+        <header
+          className={`mcp-document-header${workspace.document.content_type === 'application/pdf' ? ' mcp-pdf-header' : ''}`}
+        >
           <div className="mcp-document-identity">
             <h1 title={workspace.document.title}>{workspace.document.title}</h1>
             <p className="mcp-path" title={workspace.document.path ?? 'Saved draft'}>
@@ -547,27 +556,31 @@ function DocumentApp() {
             >
               Refresh
             </button>
-            <button
-              className="primary-button"
-              disabled={controlsDisabled || !dirty || !workspace.can_update}
-              onClick={() => {
-                void enqueue(save)
-              }}
-            >
-              Save
-            </button>
+            {workspace.document.content_type !== 'application/pdf' && (
+              <button
+                className="primary-button"
+                disabled={controlsDisabled || !dirty || !workspace.can_update}
+                onClick={() => {
+                  void enqueue(save)
+                }}
+              >
+                Save
+              </button>
+            )}
           </div>
         </header>
         <div className="mcp-status" role="status">
           {navigating
             ? 'Changing view'
-            : !workspace.can_update
-              ? 'Read-only connection'
-              : !backedUp
-                ? 'Backup pending'
-                : dirty
-                  ? 'Draft backed up'
-                  : 'All changes saved'}
+            : workspace.document.content_type === 'application/pdf'
+              ? 'PDF source is immutable'
+              : !workspace.can_update
+                ? 'Read-only connection'
+                : !backedUp
+                  ? 'Backup pending'
+                  : dirty
+                    ? 'Draft backed up'
+                    : 'All changes saved'}
         </div>
         {error && (
           <StateMessage
@@ -608,7 +621,23 @@ function DocumentApp() {
         )}
         <div className={`mcp-document-body${workspace.comparison ? ' mcp-with-comparison' : ''}`}>
           <section className="mcp-editor" aria-label="Document editor">
-            {workspace.can_update ? (
+            {workspace.document.content_type === 'application/pdf' && workspace.location.kind === 'pdf' ? (
+              <PdfPane
+                key={workspace.workspace_id}
+                app={app}
+                workspace={workspace}
+                location={workspace.location}
+                onLocation={(value) => {
+                  if (current.current?.workspace_id !== workspace.workspace_id) return
+                  location.current = value
+                  setLocationChanged((version) => version + 1)
+                }}
+                onUnsavedChange={(value) => {
+                  unsavedPdfNote.current = value
+                }}
+                disabled={navigating}
+              />
+            ) : workspace.can_update && workspace.location.kind === 'text' ? (
               <MarkdownEditor
                 key={workspace.workspace_id}
                 value={text}
@@ -650,7 +679,18 @@ function DocumentApp() {
                   {workspace.comparison.document.path}
                 </p>
                 <p>{workspace.comparison.draft === null ? 'Saved revision' : 'Draft checkpoint'}</p>
-                <pre>{workspace.comparison.draft ?? workspace.comparison.document.content}</pre>
+                {workspace.comparison.document.content_type === 'application/pdf' &&
+                workspace.comparison.location.kind === 'pdf' ? (
+                  <PdfPane
+                    app={app}
+                    workspace={{ ...workspace, ...workspace.comparison, comparison: null }}
+                    location={workspace.comparison.location}
+                    readOnly
+                    onLocation={() => {}}
+                  />
+                ) : (
+                  <pre>{workspace.comparison.draft ?? workspace.comparison.document.content}</pre>
+                )}
                 <div className="mcp-controls">
                   <button
                     className="secondary-action"
@@ -684,13 +724,13 @@ function DocumentApp() {
           )}
         </div>
         <footer className="mcp-document-footer">
-          <span>Save commits a revision. Draft backup does not.</span>
+          <span>
+            {workspace.document.content_type === 'application/pdf'
+              ? 'Page notes are saved separately from PDF bytes.'
+              : 'Save commits a revision. Draft backup does not.'}
+          </span>
           {dirty && !discarding && (
-            <button
-              className="secondary-action"
-              disabled={controlsDisabled}
-              onClick={() => setDiscarding(true)}
-            >
+            <button className="secondary-action" disabled={navigating} onClick={() => setDiscarding(true)}>
               {sharedConflict ? 'Resolve shared draft' : 'Discard draft'}
             </button>
           )}
@@ -701,11 +741,7 @@ function DocumentApp() {
                   ? 'Replace local edits with the shared checkpoint?'
                   : 'Discard these unsaved edits?'}
               </span>
-              <button
-                className="secondary-action"
-                disabled={controlsDisabled}
-                onClick={() => setDiscarding(false)}
-              >
+              <button className="secondary-action" disabled={navigating} onClick={() => setDiscarding(false)}>
                 Keep editing
               </button>
               <button

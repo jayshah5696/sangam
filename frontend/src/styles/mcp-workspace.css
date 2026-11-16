@@ -64,6 +64,23 @@
 .mcp-editor .editor, .mcp-editor .cm-editor { height: 100%; min-height: 0; }
 .mcp-editor .cm-scroller { overflow: auto; }
 .mcp-editor pre { padding: var(--space-4); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-pdf { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.mcp-pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2); }
+.mcp-pdf-toolbar button { min-width: var(--control-height); }
+.mcp-pdf-scroll { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2); }
+.mcp-pdf-page { position: relative; width: fit-content; }
+.mcp-pdf-page canvas { display: block; }
+.mcp-pdf-page .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; text-size-adjust: none; transform-origin: 0 0; --total-scale-factor: 1; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.mcp-pdf-page .textLayer span, .mcp-pdf-page .textLayer br { position: absolute; color: transparent; white-space: pre; transform-origin: 0 0; cursor: text; }
+.mcp-pdf-page .textLayer > :not(.markedContent), .mcp-pdf-page .textLayer .markedContent span:not(.markedContent) { --font-height: 0; --scale-x: 1; --rotate: 0deg; font-size: calc(var(--text-scale-factor) * var(--font-height)); transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.mcp-pdf-page .textLayer .markedContent { display: contents; }
+.mcp-pdf-page .textLayer ::selection { background: var(--accent-soft); }
+.mcp-pdf-marks { position: absolute; inset: 0; pointer-events: none; }
+.mcp-pdf-mark { position: absolute; opacity: 0.3; }
+.mcp-pdf-scroll details > button { display: block; max-width: 100%; white-space: normal; text-align: left; }
+.mcp-pdf-scroll summary { min-block-size: var(--control-height); align-content: center; cursor: pointer; }
+.mcp-pdf-field { display: grid; gap: var(--space-2); padding-block: var(--space-2); }
+.mcp-pdf-field input, .mcp-pdf-field textarea { min-height: var(--control-height); font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); padding: var(--space-2); }
 .mcp-document-footer { padding: var(--space-3) var(--space-4); flex-wrap: wrap; color: var(--muted); font-size: var(--text-control); }
 .mcp-conflict { padding: var(--space-3) var(--space-4); background: var(--accent-soft); }
 .mcp-conflict p { margin-block: var(--space-2); }
@@ -78,9 +95,17 @@
   .mcp-search, .mcp-results button { flex-direction: column; align-items: stretch; }
   .mcp-document-header { align-items: start; }
   .mcp-document-header .mcp-controls { width: 100%; justify-content: flex-end; }
+  .mcp-document-header.mcp-pdf-header .mcp-controls { width: auto; }
 }
 @media (pointer: coarse) {
   .mcp-app .mcp-tab-close { min-width: var(--control-touch); }
+  .mcp-pdf-toolbar button { min-width: var(--control-touch); }
+  .mcp-pdf-scroll summary, .mcp-workspace-search summary, .mcp-comparison summary { min-height: var(--control-touch); }
   .mcp-host button, .mcp-app button, .mcp-host input, .mcp-app input { min-height: var(--control-touch); }
   .mcp-host input, .mcp-app input { font-size: var(--text-input-mobile); }
+}
+@media (max-height: 500px) {
+  .mcp-app { height: auto; overflow: auto; }
+  .mcp-document-panel { flex: none; overflow: visible; }
+  .mcp-document-body { flex: none; block-size: 75dvh; }
 }

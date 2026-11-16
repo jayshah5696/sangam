@@ -22,10 +22,12 @@ from sangam.mcp_models import (
     DiscardDraft,
     ExecutionReceipt,
     OpenDocument,
+    PdfLocation,
     ReadDocument,
     SaveDraft,
     TextLocation,
     UpdateView,
+    ViewLocation,
     WorkspaceLayout,
     WorkspaceTab,
 )
@@ -186,7 +188,7 @@ class McpState:
         for tab in rows:
             if (
                 tab["deleted"]
-                or tab["content_type"] != "text/markdown"
+                or tab["content_type"] not in {"text/markdown", "application/pdf"}
                 or not self.services.authorization.allows(principal, Capability.READ, tab["path"])
             ):
                 continue
@@ -235,7 +237,7 @@ class McpState:
             for identifier in ids:
                 ReadDocument(document_id=identifier)
                 document = self.services.workspace_access.get_document(principal, identifier)
-                self.require_markdown(document)
+                self.require_viewable(document)
                 documents.append(document)
             with self.database.transaction() as connection:
                 if layout is None:
@@ -290,7 +292,7 @@ class McpState:
                 document = self.services.workspace_access.get_document(
                     principal, action.document_id
                 )
-                self.require_markdown(document)
+                self.require_viewable(document)
             elif not isinstance(action, CompareDocument) or action.target_workspace_id is not None:
                 assert action.target_workspace_id is not None
                 target = self._row(principal, action.target_workspace_id)
@@ -347,6 +349,11 @@ class McpState:
             return self.read(principal, selected)
 
     @staticmethod
+    def require_viewable(document: Document) -> None:
+        if document.content_type not in {"text/markdown", "application/pdf"}:
+            raise ValidationError("This App supports Markdown and PDF documents.")
+
+    @staticmethod
     def require_markdown(document: Document) -> None:
         if document.content_type != "text/markdown":
             raise ValidationError("This MCP slice edits Markdown documents only.")
@@ -382,28 +389,36 @@ class McpState:
         with self.lock:
             row = self._row(principal, workspace_id)
             document = self.services.workspace_access.get_document(principal, row["document_id"])
-            self.require_markdown(document)
+            self.require_viewable(document)
             with self.database.connection() as connection:
                 view = connection.execute(
                     "SELECT * FROM mcp_document_views WHERE workspace_id = ?", (workspace_id,)
                 ).fetchone()
+            location: ViewLocation = TextLocation()
+            if document.content_type == "application/pdf":
+                location = PdfLocation()
+            if view:
+                location = TypeAdapter(ViewLocation).validate_json(view["location_json"])
             return {
                 "workspace_id": workspace_id,
                 "version": row["version"],
                 "view_version": view["version"] if view else 1,
-                "location": TextLocation.model_validate_json(view["location_json"]).model_dump(
-                    mode="json"
-                )
-                if view
-                else TextLocation().model_dump(mode="json"),
+                "location": location.model_dump(mode="json"),
                 "base_revision_id": row["base_revision_id"],
+                "can_annotate": document.content_type == "application/pdf"
+                and self.services.authorization.allows(principal, Capability.UPDATE, document.path),
                 "draft": row["draft"],
                 "conflict": row["draft"] is not None
                 and row["base_revision_id"] != document.current_revision_id,
-                "can_update": self.services.authorization.allows(
-                    principal, Capability.UPDATE, document.path
-                ),
+                "can_update": document.content_type == "text/markdown"
+                and self.services.authorization.allows(principal, Capability.UPDATE, document.path),
                 "document": {
+                    "annotation_version": self.annotation_version(document.document_id)
+                    if document.content_type == "application/pdf"
+                    else 0,
+                    "content_type": document.content_type,
+                    "pdf_page_count": document.pdf_page_count,
+                    "pdf_extraction_status": document.pdf_extraction_status,
                     "document_id": document.document_id,
                     "title": document.title,
                     "path": document.path,
@@ -412,9 +427,32 @@ class McpState:
                 },
             }
 
+    def annotation_version(self, document_id: str) -> int:
+        """A monotonic invalidation marker over canonical annotation versions."""
+        with self.database.connection() as connection:
+            return int(
+                connection.execute(
+                    "SELECT COALESCE(sum(version), 0) FROM annotations WHERE document_id = ?",
+                    (document_id,),
+                ).fetchone()[0]
+            )
+
     def update_view(self, principal: Principal, action: UpdateView) -> dict[str, JsonValue]:
         with self.lock:
             current = self._document_view(principal, action.workspace_id)
+            document = self.services.workspace_access.get_document(
+                principal, self._row(principal, action.workspace_id)["document_id"]
+            )
+            if isinstance(action.location, PdfLocation) != (
+                document.content_type == "application/pdf"
+            ):
+                raise ValidationError("View location does not match the document type.")
+            if (
+                isinstance(action.location, PdfLocation)
+                and document.pdf_page_count
+                and action.location.page_number > document.pdf_page_count
+            ):
+                raise ValidationError("PDF page number exceeds the document page count.")
             if current["view_version"] != action.expected_view_version:
                 raise ConflictError(
                     "View location changed in another view. Refresh before saving it."
@@ -616,13 +654,27 @@ class McpState:
             )
 
     def before_write(
-        self, principal: Principal, key: str, operation_key: str, document_id: str
+        self,
+        principal: Principal,
+        key: str,
+        operation_key: str,
+        document_id: str,
+        *,
+        resource_type: str = "document",
     ) -> None:
         with self.database.transaction() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO mcp_execution_writes "
-                "(actor_id, execution_key, operation_key, document_id) VALUES (?, ?, ?, ?)",
-                (principal.actor_id, key, operation_key, document_id),
+                "(actor_id, execution_key, operation_key, document_id, resource_type, resource_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    principal.actor_id,
+                    key,
+                    operation_key,
+                    document_id,
+                    resource_type,
+                    document_id if resource_type == "document" else None,
+                ),
             )
 
     def reject_write(self, principal: Principal, key: str, operation_key: str) -> None:
@@ -647,7 +699,8 @@ class McpState:
             self.authorize_dependencies(principal, key)
         with self.database.connection() as connection:
             rows = connection.execute(
-                "SELECT operation_key, document_id, outcome FROM mcp_execution_writes "
+                "SELECT operation_key, document_id, outcome, resource_id, resource_type "
+                "FROM mcp_execution_writes "
                 "WHERE actor_id = ? AND execution_key = ?",
                 (principal.actor_id, key),
             ).fetchall()
@@ -659,7 +712,7 @@ class McpState:
                 if (
                     row["outcome"] == "rejected"
                     or committed is not None
-                    and committed.resource_id != row["document_id"]
+                    and committed.resource_id != row["resource_id"]
                 ):
                     committed = None
                 result.append(
@@ -670,6 +723,8 @@ class McpState:
                         if committed and committed.completed
                         else row["outcome"],
                         "revision_id": committed.revision_id if committed else None,
+                        "resource_id": row["resource_id"],
+                        "resource_type": row["resource_type"],
                     }
                 )
             return result

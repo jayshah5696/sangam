@@ -1,6 +1,6 @@
 # MCP document workspace
 
-The experimental MCP integration finds Markdown documents through restricted
+The experimental MCP integration finds Markdown and PDF documents through restricted
 Python and opens them in an MCP App. The App can search for more documents,
 switch between tabs, checkpoint separate drafts, and save through Sangam's
 existing revision-aware write service. The normal UI, REST API, and MCP share
@@ -15,7 +15,7 @@ just mcp-demo
 
 The command builds the frontend and self-contained App, starts port 8873 with
 an isolated database/workspace, and seeds **Sangam MCP walkthrough** and
-**Walkthrough companion notes**. It prints
+**Walkthrough companion notes**, plus a five-page PDF. It prints
 the host URL and a mode-0600 disposable key file path, never the key itself.
 Keep that terminal running. Use `just mcp-demo 8874` for another port.
 
@@ -41,7 +41,13 @@ Keep that terminal running. Use `just mcp-demo 8874` for another port.
 10. Cursor and scroll locations are saved separately from drafts. Reopening
     restores each document's location and the comparison reference. Closing a
     clean tab removes its saved view. **Remove comparison** leaves both tabs open.
-11. Expand **Connection and tool trace** to inspect the actual MCP calls.
+11. Search inside the App for `PDF` and open the walkthrough PDF. Move between
+    pages, change zoom, and search page text. Select a passage and choose
+    **Highlight selected passage**, or save a page note. These use the same
+    annotation service as normal Sangam. The original PDF bytes stay unchanged.
+12. Reopen the App to restore the PDF page, zoom, and scroll location. Save or
+    explicitly discard an unsaved note before changing pages or documents.
+13. Expand **Connection and tool trace** to inspect the actual MCP calls.
 
 To see a conflict, keep a checkpointed App draft, save a different revision in
 normal Sangam, then refresh the App. The draft survives, the App shows the new
@@ -69,9 +75,11 @@ The model tools are `search`, `execute`, and `present`. The typed interaction
 tool `mcp_app` has App-only visibility. Hosts must honor visibility metadata;
 it never substitutes for authorization. Every operation checks current grants.
 
-The slice catalog contains `documents.search`, `documents.read`,
-`documents.update`, and `executions.get`. Discovery returns their schemas and
-retry rules. Calls use keyword arguments. For example:
+The catalog contains `documents.search`, `documents.read`, `documents.update`,
+`executions.get`, `pdf.status`, `pdf.pages.read`, `pdf.search`,
+`pdf.annotations.list`, and `pdf.annotations.create`. Discovery returns schemas,
+retry rules, and `next_offset` for further catalog pages. Calls use keyword
+arguments. For example:
 
 ```python
 hits = await documents_search(query="walkthrough", limit=10)
@@ -93,10 +101,38 @@ appears under the small `output` field. Search supports `offset` pagination;
 read results include the revision and a `next_offset` for bounded passages.
 
 `present(document_id="first-id", additional_document_ids=["second-id"])`
-opens a set of permitted Markdown documents. `present(layout_id="layout-id")`
+opens a set of permitted Markdown or PDF documents. `present(layout_id="layout-id")`
 restores the saved open-document list and active tab. A legacy
 `document_id`/`workspace_id` pair must refer to the same document. Layout and
 document checkpoint IDs are explicit references, not credentials.
+
+PDF operations return bounded page passages, search hits, or annotations. For example:
+
+```python
+page = await pdf_pages_read(document_id="pdf-id", page_number=2)
+page["text"]
+```
+
+Extraction can still be pending. The response identifies the document resource
+and tells the assistant to check `pdf.status` again. Execute also retains a
+`pending_jobs` field when a program observes pending extraction, even if its
+final expression discards that status. This does not schedule another model turn.
+
+The App loads authorized PDF bytes in chunks of at most 64,000 bytes, bound to
+the opened revision. PDF.js and its parsing code are bundled into the App and
+run in the iframe without network access or a separate worker permission.
+Rendering caps canvas size and text-layer items. If rendering fails, the App
+offers extracted page text. Loading a large PDF can still use substantial host
+memory; the existing 100 MB source limit applies.
+Short host frames scroll the App controls while the PDF keeps its own reading
+area. This prevents the header and toolbar from consuming the entire reader.
+
+Page notes and text highlights require the existing update permission. Read
+access alone permits viewing and location checkpoints. Annotation retries retain
+the exact operation key and request. Migration `041` records the annotation ID
+with the canonical write transaction, so execution recovery can identify a note
+that committed before a program failed. Document resources include annotation
+changes, so current views refresh notes added through the normal API or UI.
 
 ## Recovery and persistence
 
@@ -182,11 +218,11 @@ capacity until they settle.
 See [Configuration](configuration.md#mcp) for source/output limits, quotas, and
 retention settings. Existing document byte limits still govern writes and drafts.
 
-The App uses tabs with one active Markdown editor and an optional comparison
-pane. Comparison shows text and is read-only; select its tab to edit it.
+The App uses tabs with one active Markdown editor or PDF reader and an optional
+read-only comparison pane. Select a Markdown tab to edit its content.
 View locations use their own optimistic version and require current read access.
 Saving a location creates no document revision and does not change the draft version.
-Two simultaneous editors, HTML/PDF editing, binary upload, OAuth issuance, native Skills/Tasks,
+Two simultaneous editors, HTML/PDF source editing, binary upload, OAuth issuance, native Skills/Tasks,
 proposals, and assistant delegation remain outside this implementation. See the
 [broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md).
 Local bridge verification does not establish compatibility with every external host.
@@ -202,7 +238,8 @@ just test-e2e 'e2e/mcp-workspace.spec.ts'
 `verify-mcp` starts a real isolated server and uses the official Python client
 over HTTP. It verifies authentication, Monty search, App resources, checkpointing,
 failure after commit, duplicate delivery, conflict preservation, revocation,
-multi-document restoration, recovery after trashing a dependency, and SQLite
+multi-document restoration, PDF page reads, annotation recovery and deduplication,
+unchanged PDF bytes, recovery after trashing a dependency, and SQLite
 integrity. It exercises both endpoint spellings with built frontend assets and
 saves `mcp-slice.json` without credentials. CI runs it
 after building the frontend.

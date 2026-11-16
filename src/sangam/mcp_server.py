@@ -8,7 +8,7 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
 from mcp.server import MCPServer
@@ -16,7 +16,7 @@ from mcp.server.apps import Apps
 from mcp.server.mcpserver.context import Context
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import JsonValue, TypeAdapter
+from pydantic import Field, JsonValue, TypeAdapter
 from pydantic import ValidationError as SchemaError
 from pydantic_monty import AsyncMonty, MontyError
 from starlette.datastructures import Headers
@@ -47,6 +47,13 @@ from sangam.mcp_models import (
     ExecutionStatus,
     OpenDocument,
     OperationInput,
+    PdfAnnotations,
+    PdfBytes,
+    PdfCreateAnnotation,
+    PdfReadPage,
+    PdfSearch,
+    PdfStatus,
+    PendingJob,
     ReadDocument,
     RefreshWorkspace,
     SearchApp,
@@ -56,6 +63,14 @@ from sangam.mcp_models import (
     UpdateDocument,
     UpdateView,
     WriteResult,
+)
+from sangam.mcp_pdf import (
+    PdfAnnotationResult,
+    PdfAnnotationWrite,
+    PdfOperations,
+    PdfPageResult,
+    PdfSearchResult,
+    PdfStatusResult,
 )
 from sangam.mcp_state import McpState
 from sangam.schemas import UpdateDocument as DocumentUpdate
@@ -70,7 +85,7 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
         "documents_search",
         "read",
         "search, read",
-        "Search permitted Markdown documents. Paginate with offset; "
+        "Search permitted Markdown and PDF documents. Paginate with offset; "
         "results are current revision metadata.",
     ),
     "documents.read": (
@@ -97,11 +112,51 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
         "Inspect an owned execution and original write evidence. "
         "Never replay the original program to recover.",
     ),
+    "pdf.status": (
+        PdfStatus,
+        "pdf_status",
+        "read",
+        "read",
+        "Read durable PDF extraction status and a checkable resource reference.",
+    ),
+    "pdf.pages.read": (
+        PdfReadPage,
+        "pdf_pages_read",
+        "read",
+        "read",
+        "Read one bounded extracted PDF page passage; pending extraction is explicit.",
+    ),
+    "pdf.search": (
+        PdfSearch,
+        "pdf_search",
+        "read",
+        "search, read",
+        "Search extracted PDF pages with pagination and page references.",
+    ),
+    "pdf.annotations.list": (
+        PdfAnnotations,
+        "pdf_annotations_list",
+        "read",
+        "read",
+        "Read notes and annotations for a PDF page.",
+    ),
+    "pdf.annotations.create": (
+        PdfCreateAnnotation,
+        "pdf_annotations_create",
+        "write",
+        "update",
+        "Add a PDF note or highlight with a stable operation_key. PDF bytes remain immutable.",
+    ),
 }
 OUTPUT_SCHEMAS = {
     "documents.search": SearchResults.model_json_schema(),
     "documents.read": DocumentPassage.model_json_schema(),
     "documents.update": WriteResult.model_json_schema(),
+    "pdf.status": PdfStatusResult.model_json_schema(),
+    "pdf.pages.read": PdfPageResult.model_json_schema(),
+    "pdf.search": PdfSearchResult.model_json_schema(),
+    "pdf.annotations.list": PdfAnnotationResult.model_json_schema(),
+    "pdf.annotations.create": PdfAnnotationWrite.model_json_schema(),
     "executions.get": TypeAdapter(
         ExecutionOutput | ExecutionFailure | ExecutionReceipt
     ).json_schema(),
@@ -176,6 +231,7 @@ class SangamMcp:
         self.services = services
         self.settings = settings
         self.state = McpState(services, settings)
+        self.pdf = PdfOperations(services, self.state)
         self.active = 0
         self.closing = False
         self.pending: set[asyncio.Task[Any]] = set()
@@ -255,8 +311,13 @@ class SangamMcp:
 
     def _register(self) -> None:
         @self.server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
-        async def search(query: str, ctx: Context, limit: int = 5) -> CallToolResult:
-            """Discover complete Sangam operation contracts, not document content."""
+        async def search(
+            query: Annotated[str, Field(max_length=500)],
+            ctx: Context,
+            limit: Annotated[int, Field(ge=1, le=5)] = 5,
+            offset: Annotated[int, Field(ge=0, le=100_000)] = 0,
+        ) -> CallToolResult:
+            """Discover complete operation contracts. Follow next_offset for more results."""
             self.principal(self.credential(ctx))
             terms = query.lower().replace("_", ".").split()
             matches = []
@@ -290,7 +351,10 @@ class SangamMcp:
             matches.sort(key=lambda item: (-item[0], item[1]))
             return result(
                 JSON_OBJECT.validate_python(
-                    {"operations": [item[2] for item in matches[: max(1, min(limit, 5))]]}
+                    {
+                        "operations": [item[2] for item in matches[offset : offset + limit]],
+                        "next_offset": offset + limit if offset + limit < len(matches) else None,
+                    }
                 )
             )
 
@@ -323,7 +387,7 @@ class SangamMcp:
             additional_document_ids: list[str] | None = None,
             layout_id: str | None = None,
         ) -> CallToolResult:
-            """Open a Markdown document App, or reopen an explicit recoverable workspace."""
+            """Open a Markdown/PDF App, or reopen an explicit recoverable workspace."""
             try:
                 principal = self.principal(self.credential(ctx))
                 self.state.cleanup()
@@ -363,6 +427,12 @@ class SangamMcp:
             """Typed document App interactions under the connection's current grants."""
             try:
                 principal = self.principal(self.credential(ctx))
+                if isinstance(action, PdfBytes):
+                    return result(await self.blocking(partial(self.pdf.bytes, principal, action)))
+                if isinstance(
+                    action, (PdfReadPage, PdfSearch, PdfAnnotations, PdfCreateAnnotation)
+                ):
+                    return result(await self.blocking(partial(self.pdf.invoke, principal, action)))
                 if isinstance(action, SearchApp):
                     response = await asyncio.to_thread(
                         self.search_documents,
@@ -438,6 +508,9 @@ class SangamMcp:
                 "path": document.path,
                 "content_type": document.content_type,
                 "metadata_version": document.metadata_version,
+                "annotation_version": self.state.annotation_version(document.document_id)
+                if document.content_type == "application/pdf"
+                else 0,
                 "pdf_extraction_status": document.pdf_extraction_status,
                 "pdf_page_count": document.pdf_page_count,
                 "pdf_extraction_error": document.pdf_extraction_error,
@@ -452,7 +525,7 @@ class SangamMcp:
             category=None,
             actor_id=None,
             sort="relevance",
-            content_type="text/markdown",
+            content_type=None,
             limit=query.limit,
             offset=query.offset,
         )
@@ -463,8 +536,10 @@ class SangamMcp:
                     title=document.title,
                     path=document.path,
                     current_revision_id=document.current_revision_id,
+                    content_type=document.content_type,
                 )
                 for document in documents
+                if document.content_type in {"text/markdown", "application/pdf"}
             ],
             next_offset=query.offset + len(documents) if len(documents) == query.limit else None,
         )
@@ -490,6 +565,7 @@ class SangamMcp:
             )
         self.active += 1
         callback_errors: dict[str, SangamError] = {}
+        pending_jobs: dict[str, JsonValue] = {}
         callbacks = 0
 
         async def call(operation_id: str, **arguments: JsonValue) -> JsonValue:
@@ -504,7 +580,16 @@ class SangamMcp:
                 current = self.principal(token)
                 schema = OPERATIONS[operation_id][0]
                 parsed = schema.model_validate(arguments)
-                return await self.blocking(partial(self.dispatch, current, execution_key, parsed))
+                value = await self.blocking(partial(self.dispatch, current, execution_key, parsed))
+                if isinstance(parsed, PdfStatus) and isinstance(value, dict) and "status" in value:
+                    if value["status"] in {"pending", "processing"}:
+                        pending_jobs[parsed.document_id] = PendingJob(
+                            document_id=parsed.document_id,
+                            resource_uri=f"sangam://document/{parsed.document_id}",
+                        ).model_dump(mode="json")
+                    else:
+                        pending_jobs.pop(parsed.document_id, None)
+                return value
             except SangamError as error:
                 message = f"mcp_callback_{uuid4().hex}: {error.message}"
                 callback_errors[message] = error
@@ -577,10 +662,14 @@ class SangamMcp:
                 "writes": self.state.writes(principal, execution_key, authorize=False),
                 "message": "Execution interrupted. Inspect original write keys before continuing.",
             }
+            if pending_jobs:
+                value["pending_jobs"] = list(pending_jobs.values())
             self.state.finish(principal, execution_key, value, failed=True)
             raise
         finally:
             self.active -= 1
+        if pending_jobs:
+            value["pending_jobs"] = list(pending_jobs.values())
         self.state.finish(principal, execution_key, value, failed=failed)
         self.state.authorize_dependencies(self.principal(token), execution_key)
         return result(value, failed=failed)
@@ -589,12 +678,14 @@ class SangamMcp:
         self,
         principal: Principal,
         execution_key: str,
-        operation: SearchDocuments | ReadDocument | UpdateDocument | ExecutionStatus,
+        operation: OperationInput,
     ) -> JsonValue:
         if isinstance(operation, ExecutionStatus):
             response = self.state.status(principal, operation.execution_key)
             self.state.inherit_dependencies(principal, execution_key, operation.execution_key)
             return response
+        if isinstance(operation, (PdfStatus, PdfCreateAnnotation)):
+            return self.pdf.invoke(principal, operation, execution_key)
         if isinstance(operation, SearchDocuments):
             search_response = self.search_documents(principal, operation)
             for item in search_response.items:

@@ -6,6 +6,7 @@ lost/duplicate writes; failure after commit; stale saves erasing recoverable
 drafts; and an old checkpoint acknowledgement clearing newer edits.
 """
 
+import base64
 import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ from uuid import uuid4
 import pytest
 from conftest import issue_agent_token
 from fastapi.testclient import TestClient
+from test_phase_five_pdf_research import import_pdf, text_pdf
 
 from sangam.api import create_app
 from sangam.config import Settings
@@ -126,6 +128,113 @@ def test_private_mcp_has_no_single_user_fallback(mcp_client: TestClient) -> None
         "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
     )
     assert response.status_code == 401
+
+
+def test_pdf_pages_bytes_notes_and_failure_recovery_share_existing_authority(
+    mcp_client: TestClient,
+) -> None:
+    source = text_pdf("MCP PDF needle")
+    imported = import_pdf(mcp_client, content=source, key="mcp-pdf", path="mcp/paper.pdf")
+    assert imported.status_code == 201
+    document = imported.json()
+    identifier = document["document_id"]
+    token = issue_agent_token(
+        mcp_client, capabilities=("read", "search", "update"), path_prefix="mcp/"
+    )
+    contracts = []
+    offset = 0
+    while True:
+        page = rpc(mcp_client, token, "search", {"query": "", "limit": 2, "offset": offset})[
+            "structuredContent"
+        ]
+        contracts.extend(operation["operation_id"] for operation in page["operations"])
+        if page["next_offset"] is None:
+            break
+        offset = page["next_offset"]
+    assert len(contracts) == len(set(contracts)) and "pdf.pages.read" in contracts
+    opened = rpc(mcp_client, token, "present", {"document_id": identifier})
+    assert not opened.get("isError"), opened
+    workspace = opened["structuredContent"]
+    assert workspace["location"]["kind"] == "pdf" and workspace["can_update"] is False
+    passage = execute(
+        mcp_client, token, f"await pdf_pages_read(document_id='{identifier}', page_number=1)"
+    )
+    assert "MCP PDF needle" in passage["structuredContent"]["output"]["text"]
+    data = app_action(
+        mcp_client,
+        token,
+        {
+            "type": "pdf_bytes",
+            "document_id": identifier,
+            "expected_revision_id": document["current_revision_id"],
+            "offset": 0,
+            "length": 64,
+        },
+    )
+    assert base64.b64decode(data["structuredContent"]["bytes"]) == source[:64]
+    assert data["structuredContent"]["next_offset"] == 64
+    assert app_action(
+        mcp_client,
+        token,
+        {
+            "type": "pdf_bytes",
+            "document_id": identifier,
+            "expected_revision_id": "wrong",
+            "offset": 0,
+        },
+    )["isError"]
+    key = str(uuid4())
+    program = (
+        f"await pdf_annotations_create(document_id='{identifier}', "
+        "page_number=1, note='MCP note', operation_key='pdf-note')\n1 / 0"
+    )
+    failed = execute(mcp_client, token, program, key)
+    assert failed["isError"]
+    evidence = failed["structuredContent"]["writes"][0]
+    assert evidence["outcome"] == "committed" and evidence["resource_type"] == "annotation"
+    assert evidence["resource_id"]
+    assert (
+        execute(mcp_client, token, program, key)["structuredContent"] == failed["structuredContent"]
+    )
+    notes = mcp_client.get(f"/api/v1/pdfs/{identifier}/annotations").json()
+    assert len(notes) == 1 and notes[0]["note"] == "MCP note"
+    readonly = issue_agent_token(mcp_client, capabilities=("read",), path_prefix="mcp/")
+    denied = execute(mcp_client, readonly, program)
+    assert denied["isError"]
+    outside = issue_agent_token(mcp_client, actor_id="agent:outside-pdf", path_prefix="private/")
+    assert execute(
+        mcp_client, outside, f"await pdf_pages_read(document_id='{identifier}', page_number=1)"
+    )["isError"]
+    assert app_action(
+        mcp_client,
+        outside,
+        {
+            "type": "pdf_bytes",
+            "document_id": identifier,
+            "expected_revision_id": document["current_revision_id"],
+        },
+    )["isError"]
+    refreshed = app_action(
+        mcp_client, token, {"type": "refresh", "workspace_id": workspace["workspace_id"]}
+    )["structuredContent"]
+    assert refreshed["document"]["annotation_version"] > workspace["document"]["annotation_version"]
+    assert mcp_client.get(f"/api/v1/pdfs/{identifier}/content").content == source
+    database = mcp_client.app.state.services.documents.database
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pdf_documents SET extraction_status = 'processing' WHERE document_id = ?",
+            (identifier,),
+        )
+    pending = execute(mcp_client, token, f"await pdf_status(document_id='{identifier}')\nTrue")[
+        "structuredContent"
+    ]
+    assert pending["output"] is True
+    assert pending["pending_jobs"][0]["resource_uri"] == f"sangam://document/{identifier}"
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pdf_documents SET extraction_status = 'ready' WHERE document_id = ?",
+            (identifier,),
+        )
 
 
 def test_comparison_and_location_restore_without_touching_content(mcp_client: TestClient) -> None:

@@ -5,7 +5,7 @@ approval: "Decisions 1 through 22 approved by user; Option 2 implementation and 
 source: "User discussion and 01-research-november-2026.md"
 revision: "a14b27cc1df1a60092d6d48bdb36db8c0a092eb6"
 design_date: "2026-11-12"
-updated_date: "2026-11-15"
+updated_date: "2026-11-16"
 ---
 
 # Technical design: Sangam MCP experience
@@ -78,8 +78,9 @@ open documents inside the App as the next implementation addition. It uses the
 same server and existing permissions.
 There is one execution tool and no additional write-approval mode.
 
-The catalog contains `documents.search`, `documents.read`, `documents.update`,
-and `executions.get`. The App-only dispatcher has typed search, open, activate,
+The initial catalog contains `documents.search`, `documents.read`, `documents.update`,
+and `executions.get`. PDF operations extend it as described below. The App-only
+dispatcher has typed search, open, activate,
 close, refresh, checkpoint, save, and discard actions. The authenticated
 `sangam://execution/{execution_key}` resource makes recovery available when
 new execution admission is full. A local host uses the official MCP client
@@ -111,15 +112,16 @@ In-flight receipts explicitly mark output as unavailable and identify their
 write evidence as incomplete. Cancellation retains write references and permits
 later inspection of commits that finish after the client stops waiting.
 
-The App displays one active Markdown editor and an optional comparison pane.
-The comparison shows a saved document or acknowledged draft checkpoint as text;
-selecting its tab makes it editable. Migration `040` stores a comparison reference
+The App displays one active Markdown editor or PDF reader and an optional
+comparison pane. The comparison shows saved Markdown or an acknowledged draft
+checkpoint as text, or renders a PDF. Selecting a Markdown tab makes it editable.
+Migration `040` stores a comparison reference
 per layout and a versioned cursor/scroll location per document checkpoint. View
 writes require read access and leave draft versions and document revisions alone.
 The reference and locations survive restart. Current grants filter comparison
 content just as they filter tabs. Narrow hosts expand comparison into the document
 area instead of forcing two small columns. Two simultaneous editors,
-PDF pages, binary upload, registered skills, OAuth issuance, native Tasks,
+binary upload, registered skills, OAuth issuance, native Tasks,
 proposals, and assistant delegation remain broader design
 scope. Their presence elsewhere in this document does not claim they are
 implemented. [MCP setup and contracts](../../mcp.md) describe the current
@@ -138,9 +140,36 @@ and buffers. Current state is observed once per second, so writes through the
 normal UI and REST participate without a separate MCP write path or event log.
 The App consumes fresh snapshots through its standard bridge and uses the same
 merge rules as polling. It preserves local drafts and explicit conflict actions.
-PDF status, skill snapshots, and assistant jobs should reuse this reference/read/
-observe pattern as those operations are added. Typed operations remain the action
+PDF status uses this reference/read/observe pattern. Skill snapshots and assistant
+jobs should reuse it as those operations are added. Typed operations remain the action
 primitive behind the compact public tools.
+
+The PDF addition uses the existing page extraction, search, byte-stream, and
+annotation services through one adapter shared by Code Mode and App actions.
+The catalog adds `pdf.status`, `pdf.pages.read`, `pdf.search`,
+`pdf.annotations.list`, and `pdf.annotations.create`, with paginated discovery.
+Pending extraction returns a checkable document resource and status operation.
+Execute retains server-observed pending jobs even when the final program value
+does not include them. It does not create a scheduler or promise another agent turn.
+
+The App opens PDFs in the same tabs and comparison layout. PDF location stores
+page, zoom, and scroll independently of draft versions. Revision-bound byte
+chunks are at most 64,000 bytes. Bundled PDF.js parses within the sandboxed
+iframe without network access or extra CSP permissions. Bounded canvas and text
+layers fail with an extracted-text fallback. This choice avoids a host-specific
+worker origin, but parsing uses the iframe's UI thread and can pause interaction
+on large files. The existing PDF source limit still applies.
+
+Page notes and selected-text highlights use canonical annotation geometry,
+permissions, and idempotency. PDF source bytes remain immutable. Migration `041`
+adds resource IDs and types to execution write evidence. A commit hook records
+the canonical annotation ID in the write transaction, so a failed program can
+report its committed annotation. An unresolved note attempt retains its exact
+request and key. Unsaved notes block page changes, tab changes, and acknowledged
+App teardown until the user saves or explicitly discards them. Resource snapshots
+include annotation changes so the normal API and UI participate in refresh.
+PDF upload continues through the existing API or UI. Annotation update/delete,
+centralized skills, and assistant operations remain to be implemented.
 
 MCP is an external entry point to selected authorized Sangam workflows. The
 compact tools are the access mechanism; the useful result is working with

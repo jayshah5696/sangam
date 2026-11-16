@@ -5,14 +5,26 @@ export const documentSchema = z.object({
   title: z.string(),
   path: z.string().nullable(),
   current_revision_id: z.string(),
+  content_type: z.enum(['text/markdown', 'application/pdf']),
+  pdf_page_count: z.number().int().nullable().optional(),
+  pdf_extraction_status: z.string().nullable().optional(),
+  annotation_version: z.number().int().optional(),
   content: z.string(),
 })
-export const locationSchema = z.object({
+const textLocationSchema = z.object({
   kind: z.literal('text'),
   anchor: z.number().int(),
   head: z.number().int(),
   scroll_top: z.number(),
 })
+export const pdfLocationSchema = z.object({
+  kind: z.literal('pdf'),
+  page_number: z.number().int(),
+  zoom: z.number(),
+  scroll_top: z.number(),
+})
+export const locationSchema = z.discriminatedUnion('kind', [textLocationSchema, pdfLocationSchema])
+export type PdfLocation = z.infer<typeof pdfLocationSchema>
 export type ViewLocation = z.infer<typeof locationSchema>
 const documentViewSchema = z.object({
   workspace_id: z.string(),
@@ -23,6 +35,7 @@ const documentViewSchema = z.object({
   draft: z.string().nullable(),
   conflict: z.boolean(),
   can_update: z.boolean(),
+  can_annotate: z.boolean(),
   document: documentSchema,
   saved_revision_id: z.string().optional(),
 })
@@ -56,6 +69,20 @@ export const errorSchema = z.object({ error: z.object({ code: z.string(), messag
 export const resourceSchema = z.object({ contents: z.array(z.object({ text: z.string() })) })
 
 export type AppAction =
+  | { type: 'pdf_bytes'; document_id: string; expected_revision_id: string; offset: number; length: number }
+  | { type: 'pdf_page'; document_id: string; page_number: number }
+  | { type: 'pdf_search'; document_id: string; query: string; offset: number; limit: number }
+  | { type: 'pdf_annotations'; document_id: string; page_number: number; offset?: number; limit?: number }
+  | {
+      type: 'pdf_note'
+      document_id: string
+      page_number: number
+      note: string
+      selected_text: string | null
+      operation_key: string
+      annotation_type?: 'page_note' | 'text_highlight'
+      geometry?: Array<{ x: number; y: number; width: number; height: number }>
+    }
   | {
       type: 'compare'
       workspace_id: string

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import { z } from 'zod'
 
@@ -9,6 +11,161 @@ const documentSchema = z.object({
 })
 const tokenSchema = z.object({ token: z.string() })
 test.use({ video: 'on' })
+
+test('PDF App renders authorized bytes, restores its page, and saves a note without changing the PDF', async ({
+  page,
+  request,
+}, testInfo) => {
+  const suffix = randomUUID()
+  const bytes = readFileSync(path.join(import.meta.dirname, 'assets/multipage.pdf'))
+  const imported = await request.post(`/api/v1/pdfs?title=PDF-${suffix}&path=mcp/${suffix}.pdf`, {
+    headers: { 'Content-Type': 'application/pdf', 'Idempotency-Key': suffix },
+    data: bytes,
+  })
+  expect(imported.status()).toBe(201)
+  const document = documentSchema.parse(await imported.json())
+  const issued = await request.post('/api/v1/agent-tokens', {
+    data: {
+      actor_id: `agent:mcp-pdf-${suffix}`,
+      display_name: 'MCP PDF reader',
+      label: 'isolated e2e',
+      scopes: ['read', 'search', 'update'].map((capability) => ({ capability, path_prefix: 'mcp/' })),
+    },
+  })
+  const { token } = tokenSchema.parse(await issued.json())
+  await page.goto('/mcp-host.html')
+  await page.getByLabel('Sangam API key').fill(token)
+  await page.getByRole('button', { name: 'Connect', exact: true }).click()
+  await page.getByLabel('Find a document').fill(suffix)
+  await page.getByRole('button', { name: 'Search documents', exact: true }).click()
+  await page.getByRole('button', { name: `Open PDF-${suffix}`, exact: true }).click()
+  const app = page.frameLocator('iframe[title="Sangam document workspace"]')
+  await expect(app.getByRole('img', { name: 'PDF page 1', exact: true })).toHaveAttribute(
+    'data-rendered',
+    'true',
+  )
+  await app.getByRole('button', { name: 'Next PDF page', exact: true }).click()
+  await expect(app.getByRole('img', { name: 'PDF page 2', exact: true })).toHaveAttribute(
+    'data-rendered',
+    'true',
+  )
+  if (testInfo.project.use.hasTouch)
+    expect(
+      (await app.getByText('Search this PDF', { exact: true }).boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44)
+  await app.getByText('Search this PDF', { exact: true }).click()
+  await app.getByLabel('PDF search', { exact: true }).fill('Sangam Technical Architecture')
+  await app.getByRole('button', { name: 'Search PDF pages', exact: true }).click()
+  await app.getByRole('button', { name: /^Page 2:/ }).click()
+  const passage = app.locator('.textLayer span').filter({ hasText: 'Sangam Technical Architecture' }).first()
+  const passageWidth = (await passage.boundingBox())?.width ?? 0
+  const pageWidth =
+    (await app.getByRole('img', { name: 'PDF page 2', exact: true }).boundingBox())?.width ?? 1
+  // This fixture's title covers 36% of the PDF page. Selection must cover the same glyphs.
+  expect(passageWidth / pageWidth).toBeGreaterThan(0.3)
+  expect(passageWidth / pageWidth).toBeLessThan(0.4)
+  await passage.evaluate((element) => {
+    const range = element.ownerDocument.createRange()
+    range.selectNodeContents(element)
+    const selection = element.ownerDocument.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.closest('.textLayer')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+  await app.getByRole('button', { name: 'Highlight selected passage', exact: true }).click()
+  await expect(app.locator('.mcp-pdf-mark')).toHaveCount(1)
+  await app.getByLabel('Page note', { exact: true }).fill('A note through the MCP bridge')
+  await app.getByRole('button', { name: 'Next PDF page', exact: true }).click()
+  await expect(app.getByRole('img', { name: 'PDF page 2', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Reopen App', exact: true }).click()
+  await expect(page.getByText(/Save or discard the page note before reopening/)).toBeVisible()
+  await expect(app.getByLabel('Page note', { exact: true })).toHaveValue('A note through the MCP bridge')
+  const noteAction = z.object({
+    params: z.object({
+      arguments: z.object({ action: z.object({ type: z.literal('pdf_note') }) }),
+    }),
+  })
+  let droppedNoteResponse = false
+  await page.route('**/mcp/', async (route) => {
+    if (
+      droppedNoteResponse ||
+      route.request().method() !== 'POST' ||
+      !noteAction.safeParse(route.request().postDataJSON()).success
+    ) {
+      await route.continue()
+      return
+    }
+    droppedNoteResponse = true
+    await route.fetch()
+    await route.abort('failed')
+  })
+  await app.getByRole('button', { name: 'Save page note', exact: true }).click()
+  await expect(app.getByRole('button', { name: 'Retry page note', exact: true })).toBeEnabled()
+  await app.getByRole('button', { name: 'Retry page note', exact: true }).click()
+  await expect(app.getByText('A note through the MCP bridge', { exact: true })).toBeVisible()
+  const savedNotes = z
+    .array(z.object({ note: z.string().nullable() }))
+    .parse(await (await request.get(`/api/v1/pdfs/${document.document_id}/annotations`)).json())
+  expect(savedNotes.filter((item) => item.note === 'A note through the MCP bridge')).toHaveLength(1)
+  const oldPdfFrame = page.frames().find((candidate) => candidate.parentFrame() !== null)
+  await page.getByRole('button', { name: 'Reopen App', exact: true }).click()
+  await expect.poll(() => oldPdfFrame?.isDetached()).toBe(true)
+  await expect(app.getByRole('img', { name: 'PDF page 2', exact: true })).toHaveAttribute(
+    'data-rendered',
+    'true',
+  )
+  await expect(app.getByText('A note through the MCP bridge', { exact: true })).toBeVisible()
+  await expect((await request.get(`/api/v1/pdfs/${document.document_id}/content`)).body()).resolves.toEqual(
+    bytes,
+  )
+  expect(
+    documentSchema.parse(await (await request.get(`/api/v1/documents/${document.document_id}`)).json())
+      .current_revision_id,
+  ).toBe(document.current_revision_id)
+  await page
+    .locator('iframe[title="Sangam document workspace"]')
+    .screenshot({ path: testInfo.outputPath('mcp-pdf-notes.png') })
+  await app.locator('.mcp-pdf-scroll').evaluate((element) => {
+    element.scrollTop = 0
+  })
+  await page
+    .locator('iframe[title="Sangam document workspace"]')
+    .screenshot({ path: testInfo.outputPath('mcp-pdf.png') })
+  if (testInfo.project.name === 'chromium-desktop') {
+    for (const viewport of [
+      { width: 599, height: 844 },
+      { width: 601, height: 844 },
+      { width: 320, height: 568 },
+      { width: 844, height: 390 },
+    ]) {
+      await page.setViewportSize(viewport)
+      await expect(app.getByRole('img', { name: 'PDF page 2', exact: true })).toHaveAttribute(
+        'data-rendered',
+        'true',
+      )
+      expect(
+        await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true)
+      expect((await app.locator('.mcp-pdf-scroll').boundingBox())?.height).toBeGreaterThanOrEqual(100)
+      await app.getByRole('button', { name: 'Next PDF page', exact: true }).scrollIntoViewIfNeeded()
+      await expect(app.getByRole('button', { name: 'Next PDF page', exact: true })).toBeInViewport()
+      await page
+        .locator('iframe[title="Sangam document workspace"]')
+        .screenshot({ path: testInfo.outputPath(`mcp-pdf-${viewport.width}x${viewport.height}.png`) })
+    }
+    await page.setViewportSize({ width: 844, height: 844 })
+    for (const height of [499, 501]) {
+      await page.locator('iframe[title="Sangam document workspace"]').evaluate((element, height) => {
+        element.style.height = `${height + 2}px`
+      }, height)
+      expect(await app.locator('html').evaluate((element) => element.clientHeight)).toBe(height)
+      expect((await app.locator('.mcp-pdf-scroll').boundingBox())?.height).toBeGreaterThanOrEqual(100)
+      await page
+        .locator('iframe[title="Sangam document workspace"]')
+        .screenshot({ path: testInfo.outputPath(`mcp-pdf-frame-${height}.png`) })
+    }
+  }
+})
 
 test('real MCP host finds through Monty, recovers a checkpoint, and saves one revision', async ({
   page,
