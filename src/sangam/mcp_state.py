@@ -409,6 +409,7 @@ class McpState:
                 "view_version": view["version"] if view else 1,
                 "location": location.model_dump(mode="json"),
                 "base_revision_id": row["base_revision_id"],
+                "proposal_version": self.proposal_version(principal, document.document_id),
                 "can_annotate": document.content_type == "application/pdf"
                 and self.services.authorization.allows(principal, Capability.UPDATE, document.path),
                 "draft": row["draft"],
@@ -440,6 +441,16 @@ class McpState:
                     (document_id,),
                 ).fetchone()[0]
             )
+
+    def proposal_version(self, principal: Principal, document_id: str) -> str:
+        """Observe owned canonical proposals without exporting their content."""
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT count(*) AS total, COALESCE(sum(version), 0) AS version "
+                "FROM chat_proposals WHERE document_id=? AND (owner_actor_id=? OR ?)",
+                (document_id, principal.actor_id, int(principal.administrator)),
+            ).fetchone()
+        return f"{row['total']}:{row['version']}"
 
     def update_view(self, principal: Principal, action: UpdateView) -> dict[str, JsonValue]:
         with self.lock:

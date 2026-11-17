@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo } from 'react'
 import type { FileContents } from '@pierre/diffs'
-import { themeMode, useTheme } from '../theme'
+import { themeMode, useTheme, type ThemeMode } from '../theme'
 
 const PierreRevisionDiff = lazy(async () => {
   const module = await import('./PierreRevisionDiff')
@@ -10,6 +10,18 @@ const PierreRevisionDiff = lazy(async () => {
 export function RevisionMergeView({ original, modified }: { original: string; modified: string }) {
   const { preferences } = useTheme()
   const mode = themeMode(preferences)
+  return <RevisionComparison original={original} modified={modified} mode={mode} />
+}
+
+export function RevisionComparison({
+  original,
+  modified,
+  mode,
+}: {
+  original: string
+  modified: string
+  mode: ThemeMode
+}) {
   const oldFile = useMemo<FileContents>(
     () => ({ name: 'previous-revision.md', contents: original }),
     [original],

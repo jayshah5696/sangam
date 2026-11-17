@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { chatProposalSchema } from '../api'
 
 export const documentSchema = z.object({
   document_id: z.string(),
@@ -38,6 +39,7 @@ const documentViewSchema = z.object({
   can_annotate: z.boolean(),
   document: documentSchema,
   saved_revision_id: z.string().optional(),
+  proposal_version: z.string().default('0:0'),
 })
 export const workspaceSchema = documentViewSchema.extend({
   comparison: documentViewSchema.nullable(),
@@ -68,7 +70,88 @@ export const programHitsSchema = z.object({ output: hitsSchema })
 export const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) })
 export const resourceSchema = z.object({ contents: z.array(z.object({ text: z.string() })) })
 
+export const proposalMetadataSchema = chatProposalSchema.pick({
+  proposal_id: true,
+  document_id: true,
+  expected_revision_id: true,
+  applied_revision_id: true,
+  summary: true,
+  status: true,
+})
+export const proposalPageSchema = z.object({
+  items: z.array(proposalMetadataSchema),
+  next_offset: z.number().int().nullable(),
+})
+export const proposalPassageSchema = proposalMetadataSchema
+  .extend({
+    content: z.string(),
+    content_kind: z.enum(['proposed', 'applied']),
+    current_revision_id: z.string(),
+    next_offset: z.number().int().nullable(),
+    sources_retrieved_truncated: z.boolean(),
+  })
+  .and(
+    chatProposalSchema.pick({
+      evidence_status: true,
+      evidence: true,
+      rationale: true,
+      citations: true,
+      sources_retrieved: true,
+    }),
+  )
+export const revisionPassageSchema = z.object({
+  content: z.string(),
+  revision_id: z.string(),
+  next_offset: z.number().int().nullable(),
+})
+export type ProposalMutationAction =
+  | {
+      type: 'proposal_create'
+      workspace_id: string
+      document_id: string
+      expected_revision_id: string
+      content: string
+      summary: string
+      operation_key: string
+    }
+  | {
+      type: 'proposal_apply'
+      workspace_id: string
+      proposal_id: string
+      expected_revision_id: string
+      content: string
+      operation_key: string
+    }
+  | {
+      type: 'proposal_dismiss'
+      workspace_id: string
+      proposal_id: string
+      reason: string
+      operation_key: string
+    }
+export type ProposalAction =
+  | ProposalMutationAction
+  | { type: 'proposal_list'; workspace_id: string; offset: number; limit: number }
+  | {
+      type: 'proposal_read'
+      workspace_id: string
+      proposal_id: string
+      offset: number
+      length: number
+      content_kind?: 'proposed' | 'applied'
+      include_evidence?: boolean
+    }
+  | {
+      type: 'revision_read'
+      workspace_id: string
+      document_id: string
+      revision_id: string
+      offset: number
+      length: number
+    }
+
 export type AppAction =
+  | ProposalAction
   | { type: 'pdf_bytes'; document_id: string; expected_revision_id: string; offset: number; length: number }
   | { type: 'pdf_page'; document_id: string; page_number: number }
   | { type: 'pdf_search'; document_id: string; query: string; offset: number; limit: number }

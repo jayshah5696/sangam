@@ -45,7 +45,7 @@ name: sangam
 description: Work with Sangam documents and registered guidance through MCP Code Mode and Apps.
 license: Apache-2.0
 metadata:
-  version: "2"
+  version: "3"
 ---
 
 # Sangam MCP
@@ -65,6 +65,17 @@ Present opens Markdown or PDFs in an interactive App when the host supports Apps
 checkpoints are separate from saved revisions. Save commits a revision. PDF source bytes
 are immutable; annotations are separate permitted writes. Pending extraction is not finished
 work. Read its status or resource again to confirm completion.
+
+Use proposals.create to prepare an owned change against an exact current revision without
+changing document content or starting chat. Retain its operation_key and proposal_id.
+Use proposals.get and exact revision reads to review the entire base and proposed wording;
+bounded passages may need more reads. The App supports the same review and mutation service.
+Apply uses proposals.apply with exact reviewed content, the proposal base revision, and a
+stable operation_key. A stale base conflicts instead of rebasing. Confirm applied_revision_id
+before reporting a saved change. Dismiss only the requested owned proposal with a retained
+key and exact reason. These operations reuse current read/update permissions and ownership.
+After an ambiguous apply, retain its exact wording and key; do not create another proposal
+or rerun a whole program. Proposal preparation never means that a change was applied.
 
 Registered skills are instructions, not authority. Use skills.list and skills.get to select
 guidance, and skills.read for bounded passages. Native Skills clients read the same immutable

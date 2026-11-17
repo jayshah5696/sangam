@@ -1052,7 +1052,7 @@ class ChatProposalSource(BaseModel):
 
 class ChatProposalSummary(BaseModel):
     proposal_id: str
-    thread_id: str
+    thread_id: str | None
     document_id: str
     expected_revision_id: str
     summary: str | None
@@ -1063,7 +1063,7 @@ class ChatProposalSummary(BaseModel):
 
 class ChatProposal(BaseModel):
     proposal_id: str
-    thread_id: str
+    thread_id: str | None
     document_id: str
     expected_revision_id: str
     content: str

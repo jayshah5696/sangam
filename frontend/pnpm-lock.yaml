@@ -59,6 +59,9 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.5
         version: 1.0.0-beta.5(patch_hash=bc1e0a2119ce70a6eaae660be713bca4bae12cd1775f0a57321558e172ff0ca0)(@pierre/theme@2.0.0)(@shikijs/themes@4.3.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(shiki@4.3.1)
+      '@shikijs/langs':
+        specifier: 4.3.1
+        version: 4.3.1
       '@tanstack/history':
         specifier: 1.162.4
         version: 1.162.4
@@ -92,6 +95,9 @@ importers:
       react-resizable-panels:
         specifier: ^4.14.2
         version: 4.14.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      shiki:
+        specifier: 4.3.1
+        version: 4.3.1
       zod:
         specifier: 4.6.7
         version: 4.6.7

@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from sangam.chat_capabilities import ProposalCitationInput
 from sangam.schemas import AnnotationFields, AnnotationType
 
 Identifier = Annotated[str, Field(min_length=1, max_length=200)]
@@ -56,6 +57,32 @@ class GetProposal(Input):
 
 
 InspectionOperation = ReadDocument | ReadHistory | ReadDiff | ListProposals | GetProposal
+
+
+class CreateProposal(Input):
+    document_id: Identifier
+    expected_revision_id: Identifier
+    content: str
+    summary: str = Field(min_length=1, max_length=500)
+    rationale: str | None = Field(default=None, max_length=1000)
+    citations: list[ProposalCitationInput] = Field(default_factory=list, max_length=20)
+    operation_key: Identifier
+
+
+class ApplyProposal(Input):
+    proposal_id: Identifier
+    expected_revision_id: Identifier
+    content: str
+    operation_key: Identifier
+
+
+class DismissProposal(Input):
+    proposal_id: Identifier
+    reason: str | None = Field(default=None, max_length=500)
+    operation_key: Identifier
+
+
+ProposalMutation = CreateProposal | ApplyProposal | DismissProposal
 
 
 class SearchApp(SearchDocuments):
@@ -186,6 +213,7 @@ WorkspaceOperation = (
     | ExecutionStatus
     | PdfOperation
     | SkillOperation
+    | ProposalMutation
 )
 OperationInput = WorkspaceOperation | AssistantOperation
 
@@ -367,6 +395,32 @@ class SaveDraft(WorkspaceAction):
     operation_key: Identifier
 
 
+class ProposalListApp(WorkspaceAction):
+    type: Literal["proposal_list"]
+    limit: int = Field(default=10, ge=1, le=25)
+    offset: int = Field(default=0, ge=0, le=100_000)
+
+
+class ProposalReadApp(GetProposal, WorkspaceAction):
+    type: Literal["proposal_read"]
+
+
+class ProposalCreateApp(CreateProposal, WorkspaceAction):
+    type: Literal["proposal_create"]
+
+
+class ProposalApplyApp(ApplyProposal, WorkspaceAction):
+    type: Literal["proposal_apply"]
+
+
+class ProposalDismissApp(DismissProposal, WorkspaceAction):
+    type: Literal["proposal_dismiss"]
+
+
+class RevisionReadApp(ReadDocument, WorkspaceAction):
+    type: Literal["revision_read"]
+
+
 AppAction = Annotated[
     RefreshWorkspace
     | CheckpointDraft
@@ -382,6 +436,12 @@ AppAction = Annotated[
     | PdfPageApp
     | PdfSearchApp
     | PdfAnnotationsApp
-    | PdfNoteApp,
+    | PdfNoteApp
+    | ProposalListApp
+    | ProposalReadApp
+    | ProposalCreateApp
+    | ProposalApplyApp
+    | ProposalDismissApp
+    | RevisionReadApp,
     Field(discriminator="type"),
 ]

@@ -29,7 +29,7 @@ from sangam.errors import (
     ValidationError,
     validate_metadata_text,
 )
-from sangam.idempotency import IdempotencyStore
+from sangam.idempotency import IdempotencyStore, request_hash
 from sangam.schemas import (
     ChatProposal,
     ChatProposalCitation,
@@ -71,7 +71,7 @@ class ChatProposalRepository:
         principal: Principal,
         *,
         proposal_id: str,
-        thread_id: str,
+        thread_id: str | None,
         document_id: str,
         expected_revision_id: str,
         content: str,
@@ -83,17 +83,34 @@ class ChatProposalRepository:
         model_opinion: str | None = None,
         citations_json: str = "[]",
         sources_retrieved_json: str = "[]",
+        mutation: tuple[str, str] | None = None,
+        execution_key: str | None = None,
     ) -> ChatProposal:
-        self.require_thread_owner(thread_id, principal)
+        owner = self.require_thread_owner(thread_id, principal) if thread_id else principal.actor_id
         with self.database.transaction() as connection:
+            existing = None
+            if mutation:
+                existing = IdempotencyStore.mutation_record(
+                    connection,
+                    actor_id=principal.actor_id,
+                    key=mutation[0],
+                    operation="proposal_create",
+                    request_hash=mutation[1],
+                )
+            if existing:
+                return _proposal_from_row(
+                    self._owned_row(connection, principal, existing.resource_id)
+                )
             connection.execute(
                 """
                 INSERT INTO chat_proposals(
                     proposal_id, thread_id, document_id, expected_revision_id,
                     content, summary, status, applied_revision_id, created_at, applied_at,
                     apply_idempotency_key, context_id, run_id, rationale, judgment_needed,
-                     citations_json, sources_retrieved_json, model_opinion
-                 ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
+                    citations_json, sources_retrieved_json, model_opinion,
+                    owner_actor_id, execution_key
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL, NULL,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(proposal_id) DO NOTHING
                 """,
                 (
@@ -111,8 +128,20 @@ class ChatProposalRepository:
                     citations_json,
                     sources_retrieved_json,
                     model_opinion,
+                    owner,
+                    execution_key,
                 ),
             )
+            if mutation:
+                IdempotencyStore.record_mutation(
+                    connection,
+                    actor_id=principal.actor_id,
+                    key=mutation[0],
+                    operation="proposal_create",
+                    request_hash=mutation[1],
+                    resource_type="proposal",
+                    resource_id=proposal_id,
+                )
         return self.get_owned(principal, proposal_id)
 
     def cancel_pending(self, run_id: str) -> None:
@@ -180,9 +209,8 @@ class ChatProposalRepository:
         path_prefixes: tuple[str, ...] | None,
         metadata_only: bool,
     ) -> list[sqlite3.Row]:
-        clauses = ["(thread.created_by = ? OR context.actor_id = ? OR ?)"]
+        clauses = ["(proposal.owner_actor_id = ? OR ?)"]
         params: list[object] = [
-            principal.actor_id,
             principal.actor_id,
             int(principal.administrator),
         ]
@@ -202,7 +230,7 @@ class ChatProposalRepository:
             "proposal.expected_revision_id, proposal.applied_revision_id, proposal.status, "
             "proposal.summary, proposal.created_at"
             if metadata_only
-            else "proposal.*, thread.created_by AS proposal_owner_id, "
+            else "proposal.*, proposal.owner_actor_id AS proposal_owner_id, "
             "context.actor_id AS evidence_actor_id, context.document_id AS evidence_document_id, "
             "context.revision_id AS evidence_revision_id, "
             "context.selection_text AS evidence_selected_text, "
@@ -215,7 +243,6 @@ class ChatProposalRepository:
                 SELECT {columns}
                 FROM chat_proposals AS proposal
                 JOIN documents AS d ON d.document_id = proposal.document_id
-                JOIN chat_threads AS thread ON thread.thread_id = proposal.thread_id
                 LEFT JOIN chat_turn_contexts AS context ON context.context_id = proposal.context_id
                 WHERE {" AND ".join(clauses)}
                 ORDER BY proposal.created_at DESC, proposal.proposal_id DESC
@@ -348,9 +375,25 @@ class ChatProposalRepository:
             )
         return self.get_owned(principal, proposal_id)
 
-    def dismiss(self, principal: Principal, proposal_id: str, summary: str | None) -> ChatProposal:
+    def dismiss(
+        self,
+        principal: Principal,
+        proposal_id: str,
+        summary: str | None,
+        mutation: tuple[str, str] | None = None,
+    ) -> ChatProposal:
         with self.database.transaction() as connection:
             row = self._owned_row(connection, principal, proposal_id)
+            if mutation:
+                existing = IdempotencyStore.mutation_record(
+                    connection,
+                    actor_id=principal.actor_id,
+                    key=mutation[0],
+                    operation="proposal_dismiss",
+                    request_hash=mutation[1],
+                )
+                if existing:
+                    return _proposal_from_row(row)
             proposal = _proposal_from_row(row)
             if proposal.status not in ("pending", "stale"):
                 raise ConflictError(f"The proposal is already {proposal.status}")
@@ -367,6 +410,16 @@ class ChatProposalRepository:
                 """,
                 (summary, proposal_id),
             )
+            if mutation:
+                IdempotencyStore.record_mutation(
+                    connection,
+                    actor_id=principal.actor_id,
+                    key=mutation[0],
+                    operation="proposal_dismiss",
+                    request_hash=mutation[1],
+                    resource_type="proposal",
+                    resource_id=proposal_id,
+                )
         return self.get_owned(principal, proposal_id)
 
     @staticmethod
@@ -375,7 +428,7 @@ class ChatProposalRepository:
     ) -> sqlite3.Row:
         row: sqlite3.Row | None = connection.execute(
             """
-            SELECT proposal.*, thread.created_by AS proposal_owner_id,
+            SELECT proposal.*, proposal.owner_actor_id AS proposal_owner_id,
                 context.actor_id AS evidence_actor_id,
                 context.document_id AS evidence_document_id,
                 context.revision_id AS evidence_revision_id,
@@ -383,11 +436,10 @@ class ChatProposalRepository:
                 context.pdf_page_number AS evidence_pdf_page_number,
                 context.annotation_id AS evidence_annotation_id
             FROM chat_proposals AS proposal
-            JOIN chat_threads AS thread ON thread.thread_id = proposal.thread_id
             LEFT JOIN chat_turn_contexts AS context ON context.context_id = proposal.context_id
-            WHERE proposal.proposal_id = ? AND (thread.created_by = ? OR context.actor_id = ? OR ?)
+            WHERE proposal.proposal_id = ? AND (proposal.owner_actor_id = ? OR ?)
             """,
-            (proposal_id, principal.actor_id, principal.actor_id, int(principal.administrator)),
+            (proposal_id, principal.actor_id, int(principal.administrator)),
         ).fetchone()
         if row is None:
             raise NotFoundError(f"Chat proposal not found: {proposal_id}")
@@ -417,11 +469,61 @@ class ChatProposalService:
     def cancel_pending(self, run_id: str) -> None:
         self.repository.cancel_pending(run_id)
 
+    def prepare_external(
+        self,
+        principal: Principal,
+        *,
+        document_id: str,
+        expected_revision_id: str,
+        content: str,
+        summary: str,
+        operation_key: str,
+        rationale: str | None = None,
+        citations: list[ProposalCitationInput] | None = None,
+        execution_key: str | None = None,
+    ) -> ChatProposal:
+        """Prepare an owned artifact without inference, a synthetic thread, or automatic apply."""
+        principal = self.identity.reauthorize(principal)
+        document = self.workspace.get_document(principal, document_id)
+        self.workspace.policy.require(principal, Capability.UPDATE, document.path)
+        digest = request_hash(
+            {
+                "document_id": document_id,
+                "expected_revision_id": expected_revision_id,
+                "content": content,
+                "summary": summary,
+                "rationale": rationale,
+                "citations": [citation.model_dump(mode="json") for citation in citations or []],
+            }
+        )
+        with self.repository.database.connection() as connection:
+            existing = IdempotencyStore.mutation_record(
+                connection,
+                actor_id=principal.actor_id,
+                key=operation_key,
+                operation="proposal_create",
+                request_hash=digest,
+            )
+        if existing:
+            return self.get(principal, existing.resource_id)
+        return self.create(
+            principal,
+            thread_id=None,
+            document_id=document_id,
+            expected_revision_id=expected_revision_id,
+            content=content,
+            summary=summary,
+            rationale=rationale,
+            citations=citations,
+            mutation=(operation_key, digest),
+            execution_key=execution_key,
+        )
+
     def create(
         self,
         principal: Principal,
         *,
-        thread_id: str,
+        thread_id: str | None,
         document_id: str,
         expected_revision_id: str,
         content: str,
@@ -435,6 +537,8 @@ class ChatProposalService:
         judgment_needed: str | None = None,
         model_opinion: str | None = None,
         citations: list[ProposalCitationInput] | list[dict[str, str | int | None]] | None = None,
+        mutation: tuple[str, str] | None = None,
+        execution_key: str | None = None,
     ) -> ChatProposal:
         principal = self.identity.reauthorize(principal)
         validate_metadata_text(summary, "Proposal summary")
@@ -444,7 +548,13 @@ class ChatProposalService:
             validate_metadata_text(judgment_needed, "Proposal judgment")
         if model_opinion:
             validate_metadata_text(model_opinion, "Model opinion")
-        thread_owner = self.repository.require_thread_owner(thread_id, principal)
+        if thread_id is None and mutation is None:
+            raise ValidationError("External proposals require an operation key")
+        thread_owner = (
+            self.repository.require_thread_owner(thread_id, principal)
+            if thread_id
+            else principal.actor_id
+        )
         if context_id is not None:
             context = self.evidence.get_turn_context(principal, context_id)
             if context.actor_id != thread_owner:
@@ -469,6 +579,8 @@ class ChatProposalService:
             content=resolved_content,
         )
         if run_id:
+            if thread_id is None:
+                raise ValidationError("A recorded chat run requires its conversation")
             self.evidence.require_run_owner(principal, run_id, thread_id)
         enriched_citations = self._validated_citations(principal, citations or [])
         identity = json.dumps(
@@ -490,6 +602,12 @@ class ChatProposalService:
                 f"{hashlib.sha256(identity.encode()).hexdigest()}",
             )
         )
+        if mutation:
+            proposal_id = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL, f"sangam:external:{principal.actor_id}:{mutation[0]}"
+                )
+            )
         proposal = self.repository.create(
             principal,
             proposal_id=proposal_id,
@@ -506,9 +624,11 @@ class ChatProposalService:
             citations_json=TypeAdapter(list[ChatProposalCitation])
             .dump_json(enriched_citations)
             .decode(),
+            mutation=mutation,
+            execution_key=execution_key,
         )
         visible = self._visible_evidence(principal, proposal)
-        if check_autonomy_allows(self.repository.database):
+        if thread_id is not None and check_autonomy_allows(self.repository.database):
             try:
                 return self.apply(
                     principal,
@@ -739,7 +859,8 @@ class ChatProposalService:
                 )
             self._applying.add(proposal_id)
         try:
-            proposal = self.repository.get_owned(principal, proposal_id)
+            principal = self.identity.reauthorize(principal)
+            proposal = self.get(principal, proposal_id)
             if proposal.expected_revision_id != expected_revision_id:
                 raise ConflictError("The proposal revision does not match the reviewed revision")
             applied_content = content if content is not None else proposal.content
@@ -809,14 +930,29 @@ class ChatProposalService:
             with self._apply_lock:
                 self._applying.remove(proposal_id)
 
-    def dismiss(self, principal: Principal, proposal_id: str, reason: str | None) -> ChatProposal:
+    def dismiss(
+        self,
+        principal: Principal,
+        proposal_id: str,
+        reason: str | None,
+        operation_key: str | None = None,
+    ) -> ChatProposal:
         validate_metadata_text(reason, "Dismissal reason")
-        proposal = self.repository.get_owned(principal, proposal_id)
+        principal = self.identity.reauthorize(principal)
+        proposal = self.get(principal, proposal_id)
         summary = proposal.summary
         if reason:
             summary = f"{summary or 'Proposal'} — {_bounded_text(reason, 500)}"
         return self._visible_evidence(
-            principal, self.repository.dismiss(principal, proposal_id, summary)
+            principal,
+            self.repository.dismiss(
+                principal,
+                proposal_id,
+                summary,
+                (operation_key, request_hash({"proposal_id": proposal_id, "reason": reason}))
+                if operation_key
+                else None,
+            ),
         )
 
     def _visible_evidence(self, principal: Principal, proposal: ChatProposal) -> ChatProposal:
@@ -870,6 +1006,8 @@ class ChatProposalService:
         sources = proposal.sources_retrieved
         truncated = proposal.sources_retrieved_truncated
         if proposal.run_id:
+            if proposal.thread_id is None:
+                raise ValidationError("Recorded proposal run has no conversation")
             self.evidence.require_run_owner(principal, proposal.run_id, proposal.thread_id)
             sources = self.evidence.list_run_sources(proposal.run_id)
             truncated = self.evidence.run_sources_truncated(proposal.run_id)

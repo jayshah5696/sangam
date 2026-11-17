@@ -12,6 +12,145 @@ const documentSchema = z.object({
 const tokenSchema = z.object({ token: z.string() })
 test.use({ video: 'on' })
 
+test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals', async ({
+  page,
+  request,
+}, testInfo) => {
+  // This covers three durable mutations, transport recovery, and the responsive review layouts.
+  test.setTimeout(60_000)
+  const suffix = randomUUID()
+  const created = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': suffix },
+    data: {
+      title: `Proposal review ${suffix}`,
+      path: `mcp/${suffix}.md`,
+      content: '# Original review source',
+      content_type: 'text/markdown',
+    },
+  })
+  expect(created.status()).toBe(201)
+  const document = documentSchema.parse(await created.json())
+  const issued = await request.post('/api/v1/agent-tokens', {
+    data: {
+      actor_id: `agent:mcp-review-${suffix}`,
+      display_name: 'MCP reviewer',
+      label: 'isolated e2e',
+      scopes: ['read', 'search', 'update'].map((capability) => ({ capability, path_prefix: 'mcp/' })),
+    },
+  })
+  const { token } = tokenSchema.parse(await issued.json())
+  await page.goto(`/mcp-host.html?document=${document.document_id}`)
+  await page.getByLabel('Sangam API key').fill(token)
+  await page.getByRole('button', { name: 'Connect', exact: true }).click()
+  await page.getByLabel('Find a document').fill(suffix)
+  await page.getByRole('button', { name: 'Search documents', exact: true }).click()
+  await page.getByRole('button', { name: `Open Proposal review ${suffix}`, exact: true }).click()
+  const app = page.frameLocator('iframe[title="Sangam document workspace"]')
+  await app.getByRole('button', { name: 'Review proposals', exact: true }).click()
+  await app.getByRole('button', { name: 'New proposal', exact: true }).click()
+  await app.getByLabel('Proposal summary', { exact: true }).fill('Clarify the source')
+  await app.getByLabel('Proposed content', { exact: true }).fill('# Suggested wording')
+  await app.getByRole('button', { name: 'Create proposal', exact: true }).click()
+  await expect(app.getByRole('heading', { name: 'Clarify the source', exact: true })).toBeVisible()
+  expect(
+    documentSchema.parse(await (await request.get(`/api/v1/documents/${document.document_id}`)).json())
+      .current_revision_id,
+  ).toBe(document.current_revision_id)
+  await app.getByLabel('Reviewed wording', { exact: true }).fill('# Human reviewed wording')
+  await expect(app.getByLabel('Revision comparison')).toBeVisible()
+  await expect(
+    app.getByLabel('Revision comparison').getByText('Original review source', { exact: false }),
+  ).toBeVisible()
+  await expect(
+    app.getByLabel('Revision comparison').getByText('Human reviewed wording', { exact: false }),
+  ).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('mcp-proposal-comparison.png'), fullPage: true })
+  if (testInfo.project.name === 'chromium-desktop') {
+    for (const viewport of [
+      { width: 599, height: 844 },
+      { width: 601, height: 844 },
+      { width: 320, height: 568 },
+      { width: 844, height: 390 },
+    ]) {
+      await page.setViewportSize(viewport)
+      expect(
+        await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true)
+      const apply = app.getByRole('button', { name: 'Apply proposal', exact: true })
+      await apply.scrollIntoViewIfNeeded()
+      await expect(apply).toBeInViewport()
+      await expect(app.getByRole('button', { name: 'Dismiss proposal', exact: true })).toBeInViewport()
+      await page.screenshot({
+        path: testInfo.outputPath(`mcp-proposal-${viewport.width}x${viewport.height}.png`),
+        fullPage: true,
+      })
+    }
+    await page.setViewportSize(testInfo.project.use.viewport ?? { width: 1440, height: 900 })
+    const frame = page.locator('iframe[title="Sangam document workspace"]')
+    // The App has its own 600px breakpoint, independent of the host document rail.
+    for (const width of [599, 601]) {
+      await frame.evaluate((element, width) => {
+        element.style.width = `${width}px`
+      }, width)
+      await expect.poll(() => app.locator('html').evaluate((element) => element.clientWidth)).toBe(width)
+      expect(
+        await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true)
+      await app.getByRole('button', { name: 'Apply proposal', exact: true }).scrollIntoViewIfNeeded()
+      await expect(app.getByRole('button', { name: 'Dismiss proposal', exact: true })).toBeInViewport()
+      await frame.screenshot({ path: testInfo.outputPath(`mcp-proposal-frame-${width}.png`) })
+    }
+    await frame.evaluate((element) => {
+      element.style.width = '100%'
+    })
+  }
+  const applyAction = z.object({
+    params: z.object({ arguments: z.object({ action: z.object({ type: z.literal('proposal_apply') }) }) }),
+  })
+  let dropped = false
+  await page.route('**/mcp/', async (route) => {
+    if (
+      dropped ||
+      route.request().method() !== 'POST' ||
+      !applyAction.safeParse(route.request().postDataJSON()).success
+    ) {
+      await route.continue()
+      return
+    }
+    dropped = true
+    await route.fetch()
+    await route.abort('failed')
+  })
+  await app.getByRole('button', { name: 'Apply proposal', exact: true }).click()
+  await expect(app.getByRole('button', { name: 'Retry apply', exact: true })).toBeEnabled()
+  await app.getByRole('button', { name: 'Retry apply', exact: true }).click()
+  await expect(app.getByText('Proposal applied', { exact: true })).toBeVisible()
+  const saved = documentSchema.parse(
+    await (await request.get(`/api/v1/documents/${document.document_id}`)).json(),
+  )
+  expect(saved.content).toBe('# Human reviewed wording')
+  expect(saved.current_revision_id).not.toBe(document.current_revision_id)
+  const history = z
+    .array(z.object({ revision_id: z.string() }))
+    .parse(await (await request.get(`/api/v1/documents/${document.document_id}/history`)).json())
+  expect(history).toHaveLength(2)
+  await app.getByRole('button', { name: 'New proposal', exact: true }).click()
+  await app.getByLabel('Proposal summary', { exact: true }).fill('Discard this suggestion')
+  await app.getByLabel('Proposed content', { exact: true }).fill('# Dismissed wording')
+  await app.getByRole('button', { name: 'Create proposal', exact: true }).click()
+  await app.getByLabel('Dismissal reason', { exact: true }).fill('Keep the reviewed version')
+  await app.getByRole('button', { name: 'Dismiss proposal', exact: true }).click()
+  await expect(app.getByText('Proposal dismissed', { exact: true })).toBeVisible()
+  expect(
+    documentSchema.parse(await (await request.get(`/api/v1/documents/${document.document_id}`)).json())
+      .content,
+  ).toBe('# Human reviewed wording')
+  await app.getByRole('button', { name: 'Close review', exact: true }).click()
+  await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText('# Human reviewed wording')
+  await expect(app.getByRole('button', { name: 'Review proposals', exact: true })).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath('mcp-proposal-review.png'), fullPage: true })
+})
+
 test('PDF App renders authorized bytes, restores its page, and saves a note without changing the PDF', async ({
   page,
   request,

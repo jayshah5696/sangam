@@ -222,9 +222,29 @@ Execution receipts bind any returned private evidence to current source grants.
 observation. The shared proposal reader now enforces target-document read grants
 for REST and MCP; SQL applies ownership and literal path prefixes before
 pagination, and metadata pages do not select bodies or evidence. No synthetic
-conversation or second proposal store was added. Standalone external proposal
-creation, Code Mode apply/dismiss, App proposal review, and remaining workspace
-operations are still pending under Decision 8 and the broader operation contracts.
+conversation or second proposal store was added.
+
+Decision 8 is implemented by migration `044` and the shared proposal service.
+The existing table records its owner explicitly and keeps chat/execution
+references as optional provenance. Migration preserves legacy IDs, evidence,
+reviewed content, and reserved apply keys. External preparation, exact apply,
+and dismissal run behind `execute` and the typed App dispatcher. Creation never
+starts inference or applies automatically. Creation and dismissal use the existing
+actor-scoped mutation-key namespace; apply retains canonical document recovery.
+The same key and wording recover an interrupted commit without creating another
+revision. Ownership and current document grants remain the authority.
+
+The App lists owned proposals for its active document, creates suggestions,
+reads the complete pinned base/proposal, and reuses Sangam's revision comparison.
+Users can edit reviewed wording, apply, or dismiss. Client and server prevent
+apply over an existing document draft. Proposal changes invalidate the workspace
+and proposal resources through the existing observer. Background updates preserve
+local review edits and require explicit reload when the proposal changes.
+Ambiguous mutations retain their exact key and payload for retry. Only a
+server-confirmed rejection permits correction. Review edits are local until
+Create or Apply and are guarded during App navigation/teardown; a forced browser
+reload can lose unsaved review edits. Remaining workspace operations are pending
+under the broader operation contracts.
 
 MCP is an external entry point to selected authorized Sangam workflows. The
 compact tools are the access mechanism; the useful result is working with

@@ -101,7 +101,26 @@
 .mcp-conflict pre { max-height: 20dvh; overflow: auto; white-space: pre-wrap; }
 .mcp-trace { padding: var(--space-4); color: var(--muted); }
 .mcp-trace li { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-control); }
+.mcp-proposal-review { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.mcp-proposal-review[hidden], .mcp-editor[hidden], .mcp-comparison[hidden] { display: none; }
+.mcp-review-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
+.mcp-review-toolbar h2 { margin: 0; font-size: var(--text-body); }
+.mcp-review-toolbar .mcp-controls { flex-wrap: wrap; }
+.mcp-review-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); flex: 1; min-height: 0; overflow: hidden; }
+.mcp-review-list { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; overflow: auto; padding: var(--space-3); border-right: 1px solid var(--line); }
+.mcp-review-list button { display: grid; justify-items: start; gap: var(--space-2); height: auto; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.mcp-review-list button[aria-current] { background: var(--accent-soft); }
+.mcp-review-content { min-width: 0; min-height: 0; overflow: auto; padding: var(--space-4); }
+.mcp-review-content h3 { font-size: var(--text-body); margin-block: 0 var(--space-3); }
+.mcp-review-reference { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-meta); overflow-wrap: anywhere; }
+.mcp-review-content .mcp-controls { flex-wrap: wrap; justify-content: flex-start; }
+.mcp-review-content summary { min-height: var(--control-height); align-content: center; cursor: pointer; }
+.mcp-review-field { display: grid; gap: var(--space-2); margin-block: var(--space-3); }
+.mcp-review-field input, .mcp-review-field textarea { width: 100%; min-width: 0; min-height: var(--control-height); padding: var(--space-2); background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-control); font: inherit; }
+.mcp-review-field textarea { min-height: 10lh; resize: vertical; font-family: var(--font-mono); }
 @media (max-width: 600px) {
+  .mcp-review-body { display: flex; flex-direction: column; }
+  .mcp-review-list { flex: none; max-height: 20dvh; border-right: 0; border-bottom: 1px solid var(--line); }
   .mcp-document-body { flex-direction: column; }
   .mcp-document-body:has(.mcp-comparison[open]) > .mcp-editor { display: none; }
   .mcp-comparison { border-left: 0; border-top: 1px solid var(--line); }
@@ -117,6 +136,7 @@
   .mcp-document-header.mcp-pdf-header .mcp-controls { width: auto; }
 }
 @media (pointer: coarse) {
+  .mcp-review-content summary { min-height: var(--control-touch); }
   .mcp-app .mcp-tab-close { min-width: var(--control-touch); }
   .mcp-pdf-toolbar button { min-width: var(--control-touch); }
   .mcp-pdf-scroll summary, .mcp-workspace-search summary, .mcp-comparison summary { min-height: var(--control-touch); }

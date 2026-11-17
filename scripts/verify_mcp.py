@@ -142,6 +142,114 @@ async def verify_skill_events(base: str, token: str, rest: httpx.AsyncClient, sk
             assert old == source["content"]
 
 
+async def verify_proposals(base: str, token: str, rest: httpx.AsyncClient) -> dict:
+    """Prove canonical proposals, document commits and native resource invalidations."""
+    created = await rest.post(
+        "/api/v1/documents",
+        headers={"Idempotency-Key": str(uuid4())},
+        json={
+            "title": "MCP proposal proof",
+            "path": "mcp-demo/proposal-proof.md",
+            "content_type": "text/markdown",
+            "content": "# Original proposal source",
+        },
+    )
+    created.raise_for_status()
+    document = created.json()
+    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}) as http:
+
+        @asynccontextmanager
+        async def transport():
+            async with streamable_http_client(base + "/mcp", http_client=http) as streams:
+                yield streams[0], streams[1]
+
+        async with Client(transport(), cache=None) as client:
+
+            async def program(code: str) -> dict:
+                reply = await client.call_tool(
+                    "execute", {"code": code, "execution_key": str(uuid4())}
+                )
+                assert not reply.is_error and reply.structured_content is not None, reply
+                return reply.structured_content["output"]
+
+            opened = await client.call_tool("present", {"document_id": document["document_id"]})
+            assert not opened.is_error and opened.structured_content is not None
+            workspace = opened.structured_content
+            uri = f"sangam://workspace/{workspace['workspace_id']}"
+            creation_key = str(uuid4())
+            create_code = (
+                f"await proposals_create(document_id='{document['document_id']}', "
+                f"expected_revision_id='{document['current_revision_id']}', "
+                f"summary='Proposal proof', content='# Suggested', operation_key='{creation_key}')"
+            )
+            async with client.listen(resource_subscriptions=[uri]) as subscription:
+                proposal = await program(create_code)
+                assert proposal["status"] == "pending" and proposal["conversation_id"] is None
+                event = await asyncio.wait_for(anext(subscription), 5)
+                assert isinstance(event, ResourceUpdated) and event.uri == uri
+                observed = json.loads((await client.read_resource(uri)).contents[0].text)
+                assert observed["proposal_version"] != workspace["proposal_version"]
+                assert (
+                    observed["document"]["current_revision_id"] == document["current_revision_id"]
+                )
+            proposal_uri = proposal["resource_uri"]
+            async with client.listen(resource_subscriptions=[uri, proposal_uri]) as subscription:
+                apply_code = (
+                    f"await proposals_apply(proposal_id='{proposal['proposal_id']}', "
+                    f"expected_revision_id='{document['current_revision_id']}', "
+                    f"content='# Reviewed by MCP', operation_key='{uuid4()}')"
+                )
+                applied = await program(apply_code)
+                observed_uris = set()
+                for _ in range(2):
+                    event = await asyncio.wait_for(anext(subscription), 5)
+                    assert isinstance(event, ResourceUpdated)
+                    observed_uris.add(event.uri)
+                assert observed_uris == {uri, proposal_uri}
+                recorded = json.loads((await client.read_resource(proposal_uri)).contents[0].text)
+                assert recorded["applied_revision_id"] == applied["applied_revision_id"]
+                assert (await program(apply_code))["applied_revision_id"] == applied[
+                    "applied_revision_id"
+                ]
+            saved = (await rest.get(f"/api/v1/documents/{document['document_id']}")).json()
+            assert saved["content"] == "# Reviewed by MCP"
+            assert saved["current_revision_id"] == applied["applied_revision_id"]
+            assert (
+                len((await rest.get(f"/api/v1/documents/{document['document_id']}/history")).json())
+                == 2
+            )
+            assert (await program(create_code))["proposal_id"] == proposal["proposal_id"]
+            second = await program(
+                f"await proposals_create(document_id='{document['document_id']}', "
+                f"expected_revision_id='{saved['current_revision_id']}', "
+                "content='# Dismissed wording', summary='Dismiss proof', "
+                f"operation_key='{uuid4()}')"
+            )
+            dismiss_code = (
+                f"await proposals_dismiss(proposal_id='{second['proposal_id']}', "
+                f"reason='Keep reviewed wording', operation_key='{uuid4()}')"
+            )
+            assert (await program(dismiss_code))["status"] == "dismissed"
+            assert (await program(dismiss_code))["status"] == "dismissed"
+            assert (await rest.get(f"/api/v1/documents/{document['document_id']}")).json()[
+                "current_revision_id"
+            ] == applied["applied_revision_id"]
+    with sqlite3.connect(os.environ["SANGAM_DATABASE_PATH"]) as database:
+        row = database.execute(
+            "SELECT owner_actor_id, thread_id, execution_key FROM chat_proposals "
+            "WHERE proposal_id=?",
+            (proposal["proposal_id"],),
+        ).fetchone()
+        assert row[0] == "agent:mcp-demo" and row[1] is None and row[2]
+        assert database.execute("PRAGMA foreign_key_check").fetchall() == []
+    return {
+        "proposal_id": proposal["proposal_id"],
+        "applied_revision_id": applied["applied_revision_id"],
+        "dismissed_proposal_id": second["proposal_id"],
+        "native_events": "workspace and proposal",
+    }
+
+
 async def verify() -> None:
     base = os.environ["SANGAM_API_URL"]
     document, companion, pdf, issued = await asyncio.to_thread(seed_demo, base)
@@ -373,6 +481,9 @@ async def verify() -> None:
             assert refreshed.structured_content["layout"]["unavailable_count"] == 1
             resource = await session.read_resource("ui://sangam/document-workspace.html")
             assert resource.contents and "<html" in str(resource.contents)
+            # The self-contained bridge resource must not include every Shiki grammar.
+            assert len(resource.contents[0].text.encode()) < 6_000_000
+        proposal_proof = await verify_proposals(base, issued.token, rest)
         assert (await rest.delete(f"/api/v1/agent-tokens/{issued.token_id}")).status_code == 200
         assert (
             await rest.post("/mcp/", headers={"Authorization": f"Bearer {issued.token}"}, json={})
@@ -389,6 +500,7 @@ async def verify() -> None:
         "protocol_client": "official Python SDK over Streamable HTTP",
         "document_id": document.document_id,
         "committed_revision_id": revision["current_revision_id"],
+        "proposals": proposal_proof,
         "verified": [
             "explicit authentication",
             "bare and slash endpoints with built frontend",
@@ -407,6 +519,8 @@ async def verify() -> None:
             "recovery after a dependency is trashed",
             "conflict preserves draft",
             "revocation",
+            "owned external proposal creation, exact apply recovery and idempotent dismissal",
+            "native workspace and proposal invalidation for canonical proposal changes",
             "SQLite integrity and one committed operation key",
         ],
     }

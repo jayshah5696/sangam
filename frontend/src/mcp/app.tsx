@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 're
 import { MarkdownEditor } from '../components/MarkdownEditor'
 import { StateMessage } from '../components/ui/StateMessage'
 import { PdfPane } from './PdfPane'
+import { ProposalReview } from './ProposalReview'
 import { applyHostAppearance } from './appearance'
 import {
   errorSchema,
@@ -14,6 +15,7 @@ import {
   type SearchResults,
   type Workspace,
   type ViewLocation,
+  type ProposalAction,
 } from './contracts'
 import '../styles.css'
 import '../styles/mcp-workspace.css'
@@ -22,7 +24,8 @@ const app = new App({ name: 'Sangam document workspace', version: '0.1.0' }, {})
 type SaveAttempt = { request: Extract<AppAction, { type: 'save' }>; content: string }
 type WorkspaceAction = Exclude<
   AppAction,
-  { type: 'search' | 'pdf_bytes' | 'pdf_page' | 'pdf_search' | 'pdf_annotations' | 'pdf_note' }
+  | ProposalAction
+  | { type: 'search' | 'pdf_bytes' | 'pdf_page' | 'pdf_search' | 'pdf_annotations' | 'pdf_note' }
 >
 type NavigationAction = Extract<AppAction, { type: 'open' | 'activate' | 'close' | 'compare' }>
 
@@ -35,6 +38,7 @@ function DocumentApp() {
   const [sharedConflict, setSharedConflict] = useState(false)
   const [navigating, setNavigating] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
   const [locationChanged, setLocationChanged] = useState(0)
   const [query, setQuery] = useState('')
   const [searchedQuery, setSearchedQuery] = useState<string | null>(null)
@@ -47,6 +51,8 @@ function DocumentApp() {
   const queue = useRef(Promise.resolve())
   const saveAttempt = useRef<SaveAttempt | null>(null)
   const unsavedPdfNote = useRef(false)
+  const unsavedReview = useRef(false)
+  const reviewTrigger = useRef<HTMLButtonElement>(null)
   const retryAction = useRef<(() => Promise<void>) | null>(null)
   const tabButtons = useRef(new Map<string, HTMLButtonElement>())
   const pendingTabFocus = useRef<string | null>(null)
@@ -195,6 +201,8 @@ function DocumentApp() {
   })
 
   const prepareTeardown = useEffectEvent(async () => {
+    if (unsavedReview.current)
+      throw new Error('Finish or discard your proposal review edits before reopening the App.')
     if (unsavedPdfNote.current) throw new Error('Save or discard the page note before reopening the App.')
     // The host can remove this frame after the acknowledgement. Apply the
     // editing guard synchronously before taking the final checkpoint.
@@ -280,6 +288,8 @@ function DocumentApp() {
   }
 
   async function navigate(makeRequest: (state: Workspace) => NavigationAction) {
+    if (unsavedReview.current)
+      throw new Error('Finish or discard your proposal review edits before changing documents.')
     if (unsavedPdfNote.current) throw new Error('Save or discard the page note before changing documents.')
     if (saveAttempt.current)
       throw new Error(
@@ -303,6 +313,7 @@ function DocumentApp() {
       setSharedConflict(false)
       setDiscarding(false)
       setSearchOpen(false)
+      setReviewOpen(false)
       pendingTabFocus.current = next.workspace_id
       apply(next, true)
       tabButtons.current.get(next.workspace_id)?.focus()
@@ -545,6 +556,23 @@ function DocumentApp() {
             </p>
           </div>
           <div className="mcp-controls">
+            {workspace.document.content_type === 'text/markdown' && (
+              <button
+                className="secondary-action"
+                ref={reviewTrigger}
+                aria-expanded={reviewOpen}
+                disabled={controlsDisabled}
+                onClick={() => {
+                  void enqueue(async () => {
+                    await checkpoint()
+                    await checkpointView()
+                    setReviewOpen(true)
+                  })
+                }}
+              >
+                Review proposals
+              </button>
+            )}
             <button
               className="secondary-action"
               disabled={controlsDisabled}
@@ -623,7 +651,29 @@ function DocumentApp() {
           />
         )}
         <div className={`mcp-document-body${workspace.comparison ? ' mcp-with-comparison' : ''}`}>
-          <section className="mcp-editor" aria-label="Document editor">
+          {workspace.document.content_type === 'text/markdown' && (
+            <ProposalReview
+              key={workspace.workspace_id}
+              app={app}
+              workspace={workspace}
+              active={reviewOpen}
+              initialContent={text}
+              dirtyDocument={dirty}
+              onUnsavedChange={(value) => {
+                unsavedReview.current = value
+              }}
+              onApplied={async () => {
+                await enqueue(async () => {
+                  await action({ type: 'refresh', workspace_id: workspace.workspace_id }, true)
+                })
+              }}
+              onClose={() => {
+                setReviewOpen(false)
+                reviewTrigger.current?.focus()
+              }}
+            />
+          )}
+          <section className="mcp-editor" aria-label="Document editor" hidden={reviewOpen}>
             {workspace.document.content_type === 'application/pdf' && workspace.location.kind === 'pdf' ? (
               <PdfPane
                 key={workspace.workspace_id}
@@ -672,6 +722,7 @@ function DocumentApp() {
           {workspace.comparison && (
             <details
               className="mcp-comparison"
+              hidden={reviewOpen}
               key={workspace.comparison.workspace_id}
               open={window.matchMedia('(min-width: 601px)').matches}
             >

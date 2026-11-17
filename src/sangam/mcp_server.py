@@ -41,9 +41,12 @@ from sangam.mcp_inspection import DiffPassage, InspectionReads, ProposalPage, Pr
 from sangam.mcp_models import (
     ActivateDocument,
     AppAction,
+    ApplyProposal,
     CancelAssistant,
     CloseDocument,
     CompareDocument,
+    CreateProposal,
+    DismissProposal,
     DocumentPassage,
     ExecutionFailure,
     ExecutionOutput,
@@ -64,12 +67,18 @@ from sangam.mcp_models import (
     PdfStatus,
     PendingAssistantJob,
     PendingJob,
+    ProposalApplyApp,
+    ProposalCreateApp,
+    ProposalDismissApp,
+    ProposalListApp,
+    ProposalReadApp,
     ReadConversation,
     ReadDiff,
     ReadDocument,
     ReadHistory,
     ReadSkill,
     RefreshWorkspace,
+    RevisionReadApp,
     SearchApp,
     SearchDocuments,
     SearchHit,
@@ -89,6 +98,7 @@ from sangam.mcp_pdf import (
     PdfSearchResult,
     PdfStatusResult,
 )
+from sangam.mcp_proposals import ProposalMutationError, ProposalOperations, ProposalWriteResult
 from sangam.mcp_skills import SkillCatalog, SkillEntry, SkillExports, SkillPassage, SkillsExtension
 from sangam.mcp_state import McpState
 from sangam.schemas import RevisionPage
@@ -99,6 +109,30 @@ APP_URI = "ui://sangam/document-workspace.html"
 JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
+    "proposals.create": (
+        CreateProposal,
+        "proposals_create",
+        "write",
+        "read, update",
+        "Prepare an owned proposal against an exact revision without changing document content. "
+        "Requires a stable operation_key. Creates no conversation and never automatically applies.",
+    ),
+    "proposals.apply": (
+        ApplyProposal,
+        "proposals_apply",
+        "write",
+        "ownership, read, update",
+        "Commit exact reviewed content against the proposal base using existing write authority. "
+        "Retain operation_key and content for retries. A stale base conflicts; no auto-rebase.",
+    ),
+    "proposals.dismiss": (
+        DismissProposal,
+        "proposals_dismiss",
+        "write",
+        "ownership, read",
+        "Dismiss an owned pending or stale proposal without changing its document. "
+        "Retain the operation_key and exact reason for retries.",
+    ),
     "documents.history": (
         ReadHistory,
         "documents_history",
@@ -266,6 +300,9 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
     ),
 }
 OUTPUT_SCHEMAS = {
+    "proposals.create": ProposalWriteResult.model_json_schema(),
+    "proposals.apply": ProposalWriteResult.model_json_schema(),
+    "proposals.dismiss": ProposalWriteResult.model_json_schema(),
     "documents.history": RevisionPage.model_json_schema(),
     "documents.diff": DiffPassage.model_json_schema(),
     "proposals.list": ProposalPage.model_json_schema(),
@@ -363,6 +400,7 @@ class SangamMcp:
         self.pdf = PdfOperations(services, self.state)
         self.skills = SkillExports(services, self.state)
         self.inspection = InspectionReads(services, self.state)
+        self.proposals = ProposalOperations(services, self.state, self.inspection)
         skills_extension = SkillsExtension(self.skills, self.principal)
         self.active = 0
         self.closing = False
@@ -559,6 +597,20 @@ class SangamMcp:
             """Typed document App interactions under the connection's current grants."""
             try:
                 principal = self.principal(self.credential(ctx))
+                if isinstance(
+                    action,
+                    (
+                        ProposalListApp,
+                        ProposalReadApp,
+                        ProposalCreateApp,
+                        ProposalApplyApp,
+                        ProposalDismissApp,
+                        RevisionReadApp,
+                    ),
+                ):
+                    return result(
+                        await self.blocking(partial(self.proposals.app, principal, action))
+                    )
                 if isinstance(action, PdfBytes):
                     return result(await self.blocking(partial(self.pdf.bytes, principal, action)))
                 if isinstance(
@@ -589,6 +641,14 @@ class SangamMcp:
                         await self.blocking(partial(self.state.update_view, principal, action))
                     )
                 return result(await self.blocking(partial(self.state.change, principal, action)))
+            except ProposalMutationError as error:
+                return result(
+                    {
+                        "error": {"code": error.code, "message": error.message},
+                        "mutation": {"operation_key": error.key, "outcome": error.outcome},
+                    },
+                    failed=True,
+                )
             except SangamError as error:
                 return failure(error)
 
@@ -869,6 +929,8 @@ class SangamMcp:
         execution_key: str,
         operation: WorkspaceOperation,
     ) -> JsonValue:
+        if isinstance(operation, (CreateProposal, ApplyProposal, DismissProposal)):
+            return self.proposals.invoke(principal, operation, execution_key)
         if isinstance(operation, ExecutionStatus):
             response = self.state.status(principal, operation.execution_key)
             self.state.inherit_dependencies(principal, execution_key, operation.execution_key)

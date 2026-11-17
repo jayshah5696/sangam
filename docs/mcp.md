@@ -47,7 +47,13 @@ Keep that terminal running. Use `just mcp-demo 8874` for another port.
     annotation service as normal Sangam. The original PDF bytes stay unchanged.
 12. Reopen the App to restore the PDF page, zoom, and scroll location. Save or
     explicitly discard an unsaved note before changing pages or documents.
-13. Add `debug=1` to the host URL to expose **Connection and tool trace**.
+13. Open a Markdown tab and select **Review proposals**, then **New proposal**.
+    Enter a summary and proposed content, then select **Create proposal**. The
+    document stays unchanged. Review the comparison and edit **Reviewed wording**
+    before selecting **Apply proposal**. The result names the saved revision.
+    Create another suggestion and select **Dismiss proposal** to close it without
+    changing the document. Save or discard any document draft before applying.
+14. Add `debug=1` to the host URL to expose **Connection and tool trace**.
 
 The local host uses Sangam's saved appearance preferences and shared navigation,
 tab, editor, and control styles. Its theme selector uses the existing palettes.
@@ -67,6 +73,12 @@ opaque-origin `allow-scripts` iframe with network access denied. The key stays
 in host memory. The host permits only the exact built App script hash; normal
 Sangam keeps its existing CSP. No model response or domain operation is simulated.
 
+The App's shared revision comparison bundles the Markdown syntax grammar.
+The main Sangam application retains its full language support. HTTP verification
+checks that the self-contained HTML stays below six million bytes, including its
+PDF parser and comparison renderer. This is a local bundle check, not a limit
+guaranteed by every MCP host.
+
 Press Ctrl+C in the demo terminal to stop and remove the disposable workspace
 and key. Verification artifacts remain under `artifacts/verify-sangam/`.
 
@@ -83,6 +95,7 @@ it never substitutes for authorization. Every operation checks current grants.
 
 The catalog contains `documents.search`, `documents.read`, `documents.history`,
 `documents.diff`, `documents.update`, `proposals.list`, `proposals.get`,
+`proposals.create`, `proposals.apply`, `proposals.dismiss`,
 `executions.get`, `pdf.status`, `pdf.pages.read`, `pdf.search`,
 `pdf.annotations.list`, `pdf.annotations.create`, `skills.list`, `skills.get`,
 `skills.read`, `assistant.submit/get/wait/cancel`, and `conversations.read`.
@@ -285,7 +298,7 @@ limits; retained request identities use the existing MCP receipt quota. Answers
 expire after the existing seven-day result-retention window. Identities and
 canonical conversation/artifact references remain for recovery.
 
-## Proposal inspection
+## Proposals and review
 
 `proposals_list(document_id="...", limit=10, offset=0)` returns owned proposal
 metadata. A known `conversation_id` is another optional filter. Follow
@@ -323,9 +336,62 @@ permitted proposals without an inference grant. Document access alone does not
 grant access to another actor's proposal. REST proposal listing uses the same
 target-document read filter.
 
-This addition inspects existing proposals. Standalone external proposal creation,
-apply/dismiss operations through Code Mode, and an App proposal-review view remain
-pending. The existing Sangam review UI and REST mutation contracts stay in use.
+`proposals_create` prepares an owned change against an exact revision without
+changing the document or starting a conversation. It requires existing read and
+update permissions, a summary, the full proposed content, and an `operation_key`.
+Optional rationale and pinned citations use the same validation as chat proposals.
+Creation never applies automatically, including when internal chat autonomy is
+enabled. No inference grant or separate MCP approval grant is needed.
+
+```python
+proposal = await proposals_create(
+    document_id="document-id",
+    expected_revision_id="base-revision",
+    content="# Proposed wording",
+    summary="Clarify the introduction",
+    operation_key="retained-create-key",
+)
+proposal
+```
+
+Use `proposals_apply(proposal_id="...", expected_revision_id="...",
+content="exact reviewed wording", operation_key="retained-apply-key")` to commit
+the reviewed content. Ownership and current target read/update permissions apply.
+An older base conflicts instead of rebasing. The result names the committed
+`applied_revision_id`; inspect that reference before reporting a saved change.
+The existing apply reservation binds the wording and applying actor. Recovery
+keeps its original operation key even if a later caller supplies a different key.
+Use the original key and exact content for retries.
+
+`proposals_dismiss(proposal_id="...", reason="...", operation_key="...")`
+dismisses an owned pending or stale proposal under current read access. It creates
+no document revision. Creation and dismissal use the existing actor-scoped
+idempotency namespace. Changed arguments under an existing key conflict.
+Execution failure evidence distinguishes proposal-record writes from document
+commits. An interrupted apply can report its canonical committed revision before
+proposal completion is recorded.
+
+In the App, **Review proposals** opens the current document's owned proposals.
+**New proposal** stores a suggestion; the saved document stays unchanged. Review
+loads the complete proposal and exact base through bounded passages, then uses
+the shared revision comparison and an editable reviewed-content field. Apply and
+dismiss call the same service as Code Mode and REST. The App checks the original
+key after a lost response. It permits correction only after server-confirmed
+rejection, and retains exact arguments for committed or uncertain outcomes.
+Both the App and server block apply while that workspace has a document draft.
+Save or discard the draft first. A concurrent proposal change leaves local review
+edits intact until the user reloads or discards them.
+
+Review edits remain local until Create or Apply. Navigation and App teardown
+require finishing or discarding local review edits. A forced browser reload can
+lose those edits; the canonical proposal remains available. Saved document drafts
+continue to use the existing checkpoint and retention rules.
+
+Migration `044` adds explicit ownership to the existing proposal table, makes
+conversation provenance optional, and preserves proposal IDs, evidence, and apply
+reservations. Proposal changes participate in workspace invalidation and native
+proposal-resource events. The ordinary Sangam review inbox also accepts external
+proposals without a thread. App clicks retain the connected actor's authority.
 
 ## Recovery and persistence
 
@@ -416,8 +482,7 @@ read-only comparison pane. Select a Markdown tab to edit its content.
 View locations use their own optimistic version and require current read access.
 Saving a location creates no document revision and does not change the draft version.
 Two simultaneous editors, HTML/PDF source editing, binary upload, OAuth issuance, native Tasks,
-proposal creation and mutations through Code Mode, App proposal review, and other
-workspace operations remain outside this implementation. See the
+other workspace operations remain outside this implementation. See the
 [broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md).
 Local bridge verification does not establish compatibility with every external host.
 
