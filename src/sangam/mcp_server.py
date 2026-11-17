@@ -9,6 +9,7 @@ from contextlib import AsyncExitStack
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import unquote
 from uuid import uuid4
 
 from mcp.server import MCPServer
@@ -24,6 +25,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from sangam.application import ApplicationServices
+from sangam.assistant_requests import AssistantResult, ConversationPage
 from sangam.capabilities import Capability
 from sangam.config import Settings
 from sangam.errors import (
@@ -38,6 +40,7 @@ from sangam.mcp_events import ResourceSubscriptions
 from sangam.mcp_models import (
     ActivateDocument,
     AppAction,
+    CancelAssistant,
     CloseDocument,
     CompareDocument,
     DocumentPassage,
@@ -45,6 +48,7 @@ from sangam.mcp_models import (
     ExecutionOutput,
     ExecutionReceipt,
     ExecutionStatus,
+    GetAssistant,
     GetSkill,
     ListSkills,
     OpenDocument,
@@ -55,7 +59,9 @@ from sangam.mcp_models import (
     PdfReadPage,
     PdfSearch,
     PdfStatus,
+    PendingAssistantJob,
     PendingJob,
+    ReadConversation,
     ReadDocument,
     ReadSkill,
     RefreshWorkspace,
@@ -63,8 +69,11 @@ from sangam.mcp_models import (
     SearchDocuments,
     SearchHit,
     SearchResults,
+    SubmitAssistant,
     UpdateDocument,
     UpdateView,
+    WaitAssistant,
+    WorkspaceOperation,
     WriteResult,
 )
 from sangam.mcp_pdf import (
@@ -84,6 +93,47 @@ APP_URI = "ui://sangam/document-workspace.html"
 JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
+    "assistant.submit": (
+        SubmitAssistant,
+        "assistant_submit",
+        "write",
+        "inference, current source access",
+        "Send an explicit message and optional document context to Sangam's assistant. "
+        "Retain request_key for exact replay. After a lost response, "
+        "never retry inference with a new key. "
+        "A bounded wait may return running work. Existing chat review behavior applies.",
+    ),
+    "assistant.get": (
+        GetAssistant,
+        "assistant_get",
+        "read",
+        "ownership, current source access",
+        "Read a known owned request and bounded answer with status and artifact references.",
+    ),
+    "assistant.wait": (
+        WaitAssistant,
+        "assistant_wait",
+        "read",
+        "ownership, current source access",
+        "Wait up to two seconds for an owned request; running work is not success. "
+        "Follow next_offset for answer passages.",
+    ),
+    "assistant.cancel": (
+        CancelAssistant,
+        "assistant_cancel",
+        "write",
+        "ownership, current source access",
+        "Cooperatively cancel an owned request. Previously committed changes remain.",
+    ),
+    "conversations.read": (
+        ReadConversation,
+        "conversations_read",
+        "read",
+        "ownership, current source access",
+        "Read bounded messages from an explicitly supplied owned conversation. "
+        "Follow next_cursor for message pages or item_id/offset for a long message. "
+        "This does not search conversation history or export profiles.",
+    ),
     "skills.list": (
         ListSkills,
         "skills_list",
@@ -177,6 +227,11 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
     ),
 }
 OUTPUT_SCHEMAS = {
+    "assistant.submit": AssistantResult.model_json_schema(),
+    "assistant.get": AssistantResult.model_json_schema(),
+    "assistant.wait": AssistantResult.model_json_schema(),
+    "assistant.cancel": AssistantResult.model_json_schema(),
+    "conversations.read": ConversationPage.model_json_schema(),
     "skills.list": SkillCatalog.model_json_schema(),
     "skills.get": SkillEntry.model_json_schema(),
     "skills.read": SkillPassage.model_json_schema(),
@@ -526,9 +581,20 @@ class SangamMcp:
                 self.read_resource(self.credential(ctx), f"sangam://skill/{skill_id}")
             )
 
+        @self.server.resource("sangam://assistant/{request_key}", mime_type="application/json")
+        def assistant_resource(request_key: str, ctx: Context) -> str:
+            return json.dumps(
+                self.read_resource(self.credential(ctx), f"sangam://assistant/{request_key}")
+            )
+
     def read_resource(self, token: str, uri: str) -> dict[str, JsonValue]:
         """One authorization/read path for resource reads and change observation."""
         principal = self.principal(token)
+        if uri.startswith("sangam://assistant/"):
+            return self.services.assistant_requests.get(
+                principal,
+                GetAssistant(request_key=unquote(uri.removeprefix("sangam://assistant/"))),
+            ).model_dump(mode="json")
         if uri.startswith("sangam://skill/"):
             query = GetSkill(skill_id=uri.removeprefix("sangam://skill/"))
             return self.skills.invoke(principal, query)
@@ -622,7 +688,26 @@ class SangamMcp:
                 current = self.principal(token)
                 schema = OPERATIONS[operation_id][0]
                 parsed = schema.model_validate(arguments)
-                value = await self.blocking(partial(self.dispatch, current, execution_key, parsed))
+                value: JsonValue
+                if isinstance(
+                    parsed, (SubmitAssistant, GetAssistant, CancelAssistant, ReadConversation)
+                ):
+                    value = await self.services.assistant_requests.invoke(
+                        current, parsed, execution_key
+                    )
+                    if isinstance(parsed, (SubmitAssistant, GetAssistant, CancelAssistant)):
+                        if isinstance(value, dict) and value.get("status") == "running":
+                            pending_jobs["assistant:" + parsed.request_key] = PendingAssistantJob(
+                                request_key=parsed.request_key,
+                                conversation_id=str(value["conversation_id"]),
+                                resource_uri=str(value["resource_uri"]),
+                            ).model_dump(mode="json")
+                        else:
+                            pending_jobs.pop("assistant:" + parsed.request_key, None)
+                else:
+                    value = await self.blocking(
+                        partial(self.dispatch, current, execution_key, parsed)
+                    )
                 if isinstance(parsed, PdfStatus) and isinstance(value, dict) and "status" in value:
                     if value["status"] in {"pending", "processing"}:
                         pending_jobs[parsed.document_id] = PendingJob(
@@ -706,21 +791,29 @@ class SangamMcp:
             }
             if pending_jobs:
                 value["pending_jobs"] = list(pending_jobs.values())
-            self.state.finish(principal, execution_key, value, failed=True)
+            await asyncio.shield(
+                self.blocking(
+                    partial(self.state.finish, principal, execution_key, value, failed=True)
+                )
+            )
             raise
         finally:
             self.active -= 1
         if pending_jobs:
             value["pending_jobs"] = list(pending_jobs.values())
-        self.state.finish(principal, execution_key, value, failed=failed)
-        self.state.authorize_dependencies(self.principal(token), execution_key)
+        await self.blocking(
+            partial(self.state.finish, principal, execution_key, value, failed=failed)
+        )
+        await self.blocking(
+            partial(self.state.authorize_dependencies, self.principal(token), execution_key)
+        )
         return result(value, failed=failed)
 
     def dispatch(
         self,
         principal: Principal,
         execution_key: str,
-        operation: OperationInput,
+        operation: WorkspaceOperation,
     ) -> JsonValue:
         if isinstance(operation, ExecutionStatus):
             response = self.state.status(principal, operation.execution_key)

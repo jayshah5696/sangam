@@ -1108,9 +1108,11 @@ def test_chat_store_loads_legacy_payloads_and_rejects_unknown_versions(
     assert "unsupported schema version" in unsupported.json()["error"]["message"]
 
 
-def _make_response(text: str, *, status: str = "completed", with_output: bool = True) -> Response:
+def _make_response(
+    text: str, *, status: str = "completed", with_output: bool = True, message_id: str = "msg_1"
+) -> Response:
     message = ResponseOutputMessage(
-        id="msg_1",
+        id=message_id,
         type="message",
         role="assistant",
         status="completed",
@@ -1164,6 +1166,7 @@ class _RecordingResponsesModel(Model):
                             "400 invalid_prompt: Unknown parameter: input[].content[].logprobs"
                         )
         text = self.text
+        message_id = "msg_" + uuid.uuid4().hex
         counter = 0
 
         def seq() -> int:
@@ -1180,13 +1183,13 @@ class _RecordingResponsesModel(Model):
             type="response.output_item.added",
             output_index=0,
             item=ResponseOutputMessage(
-                id="msg_1", type="message", role="assistant", status="in_progress", content=[]
+                id=message_id, type="message", role="assistant", status="in_progress", content=[]
             ),
             sequence_number=seq(),
         )
         yield ResponseContentPartAddedEvent(
             type="response.content_part.added",
-            item_id="msg_1",
+            item_id=message_id,
             output_index=0,
             content_index=0,
             part=ResponseOutputText(type="output_text", text="", annotations=[]),
@@ -1194,7 +1197,7 @@ class _RecordingResponsesModel(Model):
         )
         yield ResponseTextDeltaEvent(
             type="response.output_text.delta",
-            item_id="msg_1",
+            item_id=message_id,
             output_index=0,
             content_index=0,
             delta=text,
@@ -1204,7 +1207,7 @@ class _RecordingResponsesModel(Model):
         done_part = ResponseOutputText(type="output_text", text=text, annotations=[])
         yield ResponseTextDoneEvent(
             type="response.output_text.done",
-            item_id="msg_1",
+            item_id=message_id,
             output_index=0,
             content_index=0,
             text=text,
@@ -1213,7 +1216,7 @@ class _RecordingResponsesModel(Model):
         )
         yield ResponseContentPartDoneEvent(
             type="response.content_part.done",
-            item_id="msg_1",
+            item_id=message_id,
             output_index=0,
             content_index=0,
             part=done_part,
@@ -1223,7 +1226,7 @@ class _RecordingResponsesModel(Model):
             type="response.output_item.done",
             output_index=0,
             item=ResponseOutputMessage(
-                id="msg_1",
+                id=message_id,
                 type="message",
                 role="assistant",
                 status="completed",
@@ -1233,7 +1236,7 @@ class _RecordingResponsesModel(Model):
         )
         yield ResponseCompletedEvent(
             type="response.completed",
-            response=_make_response(text),
+            response=_make_response(text, message_id=message_id),
             sequence_number=seq(),
         )
 

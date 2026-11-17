@@ -122,7 +122,7 @@ The reference and locations survive restart. Current grants filter comparison
 content just as they filter tabs. Narrow hosts expand comparison into the document
 area instead of forcing two small columns. Two simultaneous editors,
 binary upload, OAuth issuance, native Tasks,
-proposals, and assistant delegation remain broader design
+direct proposal management and other workspace actions remain broader design
 scope. Their presence elsewhere in this document does not claim they are
 implemented. [MCP setup and contracts](../../mcp.md) describe the current
 slice and its reproducible verification commands.
@@ -168,8 +168,8 @@ report its committed annotation. An unresolved note attempt retains its exact
 request and key. Unsaved notes block page changes, tab changes, and acknowledged
 App teardown until the user saves or explicitly discards them. Resource snapshots
 include annotation changes so the normal API and UI participate in refresh.
-PDF upload continues through the existing API or UI. Annotation update/delete,
-and assistant operations remain to be implemented.
+PDF upload continues through the existing API or UI. Annotation update/delete
+remains to be implemented.
 
 Centralized skill export now uses existing registrations and document read grants
 without changing internal chat catalog selection. `skills.list`, `skills.get`,
@@ -187,8 +187,29 @@ dependencies. The initial limits are 32 files, the configured document byte limi
 per file, 16 MiB per bundle, and bounded catalog output. Missing mappings, unsafe
 paths, unavailable sources, and oversized exports return diagnostics. No source
 file is silently truncated for a native read. The built-in `sangam` guide is
-service-owned; clients control skill verification and activation. Assistant and
-remaining workspace operations are still pending.
+service-owned; clients control skill verification and activation.
+
+Assistant requests now use a shared `AssistantRequests` service over the existing
+ChatKit processing path. `assistant.submit/get/wait/cancel` and
+`conversations.read` remain operations behind the same `execute` tool. Migration
+`043` records request identities before inference and associates execution receipts
+with request or conversation references for current-authority recovery. Accepted
+requests hold existing chat admission, survive the caller's wait, and use the
+configured chat timeout. Waiting is at most two seconds. One request runs per
+conversation; the existing MCP receipt quota bounds retained identities.
+Restart marks unfinished work interrupted without replaying inference. Answer
+retention uses the existing seven-day setting. Native resource reads and
+invalidation observe `sangam://assistant/{request_key}`. Pending work remains in
+execute metadata when generated Python omits it. Known conversation reads are
+bounded and actor-owned; they recheck current source/project grants and do not
+search all history or export profiles. Skill catalog descriptions join the
+existing run-source inventory, and activated skill files use their stored
+revision references. Older turns lack catalog provenance, so migration `043`
+marks their inventory incomplete and reads require the existing global read grant.
+Audited agent reads occur before profile or skill-registration writer locks.
+Existing chat proposals and effects
+determine `needs_review` separately from inference completion. Direct proposal
+management and remaining workspace operations are still pending.
 
 MCP is an external entry point to selected authorized Sangam workflows. The
 compact tools are the access mechanism; the useful result is working with
@@ -696,8 +717,8 @@ The current [chat endpoint](../../../src/sangam/api_chat.py) accepts requests at
 [`SangamChatServer.respond`](../../../src/sangam/chat.py) checks that inference
 and the selected model are enabled, then requires `Capability.INFERENCE` for
 an ordinary agent token. Its document actions still use that principal's
-document grants. This is existing REST/chat behavior, not an implemented MCP
-chat adapter. Any delegation operation must reuse admission, provider limits,
+document grants. The MCP request adapter uses this same ChatKit path and reuses
+admission, provider limits,
 thread ownership, and existing internal review behavior.
 
 The existing [`SQLiteChatKitStore`](../../../src/sangam/chat_store.py) scopes

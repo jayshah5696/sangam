@@ -184,6 +184,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             application.state.pdf_scheduler = pdf_scheduler
             pdf_scheduler.start()
             await assignments.start()
+            await asyncio.to_thread(services.assistant_requests.start)
             if mcp_runtime is not None:
                 await mcp_runtime.start()
 
@@ -205,6 +206,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if resolved_settings.backups_enabled:
                 backup_task = asyncio.create_task(maintain_backups())
         except BaseException:
+            await services.assistant_requests.close()
             if mcp_runtime is not None:
                 await mcp_runtime.close()
             await assignments.close()
@@ -228,6 +230,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             shutdown_error: Exception | None = None
             unsafe_shutdown = False
+            try:
+                await services.assistant_requests.close()
+            except Exception as error:  # noqa: BLE001
+                shutdown_error = error
+                unsafe_shutdown = True
             if mcp_runtime is not None:
                 try:
                     await mcp_runtime.close()

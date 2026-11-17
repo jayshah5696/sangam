@@ -156,12 +156,12 @@ function DocumentApp() {
     return () => window.clearTimeout(timer)
   }, [locationChanged])
 
-  function enqueue(operation: () => Promise<void>, clearError = true) {
+  function enqueue(operation: () => Promise<void>, foreground = true) {
     queue.current = queue.current.then(async () => {
-      setBusy(true)
+      if (foreground) setBusy(true)
       try {
         await operation()
-        if (clearError) {
+        if (foreground) {
           setError('')
           retryAction.current = null
         }
@@ -173,7 +173,7 @@ function DocumentApp() {
             : 'The operation failed. Your local edits are preserved.',
         )
       } finally {
-        setBusy(false)
+        if (foreground) setBusy(false)
       }
     })
     return queue.current

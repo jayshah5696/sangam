@@ -52,6 +52,10 @@ class McpState:
         ).isoformat()
         with self.lock, self.database.transaction() as connection:
             connection.execute(
+                "UPDATE assistant_requests SET answer = NULL WHERE finished_at < ?",
+                (results_before,),
+            )
+            connection.execute(
                 "UPDATE mcp_executions SET result_json = NULL WHERE finished_at < ?",
                 (results_before,),
             )
@@ -637,6 +641,12 @@ class McpState:
                 "WHERE actor_id = ? AND execution_key = ?",
                 (target, principal.actor_id, source),
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO mcp_execution_chat_refs "
+                "SELECT actor_id, ?, kind, reference FROM mcp_execution_chat_refs "
+                "WHERE actor_id = ? AND execution_key = ?",
+                (target, principal.actor_id, source),
+            )
 
     def authorize_dependencies(self, principal: Principal, key: str) -> None:
         with self.database.connection() as connection:
@@ -645,6 +655,18 @@ class McpState:
                 "WHERE actor_id = ? AND execution_key = ?",
                 (principal.actor_id, key),
             ).fetchall()
+            requests = connection.execute(
+                "SELECT kind, reference FROM mcp_execution_chat_refs "
+                "WHERE actor_id=? AND execution_key=?",
+                (principal.actor_id, key),
+            ).fetchall()
+        for request in requests:
+            assistant = self.services.assistant_requests
+            if request["kind"] == "request":
+                assistant.authorize(principal, request["reference"])
+            else:
+                current = assistant.authority(principal)
+                assistant.authorize_conversation(current, request["reference"])
         for dependency in dependencies:
             document = self.services.documents.get_document(
                 dependency["document_id"], include_deleted=True

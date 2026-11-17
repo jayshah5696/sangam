@@ -36,7 +36,7 @@ from sangam.chat_models import ChatModelCatalog
 from sangam.chat_profiles import ChatProfileService
 from sangam.chat_proposals import ChatProposalRepository, ChatProposalService
 from sangam.chat_runtime import BoundedChatAdmission
-from sangam.chat_skills import ChatSkillService
+from sangam.chat_skills import ChatSkillService, SkillSummary
 from sangam.chat_store import SQLiteChatKitStore
 from sangam.chat_tools import ChatToolset
 from sangam.config import ChatServerConfig
@@ -389,7 +389,6 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             pdf_page_number=turn_record.pdf_page_number,
             annotation_id=turn_record.annotation_id,
         )
-        app_context = await self.app_context(request_context, thread.id)
         page = await self.store.load_thread_items(
             thread.id,
             after=None,
@@ -398,13 +397,6 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             context=request_context,
         )
         input_items = await self.item_converter.to_agent_input(list(reversed(page.data)))
-        input_items.insert(
-            0,
-            {
-                "role": "developer",
-                "content": [{"type": "input_text", "text": app_context}],
-            },
-        )
         agent: Agent[AgentRunContext] = Agent(
             name="Sangam workspace agent",
             instructions=agent_instructions(resolved_capabilities),
@@ -440,6 +432,11 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         )
         result = None
         try:
+            app_context = await self.app_context(request_context, thread.id)
+            input_items.insert(
+                0,
+                {"role": "developer", "content": [{"type": "input_text", "text": app_context}]},
+            )
             stream_failed = False
             continuity_input_tokens = continuity_output_tokens = 0
             task_state = await self.admission.run_sync(
@@ -657,8 +654,19 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         profile = await self.admission.run_sync(self.profiles.resolve, context)
         context = replace(context, project_id=profile.project_id)
         project_context = await self.admission.run_sync(self._project_context, context, thread_id)
+
+        def record_skill(summary: SkillSummary) -> None:
+            if context.run_id:
+                self.evidence.record_run_source(
+                    context.run_id,
+                    document_id=summary.document_id,
+                    revision_id=summary.current_revision_id,
+                    title=summary.name,
+                    path="",
+                )
+
         skills_prompt = await self.admission.run_sync(
-            self.skills.prompt_catalog, context.principal, context.project_id
+            self.skills.prompt_catalog, context.principal, context.project_id, on_read=record_skill
         )
         project_context = (
             self._web_context()

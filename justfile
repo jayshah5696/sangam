@@ -122,6 +122,19 @@ verify-mcp port="8897":
     source "$TMPDIR/.sangam-active-verification"
     uv run python scripts/verify_mcp.py
 
+# Prove assistant requests through MCP and real configured inference on an isolated server.
+verify-mcp-assistant port="8899":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-assistant-proof.XXXXXX")"
+    export SANGAM_MCP_ENABLED=true
+    unset SANGAM_TOKEN
+    trap './scripts/control-sangam.sh cleanup; rm -rf -- "$TMPDIR"' EXIT
+    just verify-control launch "{{ port }}"
+    just verify-control doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/verify_mcp_assistant.py
+
 # Leave a disposable, seeded local MCP walkthrough running until Ctrl+C.
 mcp-demo port="8873": build-frontend
     #!/usr/bin/env bash

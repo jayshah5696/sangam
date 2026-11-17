@@ -78,7 +78,8 @@ it never substitutes for authorization. Every operation checks current grants.
 The catalog contains `documents.search`, `documents.read`, `documents.update`,
 `executions.get`, `pdf.status`, `pdf.pages.read`, `pdf.search`,
 `pdf.annotations.list`, `pdf.annotations.create`, `skills.list`, `skills.get`,
-and `skills.read`. Discovery returns schemas,
+`skills.read`, `assistant.submit/get/wait/cancel`, and `conversations.read`.
+Discovery returns schemas,
 retry rules, and `next_offset` for further catalog pages. Calls use keyword
 arguments. For example:
 
@@ -198,6 +199,72 @@ bounded diagnostics rather than a partial usable manifest. The service-owned
 The logical `sangam://skill/{skill_id}` resource supports current-state reads and
 the existing authorized URI invalidation stream.
 
+## Sangam assistant requests
+
+Use `assistant.submit` inside Code Mode when the user explicitly wants Sangam's
+configured assistant to do work. The connection needs the existing global
+`inference` grant and current document grants. Inference and the selected model
+must be enabled in Sangam. The demo key does not include inference.
+
+```python
+request = await assistant_submit(
+    request_key="retain-this-key-for-this-exact-request",
+    message="Read this document and propose a clearer introduction.",
+    document_id="document-id",
+    wait_seconds=2,
+)
+request
+```
+
+The server records the exact request identity before inference. The request uses
+the normal ChatKit processing path, chat admission limits, tool permissions, and
+internal review behavior. MCP adds no approval policy. The default wait returns
+immediately; a requested wait is at most two seconds. Accepted work continues
+when the execute call finishes or its caller disconnects. Python state stays fresh.
+
+Retain `request_key` and `conversation_id`. Inspect a request with
+`assistant_get(request_key="...")`, or wait briefly with
+`assistant_wait(request_key="...", wait_seconds=2)`. These return bounded answer
+passages with `next_offset`, a run reference, proposal/effect references, and a
+checkable `sangam://assistant/{request_key}` resource. Resource subscriptions use
+the same authorized invalidation path as documents. A program that discards a
+running request's result still returns its reference under `pending_jobs`.
+Completed document effects include the revision ID from their canonical result.
+
+`completed` means the assistant turn finished. Confirm saved revision/effect
+evidence before claiming a requested change was applied. `needs_review` means a
+proposal or effect remains unresolved. Failed, cancelled, and interrupted jobs
+report their own outcome. A successful status lookup does not mean the job succeeded.
+The external host controls whether to schedule another turn.
+
+Reusing the original request key with the same message and context retrieves
+that request. Changed arguments conflict. A lost response never justifies a new
+inference request. `assistant_cancel(request_key="...")` cooperatively cancels
+work and waits for cancellation to settle. It does not undo committed changes.
+Restart marks unfinished requests interrupted and does not replay them.
+
+To continue a known owned conversation, pass its `conversation_id` and a new
+request key to `assistant_submit`. Explicit document context applies to that
+turn. Omitting it selects workspace context while preserving known conversation
+history. `conversations_read(conversation_id="...", cursor="...", limit=5)`
+returns bounded user and assistant messages. Follow `next_cursor`, including
+pages that contain only hidden internal items. For a long message, use its
+`item_id` and `offset` to retrieve the next 1,200 characters. Internal tool and
+profile records are not returned as messages. There is no broad history search.
+
+Starting a model turn requires current inference authority. Reading an owned
+result or conversation and cancelling owned work uses the existing ownership
+and source-access checks. These reads do not require an inference grant.
+Current document/project access includes sources retrieved in
+prior turns, skill catalog descriptions, and activated skill supporting files.
+Cached execute results recheck these references too. An incomplete source
+inventory requires a global read grant. Migration `043` marks older turns
+incomplete because they did not record skill catalog sources. One request can run in a given
+conversation at a time. New requests use existing chat admission and timeout
+limits; retained request identities use the existing MCP receipt quota. Answers
+expire after the existing seven-day result-retention window. Identities and
+canonical conversation/artifact references remain for recovery.
+
 ## Recovery and persistence
 
 ### Resource changes
@@ -287,11 +354,17 @@ read-only comparison pane. Select a Markdown tab to edit its content.
 View locations use their own optimistic version and require current read access.
 Saving a location creates no document revision and does not change the draft version.
 Two simultaneous editors, HTML/PDF source editing, binary upload, OAuth issuance, native Tasks,
-proposals, and assistant delegation remain outside this implementation. See the
+direct proposal management and other workspace operations remain outside this implementation. See the
 [broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md).
 Local bridge verification does not establish compatibility with every external host.
 
 ## Verification
+
+`just verify-mcp-assistant 8899` exercises real configured inference through the
+official MCP client on an isolated server. It verifies request completion after
+execute ends, exact request replay without duplicate inference, known-conversation
+continuation, current-source denial, and a reviewable proposal with no saved change.
+It requires a configured provider and fails if inference is unavailable.
 
 ```sh
 just test

@@ -40,6 +40,42 @@ class ExecutionStatus(Input):
     execution_key: Identifier
 
 
+class SubmitAssistant(Input):
+    request_key: Identifier
+    message: str = Field(min_length=1, max_length=16_000)
+    conversation_id: Identifier | None = None
+    document_id: Identifier | None = None
+    revision_id: Identifier | None = None
+    wait_seconds: float = Field(default=0, ge=0, le=2, allow_inf_nan=False)
+
+
+class GetAssistant(Input):
+    request_key: Identifier
+    offset: int = Field(default=0, ge=0)
+    length: int = Field(default=2000, ge=1, le=16_000)
+
+
+class WaitAssistant(GetAssistant):
+    wait_seconds: float = Field(default=2, ge=0, le=2, allow_inf_nan=False)
+
+
+class CancelAssistant(Input):
+    request_key: Identifier
+
+
+class ReadConversation(Input):
+    conversation_id: Identifier
+    cursor: Identifier | None = None
+    limit: int = Field(default=5, ge=1, le=10)
+    item_id: Identifier | None = None
+    offset: int = Field(default=0, ge=0)
+
+
+AssistantOperation = (
+    SubmitAssistant | GetAssistant | WaitAssistant | CancelAssistant | ReadConversation
+)
+
+
 class ListSkills(Input):
     query: str = Field(default="", max_length=500)
     offset: int = Field(default=0, ge=0, le=100_000)
@@ -110,7 +146,7 @@ class PdfNoteApp(PdfCreateAnnotation):
 
 PdfOperation = PdfStatus | PdfReadPage | PdfSearch | PdfAnnotations | PdfCreateAnnotation
 SkillOperation = ListSkills | GetSkill | ReadSkill
-OperationInput = (
+WorkspaceOperation = (
     SearchDocuments
     | ReadDocument
     | UpdateDocument
@@ -118,6 +154,7 @@ OperationInput = (
     | PdfOperation
     | SkillOperation
 )
+OperationInput = WorkspaceOperation | AssistantOperation
 
 
 class SearchHit(BaseModel):
@@ -180,9 +217,20 @@ class PendingJob(BaseModel):
     message: str = "Extraction is pending. Check the resource or pdf.status for completion."
 
 
+class PendingAssistantJob(BaseModel):
+    request_key: str
+    conversation_id: str
+    resource_uri: str
+    check_operation: Literal["assistant.wait"] = "assistant.wait"
+    poll_after_seconds: int = 1
+    message: str = (
+        "Assistant work is running. Check assistant.wait before reporting success. Do not resubmit."
+    )
+
+
 class ExecutionOutput(BaseModel):
     output: JsonValue
-    pending_jobs: list[PendingJob] = Field(default_factory=list)
+    pending_jobs: list[PendingJob | PendingAssistantJob] = Field(default_factory=list)
 
 
 class ExecutionError(BaseModel):
@@ -197,7 +245,7 @@ class ExecutionFailure(BaseModel):
     writes: list[WriteEvidence] = Field(default_factory=list)
     message: str | None = None
     recovery: str | None = None
-    pending_jobs: list[PendingJob] = Field(default_factory=list)
+    pending_jobs: list[PendingJob | PendingAssistantJob] = Field(default_factory=list)
 
 
 class ExecutionReceipt(BaseModel):
@@ -207,7 +255,7 @@ class ExecutionReceipt(BaseModel):
     reason: Literal["in_progress", "interrupted", "result_expired"]
     writes: list[WriteEvidence]
     message: str
-    pending_jobs: list[PendingJob] = Field(default_factory=list)
+    pending_jobs: list[PendingJob | PendingAssistantJob] = Field(default_factory=list)
 
 
 class WorkspaceAction(Input):

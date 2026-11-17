@@ -45,7 +45,7 @@ name: sangam
 description: Work with Sangam documents and registered guidance through MCP Code Mode and Apps.
 license: Apache-2.0
 metadata:
-  version: "1"
+  version: "2"
 ---
 
 # Sangam MCP
@@ -71,6 +71,14 @@ guidance, and skills.read for bounded passages. Native Skills clients read the s
 manifest files through resources/read. Preserve source identity and snapshot URIs. A new
 manifest needs fresh host verification. Reading a file does not activate a skill or run scripts.
 Current grants govern every read, including cached guidance and older snapshots.
+
+Use assistant.submit only when the user asks for Sangam's configured assistant. Retain its
+request_key and conversation_id. Accepted work can outlive execute. A running job must be
+checked with assistant.wait or its resource before reporting success. Reuse the original
+request key and exact arguments after a lost response; never repeat inference with a new key.
+The normal chat review policy still applies. A completed turn does not prove a saved change.
+Inspect proposal/effect references; needs_review means the requested change is not applied.
+Continue only known owned conversations. Cancellation does not undo completed writes.
 
 Do only the work requested by the user. A permission grant does not create user intent.
 Do not infer capabilities missing from the catalog. A notification is a request to fetch

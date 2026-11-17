@@ -430,7 +430,38 @@ test('another view cannot silently replace a locally edited shared draft', async
   await app.getByRole('button', { name: 'Resolve shared draft', exact: true }).click()
   await app.getByRole('button', { name: 'Discard and reload', exact: true }).click()
   await expect(editor).toHaveText('# Other view checkpoint')
-  await app.getByRole('button', { name: 'Save', exact: true }).click()
+  const viewStarted = Promise.withResolvers<void>()
+  const releaseView = Promise.withResolvers<void>()
+  const viewAction = z.object({
+    params: z.object({ arguments: z.object({ action: z.object({ type: z.literal('view') }) }) }),
+  })
+  await page.route('**/mcp/', async (route) => {
+    if (
+      route.request().method() !== 'POST' ||
+      !viewAction.safeParse(route.request().postDataJSON()).success
+    ) {
+      await route.continue()
+      return
+    }
+    const response = await route.fetch()
+    viewStarted.resolve()
+    await releaseView.promise
+    await route.fulfill({ response })
+  })
+  await editor.press('Home')
+  await editor.press('ArrowRight')
+  await viewStarted.promise
+  try {
+    const save = app.getByRole('button', { name: 'Save', exact: true })
+    await expect(save).toBeEnabled()
+    await save.click()
+    expect(
+      documentSchema.parse(await (await request.get(`/api/v1/documents/${original.document_id}`)).json())
+        .current_revision_id,
+    ).toBe(original.current_revision_id)
+  } finally {
+    releaseView.resolve()
+  }
   await expect(app.getByText('All changes saved', { exact: true })).toBeVisible()
   expect(
     documentSchema.parse(await (await request.get(`/api/v1/documents/${original.document_id}`)).json())
