@@ -64,6 +64,8 @@ test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals',
   await expect(
     app.getByLabel('Revision comparison').getByText('Human reviewed wording', { exact: false }),
   ).toBeVisible()
+  await app.getByLabel('Revision comparison').scrollIntoViewIfNeeded()
+  await expect(app.getByLabel('Revision comparison')).toBeInViewport()
   await page.screenshot({ path: testInfo.outputPath('mcp-proposal-comparison.png'), fullPage: true })
   if (testInfo.project.name === 'chromium-desktop') {
     for (const viewport of [
@@ -103,6 +105,14 @@ test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals',
     await frame.evaluate((element) => {
       element.style.width = '100%'
     })
+    await page.getByLabel('Theme', { exact: true }).selectOption('river')
+    await expect(app.locator('html')).toHaveCSS('color-scheme', 'light')
+    await expect(
+      app.getByLabel('Revision comparison').getByText('Human reviewed wording', { exact: false }),
+    ).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('mcp-proposal-light.png'), fullPage: true })
+    await page.getByLabel('Theme', { exact: true }).selectOption('midnight')
+    await expect(app.locator('html')).toHaveCSS('color-scheme', 'dark')
   }
   const applyAction = z.object({
     params: z.object({ arguments: z.object({ action: z.object({ type: z.literal('proposal_apply') }) }) }),
