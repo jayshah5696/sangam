@@ -156,9 +156,9 @@ test('PDF App renders authorized bytes, restores its page, and saves a note with
     await page.setViewportSize({ width: 844, height: 844 })
     for (const height of [499, 501]) {
       await page.locator('iframe[title="Sangam document workspace"]').evaluate((element, height) => {
-        element.style.height = `${height + 2}px`
+        element.style.height = `${height}px`
       }, height)
-      expect(await app.locator('html').evaluate((element) => element.clientHeight)).toBe(height)
+      await expect.poll(() => app.locator('html').evaluate((element) => element.clientHeight)).toBe(height)
       expect((await app.locator('.mcp-pdf-scroll').boundingBox())?.height).toBeGreaterThanOrEqual(100)
       await page
         .locator('iframe[title="Sangam document workspace"]')
@@ -194,15 +194,29 @@ test('real MCP host finds through Monty, recovers a checkpoint, and saves one re
   })
   expect(issued.status()).toBe(201)
   const { token } = tokenSchema.parse(await issued.json())
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'sangam.workspace-preferences.v1',
+      JSON.stringify({ theme: 'cobalt', uiFont: 'plex' }),
+    )
+  })
   await page.goto('/mcp-host.html')
   await page.getByLabel('Sangam API key').fill(token)
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
-  await expect(page.getByText('Connected with existing permissions')).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'cobalt')
   await page.getByLabel('Find a document').fill(suffix)
   await page.getByRole('button', { name: 'Search documents', exact: true }).click()
   await page.getByRole('button', { name: `Open MCP walkthrough ${suffix}` }).click()
   const app = page.frameLocator('iframe[title="Sangam document workspace"]')
   await expect(app.getByRole('heading', { name: `MCP walkthrough ${suffix}`, exact: true })).toBeVisible()
+  await expect(app.locator('html')).toHaveCSS('--accent', '#1769c2')
+  await page.getByLabel('Theme', { exact: true }).selectOption('midnight')
+  await expect(app.locator('html')).toHaveCSS('--accent', '#5b59dc')
+  await expect(app.locator('html')).toHaveCSS('color-scheme', 'dark')
+  const frameBounds = await page.locator('iframe').boundingBox()
+  expect((frameBounds?.y ?? 0) + (frameBounds?.height ?? 0)).toBeLessThanOrEqual(
+    page.viewportSize()!.height + 1,
+  )
   const editor = app.getByRole('textbox', { name: 'Document content' })
   const editorRegion = await app.getByRole('region', { name: 'Document editor' }).boundingBox()
   const editorCanvas = await app.locator('.cm-editor').boundingBox()

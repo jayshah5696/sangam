@@ -1,8 +1,10 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { StateMessage } from '../components/ui/StateMessage'
+import { ThemeProvider, themes, useTheme } from '../theme'
+import { hostAppearance } from './appearance'
 import {
   errorSchema,
   programHitsSchema,
@@ -17,12 +19,14 @@ import '../styles/mcp-workspace.css'
 const APP_URI = 'ui://sangam/document-workspace.html'
 
 function McpHost() {
+  const { preferences, updatePreferences } = useTheme()
   const [key, setKey] = useState('')
   const [connected, setConnected] = useState(false)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ReturnType<typeof programHitsSchema.parse>['output']['items']>([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [hasWorkspace, setHasWorkspace] = useState(false)
   const [trace, setTrace] = useState<string[]>([])
   const client = useRef<Client | null>(null)
   const bridge = useRef<AppBridge | null>(null)
@@ -31,7 +35,17 @@ function McpHost() {
   const resourceWatch = useRef<Awaited<ReturnType<Client['listen']>> | null>(null)
   const currentWorkspace = useRef<string | null>(null)
 
+  useEffect(() => {
+    const observer = new MutationObserver(() => bridge.current?.setHostContext(hostAppearance()))
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'data-ui-font', 'data-ui-density', 'data-editor-size', 'style'],
+    })
+    return () => observer.disconnect()
+  }, [])
+
   function rememberWorkspace(workspace: Workspace) {
+    setHasWorkspace(true)
     const previous = currentWorkspace.current
     currentWorkspace.current = workspace.workspace_id
     opened.current = { layoutId: workspace.layout.layout_id }
@@ -178,7 +192,7 @@ function McpHost() {
       null,
       { name: 'Sangam local MCP host', version: '0.1.0' },
       { serverTools: {} },
-      { hostContext: { theme: 'light', displayMode: 'inline' } },
+      { hostContext: hostAppearance() },
     )
     next.oncalltool = async (params) => {
       if (params.name !== 'mcp_app') throw new Error('This App can call only its typed interaction tool.')
@@ -208,112 +222,128 @@ function McpHost() {
   }
 
   return (
-    <main className="mcp-host">
-      <header className="mcp-host-header">
-        <a href="/">Sangam</a>
-        <span>MCP local host</span>
-        <p>Find a document. Edit it in the App. Verify the saved revision.</p>
-      </header>
-      {!connected ? (
-        <form
-          className="mcp-connect"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void run(connect)
-          }}
-        >
-          <h1>Connect to this Sangam instance</h1>
-          <p>
-            Use an existing key with read, search, and update permissions. The key stays in host memory and
-            never enters the App.
-          </p>
-          <label>
-            Sangam API key
-            <input
-              type="password"
-              autoComplete="off"
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-              required
-            />
-          </label>
-          <button className="primary-button" disabled={busy} type="submit">
-            Connect
-          </button>
-        </form>
-      ) : (
-        <>
-          <section className="mcp-host-tools">
-            <div>
-              <span className="scope-badge">Connected with existing permissions</span>
-              <form
-                className="mcp-search"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void run(search)
+    <main className="mcp-host" style={{ gridTemplateColumns: `${preferences.leftWidth}px minmax(0, 1fr)` }}>
+      <aside className="mcp-host-rail ui-rail ui-rail--surface" aria-label="Documents">
+        <header className="mcp-host-header ui-rail-header">
+          <a href="/">Sangam</a>
+        </header>
+        {!connected ? (
+          <form
+            className="mcp-connect"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void run(connect)
+            }}
+          >
+            <h1>Connect</h1>
+            <label>
+              Sangam API key
+              <input
+                type="password"
+                autoComplete="off"
+                value={key}
+                onChange={(event) => setKey(event.target.value)}
+                required
+              />
+            </label>
+            <button className="primary-button" disabled={busy} type="submit">
+              Connect
+            </button>
+          </form>
+        ) : (
+          <>
+            <section className="mcp-host-tools">
+              <div>
+                <form
+                  className="mcp-search"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void run(search)
+                  }}
+                >
+                  <label>
+                    Find a document
+                    <input value={query} onChange={(event) => setQuery(event.target.value)} required />
+                  </label>
+                  <button className="primary-button" disabled={busy} type="submit">
+                    Search documents
+                  </button>
+                </form>
+              </div>
+              <button
+                className="secondary-action"
+                disabled={busy || !opened.current}
+                onClick={() => {
+                  const state = opened.current
+                  if (state) void run(() => open({ layout_id: state.layoutId }))
                 }}
               >
-                <label>
-                  Find a document
-                  <input value={query} onChange={(event) => setQuery(event.target.value)} required />
-                </label>
-                <button className="primary-button" disabled={busy} type="submit">
-                  Search documents
-                </button>
-              </form>
-            </div>
-            <button
-              className="secondary-action"
-              disabled={busy || !opened.current}
-              onClick={() => {
-                const state = opened.current
-                if (state) void run(() => open({ layout_id: state.layoutId }))
-              }}
-            >
-              Reopen App
-            </button>
-          </section>
-          {hits.length > 0 && (
-            <ul className="mcp-results">
-              {hits.map((hit) => (
-                <li key={hit.document_id}>
-                  <button
-                    className="secondary-action"
-                    disabled={busy}
-                    onClick={() => {
-                      void run(() => open({ document_id: hit.document_id }))
-                    }}
-                    aria-label={`Open ${hit.title}`}
-                  >
-                    {hit.title}
-                    <span>{hit.path}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-      {error && <StateMessage kind="error" title="Connection or action failed" description={error} />}
-      <div ref={mount} className="mcp-app-mount" />
-      {connected && (
-        <details className="mcp-trace">
-          <summary>Connection and tool trace</summary>
-          <ol>
-            {trace.map((line, index) => (
-              <li key={`${index}-${line}`}>{line}</li>
+                Reopen App
+              </button>
+            </section>
+            {hits.length > 0 && (
+              <ul className="mcp-results">
+                {hits.map((hit) => (
+                  <li key={hit.document_id}>
+                    <button
+                      className="secondary-action"
+                      disabled={busy}
+                      onClick={() => {
+                        void run(() => open({ document_id: hit.document_id }))
+                      }}
+                      aria-label={`Open ${hit.title}`}
+                    >
+                      {hit.title}
+                      <span>{hit.path}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+        {error && <StateMessage kind="error" title="Connection or action failed" description={error} />}
+        <label className="mcp-theme-control">
+          Theme
+          <select
+            aria-label="Theme"
+            value={preferences.theme}
+            onChange={(event) => {
+              const theme = themes.find((entry) => entry.id === event.target.value)
+              if (theme) updatePreferences({ theme: theme.id })
+            }}
+          >
+            {preferences.theme.startsWith('custom:') && <option value={preferences.theme}>Custom</option>}
+            {themes.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.name}
+              </option>
             ))}
-          </ol>
-          <p>
-            This page is a local MCP host. No model response is simulated; document search runs the displayed
-            Python through the server's Monty worker.
-          </p>
-        </details>
-      )}
+          </select>
+        </label>
+        {connected && new URL(location.href).searchParams.has('debug') && (
+          <details className="mcp-trace">
+            <summary>Connection and tool trace</summary>
+            <ol>
+              {trace.map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
+              ))}
+            </ol>
+          </details>
+        )}
+      </aside>
+      <section className="mcp-host-workspace" aria-label="Document workspace">
+        {!hasWorkspace && <StateMessage kind="empty" title="Open a document" />}
+        <div ref={mount} className="mcp-app-mount" />
+      </section>
     </main>
   )
 }
 
 const root = document.getElementById('root')
 if (!root) throw new Error('MCP host root is missing')
-createRoot(root).render(<McpHost />)
+createRoot(root).render(
+  <ThemeProvider>
+    <McpHost />
+  </ThemeProvider>,
+)

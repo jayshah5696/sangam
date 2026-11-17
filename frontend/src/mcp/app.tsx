@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 're
 import { MarkdownEditor } from '../components/MarkdownEditor'
 import { StateMessage } from '../components/ui/StateMessage'
 import { PdfPane } from './PdfPane'
+import { applyHostAppearance } from './appearance'
 import {
   errorSchema,
   hitsSchema,
@@ -210,6 +211,7 @@ function DocumentApp() {
   })
 
   useEffect(() => {
+    app.onhostcontextchanged = () => applyHostAppearance(app.getHostContext())
     app.onteardown = prepareTeardown
     app.addEventListener('toolresult', (event) => {
       if (event.isError) {
@@ -233,6 +235,7 @@ function DocumentApp() {
     })
     void app
       .connect()
+      .then(() => applyHostAppearance(app.getHostContext()))
       .catch((failure) =>
         setError(failure instanceof Error ? failure.message : 'The MCP host could not connect.'),
       )
@@ -437,7 +440,7 @@ function DocumentApp() {
       </details>
       <div className="mcp-tabs" role="tablist" aria-label="Open documents">
         {workspace.layout.tabs.map((tab, index) => (
-          <div className="mcp-tab" key={tab.workspace_id}>
+          <div className="mcp-tab editor-tab" key={tab.workspace_id}>
             <button
               role="tab"
               className="mcp-tab-button"
@@ -723,58 +726,59 @@ function DocumentApp() {
             </details>
           )}
         </div>
-        <footer className="mcp-document-footer">
-          <span>
-            {workspace.document.content_type === 'application/pdf'
-              ? 'Page notes are saved separately from PDF bytes.'
-              : 'Save commits a revision. Draft backup does not.'}
-          </span>
-          {dirty && !discarding && (
-            <button className="secondary-action" disabled={navigating} onClick={() => setDiscarding(true)}>
-              {sharedConflict ? 'Resolve shared draft' : 'Discard draft'}
-            </button>
-          )}
-          {discarding && (
-            <div className="mcp-controls">
-              <span>
-                {sharedConflict
-                  ? 'Replace local edits with the shared checkpoint?'
-                  : 'Discard these unsaved edits?'}
-              </span>
-              <button className="secondary-action" disabled={navigating} onClick={() => setDiscarding(false)}>
-                Keep editing
+        {dirty && (
+          <footer className="mcp-document-footer">
+            {dirty && !discarding && (
+              <button className="secondary-action" disabled={navigating} onClick={() => setDiscarding(true)}>
+                {sharedConflict ? 'Resolve shared draft' : 'Discard draft'}
               </button>
-              <button
-                className="secondary-action"
-                disabled={controlsDisabled}
-                onClick={() => {
-                  void enqueue(async () => {
-                    const state = current.current
-                    if (state) {
-                      if (checkpointBlocked.current)
-                        await action({ type: 'refresh', workspace_id: state.workspace_id }, true)
-                      else
-                        await action(
-                          {
-                            type: 'discard',
-                            workspace_id: state.workspace_id,
-                            expected_version: state.version,
-                          },
-                          true,
-                        )
-                    }
-                    checkpointBlocked.current = false
-                    setSharedConflict(false)
-                    saveAttempt.current = null
-                    setDiscarding(false)
-                  })
-                }}
-              >
-                Discard and reload
-              </button>
-            </div>
-          )}
-        </footer>
+            )}
+            {discarding && (
+              <div className="mcp-controls">
+                <span>
+                  {sharedConflict
+                    ? 'Replace local edits with the shared checkpoint?'
+                    : 'Discard these unsaved edits?'}
+                </span>
+                <button
+                  className="secondary-action"
+                  disabled={navigating}
+                  onClick={() => setDiscarding(false)}
+                >
+                  Keep editing
+                </button>
+                <button
+                  className="secondary-action"
+                  disabled={controlsDisabled}
+                  onClick={() => {
+                    void enqueue(async () => {
+                      const state = current.current
+                      if (state) {
+                        if (checkpointBlocked.current)
+                          await action({ type: 'refresh', workspace_id: state.workspace_id }, true)
+                        else
+                          await action(
+                            {
+                              type: 'discard',
+                              workspace_id: state.workspace_id,
+                              expected_version: state.version,
+                            },
+                            true,
+                          )
+                      }
+                      checkpointBlocked.current = false
+                      setSharedConflict(false)
+                      saveAttempt.current = null
+                      setDiscarding(false)
+                    })
+                  }}
+                >
+                  Discard and reload
+                </button>
+              </div>
+            )}
+          </footer>
+        )}
       </div>
     </main>
   )

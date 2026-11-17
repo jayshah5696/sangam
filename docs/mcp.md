@@ -47,7 +47,13 @@ Keep that terminal running. Use `just mcp-demo 8874` for another port.
     annotation service as normal Sangam. The original PDF bytes stay unchanged.
 12. Reopen the App to restore the PDF page, zoom, and scroll location. Save or
     explicitly discard an unsaved note before changing pages or documents.
-13. Expand **Connection and tool trace** to inspect the actual MCP calls.
+13. Add `debug=1` to the host URL to expose **Connection and tool trace**.
+
+The local host uses Sangam's saved appearance preferences and shared navigation,
+tab, editor, and control styles. Its theme selector uses the existing palettes.
+The App receives color and font tokens through standard MCP host context, including
+updates while a document is open. External hosts can provide the same standard
+theme and style fields. The App does not read browser storage inside its sandbox.
 
 To see a conflict, keep a checkpointed App draft, save a different revision in
 normal Sangam, then refresh the App. The draft survives, the App shows the new
