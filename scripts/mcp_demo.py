@@ -53,6 +53,27 @@ def seed_demo(base_url: str) -> tuple[Document, Document, Document, IssuedAgentT
         )
         pdf_response.raise_for_status()
         pdf = Document.model_validate(pdf_response.json())
+        guide = client.post(
+            "/api/v1/documents",
+            headers={"Idempotency-Key": "mcp-demo-skill"},
+            json={
+                "title": "Walkthrough review skill",
+                "path": "mcp-demo/SKILL.md",
+                "content_type": "text/markdown",
+                "content": (
+                    "---\nname: walkthrough-review\ndescription: Review walkthrough documents\n"
+                    "sangam:\n  files:\n"
+                    f"    references/companion.md: {companion.document_id}\n"
+                    f"    references/paper.pdf: {pdf.document_id}\n---\n"
+                    "Read [companion](references/companion.md) and [paper](references/paper.pdf).\n"
+                    "Compare the documents before preparing the requested update.\n"
+                ),
+            },
+        )
+        guide.raise_for_status()
+        client.post(
+            "/api/v1/chat/skills", json={"document_id": guide.json()["document_id"]}
+        ).raise_for_status()
         issued = client.post(
             "/api/v1/agent-tokens",
             json={

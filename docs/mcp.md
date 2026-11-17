@@ -15,7 +15,7 @@ just mcp-demo
 
 The command builds the frontend and self-contained App, starts port 8873 with
 an isolated database/workspace, and seeds **Sangam MCP walkthrough** and
-**Walkthrough companion notes**, plus a five-page PDF. It prints
+**Walkthrough companion notes**, plus a five-page PDF and a registered review skill. It prints
 the host URL and a mode-0600 disposable key file path, never the key itself.
 Keep that terminal running. Use `just mcp-demo 8874` for another port.
 
@@ -77,7 +77,8 @@ it never substitutes for authorization. Every operation checks current grants.
 
 The catalog contains `documents.search`, `documents.read`, `documents.update`,
 `executions.get`, `pdf.status`, `pdf.pages.read`, `pdf.search`,
-`pdf.annotations.list`, and `pdf.annotations.create`. Discovery returns schemas,
+`pdf.annotations.list`, `pdf.annotations.create`, `skills.list`, `skills.get`,
+and `skills.read`. Discovery returns schemas,
 retry rules, and `next_offset` for further catalog pages. Calls use keyword
 arguments. For example:
 
@@ -133,6 +134,69 @@ the exact operation key and request. Migration `041` records the annotation ID
 with the canonical write transaction, so execution recovery can identify a note
 that committed before a program failed. Document resources include annotation
 changes, so current views refresh notes added through the normal API or UI.
+
+## Centralized skills
+
+The catalog also provides `skills.list`, `skills.get`, and `skills.read` through
+the existing execute tool. These discover explicitly registered documents under
+the connection's current read grants, including guidance registered by another
+actor. Internal chat keeps its existing personal/project catalog rules.
+Unregistered Markdown documents do not become skills merely because they can be read.
+
+The demo registers **Walkthrough review skill**. Discover its manifest with:
+
+```python
+catalog = await skills_list(query="walkthrough")
+catalog["items"]
+```
+
+Each entry includes its stable document identity under `_meta.sangam.skill_id`,
+origin, snapshot URI, original frontmatter, and complete file sizes and SHA-256
+digests. `skills_get(skill_id="document-id")` exports the latest available
+snapshot. `skills_read(uri="skill-file-uri", offset=0, length=1000)` reads a
+bounded passage and returns `next_offset`. Text offsets count characters;
+binary offsets count bytes and binary chunks use base64.
+
+Use the existing skill registration UI or `POST /api/v1/chat/skills` with a
+document ID. The registered document becomes `SKILL.md`. Explicit supporting
+documents map to package-relative paths in its frontmatter:
+
+```yaml
+---
+name: review-guide
+description: Review a specification using the team's checklist
+sangam:
+  files:
+    references/checklist.md: DOCUMENT_ID
+    references/paper.pdf: PDF_DOCUMENT_ID
+---
+Read `references/checklist.md` before preparing the review.
+```
+
+Mappings support canonical text documents and immutable PDFs. Relative Markdown
+links must have mappings. Paths cannot traverse directories, collide, or replace
+`SKILL.md`. External links remain references. Exporting never runs scripts.
+The initial bounds are 32 files including `SKILL.md`, the configured document
+byte limit per file, and 16 MiB per bundle. Oversized files fail explicitly.
+Catalog pages also respect the configured MCP result limit.
+
+Native clients can use the `io.modelcontextprotocol/skills` extension on protocol
+`2026-07-28`: `skills/list`, `skills/get`, and exact file bytes through
+`resources/read`. The pinned SDK's extension interface supplies this adapter.
+Directory reads are not advertised. Native and Code Mode reads use the same
+snapshots; the host decides verification, approval, and activation.
+
+Migration `042` stores manifests and revision references, not editable copies.
+One transaction binds all source revisions. A change to a supporting document
+also creates a new snapshot. Superseded manifests expire after seven days by
+default, using `mcp_result_retention_days`; reads do not extend retention.
+Current snapshots remain available while registered and readable. Expired or
+missing sources require rediscovery. Every read checks all source grants, and
+execution recovery rechecks the same dependencies. Unavailable helpers produce
+bounded diagnostics rather than a partial usable manifest. The service-owned
+`sangam` skill provides MCP operating guidance separately from user registrations.
+The logical `sangam://skill/{skill_id}` resource supports current-state reads and
+the existing authorized URI invalidation stream.
 
 ## Recovery and persistence
 
@@ -222,7 +286,7 @@ The App uses tabs with one active Markdown editor or PDF reader and an optional
 read-only comparison pane. Select a Markdown tab to edit its content.
 View locations use their own optimistic version and require current read access.
 Saving a location creates no document revision and does not change the draft version.
-Two simultaneous editors, HTML/PDF source editing, binary upload, OAuth issuance, native Skills/Tasks,
+Two simultaneous editors, HTML/PDF source editing, binary upload, OAuth issuance, native Tasks,
 proposals, and assistant delegation remain outside this implementation. See the
 [broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md).
 Local bridge verification does not establish compatibility with every external host.

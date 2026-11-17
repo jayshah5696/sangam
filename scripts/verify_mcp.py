@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -18,6 +19,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.client.subscriptions import ResourceUpdated
 from mcp.shared.exceptions import MCPError
+from mcp.types import TextResourceContents
 from mcp_demo import seed_demo
 
 
@@ -107,6 +109,39 @@ async def verify_event_revocation(base: str, rest: httpx.AsyncClient, document_i
                 pass
 
 
+async def verify_skill_events(base: str, token: str, rest: httpx.AsyncClient, skill: dict) -> None:
+    """A canonical source edit invalidates the logical skill resource, not old bytes."""
+    info = skill["_meta"]["sangam"]
+    uri = info["resource_uri"]
+    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}) as http:
+
+        @asynccontextmanager
+        async def transport():
+            async with streamable_http_client(base + "/mcp", http_client=http) as streams:
+                yield streams[0], streams[1]
+
+        async with (
+            Client(transport(), cache=None) as client,
+            client.listen(resource_subscriptions=[uri]) as subscription,
+        ):
+            source = (await rest.get(f"/api/v1/documents/{info['skill_id']}")).json()
+            changed = await rest.patch(
+                f"/api/v1/documents/{info['skill_id']}",
+                headers={"Idempotency-Key": str(uuid4())},
+                json={
+                    "expected_revision_id": source["current_revision_id"],
+                    "content": source["content"] + "\nReport the observed revision.\n",
+                },
+            )
+            changed.raise_for_status()
+            event = await asyncio.wait_for(anext(subscription), 5)
+            assert isinstance(event, ResourceUpdated) and event.uri == uri
+            current = json.loads((await client.read_resource(uri)).contents[0].text)
+            assert current["uri"] != skill["uri"]
+            old = (await client.read_resource(skill["uri"])).contents[0].text
+            assert old == source["content"]
+
+
 async def verify() -> None:
     base = os.environ["SANGAM_API_URL"]
     document, companion, pdf, issued = await asyncio.to_thread(seed_demo, base)
@@ -138,6 +173,50 @@ async def verify() -> None:
             )
             assert not result.is_error
             assert document.document_id in str(result.structured_content)
+            guidance = await session.call_tool(
+                "execute",
+                {
+                    "code": "await skills_list(query='walkthrough')",
+                    "execution_key": str(uuid4()),
+                },
+            )
+            assert guidance.structured_content is not None and not guidance.is_error
+            skill = guidance.structured_content["output"]["items"][0]
+            for file in skill["resources"]:
+                content = (await session.read_resource(file["uri"])).contents[0]
+                data = (
+                    content.text.encode()
+                    if isinstance(content, TextResourceContents)
+                    else base64.b64decode(content.blob)
+                )
+                assert len(data) == file["size"]
+                assert "sha256:" + hashlib.sha256(data).hexdigest() == file["digest"]
+            native = await rest.post(
+                "/mcp",
+                headers={
+                    "Authorization": f"Bearer {issued.token}",
+                    "Accept": "application/json, text/event-stream",
+                    "MCP-Protocol-Version": "2026-07-28",
+                    "Mcp-Method": "skills/get",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "skills/get",
+                    "params": {
+                        "uri": skill["uri"],
+                        "_meta": {
+                            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                            "io.modelcontextprotocol/clientCapabilities": {
+                                "extensions": {"io.modelcontextprotocol/skills": {}}
+                            },
+                        },
+                    },
+                },
+            )
+            native.raise_for_status()
+            assert native.json()["result"]["skill"] == skill
+            await verify_skill_events(base, issued.token, rest, skill)
             for _ in range(100):
                 status = await session.call_tool(
                     "execute",
@@ -289,6 +368,8 @@ async def verify() -> None:
             "catalog discovery",
             "real Monty search",
             "App resource",
+            "registered guidance through Code Mode and native Skills, exact text/PDF digests",
+            "skill source invalidation with pinned older bytes preserved",
             "PDF page reads, annotation commit recovery, duplicate prevention and immutable bytes",
             "draft checkpoint",
             "App search and multiple-document restoration",

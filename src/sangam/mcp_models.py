@@ -40,6 +40,22 @@ class ExecutionStatus(Input):
     execution_key: Identifier
 
 
+class ListSkills(Input):
+    query: str = Field(default="", max_length=500)
+    offset: int = Field(default=0, ge=0, le=100_000)
+    limit: int = Field(default=5, ge=1, le=5)
+
+
+class GetSkill(Input):
+    skill_id: Identifier
+
+
+class ReadSkill(Input):
+    uri: str = Field(min_length=1, max_length=2048)
+    offset: int = Field(default=0, ge=0)
+    length: int = Field(default=16_000, ge=1, le=32_000)
+
+
 class PdfStatus(Input):
     document_id: Identifier
 
@@ -93,7 +109,15 @@ class PdfNoteApp(PdfCreateAnnotation):
 
 
 PdfOperation = PdfStatus | PdfReadPage | PdfSearch | PdfAnnotations | PdfCreateAnnotation
-OperationInput = SearchDocuments | ReadDocument | UpdateDocument | ExecutionStatus | PdfOperation
+SkillOperation = ListSkills | GetSkill | ReadSkill
+OperationInput = (
+    SearchDocuments
+    | ReadDocument
+    | UpdateDocument
+    | ExecutionStatus
+    | PdfOperation
+    | SkillOperation
+)
 
 
 class SearchHit(BaseModel):

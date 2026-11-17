@@ -121,7 +121,7 @@ writes require read access and leave draft versions and document revisions alone
 The reference and locations survive restart. Current grants filter comparison
 content just as they filter tabs. Narrow hosts expand comparison into the document
 area instead of forcing two small columns. Two simultaneous editors,
-binary upload, registered skills, OAuth issuance, native Tasks,
+binary upload, OAuth issuance, native Tasks,
 proposals, and assistant delegation remain broader design
 scope. Their presence elsewhere in this document does not claim they are
 implemented. [MCP setup and contracts](../../mcp.md) describe the current
@@ -169,7 +169,26 @@ request and key. Unsaved notes block page changes, tab changes, and acknowledged
 App teardown until the user saves or explicitly discards them. Resource snapshots
 include annotation changes so the normal API and UI participate in refresh.
 PDF upload continues through the existing API or UI. Annotation update/delete,
-centralized skills, and assistant operations remain to be implemented.
+and assistant operations remain to be implemented.
+
+Centralized skill export now uses existing registrations and document read grants
+without changing internal chat catalog selection. `skills.list`, `skills.get`,
+and `skills.read` share revision-pinned manifests with native `skills/list`,
+`skills/get`, and `resources/read`. The pinned SDK's extension interface handles
+the native adapter; optional directory reading is not advertised. Complete
+original frontmatter and text/PDF bytes share manifest sizes and SHA-256 digests.
+Explicit `sangam.files` mappings assign relative paths to supporting document IDs.
+The export keeps one SQLite view of all source revisions and records its read
+audit after releasing that transaction, avoiding the audit writer's independent
+connection. Migration `042` persists manifests and source references across restart.
+Superseded manifests use the existing seven-day MCP result-retention setting.
+Every read authorizes the complete bundle, and cached executions retain its source
+dependencies. The initial limits are 32 files, the configured document byte limit
+per file, 16 MiB per bundle, and bounded catalog output. Missing mappings, unsafe
+paths, unavailable sources, and oversized exports return diagnostics. No source
+file is silently truncated for a native read. The built-in `sangam` guide is
+service-owned; clients control skill verification and activation. Assistant and
+remaining workspace operations are still pending.
 
 MCP is an external entry point to selected authorized Sangam workflows. The
 compact tools are the access mechanism; the useful result is working with

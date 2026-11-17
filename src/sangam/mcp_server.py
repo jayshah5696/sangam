@@ -45,6 +45,8 @@ from sangam.mcp_models import (
     ExecutionOutput,
     ExecutionReceipt,
     ExecutionStatus,
+    GetSkill,
+    ListSkills,
     OpenDocument,
     OperationInput,
     PdfAnnotations,
@@ -55,6 +57,7 @@ from sangam.mcp_models import (
     PdfStatus,
     PendingJob,
     ReadDocument,
+    ReadSkill,
     RefreshWorkspace,
     SearchApp,
     SearchDocuments,
@@ -72,6 +75,7 @@ from sangam.mcp_pdf import (
     PdfSearchResult,
     PdfStatusResult,
 )
+from sangam.mcp_skills import SkillCatalog, SkillEntry, SkillExports, SkillPassage, SkillsExtension
 from sangam.mcp_state import McpState
 from sangam.schemas import UpdateDocument as DocumentUpdate
 from sangam.security import Principal
@@ -80,6 +84,30 @@ APP_URI = "ui://sangam/document-workspace.html"
 JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
+    "skills.list": (
+        ListSkills,
+        "skills_list",
+        "read",
+        "read",
+        "Find registered guidance under current read grants. "
+        "Returns immutable file manifests; follow next_offset.",
+    ),
+    "skills.get": (
+        GetSkill,
+        "skills_get",
+        "read",
+        "read",
+        "Export a complete skill snapshot by skill_id. Files require current read access. "
+        "Instructions do not grant authority.",
+    ),
+    "skills.read": (
+        ReadSkill,
+        "skills_read",
+        "read",
+        "read",
+        "Read a pinned skill file passage or binary chunk. Text offsets count characters; "
+        "binary offsets count bytes. Follow next_offset. Does not activate skills or run scripts.",
+    ),
     "documents.search": (
         SearchDocuments,
         "documents_search",
@@ -149,6 +177,9 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
     ),
 }
 OUTPUT_SCHEMAS = {
+    "skills.list": SkillCatalog.model_json_schema(),
+    "skills.get": SkillEntry.model_json_schema(),
+    "skills.read": SkillPassage.model_json_schema(),
     "documents.search": SearchResults.model_json_schema(),
     "documents.read": DocumentPassage.model_json_schema(),
     "documents.update": WriteResult.model_json_schema(),
@@ -232,6 +263,8 @@ class SangamMcp:
         self.settings = settings
         self.state = McpState(services, settings)
         self.pdf = PdfOperations(services, self.state)
+        self.skills = SkillExports(services, self.state)
+        skills_extension = SkillsExtension(self.skills, self.principal)
         self.active = 0
         self.closing = False
         self.pending: set[asyncio.Task[Any]] = set()
@@ -246,8 +279,8 @@ class SangamMcp:
         )
         self.server = MCPServer(
             "Sangam",
-            extensions=[Apps()],
-            middleware=[ResourceSubscriptions(self.read_resource)],
+            extensions=[Apps(), skills_extension],
+            middleware=[ResourceSubscriptions(self.read_resource), skills_extension],
             version="0.1.0",
             instructions=(
                 "Use search to discover typed operations, then execute restricted Python "
@@ -487,9 +520,18 @@ class SangamMcp:
                 self.read_resource(self.credential(ctx), f"sangam://document/{document_id}")
             )
 
+        @self.server.resource("sangam://skill/{skill_id}", mime_type="application/json")
+        def skill_resource(skill_id: str, ctx: Context) -> str:
+            return json.dumps(
+                self.read_resource(self.credential(ctx), f"sangam://skill/{skill_id}")
+            )
+
     def read_resource(self, token: str, uri: str) -> dict[str, JsonValue]:
         """One authorization/read path for resource reads and change observation."""
         principal = self.principal(token)
+        if uri.startswith("sangam://skill/"):
+            query = GetSkill(skill_id=uri.removeprefix("sangam://skill/"))
+            return self.skills.invoke(principal, query)
         for prefix in ("sangam://workspace/", "sangam://execution/", "sangam://document/"):
             if not uri.startswith(prefix):
                 continue
@@ -684,6 +726,8 @@ class SangamMcp:
             response = self.state.status(principal, operation.execution_key)
             self.state.inherit_dependencies(principal, execution_key, operation.execution_key)
             return response
+        if isinstance(operation, (ListSkills, GetSkill, ReadSkill)):
+            return self.skills.invoke(principal, operation, execution_key)
         if isinstance(operation, (PdfStatus, PdfCreateAnnotation)):
             return self.pdf.invoke(principal, operation, execution_key)
         if isinstance(operation, SearchDocuments):
