@@ -5,6 +5,23 @@ from sangam.errors import AuthorizationError
 from sangam.security import Principal, path_matches
 
 
+def add_document_path_filter(
+    conditions: list[str], parameters: list[object], path_prefixes: tuple[str, ...] | None
+) -> None:
+    """Filter the SQL document alias `d` with the same literal prefix rules as grants."""
+    if path_prefixes is None:
+        return
+    if not path_prefixes:
+        conditions.append("0")
+        return
+    clauses = []
+    for prefix in path_prefixes:
+        # Binary ordering bounds descendants without treating SQL wildcards specially.
+        clauses.append("(d.path = ? OR (d.path >= ? AND d.path < ?))")
+        parameters.extend((prefix, f"{prefix}/", f"{prefix}0"))
+    conditions.append(f"({' OR '.join(clauses)})")
+
+
 class AuthorizationPolicy:
     """Deny-by-default capability and normalized workspace-prefix policy."""
 

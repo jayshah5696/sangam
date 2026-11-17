@@ -75,7 +75,8 @@ The model tools are `search`, `execute`, and `present`. The typed interaction
 tool `mcp_app` has App-only visibility. Hosts must honor visibility metadata;
 it never substitutes for authorization. Every operation checks current grants.
 
-The catalog contains `documents.search`, `documents.read`, `documents.update`,
+The catalog contains `documents.search`, `documents.read`, `documents.history`,
+`documents.diff`, `documents.update`, `proposals.list`, `proposals.get`,
 `executions.get`, `pdf.status`, `pdf.pages.read`, `pdf.search`,
 `pdf.annotations.list`, `pdf.annotations.create`, `skills.list`, `skills.get`,
 `skills.read`, `assistant.submit/get/wait/cancel`, and `conversations.read`.
@@ -101,6 +102,19 @@ await documents_update(
 Each execute requires a caller-retained `execution_key`. Its final expression
 appears under the small `output` field. Search supports `offset` pagination;
 read results include the revision and a `next_offset` for bounded passages.
+
+`documents_read(document_id="...", revision_id="...")` reads an exact text
+revision. Its `revision_id` identifies the returned content. Its
+`current_revision_id` and `title` describe current document metadata. Read current
+content again before preparing an update; historical text is not a current read.
+Markdown and HTML return source text under the existing read grant.
+
+`documents_history(document_id="...", limit=10, cursor="...")` returns revision
+metadata without document bodies. Follow `next_cursor`. Use exact revision IDs
+with `documents_diff(document_id="...", from_revision_id="...", to_revision_id="...")`.
+The diff returns bounded unified text and `next_offset`, with additions/deletions
+for the full comparison. Text offsets count characters. PDF research operations
+remain the way to inspect PDF content and annotations.
 
 `present(document_id="first-id", additional_document_ids=["second-id"])`
 opens a set of permitted Markdown or PDF documents. `present(layout_id="layout-id")`
@@ -265,6 +279,48 @@ limits; retained request identities use the existing MCP receipt quota. Answers
 expire after the existing seven-day result-retention window. Identities and
 canonical conversation/artifact references remain for recovery.
 
+## Proposal inspection
+
+`proposals_list(document_id="...", limit=10, offset=0)` returns owned proposal
+metadata. A known `conversation_id` is another optional filter. Follow
+`next_offset`. Ownership and literal read-prefix filters run before SQL pagination;
+the metadata query does not load proposal bodies or evidence.
+
+```python
+proposal = await proposals_get(proposal_id="...", length=1000)
+{
+    "wording": proposal["content"],
+    "kind": proposal["content_kind"],
+    "base_revision": proposal["expected_revision_id"],
+    "status": proposal["status"],
+}
+```
+
+The default `content_kind="proposed"` reads the original suggested wording.
+`content_kind="applied"` reads the exact reviewed wording stored by the normal
+apply service. It is available only after apply and names `applied_revision_id`.
+The response also names the current document head and whether the target is in
+Trash. A suggestion is not a saved revision.
+
+Use `offset` and `length` for content passages. Set `include_evidence=True` to
+retrieve authorized context, citations, and retrieved-source references.
+`evidence_included` distinguishes omitted evidence from an empty set. Existing
+source checks redact inaccessible quotations and mark them unavailable. A cached
+execute result that contained private evidence rechecks those source grants.
+For large evidence sets, let the Code Mode program select the required fields
+and citations within its normal output budget.
+
+`sangam://proposal/{proposal_id}` provides the same default bounded read through
+native resources and the existing invalidation observer. Normal Sangam or REST
+apply/dismiss actions update this resource. A read-only key can inspect its own
+permitted proposals without an inference grant. Document access alone does not
+grant access to another actor's proposal. REST proposal listing uses the same
+target-document read filter.
+
+This addition inspects existing proposals. Standalone external proposal creation,
+apply/dismiss operations through Code Mode, and an App proposal-review view remain
+pending. The existing Sangam review UI and REST mutation contracts stay in use.
+
 ## Recovery and persistence
 
 ### Resource changes
@@ -354,7 +410,8 @@ read-only comparison pane. Select a Markdown tab to edit its content.
 View locations use their own optimistic version and require current read access.
 Saving a location creates no document revision and does not change the draft version.
 Two simultaneous editors, HTML/PDF source editing, binary upload, OAuth issuance, native Tasks,
-direct proposal management and other workspace operations remain outside this implementation. See the
+proposal creation and mutations through Code Mode, App proposal review, and other
+workspace operations remain outside this implementation. See the
 [broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md).
 Local bridge verification does not establish compatibility with every external host.
 
@@ -365,6 +422,9 @@ official MCP client on an isolated server. It verifies request completion after
 execute ends, exact request replay without duplicate inference, known-conversation
 continuation, current-source denial, and a reviewable proposal with no saved change.
 It requires a configured provider and fails if inference is unavailable.
+The check also inspects a generated proposal, applies it through the existing
+authorized REST path, and confirms the exact applied revision through MCP and
+its native resource.
 
 ```sh
 just test

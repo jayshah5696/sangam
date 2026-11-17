@@ -114,6 +114,43 @@ async def verify() -> None:
                 .json()
             )
             assert saved["current_revision_id"] == document.current_revision_id
+            proposal_id = reviewed["proposals"][0]["proposal_id"]
+            proposed = (
+                await execute(
+                    f"await proposals_get(proposal_id='{proposal_id}', include_evidence=True)"
+                )
+            )["output"]
+            assert proposed["content_kind"] == "proposed"
+            assert proposed["expected_revision_id"] == document.current_revision_id
+            assert "MCP review proof." in proposed["content"]
+            listed = (await execute(f"await proposals_list(document_id='{document.document_id}')"))[
+                "output"
+            ]
+            assert any(item["proposal_id"] == proposal_id for item in listed["items"])
+            uri = proposed["resource_uri"]
+            snapshot = json.loads((await session.read_resource(uri)).contents[0].text)
+            assert snapshot["status"] == "pending"
+            applied_response = await rest.post(
+                f"/api/v1/chat/proposals/{proposal_id}/apply",
+                headers={
+                    "Authorization": f"Bearer {key['token']}",
+                    "Idempotency-Key": str(uuid4()),
+                },
+                json={"expected_revision_id": document.current_revision_id},
+            )
+            applied_response.raise_for_status()
+            applied = (
+                await execute(
+                    f"await proposals_get(proposal_id='{proposal_id}', content_kind='applied')"
+                )
+            )["output"]
+            assert applied["content"] == proposed["content"]
+            assert applied["applied_revision_id"] == applied_response.json()["applied_revision_id"]
+            snapshot = json.loads((await session.read_resource(uri)).contents[0].text)
+            assert (
+                snapshot["status"] == "applied"
+                and snapshot["applied_revision_id"] == applied["applied_revision_id"]
+            )
         narrow = (
             (
                 await rest.post(
@@ -178,6 +215,7 @@ async def verify() -> None:
         "first": first,
         "follow_up": follow,
         "review": reviewed,
+        "proposal_inspection": {"proposed": proposed, "applied": applied},
         "verified": [
             "real official MCP client, Monty and configured inference",
             "server-owned work after the submitting execute ends",
@@ -185,6 +223,7 @@ async def verify() -> None:
             "known owned conversation continuation",
             "resource status parity and narrowed source access denial",
             "pending review distinct from a saved revision",
+            "proposal inspection and native resource refresh after an authorized REST apply",
             "SQLite integrity and expected request/run counts",
         ],
     }

@@ -14,6 +14,8 @@ from pydantic import Field, TypeAdapter
 from pydantic import ValidationError as PayloadValidationError
 
 from sangam.access import WorkspaceAccessService
+from sangam.authorization import add_document_path_filter
+from sangam.capabilities import Capability
 from sangam.chat_actions import ActionDigest, check_autonomy_allows, validate_action_ownership
 from sangam.chat_capabilities import ProposalCitationInput
 from sangam.chat_evidence import ChatEvidenceRepository
@@ -33,6 +35,7 @@ from sangam.schemas import (
     ChatProposalCitation,
     ChatProposalEvidence,
     ChatProposalSource,
+    ChatProposalSummary,
     UpdateDocument,
 )
 from sangam.security import IdentityService, Principal
@@ -125,8 +128,58 @@ class ChatProposalRepository:
             )
 
     def list_owned(
-        self, principal: Principal, *, thread_id: str | None, document_id: str | None
+        self,
+        principal: Principal,
+        *,
+        thread_id: str | None,
+        document_id: str | None,
+        limit: int | None = None,
+        offset: int = 0,
+        path_prefixes: tuple[str, ...] | None = None,
     ) -> list[ChatProposal]:
+        rows = self._list_rows(
+            principal,
+            thread_id=thread_id,
+            document_id=document_id,
+            limit=limit,
+            offset=offset,
+            path_prefixes=path_prefixes,
+            metadata_only=False,
+        )
+        return [_proposal_from_row(row) for row in rows]
+
+    def summaries(
+        self,
+        principal: Principal,
+        *,
+        thread_id: str | None,
+        document_id: str | None,
+        limit: int,
+        offset: int,
+        path_prefixes: tuple[str, ...] | None,
+    ) -> list[ChatProposalSummary]:
+        rows = self._list_rows(
+            principal,
+            thread_id=thread_id,
+            document_id=document_id,
+            limit=limit,
+            offset=offset,
+            path_prefixes=path_prefixes,
+            metadata_only=True,
+        )
+        return [ChatProposalSummary.model_validate(dict(row)) for row in rows]
+
+    def _list_rows(
+        self,
+        principal: Principal,
+        *,
+        thread_id: str | None,
+        document_id: str | None,
+        limit: int | None,
+        offset: int,
+        path_prefixes: tuple[str, ...] | None,
+        metadata_only: bool,
+    ) -> list[sqlite3.Row]:
         clauses = ["(thread.created_by = ? OR context.actor_id = ? OR ?)"]
         params: list[object] = [
             principal.actor_id,
@@ -139,25 +192,37 @@ class ChatProposalRepository:
         if document_id:
             clauses.append("proposal.document_id = ?")
             params.append(document_id)
+        add_document_path_filter(clauses, params, path_prefixes)
+        pagination = ""
+        if limit is not None:
+            pagination = "LIMIT ? OFFSET ?"
+            params.extend((limit, offset))
+        columns = (
+            "proposal.proposal_id, proposal.thread_id, proposal.document_id, "
+            "proposal.expected_revision_id, proposal.applied_revision_id, proposal.status, "
+            "proposal.summary, proposal.created_at"
+            if metadata_only
+            else "proposal.*, thread.created_by AS proposal_owner_id, "
+            "context.actor_id AS evidence_actor_id, context.document_id AS evidence_document_id, "
+            "context.revision_id AS evidence_revision_id, "
+            "context.selection_text AS evidence_selected_text, "
+            "context.pdf_page_number AS evidence_pdf_page_number, "
+            "context.annotation_id AS evidence_annotation_id"
+        )
         with self.database.connection() as connection:
-            rows = connection.execute(
+            return connection.execute(
                 f"""
-                SELECT proposal.*, thread.created_by AS proposal_owner_id,
-                    context.actor_id AS evidence_actor_id,
-                    context.document_id AS evidence_document_id,
-                    context.revision_id AS evidence_revision_id,
-                    context.selection_text AS evidence_selected_text,
-                    context.pdf_page_number AS evidence_pdf_page_number,
-                    context.annotation_id AS evidence_annotation_id
+                SELECT {columns}
                 FROM chat_proposals AS proposal
+                JOIN documents AS d ON d.document_id = proposal.document_id
                 JOIN chat_threads AS thread ON thread.thread_id = proposal.thread_id
                 LEFT JOIN chat_turn_contexts AS context ON context.context_id = proposal.context_id
                 WHERE {" AND ".join(clauses)}
-                ORDER BY proposal.created_at DESC
+                ORDER BY proposal.created_at DESC, proposal.proposal_id DESC
+                {pagination}
                 """,
                 params,
             ).fetchall()
-        return [_proposal_from_row(row) for row in rows]
 
     def get_owned(self, principal: Principal, proposal_id: str) -> ChatProposal:
         with self.database.connection() as connection:
@@ -611,18 +676,51 @@ class ChatProposalService:
             return document_content.replace(anchor, content + anchor, 1)
         return document_content.replace(anchor, anchor + content, 1)
 
+    def summaries(
+        self,
+        principal: Principal,
+        *,
+        thread_id: str | None,
+        document_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[ChatProposalSummary]:
+        principal = self.identity.reauthorize(principal)
+        return self.repository.summaries(
+            principal,
+            thread_id=thread_id,
+            document_id=document_id,
+            limit=limit,
+            offset=offset,
+            path_prefixes=self.workspace.policy.allowed_prefixes(principal, Capability.READ),
+        )
+
     def list(
-        self, principal: Principal, *, thread_id: str | None, document_id: str | None
+        self,
+        principal: Principal,
+        *,
+        thread_id: str | None,
+        document_id: str | None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[ChatProposal]:
+        principal = self.identity.reauthorize(principal)
         return [
             self._visible_evidence(principal, proposal)
             for proposal in self.repository.list_owned(
-                principal, thread_id=thread_id, document_id=document_id
+                principal,
+                thread_id=thread_id,
+                document_id=document_id,
+                limit=limit,
+                offset=offset,
+                path_prefixes=self.workspace.policy.allowed_prefixes(principal, Capability.READ),
             )
         ]
 
     def get(self, principal: Principal, proposal_id: str) -> ChatProposal:
+        principal = self.identity.reauthorize(principal)
         proposal = self.repository.get_owned(principal, proposal_id)
+        self.workspace.get_document(principal, proposal.document_id, include_deleted=True)
         return self._visible_evidence(principal, proposal)
 
     def apply(

@@ -318,6 +318,33 @@ async def verify() -> None:
             assert failed.is_error and failed.structured_content is not None
             revision = (await rest.get(f"/api/v1/documents/{document.document_id}")).json()
             assert revision["content"] == "# Committed before failure"
+            inspected = await session.call_tool(
+                "execute",
+                {
+                    "execution_key": str(uuid4()),
+                    "code": (
+                        f"old = await documents_read(document_id='{document.document_id}', "
+                        f"revision_id='{document.current_revision_id}')\n"
+                        f"history = await documents_history(document_id='{document.document_id}', "
+                        "limit=1)\n"
+                        f"diff = await documents_diff(document_id='{document.document_id}', "
+                        f"from_revision_id='{document.current_revision_id}', "
+                        f"to_revision_id='{revision['current_revision_id']}')\n"
+                        "{'old': old, 'history': history, 'diff': diff}"
+                    ),
+                },
+            )
+            assert not inspected.is_error and inspected.structured_content is not None
+            inspected_data = inspected.structured_content["output"]
+            assert inspected_data["old"]["revision_id"] == document.current_revision_id
+            assert inspected_data["old"]["current_revision_id"] == revision["current_revision_id"]
+            assert inspected_data["old"]["content"] == document.content
+            assert (
+                inspected_data["history"]["items"][0]["revision_id"]
+                == revision["current_revision_id"]
+            )
+            assert inspected_data["history"]["next_cursor"]
+            assert "+# Committed before failure" in inspected_data["diff"]["unified_diff"]
             before = (await rest.get(f"/api/v1/documents/{document.document_id}/history")).json()
             trashed = await rest.request(
                 "DELETE",
@@ -367,6 +394,7 @@ async def verify() -> None:
             "bare and slash endpoints with built frontend",
             "catalog discovery",
             "real Monty search",
+            "exact revision reads, history pagination and canonical revision diff",
             "App resource",
             "registered guidance through Code Mode and native Skills, exact text/PDF digests",
             "skill source invalidation with pinned older bytes preserved",

@@ -21,8 +21,41 @@ class SearchDocuments(Input):
 
 class ReadDocument(Input):
     document_id: Identifier
+    revision_id: Identifier | None = None
     offset: int = Field(default=0, ge=0)
     length: int = Field(default=16_000, ge=1, le=32_000)
+
+
+class ReadHistory(Input):
+    document_id: Identifier
+    limit: int = Field(default=10, ge=1, le=25)
+    cursor: Identifier | None = None
+
+
+class ReadDiff(Input):
+    document_id: Identifier
+    from_revision_id: Identifier
+    to_revision_id: Identifier
+    offset: int = Field(default=0, ge=0)
+    length: int = Field(default=16_000, ge=1, le=32_000)
+
+
+class ListProposals(Input):
+    document_id: Identifier | None = None
+    conversation_id: Identifier | None = None
+    offset: int = Field(default=0, ge=0, le=100_000)
+    limit: int = Field(default=10, ge=1, le=25)
+
+
+class GetProposal(Input):
+    proposal_id: Identifier
+    offset: int = Field(default=0, ge=0)
+    length: int = Field(default=2000, ge=1, le=32_000)
+    content_kind: Literal["proposed", "applied"] = "proposed"
+    include_evidence: bool = False
+
+
+InspectionOperation = ReadDocument | ReadHistory | ReadDiff | ListProposals | GetProposal
 
 
 class SearchApp(SearchDocuments):
@@ -148,7 +181,7 @@ PdfOperation = PdfStatus | PdfReadPage | PdfSearch | PdfAnnotations | PdfCreateA
 SkillOperation = ListSkills | GetSkill | ReadSkill
 WorkspaceOperation = (
     SearchDocuments
-    | ReadDocument
+    | InspectionOperation
     | UpdateDocument
     | ExecutionStatus
     | PdfOperation
@@ -174,6 +207,8 @@ class DocumentPassage(BaseModel):
     document_id: str
     title: str
     current_revision_id: str
+    revision_id: str
+    content_type: str
     content: str
     next_offset: int | None
 

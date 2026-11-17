@@ -208,8 +208,23 @@ revision references. Older turns lack catalog provenance, so migration `043`
 marks their inventory incomplete and reads require the existing global read grant.
 Audited agent reads occur before profile or skill-registration writer locks.
 Existing chat proposals and effects
-determine `needs_review` separately from inference completion. Direct proposal
-management and remaining workspace operations are still pending.
+determine `needs_review` separately from inference completion.
+
+Proposal inspection and revision history now share a bounded read adapter.
+`documents.read` accepts an exact revision and identifies both that content's
+revision and the current document head. Markdown and HTML are returned as source
+text. `documents.history` pages revision metadata; `documents.diff` reads a
+bounded unified comparison between exact revisions. `proposals.list/get` inspect
+owned proposal metadata, original wording, and separately recorded applied wording.
+Evidence is optional and retains canonical redaction and availability labels.
+Execution receipts bind any returned private evidence to current source grants.
+`sangam://proposal/{proposal_id}` uses the same reader for resources and change
+observation. The shared proposal reader now enforces target-document read grants
+for REST and MCP; SQL applies ownership and literal path prefixes before
+pagination, and metadata pages do not select bodies or evidence. No synthetic
+conversation or second proposal store was added. Standalone external proposal
+creation, Code Mode apply/dismiss, App proposal review, and remaining workspace
+operations are still pending under Decision 8 and the broader operation contracts.
 
 MCP is an external entry point to selected authorized Sangam workflows. The
 compact tools are the access mechanism; the useful result is working with

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from sangam.comments import DocumentCommentService
 
 from sangam.activity import ActivityService
-from sangam.authorization import AuthorizationPolicy
+from sangam.authorization import AuthorizationPolicy, add_document_path_filter
 from sangam.capabilities import Capability
 from sangam.conditions import (
     ConditionalMutation,
@@ -1818,7 +1818,7 @@ class WorkspaceAccessService:
                 elif any(path_matches(folder.path, prefix) for prefix in allowed):
                     clauses = ["d.deleted = 0"]
                     parameters: list[object] = []
-                    self.documents._add_path_filter(
+                    add_document_path_filter(
                         clauses,
                         parameters,
                         tuple(prefix for prefix in allowed if path_matches(folder.path, prefix)),

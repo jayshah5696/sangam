@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Concatenate
 
 from sangam.actors import ActorService
+from sangam.authorization import add_document_path_filter
 from sangam.db import Database, utc_now
 from sangam.errors import (
     ConflictError,
@@ -459,7 +460,7 @@ class DocumentService:
             return []
         conditions = [] if include_deleted else ["d.deleted = 0"]
         parameters: list[object] = []
-        self._add_path_filter(conditions, parameters, path_prefixes)
+        add_document_path_filter(conditions, parameters, path_prefixes)
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         parameters.extend((limit, offset))
         with self.database.connection() as connection:
@@ -516,7 +517,7 @@ class DocumentService:
             f"%sangam://document/{document_id}%",
             f"%/documents/{document_id}%",
         ]
-        self._add_path_filter(conditions, parameters, path_prefixes)
+        add_document_path_filter(conditions, parameters, path_prefixes)
         where = f" WHERE {' AND '.join(conditions)}"
         parameters.append(limit)
         with self.database.connection() as connection:
@@ -535,23 +536,6 @@ class DocumentService:
                 summary.search_snippet = snippet
             summaries.append(summary)
         return summaries
-
-    @staticmethod
-    def _add_path_filter(
-        conditions: list[str],
-        parameters: list[object],
-        path_prefixes: tuple[str, ...] | None,
-    ) -> None:
-        if path_prefixes is None:
-            return
-        clauses: list[str] = []
-        for prefix in path_prefixes:
-            # Under SQLite's binary text ordering, every descendant starts in
-            # the half-open ["prefix/", "prefix0") range. This is segment-aware
-            # and treats SQL wildcard characters in paths as ordinary text.
-            clauses.append("(d.path = ? OR (d.path >= ? AND d.path < ?))")
-            parameters.extend((prefix, f"{prefix}/", f"{prefix}0"))
-        conditions.append(f"({' OR '.join(clauses)})")
 
     def legacy_duplicate_replay_matches(
         self,
@@ -1892,7 +1876,7 @@ class DocumentService:
                 "WHERE ar.document_id = d.document_id AND ar.actor_id = ?)"
             )
             parameters.append(actor_id)
-        self._add_path_filter(conditions, parameters, path_prefixes)
+        add_document_path_filter(conditions, parameters, path_prefixes)
         if sort == "title":
             ordering = "d.title COLLATE NOCASE, d.document_id"
         elif sort == "path":

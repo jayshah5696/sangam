@@ -37,6 +37,7 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.mcp_events import ResourceSubscriptions
+from sangam.mcp_inspection import DiffPassage, InspectionReads, ProposalPage, ProposalPassage
 from sangam.mcp_models import (
     ActivateDocument,
     AppAction,
@@ -49,7 +50,9 @@ from sangam.mcp_models import (
     ExecutionReceipt,
     ExecutionStatus,
     GetAssistant,
+    GetProposal,
     GetSkill,
+    ListProposals,
     ListSkills,
     OpenDocument,
     OperationInput,
@@ -62,7 +65,9 @@ from sangam.mcp_models import (
     PendingAssistantJob,
     PendingJob,
     ReadConversation,
+    ReadDiff,
     ReadDocument,
+    ReadHistory,
     ReadSkill,
     RefreshWorkspace,
     SearchApp,
@@ -86,6 +91,7 @@ from sangam.mcp_pdf import (
 )
 from sangam.mcp_skills import SkillCatalog, SkillEntry, SkillExports, SkillPassage, SkillsExtension
 from sangam.mcp_state import McpState
+from sangam.schemas import RevisionPage
 from sangam.schemas import UpdateDocument as DocumentUpdate
 from sangam.security import Principal
 
@@ -93,6 +99,38 @@ APP_URI = "ui://sangam/document-workspace.html"
 JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
+    "documents.history": (
+        ReadHistory,
+        "documents_history",
+        "read",
+        "read",
+        "Read revision metadata without full document bodies. Follow next_cursor for more history.",
+    ),
+    "documents.diff": (
+        ReadDiff,
+        "documents_diff",
+        "read",
+        "read",
+        "Compare two exact text revision IDs as a bounded unified diff. "
+        "Follow next_offset; this does not compare PDF bytes.",
+    ),
+    "proposals.list": (
+        ListProposals,
+        "proposals_list",
+        "read",
+        "ownership, read",
+        "List permitted owned proposal metadata, optionally by document or known conversation. "
+        "Follow next_offset. Listing does not apply or dismiss a proposal.",
+    ),
+    "proposals.get": (
+        GetProposal,
+        "proposals_get",
+        "read",
+        "ownership, read",
+        "Inspect bounded proposed or applied wording and exact revision references. "
+        "Set include_evidence to inspect currently authorized citations and sources. "
+        "Unavailable sources are marked explicitly; proposed text is not a saved revision.",
+    ),
     "assistant.submit": (
         SubmitAssistant,
         "assistant_submit",
@@ -171,8 +209,9 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
         "documents_read",
         "read",
         "read",
-        "Read a bounded Markdown passage. Returns current_revision_id; "
-        "offset and length count characters.",
+        "Read a bounded Markdown or HTML passage from the current or an exact revision. "
+        "revision_id identifies the content; current_revision_id identifies the current head. "
+        "offset and length count characters. Read current content before writing.",
     ),
     "documents.update": (
         UpdateDocument,
@@ -227,6 +266,10 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
     ),
 }
 OUTPUT_SCHEMAS = {
+    "documents.history": RevisionPage.model_json_schema(),
+    "documents.diff": DiffPassage.model_json_schema(),
+    "proposals.list": ProposalPage.model_json_schema(),
+    "proposals.get": ProposalPassage.model_json_schema(),
     "assistant.submit": AssistantResult.model_json_schema(),
     "assistant.get": AssistantResult.model_json_schema(),
     "assistant.wait": AssistantResult.model_json_schema(),
@@ -319,6 +362,7 @@ class SangamMcp:
         self.state = McpState(services, settings)
         self.pdf = PdfOperations(services, self.state)
         self.skills = SkillExports(services, self.state)
+        self.inspection = InspectionReads(services, self.state)
         skills_extension = SkillsExtension(self.skills, self.principal)
         self.active = 0
         self.closing = False
@@ -587,9 +631,19 @@ class SangamMcp:
                 self.read_resource(self.credential(ctx), f"sangam://assistant/{request_key}")
             )
 
+        @self.server.resource("sangam://proposal/{proposal_id}", mime_type="application/json")
+        def proposal_resource(proposal_id: str, ctx: Context) -> str:
+            return json.dumps(
+                self.read_resource(self.credential(ctx), f"sangam://proposal/{proposal_id}")
+            )
+
     def read_resource(self, token: str, uri: str) -> dict[str, JsonValue]:
         """One authorization/read path for resource reads and change observation."""
         principal = self.principal(token)
+        if uri.startswith("sangam://proposal/"):
+            return self.inspection.invoke(
+                principal, GetProposal(proposal_id=uri.removeprefix("sangam://proposal/"))
+            )
         if uri.startswith("sangam://assistant/"):
             return self.services.assistant_requests.get(
                 principal,
@@ -819,6 +873,8 @@ class SangamMcp:
             response = self.state.status(principal, operation.execution_key)
             self.state.inherit_dependencies(principal, execution_key, operation.execution_key)
             return response
+        if isinstance(operation, (ReadDocument, ReadHistory, ReadDiff, ListProposals, GetProposal)):
+            return self.inspection.invoke(principal, operation, execution_key)
         if isinstance(operation, (ListSkills, GetSkill, ReadSkill)):
             return self.skills.invoke(principal, operation, execution_key)
         if isinstance(operation, (PdfStatus, PdfCreateAnnotation)):
@@ -828,18 +884,6 @@ class SangamMcp:
             for item in search_response.items:
                 self.state.dependency(principal, execution_key, item.document_id)
             return search_response.model_dump(mode="json")
-        if isinstance(operation, ReadDocument):
-            document = self.services.workspace_access.get_document(principal, operation.document_id)
-            self.state.require_markdown(document)
-            self.state.dependency(principal, execution_key, document.document_id)
-            end = operation.offset + operation.length
-            return {
-                "document_id": document.document_id,
-                "title": document.title,
-                "current_revision_id": document.current_revision_id,
-                "content": document.content[operation.offset : end],
-                "next_offset": end if end < len(document.content) else None,
-            }
         document = self.services.documents.get_document(operation.document_id)
         self.services.authorization.require(principal, Capability.UPDATE, document.path)
         self.state.require_markdown(document)
