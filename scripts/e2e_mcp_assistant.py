@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import Callable
 from uuid import uuid4
 
 from agents.models.interface import Model, ModelProvider
@@ -138,10 +139,12 @@ class FixtureModel(Model):
 def register(app: FastAPI) -> None:
     fixture: FixtureInput | None = None
     released: asyncio.Event | None = None
+    original_provider: Callable[[str], ModelProvider] | None = None
+    original_credential: str | None = None
 
     @app.post("/__e2e/mcp-assistant")
     async def configure(payload: FixtureInput) -> dict[str, bool]:
-        nonlocal fixture, released
+        nonlocal fixture, released, original_provider, original_credential
         fixture = payload
         released = asyncio.Event()
         if not payload.hold:
@@ -153,9 +156,28 @@ def register(app: FastAPI) -> None:
                 return FixtureModel(payload, event)
 
         connections = app.state.services.provider_connections
+        if original_provider is None:
+            original_provider = connections.model_provider
+            original_credential = connections._credential_overrides.get("openrouter")
         connections._credential_overrides["openrouter"] = "browser-fixture"
         connections.model_provider = lambda _connection_id: Provider()
         return {"configured": True}
+
+    @app.post("/__e2e/mcp-assistant/reset")
+    async def reset() -> dict[str, bool]:
+        nonlocal fixture, released, original_provider
+        if released is not None:
+            released.set()
+        if original_provider is not None:
+            connections = app.state.services.provider_connections
+            connections.model_provider = original_provider
+            if original_credential is None:
+                connections._credential_overrides.pop("openrouter", None)
+            else:
+                connections._credential_overrides["openrouter"] = original_credential
+            original_provider = None
+        fixture, released = None, None
+        return {"reset": True}
 
     @app.post("/__e2e/mcp-assistant/release")
     async def release() -> dict[str, bool]:

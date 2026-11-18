@@ -11,6 +11,10 @@ const documentSchema = z.object({
 })
 const tokenSchema = z.object({ token: z.string() })
 test.use({ video: 'on' })
+test.afterEach(async ({ request }) => {
+  const reset = await request.post('/__e2e/mcp-assistant/reset')
+  expect(reset.ok()).toBeTruthy()
+})
 
 test('App creates one document after a lost response and preserves the outgoing draft', async ({
   page,
@@ -143,6 +147,8 @@ test('App assistant retains an accepted request, continues its conversation, and
     },
   })
   const source = documentSchema.parse(await created.json())
+  const configSchema = z.object({ inference_enabled: z.boolean() })
+  const originalConfig = configSchema.parse(await (await request.get('/api/v1/chat/config')).json())
   const fixture = await request.post('/__e2e/mcp-assistant', {
     data: {
       document_id: source.document_id,
@@ -276,6 +282,9 @@ test('App assistant retains an accepted request, continues its conversation, and
   await app.getByRole('button', { name: 'Close assistant', exact: true }).click()
   await expect(app.getByRole('button', { name: 'Ask Sangam', exact: true })).toBeFocused()
   await page.screenshot({ path: testInfo.outputPath('mcp-assistant-applied.png'), fullPage: true })
+  expect((await request.post('/__e2e/mcp-assistant/reset')).ok()).toBeTruthy()
+  const restoredConfig = configSchema.parse(await (await request.get('/api/v1/chat/config')).json())
+  expect(restoredConfig.inference_enabled).toBe(originalConfig.inference_enabled)
 })
 
 test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals', async ({
