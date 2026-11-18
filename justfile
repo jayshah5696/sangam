@@ -136,7 +136,7 @@ verify-mcp-assistant port="8899":
     uv run python scripts/verify_mcp_assistant.py
 
 # Leave a disposable, seeded local MCP walkthrough running until Ctrl+C.
-mcp-demo port="8873": build-frontend
+mcp-demo port="8873" inference="false": build-frontend
     #!/usr/bin/env bash
     set -Eeuo pipefail
     export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-mcp-demo.XXXXXX")"
@@ -146,7 +146,7 @@ mcp-demo port="8873": build-frontend
     just verify-control launch "{{ port }}"
     just verify-control doctor
     source "$TMPDIR/.sangam-active-verification"
-    uv run python scripts/mcp_demo.py
+    uv run python scripts/mcp_demo.py --inference="{{ inference }}"
     while kill -0 "$SANGAM_VERIFY_PID" 2>/dev/null; do sleep 1; done
 
 # Verify settings inventories, version propagation, and dependency audits. Needs a built frontend.

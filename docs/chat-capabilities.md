@@ -10,6 +10,11 @@ with the connection's own inference and document permissions. They preserve
 internal proposal/effect review behavior. Server-owned request handles add
 bounded waiting and recovery; they do not expose broad history or profiles.
 See the [MCP request contract](mcp.md#sangam-assistant-requests).
+The MCP App can create Markdown through the same `create_document` service and
+send messages to this assistant path. Its explicit saved revision, selection,
+and open-tab context follows the same turn-context and current-source checks.
+Proposal review opens the shared apply/dismiss workflow. Other durable effect
+approvals remain in internal chat.
 
 Sangam chat is a bounded interface to the document server. The model may choose from capabilities that deterministic application code has already authorized. It cannot grant itself a tool, write SQLite or the workspace, or turn a proposal into an applied revision. See [architecture.md](architecture.md) for the core trust model and [operations/integrations.md](operations/integrations.md) for provider configuration. To measure changes to this contract, run the eval suite in [chat-evals.md](chat-evals.md).
 

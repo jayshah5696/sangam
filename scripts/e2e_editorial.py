@@ -12,9 +12,11 @@ from sangam.chat_context import ChatRequestContext
 from sangam.config import Settings
 from sangam.schemas import ChatProposal, Document
 from sangam.security import Principal
+from scripts.e2e_mcp_assistant import register
 
 settings = Settings()
 app = create_app(settings)
+register(app)
 
 
 class EditorialSeed(BaseModel):

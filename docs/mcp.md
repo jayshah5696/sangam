@@ -18,10 +18,13 @@ an isolated database/workspace, and seeds **Sangam MCP walkthrough** and
 **Walkthrough companion notes**, plus a five-page PDF and a registered review skill. It prints
 the host URL and a mode-0600 disposable key file path, never the key itself.
 Keep that terminal running. Use `just mcp-demo 8874` for another port.
+For the assistant walkthrough, use `just mcp-demo 8873 true`. This gives the
+disposable key the existing inference grant. Sangam must already have a working
+provider and model configuration.
 
 1. Open `http://127.0.0.1:8873/mcp-host.html`.
 2. Paste the key file's contents into **Sangam API key** and select **Connect**.
-   The key can read, search, and update only `mcp-demo/`.
+   The key can read, search, create, and update only `mcp-demo/`.
 3. Search for `walkthrough` and open the result.
 4. Edit a paragraph and wait for **Draft backed up**. The normal Sangam document
    still holds its previous saved revision.
@@ -53,7 +56,16 @@ Keep that terminal running. Use `just mcp-demo 8874` for another port.
     before selecting **Apply proposal**. The result names the saved revision.
     Create another suggestion and select **Dismiss proposal** to close it without
     changing the document. Save or discard any document draft before applying.
-14. Add `debug=1` to the host URL to expose **Connection and tool trace**.
+14. Select **New document**. Enter a title, a path under `mcp-demo/`, and initial
+    Markdown, then select **Create document**. The new tab opens after creation.
+    The outgoing document's checkpointed draft remains in its own tab.
+15. With the inference-enabled demo, select **Ask Sangam**. Choose the saved active
+    document, a selected saved passage, or saved revisions of the open tabs.
+    Inspect **Included context**, enter a message, and select **Send message**.
+    Follow up in the same conversation or select **New conversation**. A proposed
+    edit opens through its **Review** button and uses the existing apply/dismiss
+    workflow. **Cancel request** stops running work without undoing completed writes.
+16. Add `debug=1` to the host URL to expose **Connection and tool trace**.
 
 The local host uses Sangam's saved appearance preferences and shared navigation,
 tab, editor, and control styles. Its theme selector uses the existing palettes.
@@ -94,7 +106,7 @@ tool `mcp_app` has App-only visibility. Hosts must honor visibility metadata;
 it never substitutes for authorization. Every operation checks current grants.
 
 The catalog contains `documents.search`, `documents.read`, `documents.history`,
-`documents.diff`, `documents.update`, `proposals.list`, `proposals.get`,
+`documents.diff`, `documents.create`, `documents.update`, `proposals.list`, `proposals.get`,
 `proposals.create`, `proposals.apply`, `proposals.dismiss`,
 `executions.get`, `pdf.status`, `pdf.pages.read`, `pdf.search`,
 `pdf.annotations.list`, `pdf.annotations.create`, `skills.list`, `skills.get`,
@@ -232,12 +244,42 @@ bounded diagnostics rather than a partial usable manifest. The service-owned
 The logical `sangam://skill/{skill_id}` resource supports current-state reads and
 the existing authorized URI invalidation stream.
 
+## Document creation
+
+`documents.create` calls the same `WorkspaceAccessService.create_document` as
+REST and chat. It creates Markdown with `title`, `content`, optional `path`, and
+a stable `operation_key`. Existing create grants govern the destination.
+
+```python
+created = await documents_create(
+    title="Meeting notes",
+    path="notes/meeting.md",
+    content="# Meeting notes\n",
+    operation_key="retain-this-key-for-this-exact-creation",
+)
+created
+```
+
+The result separates `created_revision_id`, the original creation commit, from
+`current_revision_id`, which can change later. Repeating the original key and
+arguments returns the same document. Changed arguments conflict. An interrupted
+execute retains canonical creation evidence in its receipt. A create-only key
+can receive its creation reference without gaining read or update authority.
+
+The App uses a typed `document_create` action over the same operation. A lost
+response retains the original fields and key for **Retry creation**. If creation
+succeeds but opening fails, **Open document** retries navigation rather than
+creation. The form starts from an existing workspace. Code Mode can create the
+first document and then present it. Form text stays local until Create; a forced
+reload can lose an unsent form.
+
 ## Sangam assistant requests
 
 Use `assistant.submit` inside Code Mode when the user explicitly wants Sangam's
 configured assistant to do work. The connection needs the existing global
 `inference` grant and current document grants. Inference and the selected model
-must be enabled in Sangam. The demo key does not include inference.
+must be enabled in Sangam. The default demo key does not include inference;
+`just mcp-demo 8873 true` enables that grant for the disposable walkthrough.
 
 ```python
 request = await assistant_submit(
@@ -297,6 +339,36 @@ conversation at a time. New requests use existing chat admission and timeout
 limits; retained request identities use the existing MCP receipt quota. Answers
 expire after the existing seven-day result-retention window. Identities and
 canonical conversation/artifact references remain for recovery.
+
+### Assistant interaction inside the App
+
+**Ask Sangam** uses typed `assistant_submit`, `assistant_get`, `assistant_cancel`,
+and `assistant_messages` bridge actions over this same service. No additional
+model tool or authorization mode is introduced. New messages need inference;
+reading and cancelling existing owned requests use current source permissions.
+
+Context is explicit. The active document and optional `context_documents` carry
+exact saved revision IDs. A selected passage also carries `selection_text` and,
+for PDFs, `pdf_page_number`. The server records every included document as an
+access dependency before inference, even if the model never reads it. A narrowed
+key cannot retrieve an answer or conversation that includes an unreadable source.
+The App only accepts additional sources from its readable open tabs. Selected
+Markdown must occur in the supplied revision, and selection mode requires a clean
+document. Other modes use saved revisions while preserving unsaved edits.
+
+The composer shows included references before Send. It retains the original
+message and context while acceptance is uncertain. **Retry submission** first
+looks up that owned request and only resubmits the same key and arguments if it
+does not exist. Reopening the same document workspace restores the last accepted
+request and conversation. Unsent messages remain local and can be lost on forced
+reload. Ordinary navigation blocks until the message is sent or discarded.
+
+Messages are bounded and paginated, with explicit controls for older messages
+and long passages. The App reads the newest page first, using
+`conversations.read(order="desc")`; the existing default remains `asc`.
+Running work refreshes without another model response. A proposal reference
+opens the shared revision review view. Other effect references show their current
+status; effect approval remains in Sangam's existing chat workflow.
 
 ## Proposals and review
 
@@ -493,9 +565,11 @@ official MCP client on an isolated server. It verifies request completion after
 execute ends, exact request replay without duplicate inference, known-conversation
 continuation, current-source denial, and a reviewable proposal with no saved change.
 It requires a configured provider and fails if inference is unavailable.
-The check also inspects a generated proposal, applies it through the existing
-authorized REST path, and confirms the exact applied revision through MCP and
-its native resource.
+The check also creates a document through Code Mode and replays it through the
+App action, submits saved selection and open-tab context, restores the accepted
+request from its workspace, and applies the generated proposal through the
+authorized App action. It checks the exact revision through MCP, REST, SQLite,
+and the native resource.
 
 ```sh
 just test
@@ -520,3 +594,9 @@ services. Browser tests use the real client
 and bridge, check persisted content through REST, and cover desktop/narrow
 Chromium, touch-mobile Chromium, and mobile WebKit. Screenshots and walkthrough
 videos go to Playwright artifact directories rather than product baselines.
+The creation and assistant cases cover lost responses, draft preservation,
+accepted-request restoration, follow-up, proposal apply, exact persisted content,
+minimum-width forms, and touch targets. The browser fixture replaces only the
+model provider; the opt-in assistant check separately crosses the live provider
+boundary. Migration `045` preserves old request hashes and execution write
+evidence while adding App provenance and declared source dependencies.

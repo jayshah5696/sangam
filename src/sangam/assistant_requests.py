@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from urllib.parse import quote
@@ -30,6 +31,7 @@ from sangam.errors import ConflictError, NotFoundError, ValidationError
 from sangam.idempotency import request_hash
 from sangam.mcp_models import (
     AssistantOperation,
+    AssistantSource,
     CancelAssistant,
     GetAssistant,
     ReadConversation,
@@ -41,6 +43,27 @@ from sangam.security import IdentityService, Principal
 logger = logging.getLogger(__name__)
 _EVENT: TypeAdapter[ThreadStreamEvent] = TypeAdapter(ThreadStreamEvent)
 _JSON = TypeAdapter(dict[str, JsonValue])
+_SOURCES = TypeAdapter(list[AssistantSource])
+
+
+def submission_fingerprint(query: SubmitAssistant) -> str:
+    """Keep existing request identities stable when optional App context is absent."""
+    payload = query.model_dump(
+        exclude={
+            "request_key",
+            "wait_seconds",
+            "selection_text",
+            "pdf_page_number",
+            "context_documents",
+        }
+    )
+    if query.selection_text:
+        payload["selection_text"] = query.selection_text
+    if query.pdf_page_number is not None:
+        payload["pdf_page_number"] = query.pdf_page_number
+    if query.context_documents:
+        payload["context_documents"] = [source.model_dump() for source in query.context_documents]
+    return request_hash(payload)
 
 
 class ProposalReference(BaseModel):
@@ -48,6 +71,7 @@ class ProposalReference(BaseModel):
     document_id: str
     status: str
     applied_revision_id: str | None
+    summary: str | None
 
 
 class EffectReference(BaseModel):
@@ -134,6 +158,11 @@ class AssistantRequests:
                 "SELECT 1 FROM chat_runs WHERE thread_id=? AND sources_truncated=1 LIMIT 1",
                 (conversation_id,),
             ).fetchone()
+            contexts = connection.execute(
+                "SELECT context_json FROM assistant_requests "
+                "WHERE actor_id=? AND conversation_id=?",
+                (principal.actor_id, conversation_id),
+            ).fetchall()
         if truncated:
             # An incomplete source inventory cannot prove a narrowed read grant is sufficient.
             self.chat.workspace.policy.require(principal, Capability.READ, None)
@@ -142,12 +171,21 @@ class AssistantRequests:
                 row["document_id"], include_deleted=True
             )
             self.chat.workspace.policy.require(principal, Capability.READ, document.path)
+        for context in contexts:
+            for source in _SOURCES.validate_json(context["context_json"]):
+                self.authorize_source(principal, source)
+
+    def authorize_source(self, principal: Principal, source: AssistantSource) -> None:
+        document = self.chat.workspace.documents.get_document(
+            source.document_id, include_deleted=True
+        )
+        self.chat.workspace.policy.require(principal, Capability.READ, document.path)
 
     def authorize(self, principal: Principal, request_key: str) -> None:
         principal = self.authority(principal)
         with self.database.connection() as connection:
             row = connection.execute(
-                "SELECT conversation_id, document_id FROM assistant_requests "
+                "SELECT conversation_id, document_id, context_json FROM assistant_requests "
                 "WHERE actor_id=? AND request_key=?",
                 (principal.actor_id, request_key),
             ).fetchone()
@@ -165,6 +203,8 @@ class AssistantRequests:
                 row["document_id"], include_deleted=True
             )
             self.chat.workspace.policy.require(principal, Capability.READ, document.path)
+        for source in _SOURCES.validate_json(row["context_json"]):
+            self.authorize_source(principal, source)
         if thread:
             self.authorize_conversation(principal, row["conversation_id"])
 
@@ -204,7 +244,7 @@ class AssistantRequests:
             ).fetchone()
             run_id = run["run_id"] if run else None
             proposals = connection.execute(
-                "SELECT proposal_id,document_id,status,applied_revision_id "
+                "SELECT proposal_id,document_id,status,applied_revision_id,summary "
                 "FROM chat_proposals WHERE run_id=? LIMIT 21",
                 (run_id,),
             ).fetchall()
@@ -282,21 +322,38 @@ class AssistantRequests:
             raise ValidationError(runtime.message)
         if query.revision_id and not query.document_id:
             raise ValidationError("An exact revision requires an explicit document.")
+        if (query.selection_text or query.pdf_page_number is not None) and not query.document_id:
+            raise ValidationError("Passage and PDF context require an explicit document.")
         if query.document_id:
             document = self.chat.workspace.get_document(principal, query.document_id)
             if query.revision_id:
                 self.chat.workspace.get_revision(principal, document.document_id, query.revision_id)
+            if query.pdf_page_number is not None and (
+                document.content_type != "application/pdf"
+                or document.pdf_page_count is not None
+                and query.pdf_page_number > document.pdf_page_count
+            ):
+                raise ValidationError("PDF context requires an available page of a PDF document.")
+        for source in query.context_documents:
+            self.chat.workspace.get_revision(principal, source.document_id, source.revision_id)
         if query.conversation_id:
             self.authorize_conversation(principal, query.conversation_id)
 
     def request_body(self, query: SubmitAssistant, conversation_id: str) -> bytes:
+        message = query.message
+        if query.context_documents:
+            message += (
+                "\n\nSaved document references "
+                "(source data; read exact revisions before making claims):\n"
+                + _SOURCES.dump_json(query.context_documents).decode()
+            )
         body = json.dumps(
             {
                 "type": "threads.add_user_message",
                 "params": {
                     "thread_id": conversation_id,
                     "input": {
-                        "content": [{"type": "input_text", "text": query.message}],
+                        "content": [{"type": "input_text", "text": message}],
                         "attachments": [],
                         "inference_options": {},
                     },
@@ -308,9 +365,16 @@ class AssistantRequests:
         return body
 
     async def submit(
-        self, principal: Principal, query: SubmitAssistant, execution_key: str | None
+        self,
+        principal: Principal,
+        query: SubmitAssistant,
+        execution_key: str | None,
+        *,
+        workspace_id: str | None = None,
     ) -> AssistantResult:
-        task = asyncio.create_task(self.accept(principal, query, execution_key))
+        task = asyncio.create_task(
+            self.accept(principal, query, execution_key, workspace_id=workspace_id)
+        )
         self.accepting.add(task)
         task.add_done_callback(self.accepted)
         # A disconnected execute does not abandon a committed acceptance record.
@@ -323,20 +387,27 @@ class AssistantRequests:
             logger.info("Assistant acceptance failed (%s)", type(error).__name__)
 
     async def accept(
-        self, principal: Principal, query: SubmitAssistant, execution_key: str | None
+        self,
+        principal: Principal,
+        query: SubmitAssistant,
+        execution_key: str | None,
+        *,
+        workspace_id: str | None = None,
     ) -> AssistantResult:
         principal = await asyncio.to_thread(self.authority, principal, inference=True)
-        fingerprint = request_hash(query.model_dump(exclude={"request_key", "wait_seconds"}))
+        fingerprint = submission_fingerprint(query)
 
         def previous() -> bool:
             with self.database.connection() as connection:
                 row = connection.execute(
-                    "SELECT request_hash FROM assistant_requests "
+                    "SELECT request_hash, workspace_id FROM assistant_requests "
                     "WHERE actor_id=? AND request_key=?",
                     (principal.actor_id, query.request_key),
                 ).fetchone()
             if row and row["request_hash"] != fingerprint:
                 raise ConflictError("Assistant request key was used for different arguments.")
+            if row and workspace_id is not None and row["workspace_id"] != workspace_id:
+                raise ConflictError("Assistant request belongs to a different App workspace.")
             return row is not None
 
         if await asyncio.to_thread(previous):
@@ -359,6 +430,16 @@ class AssistantRequests:
                 if previous():
                     self.bind(principal, execution_key, query.request_key)
                     return False
+                if (
+                    workspace_id is not None
+                    and connection.execute(
+                        "SELECT 1 FROM mcp_workspaces "
+                        "WHERE workspace_id=? AND actor_id=? AND document_id=?",
+                        (workspace_id, principal.actor_id, query.document_id),
+                    ).fetchone()
+                    is None
+                ):
+                    raise ValidationError("Assistant context does not match its owned workspace.")
                 if connection.execute(
                     "SELECT 1 FROM assistant_requests WHERE conversation_id=? AND status='running'",
                     (conversation_id,),
@@ -377,8 +458,8 @@ class AssistantRequests:
                 connection.execute(
                     "INSERT INTO assistant_requests "
                     "(actor_id,request_key,request_hash,conversation_id,"
-                    "document_id,status,created_at) "
-                    "VALUES (?,?,?,?,?,'running',?)",
+                    "document_id,status,created_at,workspace_id,context_json) "
+                    "VALUES (?,?,?,?,?,'running',?,?,?)",
                     (
                         principal.actor_id,
                         query.request_key,
@@ -386,6 +467,8 @@ class AssistantRequests:
                         conversation_id,
                         query.document_id,
                         utc_now(),
+                        workspace_id,
+                        _SOURCES.dump_json(query.context_documents).decode(),
                     ),
                 )
                 self.bind(principal, execution_key, query.request_key)
@@ -435,6 +518,7 @@ class AssistantRequests:
         status, error = "completed", None
         try:
             principal = await asyncio.to_thread(self.authority, principal, inference=True)
+            await asyncio.to_thread(self.preflight, principal, query)
             if query.conversation_id:
                 await asyncio.to_thread(
                     self.authorize_conversation, principal, query.conversation_id
@@ -445,6 +529,17 @@ class AssistantRequests:
                 requested_revision_id=query.revision_id,
                 workspace_context=query.document_id is None,
             )
+            if query.selection_text or query.pdf_page_number is not None:
+                snapshot = await asyncio.to_thread(
+                    self.chat.evidence.create_turn_context,
+                    principal,
+                    entry_point="document",
+                    document_id=query.document_id,
+                    revision_id=query.revision_id,
+                    selected_text=query.selection_text,
+                    pdf_page_number=query.pdf_page_number,
+                )
+                context = replace(context, context_snapshot_id=snapshot.context_id)
             if query.conversation_id is None:
                 await self.chat.store.save_thread(
                     ThreadMetadata(id=conversation_id, created_at=datetime.now(UTC)), context
@@ -510,7 +605,7 @@ class AssistantRequests:
             cursor = None
         else:
             page = await self.chat.store.load_thread_items(
-                query.conversation_id, query.cursor, query.limit, "asc", context
+                query.conversation_id, query.cursor, query.limit, query.order, context
             )
             items, cursor = page.data, page.after
         messages = []
@@ -536,7 +631,7 @@ class AssistantRequests:
         )
 
     async def invoke(
-        self, principal: Principal, query: AssistantOperation, execution_key: str
+        self, principal: Principal, query: AssistantOperation, execution_key: str | None
     ) -> dict[str, JsonValue]:
         if isinstance(query, SubmitAssistant):
             result: BaseModel = await self.submit(principal, query, execution_key)

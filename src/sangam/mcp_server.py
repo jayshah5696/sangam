@@ -36,17 +36,27 @@ from sangam.errors import (
     SangamError,
     ValidationError,
 )
+from sangam.mcp_assistant_app import AssistantApp
+from sangam.mcp_documents import DocumentCreates
+from sangam.mcp_errors import McpMutationError
 from sangam.mcp_events import ResourceSubscriptions
 from sangam.mcp_inspection import DiffPassage, InspectionReads, ProposalPage, ProposalPassage
 from sangam.mcp_models import (
     ActivateDocument,
     AppAction,
     ApplyProposal,
+    AssistantCancelApp,
+    AssistantGetApp,
+    AssistantMessagesApp,
+    AssistantSubmitApp,
     CancelAssistant,
     CloseDocument,
     CompareDocument,
+    CreateDocument,
     CreateProposal,
+    CreationResult,
     DismissProposal,
+    DocumentCreateApp,
     DocumentPassage,
     ExecutionFailure,
     ExecutionOutput,
@@ -98,7 +108,7 @@ from sangam.mcp_pdf import (
     PdfSearchResult,
     PdfStatusResult,
 )
-from sangam.mcp_proposals import ProposalMutationError, ProposalOperations, ProposalWriteResult
+from sangam.mcp_proposals import ProposalOperations, ProposalWriteResult
 from sangam.mcp_skills import SkillCatalog, SkillEntry, SkillExports, SkillPassage, SkillsExtension
 from sangam.mcp_state import McpState
 from sangam.schemas import RevisionPage
@@ -109,6 +119,15 @@ APP_URI = "ui://sangam/document-workspace.html"
 JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
+    "documents.create": (
+        CreateDocument,
+        "documents_create",
+        "write",
+        "create",
+        "Create a Markdown document under current destination permissions. Retain operation_key "
+        "and exact arguments for retries. created_revision_id identifies the original creation; "
+        "current_revision_id can be newer. Creation does not start inference.",
+    ),
     "proposals.create": (
         CreateProposal,
         "proposals_create",
@@ -300,6 +319,7 @@ OPERATIONS: dict[str, tuple[type[OperationInput], str, str, str, str]] = {
     ),
 }
 OUTPUT_SCHEMAS = {
+    "documents.create": CreationResult.model_json_schema(),
     "proposals.create": ProposalWriteResult.model_json_schema(),
     "proposals.apply": ProposalWriteResult.model_json_schema(),
     "proposals.dismiss": ProposalWriteResult.model_json_schema(),
@@ -400,6 +420,8 @@ class SangamMcp:
         self.pdf = PdfOperations(services, self.state)
         self.skills = SkillExports(services, self.state)
         self.inspection = InspectionReads(services, self.state)
+        self.document_creates = DocumentCreates(services, self.state)
+        self.assistant_app = AssistantApp(services, self.state)
         self.proposals = ProposalOperations(services, self.state, self.inspection)
         skills_extension = SkillsExtension(self.skills, self.principal)
         self.active = 0
@@ -599,6 +621,20 @@ class SangamMcp:
                 principal = self.principal(self.credential(ctx))
                 if isinstance(
                     action,
+                    (AssistantSubmitApp, AssistantGetApp, AssistantCancelApp, AssistantMessagesApp),
+                ):
+                    return result(await self.assistant_app.invoke(principal, action))
+                if isinstance(action, DocumentCreateApp):
+                    await self.blocking(partial(self.state.read, principal, action.workspace_id))
+                    query = CreateDocument.model_validate(
+                        action.model_dump(exclude={"type", "workspace_id"})
+                    )
+                    created = await self.blocking(
+                        partial(self.document_creates.invoke, principal, query)
+                    )
+                    return result(created.model_dump(mode="json"))
+                if isinstance(
+                    action,
                     (
                         ProposalListApp,
                         ProposalReadApp,
@@ -641,7 +677,7 @@ class SangamMcp:
                         await self.blocking(partial(self.state.update_view, principal, action))
                     )
                 return result(await self.blocking(partial(self.state.change, principal, action)))
-            except ProposalMutationError as error:
+            except McpMutationError as error:
                 return result(
                     {
                         "error": {"code": error.code, "message": error.message},
@@ -929,6 +965,10 @@ class SangamMcp:
         execution_key: str,
         operation: WorkspaceOperation,
     ) -> JsonValue:
+        if isinstance(operation, CreateDocument):
+            return self.document_creates.invoke(principal, operation, execution_key).model_dump(
+                mode="json"
+            )
         if isinstance(operation, (CreateProposal, ApplyProposal, DismissProposal)):
             return self.proposals.invoke(principal, operation, execution_key)
         if isinstance(operation, ExecutionStatus):

@@ -1,11 +1,11 @@
 ---
 type: technical-design
 status: draft
-approval: "Decisions 1 through 22 approved by user; Option 2 implementation and subsequent App search and multiple-document work approved on November 15; remaining capabilities are broader design scope"
+approval: "Decisions 1 through 22 approved; Option 2 and subsequent App, event, PDF, skill, assistant, proposal, and November 17 creation work authorized; remaining capabilities are broader design scope"
 source: "User discussion and 01-research-november-2026.md"
 revision: "a14b27cc1df1a60092d6d48bdb36db8c0a092eb6"
 design_date: "2026-11-12"
-updated_date: "2026-11-16"
+updated_date: "2026-11-17"
 ---
 
 # Technical design: Sangam MCP experience
@@ -61,11 +61,11 @@ Superseded skill snapshots expire after a configurable seven days. Clean
 workspace layouts expire after a configurable 30 days of inactivity.
 Acknowledged unfinished drafts survive until Save or Discard.
 
-The remaining four engineering groups are operation contracts, numeric limits
-and quotas, OAuth implementation, and dependency/host compatibility. Their
-required evidence appears under engineering work and verification below.
-No runtime compatibility, capacity, or end-to-end MCP implementation is
-claimed by this document review.
+Engineering requirements are grouped below as operation contracts, numeric
+limits and quotas, OAuth implementation, and dependency/host compatibility.
+The approved additions record the implemented subset and its verification.
+OAuth issuance, production capacity measurements, and compatibility with all
+external hosts remain unverified.
 
 ### Approved implementation slice
 
@@ -122,7 +122,7 @@ The reference and locations survive restart. Current grants filter comparison
 content just as they filter tabs. Narrow hosts expand comparison into the document
 area instead of forcing two small columns. Two simultaneous editors,
 binary upload, OAuth issuance, native Tasks,
-direct proposal management and other workspace actions remain broader design
+and other workspace actions remain broader design
 scope. Their presence elsewhere in this document does not claim they are
 implemented. [MCP setup and contracts](../../mcp.md) describe the current
 slice and its reproducible verification commands.
@@ -245,6 +245,70 @@ server-confirmed rejection permits correction. Review edits are local until
 Create or Apply and are guarded during App navigation/teardown; a forced browser
 reload can lose unsaved review edits. Remaining workspace operations are pending
 under the broader operation contracts.
+
+### Approved addition: document creation and assistant interaction
+
+On November 17, the user authorized document creation and assistant interaction
+inside the App, with a design update and complete verification. These additions
+reuse the existing document, inference, proposal, and observation services. The
+public tools remain `search`, `execute`, and `present`.
+
+`documents.create` creates a Markdown document through
+`WorkspaceAccessService.create_document`, with existing destination create
+authority and a stable operation key. Return its document ID and original
+creation revision separately from the current head. Creation through the App
+uses the same contract, then opens the resulting document in its existing
+layout. Checkpoint the outgoing draft first. Opening failure must not conceal
+a committed creation or cause another document to be created. A create-only
+connection can obtain a creation reference without gaining read or update
+authority. Initial App creation starts from an open workspace; an assistant can
+create the first document through Code Mode before presenting it.
+
+The App offers explicit assistant context: the saved active document, a selected
+saved passage, or saved revisions of the open tabs. Show the included references
+before Send. Sending never saves or transmits an unsaved document draft. Selected
+passages require a clean saved source; other modes explicitly use saved revisions.
+PDF context records the selected page and, when provided, its selected passage.
+Draft selections remain a broader design requirement beyond this addition.
+
+Reuse `AssistantRequests` for submit, status, cancellation, and known-conversation
+messages. Require existing inference authority for new messages and current read
+authority for every included source. Pin explicit source revisions and preserve
+their access dependencies before accepting inference, including sources the model
+does not subsequently read. Bind App provenance to the existing request record;
+it is not another authorization rule or conversation store. Reopening the same
+document workspace discovers its last accepted request and known conversation.
+Losing the submission response must not start inference twice. Preserve original
+message/context arguments while an acceptance outcome is uncertain.
+
+Running, completed, failed, interrupted, cancelled, expired, and review-required
+outcomes remain distinct. The App reads bounded answer/message pages and supports
+explicit follow-up or a new conversation. A proposal reference opens the existing
+review view for its document, where the ordinary exact apply/dismiss rules apply.
+Assistant completion alone never means a proposed change was saved. Background
+refresh does not submit a message or replace a dirty composer or document.
+
+Program ownership remains small: a creation adapter binds canonical commit
+evidence to execution recovery; the existing assistant service owns acceptance
+and source checks; a typed App adapter validates workspace provenance. Shared App
+state carries capability flags and authorized request references. New UI views
+reuse the existing controls, state messages, and revision review component.
+
+Verification must prove destination denial, key/payload conflicts, creation after
+a lost response, original revision evidence after later edits, preservation of
+outgoing drafts, no duplicate inference after lost acceptance, source revocation,
+known-thread ownership, cancellation, and reopen recovery. Browser proof includes
+create, ask with explicit context, follow-up, proposal review/apply, persisted
+revisions, keyboard/focus behavior, narrow and touch layouts, and real inference
+outside deterministic browser fixtures. The addition is implemented through
+the existing `documents.create` and assistant services, with typed App actions
+and migration `045`. The HTTP and live-provider checks passed on November 17.
+Final local and browser results are recorded with the implementation review.
+
+Unsent creation forms and assistant messages remain local. Normal navigation
+requires completion or discard; forced reload can lose them. Accepted requests
+and canonical documents remain server-owned. Assistant effect references can
+be inspected here, while their approval remains in the existing chat UI.
 
 MCP is an external entry point to selected authorized Sangam workflows. The
 compact tools are the access mechanism; the useful result is working with
@@ -2354,7 +2418,8 @@ Use the repository's canonical `just` recipes. Backend changes require the
 project `verify-sangam` workflow, including `just verify-behavior`. Browser
 changes require `browser-verification` and `just test-e2e`. Run required build,
 test, lint, contract, and formatting checks for the actual implementation.
-No implementation checks are claimed by this draft.
+These are requirements for the full design. Implemented additions and repeatable
+checks are documented above and in [the MCP guide](../../mcp.md#verification).
 
 For this document, run `just test-docs` to check local links, Markdown, and the
 Mermaid diagram. The inspected source revision appears in the frontmatter.

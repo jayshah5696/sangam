@@ -45,7 +45,7 @@ name: sangam
 description: Work with Sangam documents and registered guidance through MCP Code Mode and Apps.
 license: Apache-2.0
 metadata:
-  version: "3"
+  version: "4"
 ---
 
 # Sangam MCP
@@ -61,6 +61,9 @@ inspect executions.get or its resource. Preserve original write keys and exact a
 Completed writes survive program failure. Never rerun a whole mutating program to recover.
 
 Search document content through documents.search. Discovery search finds operation contracts.
+Create Markdown through documents.create with a stable operation_key and an allowed path.
+Its created_revision_id identifies the original commit; current_revision_id may change later.
+Creation does not grant read authority. The App can create and open the same document.
 Present opens Markdown or PDFs in an interactive App when the host supports Apps. Draft
 checkpoints are separate from saved revisions. Save commits a revision. PDF source bytes
 are immutable; annotations are separate permitted writes. Pending extraction is not finished
@@ -90,6 +93,9 @@ request key and exact arguments after a lost response; never repeat inference wi
 The normal chat review policy still applies. A completed turn does not prove a saved change.
 Inspect proposal/effect references; needs_review means the requested change is not applied.
 Continue only known owned conversations. Cancellation does not undo completed writes.
+The App can submit explicit saved document, selected-passage, or open-tab context. Inspect
+the included revisions before sending. Unsaved edits are not sent or saved by a message.
+Every included source remains an access dependency even if the model does not read it.
 
 Do only the work requested by the user. A permission grant does not create user intent.
 Do not infer capabilities missing from the catalog. A notification is a request to fetch

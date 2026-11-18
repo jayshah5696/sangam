@@ -490,7 +490,7 @@ def test_legacy_conversation_upgrade_marks_its_source_inventory_incomplete(
     with database.transaction() as connection:
         connection.execute("DROP TABLE mcp_execution_chat_refs")
         connection.execute("DROP TABLE assistant_requests")
-        connection.execute("DELETE FROM schema_migrations WHERE version='043'")
+        connection.execute("DELETE FROM schema_migrations WHERE version IN ('043', '045')")
     with TestClient(create_app(settings)) as client:
         code = f"await conversations_read(conversation_id='{result['conversation_id']}')"
         assert not execute(client, token, code).get("isError")

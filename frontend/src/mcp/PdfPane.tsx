@@ -50,6 +50,7 @@ export function PdfPane({
   readOnly = false,
   onUnsavedChange,
   disabled = false,
+  onSelectionChange,
 }: {
   app: App
   workspace: Workspace
@@ -58,6 +59,7 @@ export function PdfPane({
   readOnly?: boolean
   onUnsavedChange?: (value: boolean) => void
   disabled?: boolean
+  onSelectionChange?: (text: string, page: number) => void
 }) {
   const document = workspace.document
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
@@ -274,6 +276,7 @@ export function PdfPane({
     setPageNumber(page)
     setZoom(scale)
     selectedPassage.current = null
+    onSelectionChange?.('', page)
     selectedRects.current = []
     setHasSelection(false)
     if (surface.current) surface.current.scrollTop = 0
@@ -300,6 +303,7 @@ export function PdfPane({
       setNotePending(false)
       setNote('')
       selectedPassage.current = null
+      onSelectionChange?.('', pageNumber)
       selectedRects.current = []
       setHasSelection(false)
       onUnsavedChange?.(false)
@@ -422,6 +426,7 @@ export function PdfPane({
                   selection.rangeCount
                 ) {
                   selectedPassage.current = selection.toString().slice(0, 20_000) || null
+                  onSelectionChange?.(selection.toString(), pageNumber)
                   const bounds = textLayer.current.getBoundingClientRect()
                   selectedRects.current = Array.from(selection.getRangeAt(0).getClientRects())
                     .filter((rect) => rect.width > 0 && rect.height > 0)

@@ -12,6 +12,272 @@ const documentSchema = z.object({
 const tokenSchema = z.object({ token: z.string() })
 test.use({ video: 'on' })
 
+test('App creates one document after a lost response and preserves the outgoing draft', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.setTimeout(60_000)
+  const suffix = randomUUID()
+  const created = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': suffix },
+    data: {
+      title: `Creation source ${suffix}`,
+      path: `mcp/${suffix}-source.md`,
+      content: '# Keep the saved source',
+      content_type: 'text/markdown',
+    },
+  })
+  const source = documentSchema.parse(await created.json())
+  const issued = await request.post('/api/v1/agent-tokens', {
+    data: {
+      actor_id: `agent:create-${suffix}`,
+      display_name: 'App creator',
+      label: 'isolated e2e',
+      scopes: ['read', 'search', 'create', 'update'].map((capability) => ({
+        capability,
+        path_prefix: 'mcp/',
+      })),
+    },
+  })
+  const { token } = tokenSchema.parse(await issued.json())
+  await page.goto('/mcp-host.html')
+  await page.getByLabel('Sangam API key').fill(token)
+  await page.getByRole('button', { name: 'Connect', exact: true }).click()
+  await page.getByLabel('Find a document').fill(suffix)
+  await page.getByRole('button', { name: 'Search documents', exact: true }).click()
+  await page.getByRole('button', { name: `Open Creation source ${suffix}`, exact: true }).click()
+  const app = page.frameLocator('iframe[title="Sangam document workspace"]')
+  const editor = app.getByRole('textbox', { name: 'Document content' })
+  await editor.fill('# Preserve this outgoing draft')
+  await app.getByRole('button', { name: 'New document', exact: true }).click()
+  await expect(app.getByRole('button', { name: 'Discard draft', exact: true })).not.toBeVisible()
+  await app.getByLabel('Document title', { exact: true }).fill(`App creation ${suffix}`)
+  await app.getByLabel('Document path', { exact: true }).fill(`private/${suffix}.md`)
+  await app.getByLabel('Initial content', { exact: true }).fill('# Created from the App')
+  if (testInfo.project.name === 'chromium-desktop') {
+    for (const viewport of [
+      { width: 320, height: 568 },
+      { width: 844, height: 390 },
+    ]) {
+      await page.setViewportSize(viewport)
+      expect(
+        await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true)
+      const create = app.getByRole('button', { name: 'Create document', exact: true })
+      await create.scrollIntoViewIfNeeded()
+      await expect(create).toBeInViewport()
+      await page.screenshot({ path: testInfo.outputPath(`mcp-create-${viewport.width}.png`), fullPage: true })
+    }
+    await page.setViewportSize(testInfo.project.use.viewport ?? { width: 1440, height: 900 })
+  }
+  if (testInfo.project.use.hasTouch) {
+    expect(
+      (await app.getByRole('button', { name: 'Create document', exact: true }).boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44)
+  }
+  await app.getByLabel('Document title', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(app.getByLabel('Document title', { exact: true })).toBeInViewport()
+  await page
+    .locator('iframe[title="Sangam document workspace"]')
+    .screenshot({ path: testInfo.outputPath('mcp-creation-form.png') })
+  await app.getByRole('button', { name: 'Create document', exact: true }).click()
+  await expect(app.getByText('Document creation failed', { exact: true })).toBeVisible()
+  await expect(app.getByLabel('Initial content', { exact: true })).toHaveValue('# Created from the App')
+  await app.getByLabel('Document path', { exact: true }).fill(`mcp/${suffix}-created.md`)
+  const actionSchema = z.object({
+    params: z.object({ arguments: z.object({ action: z.object({ type: z.literal('document_create') }) }) }),
+  })
+  let dropped = false
+  await page.route('**/mcp/', async (route) => {
+    if (
+      dropped ||
+      route.request().method() !== 'POST' ||
+      !actionSchema.safeParse(route.request().postDataJSON()).success
+    ) {
+      await route.continue()
+      return
+    }
+    dropped = true
+    await route.fetch()
+    await route.abort('failed')
+  })
+  await app.getByRole('button', { name: 'Create document', exact: true }).click()
+  await expect(app.getByRole('button', { name: 'Retry creation', exact: true })).toBeEnabled()
+  await expect(app.getByLabel('Document title', { exact: true })).toBeDisabled()
+  await app.getByRole('button', { name: 'Retry creation', exact: true }).click()
+  await expect(app.getByRole('tab', { name: `App creation ${suffix}`, exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(editor).toHaveText('# Created from the App')
+  const found = await request.get(`/api/v1/search?q=${suffix}`)
+  const hits = z
+    .array(z.object({ document_id: z.string(), path: z.string().nullable() }))
+    .parse(await found.json())
+  const matching = hits.filter((item) => item.path === `mcp/${suffix}-created.md`)
+  expect(matching).toHaveLength(1)
+  const history = await request.get(`/api/v1/documents/${matching[0].document_id}/history`)
+  expect(z.array(z.object({ revision_id: z.string() })).parse(await history.json())).toHaveLength(1)
+  await app.getByRole('tab', { name: `Creation source ${suffix}`, exact: true }).click()
+  await expect(editor).toHaveText('# Preserve this outgoing draft')
+  expect(
+    documentSchema.parse(await (await request.get(`/api/v1/documents/${source.document_id}`)).json()).content,
+  ).toBe('# Keep the saved source')
+  await page.screenshot({ path: testInfo.outputPath('mcp-document-created.png'), fullPage: true })
+})
+
+test('App assistant retains an accepted request, continues its conversation, and reviews the resulting proposal', async ({
+  page,
+  request,
+  browserName,
+}, testInfo) => {
+  test.setTimeout(60_000)
+  const suffix = randomUUID()
+  const created = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': suffix },
+    data: {
+      title: `Assistant source ${suffix}`,
+      path: `mcp/${suffix}.md`,
+      content: '# Selected source\n\nThe saved source stays unchanged until review.',
+      content_type: 'text/markdown',
+    },
+  })
+  const source = documentSchema.parse(await created.json())
+  const fixture = await request.post('/__e2e/mcp-assistant', {
+    data: {
+      document_id: source.document_id,
+      expected_revision_id: source.current_revision_id,
+      content: '# Assistant proposed wording',
+      summary: `Assistant proposal ${suffix}`,
+      answer: 'The assistant prepared a proposal for review.',
+      hold: true,
+    },
+  })
+  expect(fixture.ok()).toBeTruthy()
+  const issued = await request.post('/api/v1/agent-tokens', {
+    data: {
+      actor_id: `agent:ask-${suffix}`,
+      display_name: 'App assistant user',
+      label: 'isolated e2e',
+      scopes: [
+        ...['read', 'search', 'update'].map((capability) => ({ capability, path_prefix: 'mcp/' })),
+        { capability: 'inference', path_prefix: null },
+      ],
+    },
+  })
+  const { token } = tokenSchema.parse(await issued.json())
+  await page.goto('/mcp-host.html')
+  await page.getByLabel('Sangam API key').fill(token)
+  await page.getByRole('button', { name: 'Connect', exact: true }).click()
+  await page.getByLabel('Find a document').fill(suffix)
+  await page.getByRole('button', { name: 'Search documents', exact: true }).click()
+  await page.getByRole('button', { name: `Open Assistant source ${suffix}`, exact: true }).click()
+  const app = page.frameLocator('iframe[title="Sangam document workspace"]')
+  const editor = app.getByRole('textbox', { name: 'Document content' })
+  await editor.focus()
+  await editor.press(browserName === 'webkit' ? 'Meta+A' : 'Control+A')
+  await expect(app.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  await app.getByRole('button', { name: 'Ask Sangam', exact: true }).click()
+  await expect(app.getByRole('option', { name: 'Selected saved passage', exact: true })).toBeEnabled()
+  await app.getByLabel('Assistant context', { exact: true }).selectOption('selection')
+  await expect(app.getByRole('region', { name: 'Included context' })).toContainText('Selected source')
+  await app
+    .getByLabel('Message to Sangam', { exact: true })
+    .fill('Prepare a proposal using the selected passage.')
+  if (testInfo.project.name === 'chromium-desktop') {
+    const frame = page.locator('iframe[title="Sangam document workspace"]')
+    for (const width of [320, 599, 601]) {
+      await frame.evaluate((element, width) => {
+        element.style.width = `${width}px`
+      }, width)
+      await expect.poll(() => app.locator('html').evaluate((element) => element.clientWidth)).toBe(width)
+      expect(
+        await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true)
+      const send = app.getByRole('button', { name: 'Send message', exact: true })
+      await send.scrollIntoViewIfNeeded()
+      await expect(send).toBeInViewport()
+      await frame.screenshot({ path: testInfo.outputPath(`mcp-assistant-frame-${width}.png`) })
+    }
+    await frame.evaluate((element) => {
+      element.style.width = '100%'
+    })
+    await page.getByLabel('Theme', { exact: true }).selectOption('river')
+    await expect(app.locator('html')).toHaveCSS('color-scheme', 'light')
+    await page.screenshot({ path: testInfo.outputPath('mcp-assistant-light.png'), fullPage: true })
+  }
+  if (testInfo.project.use.hasTouch) {
+    expect(
+      (await app.getByRole('button', { name: 'Send message', exact: true }).boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44)
+  }
+  const submitSchema = z.object({
+    params: z.object({ arguments: z.object({ action: z.object({ type: z.literal('assistant_submit') }) }) }),
+  })
+  let dropped = false
+  await page.route('**/mcp/', async (route) => {
+    if (
+      dropped ||
+      route.request().method() !== 'POST' ||
+      !submitSchema.safeParse(route.request().postDataJSON()).success
+    ) {
+      await route.continue()
+      return
+    }
+    dropped = true
+    await route.fetch()
+    await route.abort('failed')
+  })
+  await app.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(app.getByRole('button', { name: 'Retry submission', exact: true })).toBeEnabled()
+  await app.getByRole('button', { name: 'Retry submission', exact: true }).click()
+  await expect(app.getByText('Assistant is working', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Reopen App', exact: true }).click()
+  await app.getByRole('button', { name: 'Ask Sangam', exact: true }).click()
+  await expect(app.getByText('Assistant is working', { exact: true })).toBeVisible()
+  const release = await request.post('/__e2e/mcp-assistant/release')
+  expect(release.ok()).toBeTruthy()
+  await expect(app.getByText('Review required', { exact: true })).toBeVisible()
+  await expect(app.getByText('The assistant prepared a proposal for review.', { exact: true })).toBeVisible()
+  expect(
+    documentSchema.parse(await (await request.get(`/api/v1/documents/${source.document_id}`)).json())
+      .current_revision_id,
+  ).toBe(source.current_revision_id)
+  await app.getByText('Review required', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(app.getByText('Review required', { exact: true })).toBeInViewport()
+  await page
+    .locator('iframe[title="Sangam document workspace"]')
+    .screenshot({ path: testInfo.outputPath('mcp-assistant-review-required.png') })
+  await app.getByRole('button', { name: `Review Assistant proposal ${suffix}`, exact: true }).click()
+  await expect(app.getByRole('heading', { name: `Assistant proposal ${suffix}`, exact: true })).toBeVisible()
+  await app.getByLabel('Reviewed wording', { exact: true }).fill('# Human reviewed assistant wording')
+  await app.getByRole('button', { name: 'Apply proposal', exact: true }).click()
+  await expect(app.getByText('Proposal applied', { exact: true })).toBeVisible()
+  await app.getByRole('button', { name: 'Close review', exact: true }).click()
+  await expect(editor).toHaveText('# Human reviewed assistant wording')
+  await app.getByRole('button', { name: 'Ask Sangam', exact: true }).click()
+  await app
+    .getByLabel('Message to Sangam', { exact: true })
+    .fill('Explain the result in the same conversation.')
+  await app.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(app.getByText('Assistant turn completed', { exact: true })).toBeVisible()
+  await expect(app.getByLabel('Message to Sangam', { exact: true })).toHaveValue('')
+  const evidence = await request.post('/__e2e/mcp-assistant/evidence')
+  const checked = z
+    .object({ request_count: z.number(), conversation_count: z.number(), selected_text: z.string() })
+    .parse(await evidence.json())
+  expect(checked.request_count).toBe(2)
+  expect(checked.conversation_count).toBe(1)
+  expect(checked.selected_text).toContain('Selected source')
+  const saved = documentSchema.parse(
+    await (await request.get(`/api/v1/documents/${source.document_id}`)).json(),
+  )
+  expect(saved.content).toBe('# Human reviewed assistant wording')
+  await app.getByRole('button', { name: 'Close assistant', exact: true }).click()
+  await expect(app.getByRole('button', { name: 'Ask Sangam', exact: true })).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath('mcp-assistant-applied.png'), fullPage: true })
+})
+
 test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals', async ({
   page,
   request,

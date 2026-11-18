@@ -70,6 +70,7 @@ def test_initialize_is_idempotent(tmp_path: Path) -> None:
         "042",
         "043",
         "044",
+        "045",
     ]
     assert {
         "document_comments_document_idx",

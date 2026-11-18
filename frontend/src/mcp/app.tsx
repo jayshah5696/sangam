@@ -6,6 +6,8 @@ import { MarkdownEditor } from '../components/MarkdownEditor'
 import { StateMessage } from '../components/ui/StateMessage'
 import { PdfPane } from './PdfPane'
 import { ProposalReview } from './ProposalReview'
+import { NewDocument } from './NewDocument'
+import { AssistantPane } from './AssistantPane'
 import { applyHostAppearance } from './appearance'
 import {
   errorSchema,
@@ -16,6 +18,10 @@ import {
   type Workspace,
   type ViewLocation,
   type ProposalAction,
+  type CreationAction,
+  type AssistantAction,
+  type AssistantSelection,
+  type AssistantResult,
 } from './contracts'
 import '../styles.css'
 import '../styles/mcp-workspace.css'
@@ -25,6 +31,8 @@ type SaveAttempt = { request: Extract<AppAction, { type: 'save' }>; content: str
 type WorkspaceAction = Exclude<
   AppAction,
   | ProposalAction
+  | CreationAction
+  | AssistantAction
   | { type: 'search' | 'pdf_bytes' | 'pdf_page' | 'pdf_search' | 'pdf_annotations' | 'pdf_note' }
 >
 type NavigationAction = Extract<AppAction, { type: 'open' | 'activate' | 'close' | 'compare' }>
@@ -39,6 +47,14 @@ function DocumentApp() {
   const [navigating, setNavigating] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewProposalId, setReviewProposalId] = useState<string | null>(null)
+  const [creationOpen, setCreationOpen] = useState(false)
+  const [creationGeneration, setCreationGeneration] = useState(0)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantSelection, setAssistantSelection] = useState<AssistantSelection>({
+    text: '',
+    pdf_page_number: null,
+  })
   const [locationChanged, setLocationChanged] = useState(0)
   const [query, setQuery] = useState('')
   const [searchedQuery, setSearchedQuery] = useState<string | null>(null)
@@ -52,7 +68,12 @@ function DocumentApp() {
   const saveAttempt = useRef<SaveAttempt | null>(null)
   const unsavedPdfNote = useRef(false)
   const unsavedReview = useRef(false)
+  const unsavedCreation = useRef(false)
+  const unsavedMessage = useRef(false)
+  const pdfSelection = useRef<AssistantSelection>({ text: '', pdf_page_number: null })
   const reviewTrigger = useRef<HTMLButtonElement>(null)
+  const creationTrigger = useRef<HTMLButtonElement>(null)
+  const assistantTrigger = useRef<HTMLButtonElement>(null)
   const retryAction = useRef<(() => Promise<void>) | null>(null)
   const tabButtons = useRef(new Map<string, HTMLButtonElement>())
   const pendingTabFocus = useRef<string | null>(null)
@@ -201,6 +222,10 @@ function DocumentApp() {
   })
 
   const prepareTeardown = useEffectEvent(async () => {
+    if (unsavedCreation.current)
+      throw new Error('Finish or discard the new document before reopening the App.')
+    if (unsavedMessage.current)
+      throw new Error('Send, retry, or discard your assistant message before reopening the App.')
     if (unsavedReview.current)
       throw new Error('Finish or discard your proposal review edits before reopening the App.')
     if (unsavedPdfNote.current) throw new Error('Save or discard the page note before reopening the App.')
@@ -288,6 +313,10 @@ function DocumentApp() {
   }
 
   async function navigate(makeRequest: (state: Workspace) => NavigationAction) {
+    if (unsavedCreation.current)
+      throw new Error('Finish or discard the new document before changing documents.')
+    if (unsavedMessage.current)
+      throw new Error('Send, retry, or discard your assistant message before changing documents.')
     if (unsavedReview.current)
       throw new Error('Finish or discard your proposal review edits before changing documents.')
     if (unsavedPdfNote.current) throw new Error('Save or discard the page note before changing documents.')
@@ -314,6 +343,9 @@ function DocumentApp() {
       setDiscarding(false)
       setSearchOpen(false)
       setReviewOpen(false)
+      setCreationOpen(false)
+      setAssistantOpen(false)
+      pdfSelection.current = { text: '', pdf_page_number: null }
       pendingTabFocus.current = next.workspace_id
       apply(next, true)
       tabButtons.current.get(next.workspace_id)?.focus()
@@ -355,6 +387,31 @@ function DocumentApp() {
         expected_layout_version: state.layout.version,
       })),
     )
+  }
+
+  function requireResolvedPanel() {
+    if (unsavedReview.current) throw new Error('Finish or discard the proposal review edits first.')
+    if (unsavedCreation.current) throw new Error('Finish or discard the new document first.')
+    if (unsavedMessage.current) throw new Error('Send, retry, or discard your assistant message first.')
+    if (unsavedPdfNote.current) throw new Error('Save or discard the page note first.')
+  }
+
+  async function openAssistantProposal(proposal: AssistantResult['proposals'][number]) {
+    const state = current.current
+    if (!state) return
+    if (state.document.document_id !== proposal.document_id) {
+      await enqueue(() =>
+        navigate((latest) => ({
+          type: 'open',
+          workspace_id: latest.workspace_id,
+          expected_layout_version: latest.layout.version,
+          document_id: proposal.document_id,
+        })),
+      )
+    }
+    setAssistantOpen(false)
+    setReviewProposalId(proposal.proposal_id)
+    setReviewOpen(true)
   }
 
   if (!workspace)
@@ -556,6 +613,58 @@ function DocumentApp() {
             </p>
           </div>
           <div className="mcp-controls">
+            <button
+              className="secondary-action"
+              ref={creationTrigger}
+              disabled={controlsDisabled || workspace.create_prefixes?.length === 0}
+              onClick={() => {
+                void enqueue(async () => {
+                  requireResolvedPanel()
+                  await checkpoint()
+                  await checkpointView()
+                  setReviewOpen(false)
+                  setAssistantOpen(false)
+                  setCreationGeneration((value) => value + 1)
+                  setCreationOpen(true)
+                })
+              }}
+            >
+              New document
+            </button>
+            <button
+              className="secondary-action"
+              ref={assistantTrigger}
+              disabled={controlsDisabled}
+              onClick={() => {
+                const state = current.current
+                const position = location.current
+                if (!state) return
+                const selected =
+                  state.location.kind === 'pdf'
+                    ? pdfSelection.current
+                    : {
+                        text:
+                          position?.kind === 'text' && content.current === state.document.content
+                            ? content.current.slice(
+                                Math.min(position.anchor, position.head),
+                                Math.max(position.anchor, position.head),
+                              )
+                            : '',
+                        pdf_page_number: null,
+                      }
+                void enqueue(async () => {
+                  requireResolvedPanel()
+                  await checkpoint()
+                  await checkpointView()
+                  setAssistantSelection({ ...selected, revision_id: state.document.current_revision_id })
+                  setReviewOpen(false)
+                  setCreationOpen(false)
+                  setAssistantOpen(true)
+                })
+              }}
+            >
+              Ask Sangam
+            </button>
             {workspace.document.content_type === 'text/markdown' && (
               <button
                 className="secondary-action"
@@ -564,8 +673,12 @@ function DocumentApp() {
                 disabled={controlsDisabled}
                 onClick={() => {
                   void enqueue(async () => {
+                    requireResolvedPanel()
                     await checkpoint()
                     await checkpointView()
+                    setAssistantOpen(false)
+                    setCreationOpen(false)
+                    setReviewProposalId(null)
                     setReviewOpen(true)
                   })
                 }}
@@ -590,7 +703,7 @@ function DocumentApp() {
             {workspace.document.content_type !== 'application/pdf' && (
               <button
                 className="primary-button"
-                disabled={controlsDisabled || !dirty || !workspace.can_update}
+                disabled={controlsDisabled || creationOpen || !dirty || !workspace.can_update}
                 onClick={() => {
                   void enqueue(save)
                 }}
@@ -600,7 +713,7 @@ function DocumentApp() {
             )}
           </div>
         </header>
-        <div className="mcp-status" role="status">
+        <div className="mcp-status" role="status" hidden={creationOpen || assistantOpen}>
           {navigating
             ? 'Changing view'
             : workspace.document.content_type === 'application/pdf'
@@ -651,12 +764,59 @@ function DocumentApp() {
           />
         )}
         <div className={`mcp-document-body${workspace.comparison ? ' mcp-with-comparison' : ''}`}>
+          {creationOpen && (
+            <NewDocument
+              key={`${workspace.workspace_id}-${creationGeneration}`}
+              app={app}
+              workspace={workspace}
+              onUnsavedChange={(value) => {
+                unsavedCreation.current = value
+              }}
+              onCreated={async (created) => {
+                unsavedCreation.current = false
+                await enqueue(() =>
+                  navigate((state) => ({
+                    type: 'open',
+                    workspace_id: state.workspace_id,
+                    document_id: created.document_id,
+                    expected_layout_version: state.layout.version,
+                  })),
+                )
+              }}
+              onClose={() => {
+                setCreationOpen(false)
+                creationTrigger.current?.focus()
+              }}
+            />
+          )}
+          <AssistantPane
+            key={`assistant-${workspace.workspace_id}`}
+            app={app}
+            workspace={workspace}
+            active={assistantOpen}
+            selection={assistantSelection}
+            dirtyDocument={dirty}
+            onUnsavedChange={(value) => {
+              unsavedMessage.current = value
+            }}
+            onAccepted={async () => {
+              await enqueue(async () => {
+                await action({ type: 'refresh', workspace_id: workspace.workspace_id })
+              })
+            }}
+            onReview={openAssistantProposal}
+            onClose={() => {
+              setAssistantOpen(false)
+              assistantTrigger.current?.focus()
+            }}
+          />
           {workspace.document.content_type === 'text/markdown' && (
             <ProposalReview
               key={workspace.workspace_id}
               app={app}
               workspace={workspace}
               active={reviewOpen}
+              initialProposalId={reviewProposalId}
               initialContent={text}
               dirtyDocument={dirty}
               onUnsavedChange={(value) => {
@@ -673,7 +833,11 @@ function DocumentApp() {
               }}
             />
           )}
-          <section className="mcp-editor" aria-label="Document editor" hidden={reviewOpen}>
+          <section
+            className="mcp-editor"
+            aria-label="Document editor"
+            hidden={reviewOpen || creationOpen || assistantOpen}
+          >
             {workspace.document.content_type === 'application/pdf' && workspace.location.kind === 'pdf' ? (
               <PdfPane
                 key={workspace.workspace_id}
@@ -689,6 +853,9 @@ function DocumentApp() {
                   unsavedPdfNote.current = value
                 }}
                 disabled={navigating}
+                onSelectionChange={(text, page) => {
+                  pdfSelection.current = { text, pdf_page_number: page }
+                }}
               />
             ) : workspace.can_update && workspace.location.kind === 'text' ? (
               <MarkdownEditor
@@ -722,7 +889,7 @@ function DocumentApp() {
           {workspace.comparison && (
             <details
               className="mcp-comparison"
-              hidden={reviewOpen}
+              hidden={reviewOpen || creationOpen || assistantOpen}
               key={workspace.comparison.workspace_id}
               open={window.matchMedia('(min-width: 601px)').matches}
             >
@@ -777,7 +944,7 @@ function DocumentApp() {
             </details>
           )}
         </div>
-        {dirty && (
+        {dirty && !creationOpen && !assistantOpen && (
           <footer className="mcp-document-footer">
             {dirty && !discarding && (
               <button className="secondary-action" disabled={navigating} onClick={() => setDiscarding(true)}>

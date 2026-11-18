@@ -96,6 +96,18 @@ class UpdateDocument(Input):
     operation_key: Identifier
 
 
+class CreateDocument(Input):
+    title: str = Field(min_length=1, max_length=500)
+    content: str
+    path: str | None = Field(default=None, max_length=1000)
+    operation_key: Identifier
+
+
+class AssistantSource(Input):
+    document_id: Identifier
+    revision_id: Identifier
+
+
 class ExecutionStatus(Input):
     execution_key: Identifier
 
@@ -107,6 +119,9 @@ class SubmitAssistant(Input):
     document_id: Identifier | None = None
     revision_id: Identifier | None = None
     wait_seconds: float = Field(default=0, ge=0, le=2, allow_inf_nan=False)
+    selection_text: str = Field(default="", max_length=20_000)
+    pdf_page_number: int | None = Field(default=None, ge=1, le=1000)
+    context_documents: list[AssistantSource] = Field(default_factory=list, max_length=50)
 
 
 class GetAssistant(Input):
@@ -129,6 +144,7 @@ class ReadConversation(Input):
     limit: int = Field(default=5, ge=1, le=10)
     item_id: Identifier | None = None
     offset: int = Field(default=0, ge=0)
+    order: Literal["asc", "desc"] = "asc"
 
 
 AssistantOperation = (
@@ -210,6 +226,7 @@ WorkspaceOperation = (
     SearchDocuments
     | InspectionOperation
     | UpdateDocument
+    | CreateDocument
     | ExecutionStatus
     | PdfOperation
     | SkillOperation
@@ -247,12 +264,18 @@ class WriteResult(BaseModel):
     operation_key: str
 
 
+class CreationResult(WriteResult):
+    created_revision_id: str
+    resource_uri: str
+
+
 class WorkspaceTab(BaseModel):
     workspace_id: str
     document_id: str
     title: str
     path: str | None
     has_draft: bool
+    current_revision_id: str
 
 
 class WorkspaceLayout(BaseModel):
@@ -266,7 +289,7 @@ class WorkspaceLayout(BaseModel):
 
 class WriteEvidence(BaseModel):
     operation_key: str
-    document_id: str
+    document_id: str | None
     outcome: Literal["committed", "rejected", "unknown"]
     revision_id: str | None
     resource_id: str | None = None
@@ -323,6 +346,31 @@ class ExecutionReceipt(BaseModel):
 
 class WorkspaceAction(Input):
     workspace_id: Identifier
+
+
+class DocumentCreateApp(CreateDocument, WorkspaceAction):
+    type: Literal["document_create"]
+
+
+class AssistantSubmitApp(SubmitAssistant, WorkspaceAction):
+    type: Literal["assistant_submit"]
+
+
+class AssistantGetApp(GetAssistant, WorkspaceAction):
+    type: Literal["assistant_get"]
+
+
+class AssistantCancelApp(CancelAssistant, WorkspaceAction):
+    type: Literal["assistant_cancel"]
+
+
+class AssistantMessagesApp(ReadConversation, WorkspaceAction):
+    type: Literal["assistant_messages"]
+
+
+AssistantAppAction = (
+    AssistantSubmitApp | AssistantGetApp | AssistantCancelApp | AssistantMessagesApp
+)
 
 
 class RefreshWorkspace(WorkspaceAction):
@@ -422,7 +470,9 @@ class RevisionReadApp(ReadDocument, WorkspaceAction):
 
 
 AppAction = Annotated[
-    RefreshWorkspace
+    DocumentCreateApp
+    | AssistantAppAction
+    | RefreshWorkspace
     | CheckpointDraft
     | DiscardDraft
     | SaveDraft

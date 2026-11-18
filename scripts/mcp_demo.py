@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 
@@ -10,7 +11,9 @@ import httpx
 from sangam.schemas import Document, IssuedAgentToken
 
 
-def seed_demo(base_url: str) -> tuple[Document, Document, Document, IssuedAgentToken]:
+def seed_demo(
+    base_url: str, *, inference: bool = False
+) -> tuple[Document, Document, Document, IssuedAgentToken]:
     with httpx.Client(base_url=base_url, timeout=30) as client:
         response = client.post(
             "/api/v1/documents",
@@ -74,16 +77,19 @@ def seed_demo(base_url: str) -> tuple[Document, Document, Document, IssuedAgentT
         client.post(
             "/api/v1/chat/skills", json={"document_id": guide.json()["document_id"]}
         ).raise_for_status()
+        scopes = [
+            {"capability": capability, "path_prefix": "mcp-demo/"}
+            for capability in ("read", "search", "create", "update")
+        ]
+        if inference:
+            scopes.append({"capability": "inference", "path_prefix": None})
         issued = client.post(
             "/api/v1/agent-tokens",
             json={
                 "actor_id": "agent:mcp-demo",
                 "display_name": "Local MCP walkthrough",
                 "label": "Disposable local MCP key",
-                "scopes": [
-                    {"capability": capability, "path_prefix": "mcp-demo/"}
-                    for capability in ("read", "search", "update")
-                ],
+                "scopes": scopes,
             },
         )
         issued.raise_for_status()
@@ -91,10 +97,15 @@ def seed_demo(base_url: str) -> tuple[Document, Document, Document, IssuedAgentT
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--inference", choices=("true", "false"), default="false")
+    options = parser.parse_args()
     root = Path(os.environ["SANGAM_VERIFY_RUN_DIR"])
     if not root.name.startswith("sangam-verify-"):
         raise RuntimeError("The MCP demo requires the isolated verification instance.")
-    document, companion, pdf, issued = seed_demo(os.environ["SANGAM_API_URL"])
+    document, companion, pdf, issued = seed_demo(
+        os.environ["SANGAM_API_URL"], inference=options.inference == "true"
+    )
     key_path = root / "mcp-demo-key.txt"
     descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w") as output:
@@ -105,6 +116,8 @@ def main() -> None:
     print(f"Companion document: {companion.document_id}")
     print(f"PDF document: {pdf.document_id}")
     print("Paste the file's contents into Sangam API key, connect, then search for walkthrough.")
+    if options.inference == "true":
+        print("Sending an App assistant message invokes Sangam's configured model with this key.")
     print("The disposable instance stays running until you press Ctrl+C.")
 
 

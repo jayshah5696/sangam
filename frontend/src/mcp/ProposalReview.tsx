@@ -3,7 +3,6 @@ import type { App } from '@modelcontextprotocol/ext-apps'
 import { RevisionComparison } from '../components/RevisionMergeView'
 import { StateMessage } from '../components/ui/StateMessage'
 import {
-  errorSchema,
   proposalMetadataSchema,
   proposalPageSchema,
   proposalPassageSchema,
@@ -13,24 +12,10 @@ import {
   type Workspace,
 } from './contracts'
 import { z } from 'zod'
+import { AppActionError as ReviewError, callAppTool } from './tool-client'
 
 type Proposal = z.infer<typeof proposalPassageSchema>
 type ProposalPage = z.infer<typeof proposalPageSchema>
-const reviewErrorSchema = errorSchema.extend({
-  mutation: z
-    .object({ operation_key: z.string(), outcome: z.enum(['rejected', 'committed', 'unknown']) })
-    .optional(),
-})
-
-class ReviewError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-    readonly outcome: 'rejected' | 'committed' | 'unknown' = 'unknown',
-  ) {
-    super(message)
-  }
-}
 
 export function ProposalReview({
   app,
@@ -41,6 +26,7 @@ export function ProposalReview({
   onApplied,
   onClose,
   onUnsavedChange,
+  initialProposalId,
 }: {
   app: App
   workspace: Workspace
@@ -50,6 +36,7 @@ export function ProposalReview({
   onApplied: () => Promise<void>
   onClose: () => void
   onUnsavedChange: (dirty: boolean) => void
+  initialProposalId?: string | null
 }) {
   const [page, setPage] = useState<ProposalPage | null>(null)
   const [selected, setSelected] = useState<Proposal | null>(null)
@@ -84,16 +71,7 @@ export function ProposalReview({
   }, [])
 
   async function request(action: ProposalAction) {
-    const reply = await app.callServerTool({ name: 'mcp_app', arguments: { action } })
-    if (reply.isError) {
-      const parsed = reviewErrorSchema.safeParse(reply.structuredContent)
-      throw new ReviewError(
-        parsed.success ? parsed.data.error.message : 'Proposal action failed. Retry the same action.',
-        parsed.success ? parsed.data.error.code : 'unknown',
-        parsed.success ? (parsed.data.mutation?.outcome ?? 'unknown') : 'unknown',
-      )
-    }
-    return reply.structuredContent
+    return callAppTool(app, action)
   }
 
   async function run(operation: () => Promise<void>) {
@@ -140,6 +118,10 @@ export function ProposalReview({
     }
     return { page: nextPage, changed, generation: observedGeneration }
   })
+  const openInitialProposal = useEffectEvent(() => {
+    if (initialProposalId && selected?.proposal_id !== initialProposalId)
+      void run(() => load(initialProposalId))
+  })
   useEffect(() => {
     let cancelled = false
     void readSnapshot()
@@ -147,6 +129,7 @@ export function ProposalReview({
         if (cancelled || !snapshot || generation.current !== snapshot.generation) return
         setPage(snapshot.page)
         if (snapshot.changed) setChanged(true)
+        openInitialProposal()
       })
       .catch((failure) => {
         if (!cancelled) setError(failure instanceof Error ? failure.message : 'Proposal refresh failed.')
@@ -154,7 +137,7 @@ export function ProposalReview({
     return () => {
       cancelled = true
     }
-  }, [active, workspace.proposal_version])
+  }, [active, workspace.proposal_version, initialProposalId])
 
   async function load(proposalId: string, contentKind: 'proposed' | 'applied' = 'proposed') {
     const currentGeneration = ++generation.current

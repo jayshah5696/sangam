@@ -17,14 +17,14 @@ from mcp_demo import seed_demo
 
 async def verify() -> None:
     base = os.environ["SANGAM_API_URL"]
-    document, _, _, _ = await asyncio.to_thread(seed_demo, base)
+    document, companion, _, _ = await asyncio.to_thread(seed_demo, base)
     async with httpx.AsyncClient(base_url=base, timeout=30) as rest:
         config = (await rest.get("/api/v1/chat/config")).raise_for_status().json()
         assert config["inference_enabled"], config["message"]
         assert config["autonomy_mode"] == "review"
         scopes = [{"capability": "inference"}] + [
             {"capability": capability, "path_prefix": "mcp-demo/"}
-            for capability in ("read", "search", "update")
+            for capability in ("read", "search", "create", "update")
         ]
         key = (
             (
@@ -52,6 +52,11 @@ async def verify() -> None:
                 reply = await session.call_tool(
                     "execute", {"execution_key": str(uuid4()), "code": code}
                 )
+                assert not reply.is_error and reply.structured_content is not None, reply
+                return reply.structured_content
+
+            async def app_action(action: dict) -> dict:
+                reply = await session.call_tool("mcp_app", {"action": action})
                 assert not reply.is_error and reply.structured_content is not None, reply
                 return reply.structured_content
 
@@ -98,22 +103,70 @@ async def verify() -> None:
                 follow["status"] == "completed" and "SANGAM_ASSISTANT_PROOF" in follow["answer"]
             ), follow
             review_key = str(uuid4())
-            await execute(
-                f"await assistant_submit(request_key='{review_key}', "
-                f"document_id='{document.document_id}', "
-                "message='Read this document and prepare a proposal "
-                "to append the sentence: MCP review proof. "
-                "Use propose_update. Do not apply the proposal or publish anything.')"
+            opened = await session.call_tool(
+                "present",
+                {
+                    "document_id": document.document_id,
+                    "additional_document_ids": [companion.document_id],
+                },
             )
+            assert not opened.is_error and opened.structured_content is not None
+            workspace = opened.structured_content
+            create_action = {
+                "type": "document_create",
+                "workspace_id": workspace["workspace_id"],
+                "title": "Live App assistant proof",
+                "path": "mcp-demo/app-assistant-proof.md",
+                "content": "# App assistant proof\n\nSaved passage for assistant review.",
+                "operation_key": str(uuid4()),
+            }
+            create_arguments = ", ".join(
+                f"{name}={value!r}"
+                for name, value in create_action.items()
+                if name not in {"type", "workspace_id"}
+            )
+            created = (await execute(f"await documents_create({create_arguments})"))["output"]
+            assert await app_action(create_action) == created
+            workspace = await app_action(
+                {
+                    "type": "open",
+                    "workspace_id": workspace["workspace_id"],
+                    "document_id": created["document_id"],
+                    "expected_layout_version": workspace["layout"]["version"],
+                }
+            )
+            review_action = {
+                "type": "assistant_submit",
+                "workspace_id": workspace["workspace_id"],
+                "request_key": review_key,
+                "document_id": created["document_id"],
+                "revision_id": created["created_revision_id"],
+                "selection_text": "Saved passage for assistant review.",
+                "context_documents": [
+                    {
+                        "document_id": companion.document_id,
+                        "revision_id": companion.current_revision_id,
+                    }
+                ],
+                "message": "Read this active document and prepare a proposal to append "
+                "the sentence: MCP review proof. Use propose_update. "
+                "Do not apply the proposal or publish anything.",
+            }
+            await app_action(review_action)
             reviewed = await finished(review_key)
+            assert await app_action(review_action) == reviewed
+            recorded_workspace = await app_action(
+                {"type": "refresh", "workspace_id": workspace["workspace_id"]}
+            )
+            assert recorded_workspace["assistant_request_key"] == review_key
             assert reviewed["status"] == "needs_review" and reviewed["proposals"], reviewed
             assert reviewed["proposals"][0]["applied_revision_id"] is None
             saved = (
-                (await rest.get(f"/api/v1/documents/{document.document_id}"))
+                (await rest.get(f"/api/v1/documents/{created['document_id']}"))
                 .raise_for_status()
                 .json()
             )
-            assert saved["current_revision_id"] == document.current_revision_id
+            assert saved["current_revision_id"] == created["created_revision_id"]
             proposal_id = reviewed["proposals"][0]["proposal_id"]
             proposed = (
                 await execute(
@@ -121,31 +174,39 @@ async def verify() -> None:
                 )
             )["output"]
             assert proposed["content_kind"] == "proposed"
-            assert proposed["expected_revision_id"] == document.current_revision_id
+            assert proposed["expected_revision_id"] == created["created_revision_id"]
             assert "MCP review proof." in proposed["content"]
-            listed = (await execute(f"await proposals_list(document_id='{document.document_id}')"))[
-                "output"
-            ]
+            listed = (
+                await execute(f"await proposals_list(document_id='{created['document_id']}')")
+            )["output"]
             assert any(item["proposal_id"] == proposal_id for item in listed["items"])
             uri = proposed["resource_uri"]
             snapshot = json.loads((await session.read_resource(uri)).contents[0].text)
             assert snapshot["status"] == "pending"
-            applied_response = await rest.post(
-                f"/api/v1/chat/proposals/{proposal_id}/apply",
-                headers={
-                    "Authorization": f"Bearer {key['token']}",
-                    "Idempotency-Key": str(uuid4()),
-                },
-                json={"expected_revision_id": document.current_revision_id},
+            applied_response = await app_action(
+                {
+                    "type": "proposal_apply",
+                    "workspace_id": workspace["workspace_id"],
+                    "proposal_id": proposal_id,
+                    "expected_revision_id": created["created_revision_id"],
+                    "content": proposed["content"],
+                    "operation_key": str(uuid4()),
+                }
             )
-            applied_response.raise_for_status()
             applied = (
                 await execute(
                     f"await proposals_get(proposal_id='{proposal_id}', content_kind='applied')"
                 )
             )["output"]
             assert applied["content"] == proposed["content"]
-            assert applied["applied_revision_id"] == applied_response.json()["applied_revision_id"]
+            assert applied["applied_revision_id"] == applied_response["applied_revision_id"]
+            saved = (
+                (await rest.get(f"/api/v1/documents/{created['document_id']}"))
+                .raise_for_status()
+                .json()
+            )
+            assert saved["content"] == proposed["content"]
+            assert saved["current_revision_id"] == applied["applied_revision_id"]
             snapshot = json.loads((await session.read_resource(uri)).contents[0].text)
             assert (
                 snapshot["status"] == "applied"
@@ -209,12 +270,23 @@ async def verify() -> None:
             ).fetchone()[0]
             == 2
         )
+        origin = database.execute(
+            "SELECT workspace_id,context_json FROM assistant_requests WHERE request_key=?",
+            (review_key,),
+        ).fetchone()
+        assert origin[0] == workspace["workspace_id"] and companion.document_id in origin[1]
+        selection = database.execute(
+            "SELECT selection_text FROM chat_turn_contexts WHERE thread_id=?",
+            (reviewed["conversation_id"],),
+        ).fetchone()
+        assert selection[0] == "Saved passage for assistant review."
     report = {
         "result": "passed",
         "model": config["default_model"],
         "first": first,
         "follow_up": follow,
         "review": reviewed,
+        "app_creation": created,
         "proposal_inspection": {"proposed": proposed, "applied": applied},
         "verified": [
             "real official MCP client, Monty and configured inference",
@@ -223,7 +295,8 @@ async def verify() -> None:
             "known owned conversation continuation",
             "resource status parity and narrowed source access denial",
             "pending review distinct from a saved revision",
-            "proposal inspection and native resource refresh after an authorized REST apply",
+            "App creation replay, saved selection/tab context and accepted request restoration",
+            "proposal inspection and native resource refresh after an authorized App apply",
             "SQLite integrity and expected request/run counts",
         ],
     }

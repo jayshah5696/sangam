@@ -40,6 +40,11 @@ const documentViewSchema = z.object({
   document: documentSchema,
   saved_revision_id: z.string().optional(),
   proposal_version: z.string().default('0:0'),
+  can_infer: z.boolean(),
+  create_prefixes: z.array(z.string()).nullable(),
+  assistant_request_key: z.string().nullable(),
+  assistant_status: z.string().nullable(),
+  assistant_unavailable: z.boolean(),
 })
 export const workspaceSchema = documentViewSchema.extend({
   comparison: documentViewSchema.nullable(),
@@ -56,6 +61,7 @@ export const workspaceSchema = documentViewSchema.extend({
         title: z.string(),
         path: z.string().nullable(),
         has_draft: z.boolean(),
+        current_revision_id: z.string(),
       }),
     ),
   }),
@@ -68,6 +74,11 @@ export const hitsSchema = z.object({
 export type SearchResults = z.infer<typeof hitsSchema>
 export const programHitsSchema = z.object({ output: hitsSchema })
 export const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) })
+export const mutationErrorSchema = errorSchema.extend({
+  mutation: z
+    .object({ operation_key: z.string(), outcome: z.enum(['rejected', 'committed', 'unknown']) })
+    .optional(),
+})
 export const resourceSchema = z.object({ contents: z.array(z.object({ text: z.string() })) })
 
 export const proposalMetadataSchema = chatProposalSchema.pick({
@@ -104,6 +115,103 @@ export const revisionPassageSchema = z.object({
   revision_id: z.string(),
   next_offset: z.number().int().nullable(),
 })
+export const creationResultSchema = z.object({
+  document_id: z.string(),
+  current_revision_id: z.string(),
+  created_revision_id: z.string(),
+  operation_key: z.string(),
+  resource_uri: z.string(),
+})
+export type CreationResult = z.infer<typeof creationResultSchema>
+export type CreationAction = {
+  type: 'document_create'
+  workspace_id: string
+  title: string
+  content: string
+  path: string | null
+  operation_key: string
+}
+export const assistantResultSchema = z.object({
+  request_key: z.string(),
+  conversation_id: z.string(),
+  status: z.enum([
+    'running',
+    'completed',
+    'needs_review',
+    'failed',
+    'cancelled',
+    'interrupted',
+    'result_expired',
+  ]),
+  run_id: z.string().nullable(),
+  answer: z.string().nullable(),
+  next_offset: z.number().int().nullable(),
+  error: z.string().nullable(),
+  proposals: z.array(
+    z.object({
+      proposal_id: z.string(),
+      document_id: z.string(),
+      status: z.string(),
+      applied_revision_id: z.string().nullable(),
+      summary: z.string().nullable(),
+    }),
+  ),
+  effects: z.array(
+    z.object({
+      effect_id: z.string(),
+      capability_id: z.string(),
+      status: z.string(),
+      resource_id: z.string().nullable(),
+      revision_id: z.string().nullable(),
+    }),
+  ),
+  artifacts_truncated: z.boolean(),
+  resource_uri: z.string(),
+  message: z.string(),
+})
+export type AssistantResult = z.infer<typeof assistantResultSchema>
+export const conversationPageSchema = z.object({
+  conversation_id: z.string(),
+  items: z.array(
+    z.object({
+      item_id: z.string(),
+      role: z.enum(['user', 'assistant']),
+      text: z.string(),
+      offset: z.number().int(),
+      next_offset: z.number().int().nullable(),
+    }),
+  ),
+  next_cursor: z.string().nullable(),
+})
+export type ConversationPage = z.infer<typeof conversationPageSchema>
+export type AssistantSelection = { text: string; pdf_page_number: number | null; revision_id?: string }
+export type AssistantSubmitAction = {
+  type: 'assistant_submit'
+  workspace_id: string
+  request_key: string
+  message: string
+  document_id: string
+  revision_id: string
+  conversation_id: string | null
+  selection_text: string
+  pdf_page_number: number | null
+  context_documents: { document_id: string; revision_id: string }[]
+  wait_seconds: number
+}
+export type AssistantAction =
+  | AssistantSubmitAction
+  | { type: 'assistant_get'; workspace_id: string; request_key: string; offset?: number; length?: number }
+  | { type: 'assistant_cancel'; workspace_id: string; request_key: string }
+  | {
+      type: 'assistant_messages'
+      workspace_id: string
+      conversation_id: string
+      cursor?: string | null
+      limit?: number
+      item_id?: string
+      offset?: number
+      order?: 'asc' | 'desc'
+    }
 export type ProposalMutationAction =
   | {
       type: 'proposal_create'
@@ -151,6 +259,8 @@ export type ProposalAction =
     }
 
 export type AppAction =
+  | CreationAction
+  | AssistantAction
   | ProposalAction
   | { type: 'pdf_bytes'; document_id: string; expected_revision_id: string; offset: number; length: number }
   | { type: 'pdf_page'; document_id: string; page_number: number }

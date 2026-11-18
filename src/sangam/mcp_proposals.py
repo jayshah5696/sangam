@@ -18,6 +18,7 @@ from sangam.errors import (
     ValidationError,
 )
 from sangam.idempotency import IdempotencyStore, request_hash
+from sangam.mcp_errors import McpMutationError
 from sangam.mcp_inspection import InspectionReads, ProposalMetadata, metadata
 from sangam.mcp_models import (
     ApplyProposal,
@@ -44,17 +45,6 @@ from sangam.service import append_fingerprint
 class ProposalWriteResult(ProposalMetadata):
     operation_key: str
     resource_uri: str
-
-
-class ProposalMutationError(SangamError):
-    """An App failure carries canonical write evidence instead of guessing from HTTP errors."""
-
-    def __init__(
-        self, error: SangamError, key: str, outcome: Literal["rejected", "committed", "unknown"]
-    ):
-        super().__init__(error.message)
-        self.code = error.code
-        self.key, self.outcome = key, outcome
 
 
 class ProposalOperations:
@@ -97,7 +87,7 @@ class ProposalOperations:
                 ).fetchone()
             key = reserved["apply_idempotency_key"] or key
             if reserved["apply_actor_id"] not in {None, principal.actor_id}:
-                raise ProposalMutationError(
+                raise McpMutationError(
                     ConflictError("Apply recovery must use the original reviewer's actor"),
                     operation.operation_key,
                     "rejected",
@@ -216,7 +206,7 @@ class ProposalOperations:
             except SangamError:
                 # Lost authority cannot establish whether the original mutation committed.
                 pass
-            raise ProposalMutationError(error, key, outcome) from error
+            raise McpMutationError(error, key, outcome) from error
         return ProposalWriteResult(
             **metadata(proposal).model_dump(),
             operation_key=key,
@@ -258,7 +248,7 @@ class ProposalOperations:
                 return self.reads.invoke(principal, ReadDocument.model_validate(payload))
             if isinstance(action, ProposalApplyApp):
                 if workspace["draft"] is not None:
-                    raise ProposalMutationError(
+                    raise McpMutationError(
                         ConflictError(
                             "Save or discard your document draft before applying a proposal"
                         ),

@@ -12,7 +12,7 @@ from sangam.application import ApplicationServices
 from sangam.capabilities import Capability
 from sangam.config import Settings
 from sangam.db import utc_now
-from sangam.errors import ConflictError, NotFoundError, ValidationError
+from sangam.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from sangam.idempotency import IdempotencyStore
 from sangam.mcp_models import (
     ActivateDocument,
@@ -177,7 +177,8 @@ class McpState:
         with self.database.connection() as connection:
             rows = connection.execute(
                 "SELECT w.workspace_id, w.document_id, w.draft IS NOT NULL AS has_draft, "
-                "d.title, d.path, d.deleted, d.content_type FROM mcp_layout_documents t "
+                "d.title, d.path, d.deleted, d.content_type, d.current_revision_id "
+                "FROM mcp_layout_documents t "
                 "JOIN mcp_workspaces w ON w.workspace_id = t.workspace_id "
                 "JOIN documents d ON d.document_id = w.document_id "
                 "WHERE t.layout_id = ? ORDER BY t.position",
@@ -204,6 +205,7 @@ class McpState:
                     title=tab["title"],
                     path=tab["path"],
                     has_draft=bool(tab["has_draft"]),
+                    current_revision_id=tab["current_revision_id"],
                 )
             )
         return WorkspaceLayout(
@@ -403,6 +405,12 @@ class McpState:
                 location = PdfLocation()
             if view:
                 location = TypeAdapter(ViewLocation).validate_json(view["location_json"])
+            assistant_key, assistant_status, assistant_unavailable = self.assistant_reference(
+                principal, workspace_id
+            )
+            create_prefixes = self.services.authorization.allowed_prefixes(
+                principal, Capability.CREATE
+            )
             return {
                 "workspace_id": workspace_id,
                 "version": row["version"],
@@ -410,6 +418,13 @@ class McpState:
                 "location": location.model_dump(mode="json"),
                 "base_revision_id": row["base_revision_id"],
                 "proposal_version": self.proposal_version(principal, document.document_id),
+                "assistant_request_key": assistant_key,
+                "assistant_status": assistant_status,
+                "assistant_unavailable": assistant_unavailable,
+                "can_infer": self.services.authorization.allows(
+                    principal, Capability.INFERENCE, None
+                ),
+                "create_prefixes": list(create_prefixes) if create_prefixes is not None else None,
                 "can_annotate": document.content_type == "application/pdf"
                 and self.services.authorization.allows(principal, Capability.UPDATE, document.path),
                 "draft": row["draft"],
@@ -431,6 +446,24 @@ class McpState:
                     "current_revision_id": document.current_revision_id,
                 },
             }
+
+    def assistant_reference(
+        self, principal: Principal, workspace_id: str
+    ) -> tuple[str | None, str | None, bool]:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT request_key, status FROM assistant_requests "
+                "WHERE actor_id=? AND workspace_id=? "
+                "ORDER BY created_at DESC, request_key DESC LIMIT 1",
+                (principal.actor_id, workspace_id),
+            ).fetchone()
+        if row is None:
+            return None, None, False
+        try:
+            self.services.assistant_requests.authorize(principal, row["request_key"])
+        except (AuthorizationError, NotFoundError):
+            return None, None, True
+        return row["request_key"], row["status"], False
 
     def annotation_version(self, document_id: str) -> int:
         """A monotonic invalidation marker over canonical annotation versions."""
@@ -691,7 +724,7 @@ class McpState:
         principal: Principal,
         key: str,
         operation_key: str,
-        document_id: str,
+        document_id: str | None,
         *,
         resource_type: str = "document",
     ) -> None:
