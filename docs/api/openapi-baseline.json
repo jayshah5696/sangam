@@ -2496,8 +2496,15 @@
             "title": "Summary"
           },
           "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
           }
         },
         "required": [
@@ -39161,7 +39168,7 @@
     }
   },
   "x-sangam-baseline-review": {
-    "date": "2026-11-11",
-    "reason": "Release v0.14.0"
+    "date": "2026-11-17",
+    "reason": "Proposal ownership is explicit; conversation provenance is optional for external MCP proposals."
   }
 }

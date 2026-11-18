@@ -306,7 +306,7 @@ def test_revoked_inflight_principal_cannot_apply_and_reservation_remains_dismiss
     )
 
 
-def test_existing_principal_cannot_reveal_evidence_after_scope_withdrawal(client, editorial):
+def test_existing_principal_cannot_read_proposal_after_target_scope_withdrawal(client, editorial):
     _, document, _, service, _ = editorial
     token = issue_agent_token(client, capabilities=("read", "update"))
     identity = client.app.state.services.identity
@@ -333,14 +333,9 @@ def test_existing_principal_cannot_reveal_evidence_after_scope_withdrawal(client
         },
     )
     assert updated.status_code == 200, updated.text
-    visible = next(
-        p
-        for p in service.list(principal, thread_id=thread, document_id=None)
-        if p.proposal_id == proposal.proposal_id
-    )
-    assert visible.citations[0].snippet == ""
-    assert visible.citations[0].title is None
-    assert visible.citations[0].available is False
+    assert service.list(principal, thread_id=thread, document_id=None) == []
+    with pytest.raises(AuthorizationError):
+        service.get(principal, proposal.proposal_id)
 
 
 def test_actual_byte_limit_failure_allows_retry_then_replay(client, editorial):

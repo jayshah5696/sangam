@@ -94,7 +94,9 @@ def test_tag_author_pdf_and_annotation_changes_mark_search_dirty(client):
     services = client.app.state.services
     database = services.documents.database
     index = services.documents.search_index
-    # Drain any trailing background extraction sync before testing triggers
+    # Ready is committed before extraction's trailing index sync. Join that worker
+    # so it cannot consume the dirty marker this test expects to repair itself.
+    client.portal.call(client.app.state.pdf_scheduler.close, 5)
     index.repair_pending()
     statements = [
         (

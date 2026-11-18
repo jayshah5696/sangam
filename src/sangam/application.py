@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from sangam.access import WorkspaceAccessService
 from sangam.activity import ActivityService
 from sangam.actors import ActorService
+from sangam.assistant_requests import AssistantRequests
 from sangam.authorization import AuthorizationPolicy
 from sangam.backup import BackupManager
 from sangam.backup_service import BackupService
@@ -62,6 +63,7 @@ class ApplicationServices:
     pdf_research: PdfResearchService
     karakeep: KarakeepService
     chat: SangamChatServer
+    assistant_requests: AssistantRequests
     provider_connections: ProviderConnectionService
     readiness: ReadinessService
     projects: ProjectService
@@ -277,6 +279,7 @@ def build_application_services(
         pdf_research=pdf_research,
         karakeep=karakeep,
         chat=chat,
+        assistant_requests=AssistantRequests(chat, identity, settings),
         provider_connections=provider_connections,
         readiness=readiness,
         projects=projects,

@@ -105,6 +105,50 @@ test-python:
 # Run the complete fast local verification suite.
 test: test-python test-frontend
 
+# Build the main frontend, local MCP host, and self-contained MCP App resource.
+build-frontend:
+    pnpm --dir frontend run build
+
+# Drive the MCP slice against an isolated real HTTP server and its canonical database.
+verify-mcp port="8897":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-mcp-proof.XXXXXX")"
+    export SANGAM_MCP_ENABLED=true
+    unset SANGAM_TOKEN
+    trap './scripts/control-sangam.sh cleanup; rm -rf -- "$TMPDIR"' EXIT
+    just verify-control launch "{{ port }}"
+    just verify-control doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/verify_mcp.py
+
+# Prove assistant requests through MCP and real configured inference on an isolated server.
+verify-mcp-assistant port="8899":
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-assistant-proof.XXXXXX")"
+    export SANGAM_MCP_ENABLED=true
+    unset SANGAM_TOKEN
+    trap './scripts/control-sangam.sh cleanup; rm -rf -- "$TMPDIR"' EXIT
+    just verify-control launch "{{ port }}"
+    just verify-control doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/verify_mcp_assistant.py
+
+# Leave a disposable, seeded local MCP walkthrough running until Ctrl+C.
+mcp-demo port="8873" inference="false": build-frontend
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/sangam-mcp-demo.XXXXXX")"
+    export SANGAM_MCP_ENABLED=true
+    unset SANGAM_TOKEN
+    trap './scripts/control-sangam.sh cleanup; rm -rf -- "$TMPDIR"' EXIT
+    just verify-control launch "{{ port }}"
+    just verify-control doctor
+    source "$TMPDIR/.sangam-active-verification"
+    uv run python scripts/mcp_demo.py --inference="{{ inference }}"
+    while kill -0 "$SANGAM_VERIFY_PID" 2>/dev/null; do sleep 1; done
+
 # Verify settings inventories, version propagation, and dependency audits. Needs a built frontend.
 check-distribution:
     uv run python scripts/verify-release-config.py

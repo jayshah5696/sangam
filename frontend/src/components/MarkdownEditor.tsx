@@ -2,10 +2,10 @@ import { autocompletion, type CompletionContext, type CompletionResult } from '@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { html } from '@codemirror/lang-html'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 
 import { SUPPORTED_IMAGE_TYPES, type DocumentSummary } from '../api'
 import { internalDocumentMarkdown } from '../internalLinks'
@@ -42,6 +42,7 @@ export type MarkdownEditorHandle = {
 
 type MarkdownEditorProps = {
   value: string
+  readOnly?: boolean
   onChange: (value: string) => void
   onSelectionChange?: (selection: EditorSelection) => void
   initialViewState?: EditorViewState
@@ -65,6 +66,7 @@ function formatEdit(view: EditorView, format: MarkdownFormat): TextEdit {
 }
 
 function applyEdit(view: EditorView, edit: TextEdit) {
+  if (view.state.readOnly) return
   view.dispatch({
     changes: { from: edit.from, to: edit.to, insert: edit.insert },
     selection: edit.selection,
@@ -141,6 +143,7 @@ function createDocumentLinkCompletionSource(
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
   {
     value,
+    readOnly = false,
     onChange,
     onSelectionChange,
     initialViewState,
@@ -158,6 +161,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const editable = useRef(new Compartment())
+  const readOnlyRef = useRef(readOnly)
   const onChangeRef = useRef(onChange)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onViewStateChangeRef = useRef(onViewStateChange)
@@ -167,6 +172,16 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const currentDocumentIdRef = useRef(currentDocumentId)
   const onImageFilesRef = useRef(onImageFiles)
   const onSelectionSettledRef = useRef(onSelectionSettled)
+
+  useLayoutEffect(() => {
+    readOnlyRef.current = readOnly
+    viewRef.current?.dispatch({
+      effects: editable.current.reconfigure([
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
+      ]),
+    })
+  }, [readOnly])
 
   useEffect(() => {
     onImageFilesRef.current = onImageFiles
@@ -190,7 +205,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       focus: () => viewRef.current?.focus(),
       insertText: (text: string, expectedContent?: string) => {
         const view = viewRef.current
-        if (!view) return false
+        if (!view || view.state.readOnly) return false
         if (expectedContent !== undefined && view.state.doc.toString() !== expectedContent) return false
         const selection = view.state.selection.main
         view.dispatch({
@@ -247,6 +262,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           : undefined,
         extensions: [
           lineNumbers(),
+          EditorView.contentAttributes.of({ 'aria-label': 'Document content' }),
+          editable.current.of([
+            EditorState.readOnly.of(readOnlyRef.current),
+            EditorView.editable.of(!readOnlyRef.current),
+          ]),
           history(),
           contentType === 'text/html' ? html() : markdown(),
           contentType === 'text/markdown'

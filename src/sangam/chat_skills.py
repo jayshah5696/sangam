@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Literal
 
 import yaml
@@ -207,6 +208,12 @@ class ChatSkillService:
         payload = request.model_dump(mode="json")
 
         def mutate() -> SkillSummary:
+            # Agent reads write their audit on another connection. Do these
+            # before holding the registration writer lock.
+            skill_id, parsed = self.preflight_registration(
+                principal, request.document_id, request.project_id
+            )
+            document = self.workspace.get_document(principal, request.document_id)
             with self.database.transaction() as conn:
                 replay = IdempotencyStore.mutation_record(
                     conn,
@@ -225,10 +232,11 @@ class ChatSkillService:
                         raise ConflictError("Skill mutation replay result is unavailable")
                     return SkillSummary.model_validate_json(row["response_json"])
 
-                skill_id, parsed = self.preflight_registration(
-                    principal, request.document_id, request.project_id
-                )
-                document = self.workspace.get_document(principal, request.document_id)
+                existing = conn.execute(
+                    "SELECT document_id FROM chat_skills WHERE skill_id=?", (skill_id,)
+                ).fetchone()
+                if existing and existing["document_id"] != request.document_id:
+                    raise ConflictError("A skill with this name already exists in this scope")
                 now = utc_now()
                 has_scripts = int(bool(parsed.scripts))
 
@@ -295,12 +303,13 @@ class ChatSkillService:
                 )
                 return result
 
-        return self.workspace.audited(
-            principal,
-            writes("register", "chat_skill"),
-            mutate,
-            resource_id=request.document_id,
-        )
+        with self.workspace.documents.mutations.documents(request.document_id):
+            return self.workspace.audited(
+                principal,
+                writes("register", "chat_skill"),
+                mutate,
+                resource_id=request.document_id,
+            )
 
     def unregister(self, principal: Principal, key: str, skill_id: str) -> None:
         skill = self.get(principal, skill_id)
@@ -454,7 +463,13 @@ class ChatSkillService:
                 summaries.append(summary)
         return summaries
 
-    def prompt_catalog(self, principal: Principal, project_id: str | None) -> str:
+    def prompt_catalog(
+        self,
+        principal: Principal,
+        project_id: str | None,
+        *,
+        on_read: Callable[[SkillSummary], None] | None = None,
+    ) -> str:
         skills = self.list_for_actor(principal, project_id)
         valid_skills = [s for s in skills if s.valid]
         if not valid_skills:
@@ -472,6 +487,8 @@ class ChatSkillService:
             "Available skills:",
         ]
         for s in valid_skills[:20]:
+            if on_read:
+                on_read(s)
             lines.append(f"- name: {s.name}")
             lines.append(f"  description: {s.description}")
             lines.append(f"  skill_id: {s.skill_id}")

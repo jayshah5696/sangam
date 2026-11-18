@@ -923,7 +923,7 @@ export type ProviderConnectionInput = Pick<
 
 export const chatProposalSchema = z.object({
   proposal_id: z.string(),
-  thread_id: z.string(),
+  thread_id: z.string().nullable(),
   document_id: z.string(),
   expected_revision_id: z.string(),
   content: z.string(),

@@ -497,7 +497,7 @@ class ChatProfileService:
 
     def resolve(self, context: ChatRequestContext) -> ProfileContext:
         """Pin sources per turn; continuations recheck access without replacing their guidance."""
-        with self.database.transaction() as conn:
+        with self.database.connection() as conn:
             if context.context_snapshot_id:
                 owner = conn.execute(
                     "SELECT actor_id FROM chat_turn_contexts WHERE context_id=?",
@@ -513,25 +513,34 @@ class ChatProfileService:
                 if context.context_snapshot_id
                 else None
             )
-            if row:
-                profile = ProfileContext.model_validate_json(row["profile_json"])
-                self.authorize(context.principal, profile.project_id, context.document_id)
-                return profile.model_copy(update={"memories": self.used_memory(context)})
-            self.authorize(context.principal, context.project_id, context.document_id)
-            entries = [self.get(context.principal)]
-            if context.project_id:
-                entries.append(self.get(context.principal, context.project_id))
-            profile = ProfileContext(
-                entries=entries,
-                project_id=context.project_id,
-                instructions_override=context.instructions_override or "",
-            )
-            if context.context_snapshot_id:
+        # Agent document reads enqueue an audit on another connection. Complete
+        # these reads before taking the writer lock used to pin the profile.
+        if row:
+            profile = ProfileContext.model_validate_json(row["profile_json"])
+            self.authorize(context.principal, profile.project_id, context.document_id)
+            return profile.model_copy(update={"memories": self.used_memory(context)})
+        self.authorize(context.principal, context.project_id, context.document_id)
+        entries = [self.get(context.principal)]
+        if context.project_id:
+            entries.append(self.get(context.principal, context.project_id))
+        profile = ProfileContext(
+            entries=entries,
+            project_id=context.project_id,
+            instructions_override=context.instructions_override or "",
+        )
+        if context.context_snapshot_id:
+            with self.database.transaction() as conn:
                 conn.execute(
-                    "INSERT INTO chat_profile_turns VALUES (?, ?)",
+                    "INSERT OR IGNORE INTO chat_profile_turns VALUES (?, ?)",
                     (context.context_snapshot_id, profile.model_dump_json()),
                 )
-            return profile
+                pinned = conn.execute(
+                    "SELECT profile_json FROM chat_profile_turns WHERE context_id=?",
+                    (context.context_snapshot_id,),
+                ).fetchone()
+            profile = ProfileContext.model_validate_json(pinned["profile_json"])
+            self.authorize(context.principal, profile.project_id, context.document_id)
+        return profile
 
     def latest(self, principal: Principal, thread_id: str) -> ProfileContext | None:
         with self.database.connection() as conn:

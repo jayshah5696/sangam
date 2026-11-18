@@ -30,6 +30,23 @@ every variable.
 | `SANGAM_MAX_PUBLICATION_ASSET_BYTES` | `10000000` |
 | `SANGAM_MAX_KARAKEEP_SOURCE_BYTES` | `5000000` |
 
+## MCP
+
+MCP is experimental and disabled by default. See the [MCP walkthrough](mcp.md).
+It requires an explicit existing bearer key even in single-user mode.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SANGAM_MCP_ENABLED` | `false` | Mount MCP and enable workers. |
+| `SANGAM_MCP_ALLOWED_HOSTS` | Loopback hosts | JSON list of permitted request hostnames and ports. |
+| `SANGAM_MCP_MAX_SOURCE_BYTES` | `16000` | Python source byte cap. |
+| `SANGAM_MCP_MAX_RESULT_BYTES` | `64000` | Program output byte cap. |
+| `SANGAM_MCP_MAX_WORKSPACES_PER_ACTOR` | `50` | Retained App workspace quota. |
+| `SANGAM_MCP_MAX_EXECUTIONS_PER_ACTOR` | `10000` | Compact receipt quota; existing recovery remains accessible. |
+| `SANGAM_MCP_DRAFT_QUOTA_BYTES` | `10000000` | Total acknowledged draft bytes per actor. |
+| `SANGAM_MCP_RESULT_RETENTION_DAYS` | `7` | Detailed result retention after completion. |
+| `SANGAM_MCP_WORKSPACE_RETENTION_DAYS` | `30` | Inactive clean layout retention; drafts are protected. |
+
 ## Auth
 
 | Variable | Purpose |

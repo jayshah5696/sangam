@@ -1050,9 +1050,20 @@ class ChatProposalSource(BaseModel):
     page_number: int | None = None
 
 
+class ChatProposalSummary(BaseModel):
+    proposal_id: str
+    thread_id: str | None
+    document_id: str
+    expected_revision_id: str
+    summary: str | None
+    status: Literal["pending", "applied", "stale", "dismissed"]
+    applied_revision_id: str | None
+    created_at: str
+
+
 class ChatProposal(BaseModel):
     proposal_id: str
-    thread_id: str
+    thread_id: str | None
     document_id: str
     expected_revision_id: str
     content: str

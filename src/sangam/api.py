@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import logging
+import re
 import uuid
 import weakref
 from collections.abc import AsyncIterator
@@ -47,6 +50,7 @@ from sangam.errors import (
     ServiceUnavailableError,
     ValidationError,
 )
+from sangam.mcp_server import McpEndpointPath, SangamMcp
 from sangam.pdf_runtime import PdfExtractionScheduler
 from sangam.schemas import (
     ActivityProblemAcknowledgement,
@@ -161,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     readiness = services.readiness
     projects = services.projects
     assignments = AssignmentService(chat, projects)
+    mcp_runtime = SangamMcp(services, resolved_settings) if resolved_settings.mcp_enabled else None
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -179,6 +184,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             application.state.pdf_scheduler = pdf_scheduler
             pdf_scheduler.start()
             await assignments.start()
+            await asyncio.to_thread(services.assistant_requests.start)
+            if mcp_runtime is not None:
+                await mcp_runtime.start()
 
             backup_stop = asyncio.Event()
 
@@ -198,6 +206,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if resolved_settings.backups_enabled:
                 backup_task = asyncio.create_task(maintain_backups())
         except BaseException:
+            await services.assistant_requests.close()
+            if mcp_runtime is not None:
+                await mcp_runtime.close()
             await assignments.close()
             ownership_is_safe = True
             if pdf_scheduler is not None:
@@ -219,6 +230,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             shutdown_error: Exception | None = None
             unsafe_shutdown = False
+            try:
+                await services.assistant_requests.close()
+            except Exception as error:  # noqa: BLE001
+                shutdown_error = error
+                unsafe_shutdown = True
+            if mcp_runtime is not None:
+                try:
+                    await mcp_runtime.close()
+                except Exception as error:  # noqa: BLE001
+                    shutdown_error = error
+                    unsafe_shutdown = True
             try:
                 await assignments.close()
             # Defer the failure until all writers are stopped and lock ownership is decided.
@@ -293,6 +315,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     app.state.services = services
+    app.state.mcp_runtime = mcp_runtime
+    if mcp_runtime is not None:
+        app.add_middleware(McpEndpointPath)
+        app.mount("/mcp", mcp_runtime.app)
+
+        @app.get("/mcp-host.html", include_in_schema=False)
+        def mcp_local_host() -> FileResponse:
+            # srcdoc inherits its host's CSP. Permit only the compiled App's
+            # exact inline script, retaining the main application's strict CSP.
+            html = (resolved_settings.frontend_dist / "mcp-app" / "mcp-app.html").read_text()
+            scripts = re.findall(r"<script\b[^>]*>([\s\S]*?)</script>", html)
+            hashes = []
+            for script in scripts:
+                digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+                hashes.append(f"'sha256-{digest}'")
+            csp = (
+                "default-src 'self'; script-src 'self' "
+                + " ".join(hashes)
+                + "; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'"
+            )
+            return FileResponse(
+                resolved_settings.frontend_dist / "mcp-host.html",
+                headers={"Content-Security-Policy": csp, "Cache-Control": "no-store"},
+            )
+
     app.state.assignments = assignments
     app.state.storage_ownership = storage_ownership
     app.state.storage_ownership_finalizer = weakref.finalize(app, storage_ownership.close)

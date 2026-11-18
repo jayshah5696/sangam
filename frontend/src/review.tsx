@@ -183,13 +183,13 @@ function ProposalCard({
     const instruction = revisionInstruction.trim()
     if (!instruction) return
     setHandoffError(false)
-    const context = `Request a revision of proposal ${proposal.proposal_id} in thread ${proposal.thread_id}.\nDocument: ${proposal.document_id}\nReviewed revision: ${proposal.expected_revision_id}\nFeedback: ${instruction}`
+    const context = `Request a revision of proposal ${proposal.proposal_id}.\nDocument: ${proposal.document_id}\nReviewed revision: ${proposal.expected_revision_id}\nFeedback: ${instruction}`
     try {
       await navigate({
         to: '/chat',
         search: {
           document: proposal.document_id,
-          thread: proposal.thread_id,
+          thread: proposal.thread_id ?? undefined,
           proposal: proposal.proposal_id,
           prompt: context,
           returnTo: `/documents/${proposal.document_id}`,
@@ -315,7 +315,7 @@ function ProposalCard({
 
       <div className="review-evidence">
         <span>Proposal {proposal.proposal_id.slice(0, 8)}</span>
-        <span>Source thread {proposal.thread_id.slice(0, 8)}</span>
+        {proposal.thread_id && <span>Source thread {proposal.thread_id.slice(0, 8)}</span>}
         <span>Revision {proposal.expected_revision_id.slice(0, 8)}</span>
         <time dateTime={proposal.created_at}>{new Date(proposal.created_at).toLocaleString()}</time>
       </div>

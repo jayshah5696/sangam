@@ -38,6 +38,15 @@ importers:
       '@codemirror/view':
         specifier: 6.43.13
         version: 6.43.13
+      '@modelcontextprotocol/client':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@modelcontextprotocol/core':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@modelcontextprotocol/ext-apps':
+        specifier: 2.0.4
+        version: 2.0.4(@modelcontextprotocol/client@2.4.0)(@modelcontextprotocol/core@2.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(zod@4.6.7)
       '@openai/chatkit':
         specifier: ^1.9.0
         version: 1.9.0
@@ -50,6 +59,9 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.5
         version: 1.0.0-beta.5(patch_hash=bc1e0a2119ce70a6eaae660be713bca4bae12cd1775f0a57321558e172ff0ca0)(@pierre/theme@2.0.0)(@shikijs/themes@4.3.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(shiki@4.3.1)
+      '@shikijs/langs':
+        specifier: 4.3.1
+        version: 4.3.1
       '@tanstack/history':
         specifier: 1.162.4
         version: 1.162.4
@@ -83,6 +95,9 @@ importers:
       react-resizable-panels:
         specifier: ^4.14.2
         version: 4.14.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      shiki:
+        specifier: 4.3.1
+        version: 4.3.1
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -150,6 +165,9 @@ importers:
       vite:
         specifier: 8.3.1
         version: 8.3.1(@types/node@26.5.1)(jiti@2.7.0)
+      vite-plugin-singlefile:
+        specifier: ^2.3.4
+        version: 2.3.4(vite@8.3.1(@types/node@26.5.1)(jiti@2.7.0))
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@26.5.1)(jsdom@30.1.2)(vite@8.3.1(@types/node@26.5.1)(jiti@2.7.0))
@@ -476,6 +494,32 @@ packages:
   '@mermaid-js/parser@2.0.0':
     resolution: {integrity: sha512-K8BeapFUfrfxbRAUQAG5oBOCwo1+bNWzaVnPxTCutkfrTBn6T/j91FIhqxWJ32SUeQ9T3iy1zcmPZ5ROZEvDrg==}
     engines: {node: '>=22.12.0'}
+
+  '@modelcontextprotocol/client@2.4.0':
+    resolution: {integrity: sha512-LgrD2OphHuG12vfKFKz6SOnq7bKHQmhGJIAYdD+MZBn2npHEyry6uD8zvktodtl5CQM85MO0anUyD9JwmUmxww==}
+    engines: {node: '>=20'}
+
+  '@modelcontextprotocol/core@2.4.0':
+    resolution: {integrity: sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q==}
+    engines: {node: '>=20'}
+
+  '@modelcontextprotocol/ext-apps@2.0.4':
+    resolution: {integrity: sha512-B+PcbuGiaf0e5I3uy4iO5tS3Abo+5w8JvZFzHMzQdq9yVwP836zJkw2+KCGOQ0r4TM1fuQi4JdnbuWjkS4aBvg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@modelcontextprotocol/client': ^2.0.0
+      '@modelcontextprotocol/core': ^2.0.0
+      '@modelcontextprotocol/server': ^2.0.0
+      react: ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^17.0.0 || ^18.0.0 || ^19.0.0
+      zod: ^4.2.0
+    peerDependenciesMeta:
+      '@modelcontextprotocol/server':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
 
   '@napi-rs/canvas-android-arm64@1.0.13':
     resolution: {integrity: sha512-trn7AaDzQ+yeeA0ezhkC7cB1ZDPtp4UYk0EvB5F8qtYL9jEVWtVrU30WOpI52DszoTxaTsCgf5PP4ZVaOlOIHQ==}
@@ -1692,6 +1736,14 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
+  eventsource-parser@3.1.1:
+    resolution: {integrity: sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==}
+    engines: {node: '>=18.0.0'}
+
+  eventsource@3.0.7:
+    resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
+    engines: {node: '>=18.0.0'}
+
   expect-type@1.4.0:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
@@ -1866,6 +1918,9 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jose@6.2.17:
+    resolution: {integrity: sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -2251,6 +2306,10 @@ packages:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
 
+  pkce-challenge@5.0.1:
+    resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
+    engines: {node: '>=16.20.0'}
+
   playwright-core@1.64.1:
     resolution: {integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==}
     engines: {node: '>=20'}
@@ -2606,6 +2665,16 @@ packages:
 
   vfile@6.0.3:
     resolution: {integrity: sha512-KzIbH/9tXat2u30jf+smMwFCsno4wHVdNmzFyL+T/L3UGqqk6JKfVqOFOZEpZSHADH1k40ab6NUIXZq422ov3Q==}
+
+  vite-plugin-singlefile@2.3.4:
+    resolution: {integrity: sha512-1FAhlTCL6KJDpSUudrVU+gspapvS+tmKCg70vwNaAU6tyXn3E/C6+NnwQIze06byhBRv7VggZ78K0h+J/Rsdrg==}
+    engines: {node: '>18.0.0'}
+    peerDependencies:
+      rollup: ^4.59.0
+      vite: ^5.4.21 || ^6.0.0 || ^7.0.0 || ^8.0.0
+    peerDependenciesMeta:
+      rollup:
+        optional: true
 
   vite@8.3.1:
     resolution: {integrity: sha512-/bvH9E9tmCXRGp2uXY3WbOldqpTwFkbha/8ANaEQ6VkxhH60KyqLwgZq6lG2y+4uT55x9+9eUHMpQ7uGnOCKjA==}
@@ -3154,6 +3223,30 @@ snapshots:
   '@mermaid-js/parser@2.0.0':
     dependencies:
       '@chevrotain/types': 11.1.2
+
+  '@modelcontextprotocol/client@2.4.0':
+    dependencies:
+      '@modelcontextprotocol/core': 2.4.0
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.1.1
+      jose: 6.2.17
+      pkce-challenge: 5.0.1
+      zod: 4.6.7
+
+  '@modelcontextprotocol/core@2.4.0':
+    dependencies:
+      zod: 4.6.7
+
+  '@modelcontextprotocol/ext-apps@2.0.4(@modelcontextprotocol/client@2.4.0)(@modelcontextprotocol/core@2.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(zod@4.6.7)':
+    dependencies:
+      '@modelcontextprotocol/client': 2.4.0
+      '@modelcontextprotocol/core': 2.4.0
+      '@standard-schema/spec': 1.1.0
+      zod: 4.6.7
+    optionalDependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   '@napi-rs/canvas-android-arm64@1.0.13':
     optional: true
@@ -4318,6 +4411,12 @@ snapshots:
 
   esutils@2.0.3: {}
 
+  eventsource-parser@3.1.1: {}
+
+  eventsource@3.0.7:
+    dependencies:
+      eventsource-parser: 3.1.1
+
   expect-type@1.4.0: {}
 
   fast-deep-equal@3.1.3: {}
@@ -4476,6 +4575,8 @@ snapshots:
   isexe@2.0.0: {}
 
   jiti@2.7.0: {}
+
+  jose@6.2.17: {}
 
   js-tokens@4.0.0: {}
 
@@ -4986,6 +5087,8 @@ snapshots:
 
   picomatch@4.0.7: {}
 
+  pkce-challenge@5.0.1: {}
+
   playwright-core@1.64.1: {}
 
   playwright@1.64.1:
@@ -5291,6 +5394,11 @@ snapshots:
     dependencies:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
+
+  vite-plugin-singlefile@2.3.4(vite@8.3.1(@types/node@26.5.1)(jiti@2.7.0)):
+    dependencies:
+      picomatch: 4.0.7
+      vite: 8.3.1(@types/node@26.5.1)(jiti@2.7.0)
 
   vite@8.3.1(@types/node@26.5.1)(jiti@2.7.0):
     dependencies:
