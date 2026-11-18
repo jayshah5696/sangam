@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { z } from 'zod'
 
 const documentSchema = z.object({
@@ -436,10 +436,7 @@ test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals',
   await page.screenshot({ path: testInfo.outputPath('mcp-proposal-review.png'), fullPage: true })
 })
 
-test('PDF App renders authorized bytes, restores its page, and saves a note without changing the PDF', async ({
-  page,
-  request,
-}, testInfo) => {
+async function openPdfWorkspace({ page, request }: { page: Page; request: APIRequestContext }) {
   const suffix = randomUUID()
   const bytes = readFileSync(path.join(import.meta.dirname, 'assets/multipage.pdf'))
   const imported = await request.post(`/api/v1/pdfs?title=PDF-${suffix}&path=mcp/${suffix}.pdf`, {
@@ -464,6 +461,14 @@ test('PDF App renders authorized bytes, restores its page, and saves a note with
   await page.getByRole('button', { name: 'Search documents', exact: true }).click()
   await page.getByRole('button', { name: `Open PDF-${suffix}`, exact: true }).click()
   const app = page.frameLocator('iframe[title="Sangam document workspace"]')
+  return { app, document, bytes }
+}
+
+test('PDF App renders authorized bytes, restores its page, and saves a note without changing the PDF', async ({
+  page,
+  request,
+}, testInfo) => {
+  const { app, document, bytes } = await openPdfWorkspace({ page, request })
   await expect(app.getByRole('img', { name: 'PDF page 1', exact: true })).toHaveAttribute(
     'data-rendered',
     'true',
@@ -555,39 +560,57 @@ test('PDF App renders authorized bytes, restores its page, and saves a note with
   await page
     .locator('iframe[title="Sangam document workspace"]')
     .screenshot({ path: testInfo.outputPath('mcp-pdf.png') })
-  if (testInfo.project.name === 'chromium-desktop') {
-    for (const viewport of [
-      { width: 599, height: 844 },
-      { width: 601, height: 844 },
-      { width: 320, height: 568 },
-      { width: 844, height: 390 },
-    ]) {
-      await page.setViewportSize(viewport)
-      await expect(app.getByRole('img', { name: 'PDF page 2', exact: true })).toHaveAttribute(
-        'data-rendered',
-        'true',
-      )
-      expect(
-        await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth),
-      ).toBe(true)
-      expect((await app.locator('.mcp-pdf-scroll').boundingBox())?.height).toBeGreaterThanOrEqual(100)
-      await app.getByRole('button', { name: 'Next PDF page', exact: true }).scrollIntoViewIfNeeded()
-      await expect(app.getByRole('button', { name: 'Next PDF page', exact: true })).toBeInViewport()
-      await page
-        .locator('iframe[title="Sangam document workspace"]')
-        .screenshot({ path: testInfo.outputPath(`mcp-pdf-${viewport.width}x${viewport.height}.png`) })
-    }
-    await page.setViewportSize({ width: 844, height: 844 })
-    for (const height of [499, 501]) {
-      await page.locator('iframe[title="Sangam document workspace"]').evaluate((element, height) => {
-        element.style.height = `${height}px`
-      }, height)
-      await expect.poll(() => app.locator('html').evaluate((element) => element.clientHeight)).toBe(height)
-      expect((await app.locator('.mcp-pdf-scroll').boundingBox())?.height).toBeGreaterThanOrEqual(100)
-      await page
-        .locator('iframe[title="Sangam document workspace"]')
-        .screenshot({ path: testInfo.outputPath(`mcp-pdf-frame-${height}.png`) })
-    }
+})
+
+test('PDF App keeps its reader and controls usable at responsive boundaries', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'chromium-desktop',
+    'Desktop CSS sentinels; touch and WebKit use the PDF behavior workflow.',
+  )
+  const { app } = await openPdfWorkspace({ page, request })
+  await expect(app.getByRole('img', { name: 'PDF page 1', exact: true })).toHaveAttribute(
+    'data-rendered',
+    'true',
+  )
+  await app.getByRole('button', { name: 'Next PDF page', exact: true }).click()
+  await expect(app.getByRole('img', { name: 'PDF page 2', exact: true })).toHaveAttribute(
+    'data-rendered',
+    'true',
+  )
+  for (const viewport of [
+    { width: 599, height: 844 },
+    { width: 601, height: 844 },
+    { width: 320, height: 568 },
+    { width: 844, height: 390 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect(app.getByRole('img', { name: 'PDF page 2', exact: true })).toHaveAttribute(
+      'data-rendered',
+      'true',
+    )
+    expect(await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true,
+    )
+    expect((await app.locator('.mcp-pdf-scroll').boundingBox())?.height).toBeGreaterThanOrEqual(100)
+    await app.getByRole('button', { name: 'Next PDF page', exact: true }).scrollIntoViewIfNeeded()
+    await expect(app.getByRole('button', { name: 'Next PDF page', exact: true })).toBeInViewport()
+    await page
+      .locator('iframe[title="Sangam document workspace"]')
+      .screenshot({ path: testInfo.outputPath(`mcp-pdf-${viewport.width}x${viewport.height}.png`) })
+  }
+  await page.setViewportSize({ width: 844, height: 844 })
+  for (const height of [499, 501]) {
+    await page.locator('iframe[title="Sangam document workspace"]').evaluate((element, height) => {
+      element.style.height = `${height}px`
+    }, height)
+    await expect.poll(() => app.locator('html').evaluate((element) => element.clientHeight)).toBe(height)
+    expect((await app.locator('.mcp-pdf-scroll').boundingBox())?.height).toBeGreaterThanOrEqual(100)
+    await page
+      .locator('iframe[title="Sangam document workspace"]')
+      .screenshot({ path: testInfo.outputPath(`mcp-pdf-frame-${height}.png`) })
   }
 })
 
@@ -907,11 +930,15 @@ test('another view cannot silently replace a locally edited shared draft', async
   ).toBe('# Other view checkpoint')
 })
 
-test('App search opens several documents, restores drafts and active tab, and saves independently', async ({
+async function openMultiDocumentWorkspace({
   page,
   request,
   browserName,
-}, testInfo) => {
+}: {
+  page: Page
+  request: APIRequestContext
+  browserName: string
+}) {
   const suffix = randomUUID()
   async function create(title: string, path: string) {
     const response = await request.post('/api/v1/documents', {
@@ -925,7 +952,6 @@ test('App search opens several documents, restores drafts and active tab, and sa
   const secondTitle = `Second ${suffix}`
   const first = await create(firstTitle, `mcp/${suffix}-first.md`)
   const second = await create(secondTitle, `mcp/${suffix}-second.md`)
-  await create(`Private ${suffix}`, `private/${suffix}.md`)
   const issued = await request.post('/api/v1/agent-tokens', {
     data: {
       actor_id: `agent:mcp-tabs-${suffix}`,
@@ -949,11 +975,25 @@ test('App search opens several documents, restores drafts and active tab, and sa
     await page.keyboard.insertText(text)
     await expect(app.getByText('Draft backed up', { exact: true })).toBeVisible()
   }
+  async function findDocuments() {
+    await app.getByText('Find documents', { exact: true }).click()
+    await app.getByLabel('Search documents in Sangam').fill(suffix)
+    await app.getByRole('button', { name: 'Search workspace', exact: true }).click()
+    return app.getByRole('region', { name: 'Workspace search results' })
+  }
+  return { app, first, second, firstTitle, secondTitle, suffix, token, create, replace, findDocuments }
+}
+
+test('App search opens several documents, restores drafts and active tab, and saves independently', async ({
+  page,
+  request,
+  browserName,
+}, testInfo) => {
+  const { app, first, second, firstTitle, secondTitle, suffix, token, create, replace, findDocuments } =
+    await openMultiDocumentWorkspace({ page, request, browserName })
+  await create(`Private ${suffix}`, `private/${suffix}.md`)
   await replace('# First recoverable draft')
-  await app.getByText('Find documents', { exact: true }).click()
-  await app.getByLabel('Search documents in Sangam').fill(suffix)
-  await app.getByRole('button', { name: 'Search workspace', exact: true }).click()
-  const results = app.getByRole('region', { name: 'Workspace search results' })
+  const results = await findDocuments()
   await expect(results.getByRole('button', { name: `Open ${secondTitle}`, exact: true })).toBeVisible()
   await expect(results.getByText(`Private ${suffix}`, { exact: true })).toHaveCount(0)
   const navigationStarted = Promise.withResolvers<void>()
@@ -989,6 +1029,61 @@ test('App search opens several documents, restores drafts and active tab, and sa
   await replace('# Second recoverable draft')
   await app.getByRole('tab', { name: firstTitle, exact: true }).click()
   await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText('# First recoverable draft')
+  await app.getByRole('tab', { name: secondTitle, exact: true }).click()
+  for (const document of [first, second]) {
+    expect(
+      documentSchema.parse(await (await request.get(`/api/v1/documents/${document.document_id}`)).json())
+        .content,
+    ).toBe(document.content)
+  }
+  await page.reload()
+  await page.getByLabel('Sangam API key').fill(token)
+  await page.getByRole('button', { name: 'Connect', exact: true }).click()
+  await expect(app.getByRole('tab', { name: secondTitle, exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(app.getByRole('tab', { name: firstTitle, exact: true })).toBeVisible()
+  await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText(
+    '# Second recoverable draft',
+  )
+  await expect(app.getByRole('button', { name: `Close ${secondTitle}`, exact: true })).toBeDisabled()
+  await page
+    .locator('iframe[title="Sangam document workspace"]')
+    .screenshot({ path: testInfo.outputPath('mcp-multiple-documents.png') })
+  await app.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(app.getByText('All changes saved', { exact: true })).toBeVisible()
+  await app.getByRole('button', { name: `Close ${secondTitle}`, exact: true }).click()
+  await expect(app.getByRole('tab', { name: secondTitle, exact: true })).toHaveCount(0)
+  await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText('# First recoverable draft')
+  await app.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(app.getByText('All changes saved', { exact: true })).toBeVisible()
+  expect(
+    documentSchema.parse(await (await request.get(`/api/v1/documents/${first.document_id}`)).json()).content,
+  ).toBe('# First recoverable draft')
+  expect(
+    documentSchema.parse(await (await request.get(`/api/v1/documents/${second.document_id}`)).json()).content,
+  ).toBe('# Second recoverable draft')
+  expect(await app.locator('html').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+    true,
+  )
+  await page.screenshot({ path: testInfo.outputPath('mcp-multiple-documents-saved.png'), fullPage: true })
+})
+
+test('background App refresh preserves tab keyboard navigation and drafts', async ({
+  page,
+  request,
+  browserName,
+}) => {
+  const { app, firstTitle, secondTitle, replace, findDocuments } = await openMultiDocumentWorkspace({
+    page,
+    request,
+    browserName,
+  })
+  await replace('# First recoverable draft')
+  await (await findDocuments()).getByRole('button', { name: `Open ${secondTitle}`, exact: true }).click()
+  await replace('# Second recoverable draft')
+  await app.getByRole('tab', { name: firstTitle, exact: true }).click()
   const firstTab = app.getByRole('tab', { name: firstTitle, exact: true })
   await expect(firstTab).toBeEnabled()
   const refreshStarted = Promise.withResolvers<void>()
@@ -1023,12 +1118,18 @@ test('App search opens several documents, restores drafts and active tab, and sa
   await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText(
     '# Second recoverable draft',
   )
-  for (const document of [first, second]) {
-    expect(
-      documentSchema.parse(await (await request.get(`/api/v1/documents/${document.document_id}`)).json())
-        .content,
-    ).toBe(document.content)
-  }
+})
+
+test('App restores comparison and text selection without saving document drafts', async ({
+  page,
+  request,
+  browserName,
+}, testInfo) => {
+  const { app, first, second, firstTitle, secondTitle, token, replace, findDocuments } =
+    await openMultiDocumentWorkspace({ page, request, browserName })
+  await replace('# First recoverable draft')
+  await (await findDocuments()).getByRole('button', { name: `Open ${secondTitle}`, exact: true }).click()
+  await replace('# Second recoverable draft')
   await app.getByRole('button', { name: `Compare ${firstTitle}`, exact: true }).click()
   const comparison = app.getByRole('region', { name: 'Comparison document' })
   if ((await app.locator('details.mcp-comparison').getAttribute('open')) === null)
@@ -1082,24 +1183,19 @@ test('App search opens several documents, restores drafts and active tab, and sa
     .poll(() => editor.evaluate((element) => element.ownerDocument.getSelection()?.toString()))
     .toBe('# S')
   await expect(app.locator('details.mcp-comparison')).toHaveCount(1)
+  if ((await app.locator('details.mcp-comparison').getAttribute('open')) === null)
+    await app.getByText('Comparison', { exact: true }).click()
+  await expect(app.getByRole('region', { name: 'Comparison document' })).toContainText(
+    '# First recoverable draft',
+  )
+  for (const document of [first, second]) {
+    expect(
+      documentSchema.parse(await (await request.get(`/api/v1/documents/${document.document_id}`)).json())
+        .content,
+    ).toBe(document.content)
+  }
   await expect(app.getByRole('button', { name: `Close ${secondTitle}`, exact: true })).toBeDisabled()
   await page
     .locator('iframe[title="Sangam document workspace"]')
     .screenshot({ path: testInfo.outputPath('mcp-multiple-documents.png') })
-  await app.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(app.getByText('All changes saved', { exact: true })).toBeVisible()
-  await app.getByRole('button', { name: `Close ${secondTitle}`, exact: true }).click()
-  await expect(app.getByRole('tab', { name: secondTitle, exact: true })).toHaveCount(0)
-  await expect(app.getByRole('textbox', { name: 'Document content' })).toHaveText('# First recoverable draft')
-  await app.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(app.getByText('All changes saved', { exact: true })).toBeVisible()
-  expect(
-    documentSchema.parse(await (await request.get(`/api/v1/documents/${first.document_id}`)).json()).content,
-  ).toBe('# First recoverable draft')
-  expect(
-    documentSchema.parse(await (await request.get(`/api/v1/documents/${second.document_id}`)).json()).content,
-  ).toBe('# Second recoverable draft')
-  const frame = page.frames().find((candidate) => candidate.parentFrame() !== null)
-  expect(await frame?.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await page.screenshot({ path: testInfo.outputPath('mcp-multiple-documents-saved.png'), fullPage: true })
 })
