@@ -113,8 +113,10 @@
   text-align: left;
 }
 
-.karakeep-import-list button:hover,
 .karakeep-import-list button.active { background: var(--surface-soft); }
+@media (hover: hover) and (pointer: fine) {
+  .karakeep-import-list button:hover { background: var(--surface-soft); }
+}
 .karakeep-import-list button span { overflow: hidden; font-size: var(--text-control); text-overflow: ellipsis; white-space: nowrap; }
 .karakeep-import-list button small { color: var(--muted); font-size: var(--text-meta); text-transform: capitalize; }
 

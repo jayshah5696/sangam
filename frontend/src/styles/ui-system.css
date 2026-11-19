@@ -116,8 +116,24 @@ small {
   line-height: var(--leading-ui);
 }
 
-:where(button, input, select, textarea, a) {
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+:where(h1, h2, .document-header h1, .settings-header h1, .settings-compact-header h1, .welcome h1, .ui-state strong) {
+  text-wrap: balance;
+}
+
+:where(.ui-state p, .markdown-preview p, .settings-panel > header p, .mcp-message-text) {
+  text-wrap: pretty;
+}
+
+:where(time, .revision time, .properties-meta-grid, .mcp-review-reference) {
+  font-variant-numeric: tabular-nums;
+}
+
+:where(button, a) {
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+:where(input, select, textarea) {
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 :where(button, a.button, .panel-button, .secondary-action, .primary-button):active:not(:disabled):not([aria-disabled="true"]) {
@@ -419,7 +435,7 @@ textarea::placeholder {
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--surface) 80%, var(--app-bg));
-  box-shadow: var(--shadow-panel-inset), var(--shadow-panel);
+  box-shadow: var(--shadow-panel);
   color: var(--muted);
   transition: background var(--motion-control) var(--ease-ui-out),
     border-color var(--motion-control) var(--ease-ui-out),
@@ -546,13 +562,30 @@ textarea::placeholder {
   border-radius: var(--radius-panel);
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow-panel-inset), var(--shadow-popover);
+  box-shadow: var(--shadow-popover);
 }
 
 :where(dialog, .shared-dialog)::backdrop {
   background: var(--dialog-backdrop, color-mix(in srgb, var(--sidebar) 65%, transparent));
   backdrop-filter: blur(2px);
   animation: overlay-fade-in var(--motion-panel) var(--ease-ui-out);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  dialog::backdrop,
+  .shared-dialog::backdrop,
+  .command-dialog::backdrop,
+  .move-destination-dialog::backdrop,
+  .agent-token-edit-dialog::backdrop,
+  .agent-token-rotate-dialog::backdrop,
+  .one-time-secret-dialog::backdrop,
+  .publication-edit-dialog::backdrop,
+  .project-modal-dialog::backdrop,
+  dialog.evidence-modal-dialog::backdrop,
+  .publication-drawer-backdrop,
+  .evidence-modal-backdrop {
+    backdrop-filter: none !important;
+  }
 }
 
 @media (max-width: 768px) {

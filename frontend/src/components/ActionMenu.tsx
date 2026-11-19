@@ -17,12 +17,29 @@ type ActionMenuProps = {
   className?: string
 }
 
+type PopoverSide = 'bottom' | 'top'
+type PopoverAlign = 'right' | 'left'
+
+type PopoverPosition = {
+  top: number
+  left: number
+  visible: boolean
+  side: PopoverSide
+  align: PopoverAlign
+}
+
 export function ActionMenu({ label, icon, children, className = '' }: ActionMenuProps) {
   const menuId = useId()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState({ top: 0, left: 0, visible: false })
+  const [position, setPosition] = useState<PopoverPosition>({
+    top: 0,
+    left: 0,
+    visible: false,
+    side: 'bottom',
+    align: 'right',
+  })
   const dismiss = useCallback(() => {
     setOpen(false)
   }, [])
@@ -40,12 +57,13 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
       const gap = 5
       const edge = 8
       const below = trigger.bottom + gap
-      const top =
-        below + menu.height <= window.innerHeight - edge
-          ? below
-          : Math.max(edge, trigger.top - menu.height - gap)
-      const left = Math.min(window.innerWidth - menu.width - edge, Math.max(edge, trigger.right - menu.width))
-      setPosition({ top, left, visible: true })
+      const fitsBelow = below + menu.height <= window.innerHeight - edge
+      const side: PopoverSide = fitsBelow ? 'bottom' : 'top'
+      const top = fitsBelow ? below : Math.max(edge, trigger.top - menu.height - gap)
+      const rightAligned = trigger.right - menu.width
+      const align: PopoverAlign = rightAligned < edge ? 'left' : 'right'
+      const left = Math.min(window.innerWidth - menu.width - edge, Math.max(edge, rightAligned))
+      setPosition({ top, left, visible: true, side, align })
     }
     const outside = (event: PointerEvent) => {
       if (
@@ -133,6 +151,8 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
             role="menu"
             aria-label={label}
             className="action-menu-popover"
+            data-side={position.side}
+            data-align={position.align}
             style={{
               top: position.top,
               left: position.left,
@@ -160,7 +180,13 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState({ top: 0, left: 0, visible: false })
+  const [position, setPosition] = useState<PopoverPosition>({
+    top: 0,
+    left: 0,
+    visible: false,
+    side: 'bottom',
+    align: 'right',
+  })
   const dismiss = useCallback(() => {
     setOpen(false)
   }, [])
@@ -178,15 +204,13 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
       const gap = 5
       const edge = 8
       const below = trigger.bottom + gap
-      const top =
-        below + dialog.height <= window.innerHeight - edge
-          ? below
-          : Math.max(edge, trigger.top - dialog.height - gap)
-      const left = Math.min(
-        window.innerWidth - dialog.width - edge,
-        Math.max(edge, trigger.right - dialog.width),
-      )
-      setPosition({ top, left, visible: true })
+      const fitsBelow = below + dialog.height <= window.innerHeight - edge
+      const side: PopoverSide = fitsBelow ? 'bottom' : 'top'
+      const top = fitsBelow ? below : Math.max(edge, trigger.top - dialog.height - gap)
+      const rightAligned = trigger.right - dialog.width
+      const align: PopoverAlign = rightAligned < edge ? 'left' : 'right'
+      const left = Math.min(window.innerWidth - dialog.width - edge, Math.max(edge, rightAligned))
+      setPosition({ top, left, visible: true, side, align })
     }
     const outside = (event: PointerEvent) => {
       if (
@@ -269,6 +293,8 @@ export function ActionDialog({ label, icon, children, className = '' }: ActionDi
             aria-modal="true"
             aria-label={label}
             className="action-menu-popover action-dialog-popover"
+            data-side={position.side}
+            data-align={position.align}
             style={{
               top: position.top,
               left: position.left,

@@ -211,10 +211,16 @@
   mix-blend-mode: screen;
 }
 
-.pdf-annotation-mark.text_highlight:hover,
 .pdf-annotation-mark.text_highlight:focus-visible {
   outline: 1px solid var(--annotation-color, var(--accent));
   background: color-mix(in srgb, var(--annotation-color, var(--accent)) 46%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .pdf-annotation-mark.text_highlight:hover {
+    outline: 1px solid var(--annotation-color, var(--accent));
+    background: color-mix(in srgb, var(--annotation-color, var(--accent)) 46%, transparent);
+  }
 }
 
 .pdf-annotation-mark.area_highlight,
@@ -303,9 +309,14 @@
   color: var(--text);
 }
 
-.pdf-selection-toolbar > button:hover,
 .pdf-selection-toolbar > button:focus-visible {
   background: var(--accent-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .pdf-selection-toolbar > button:hover {
+    background: var(--accent-soft);
+  }
 }
 
 .pdf-highlight-colors {
@@ -574,8 +585,10 @@
   cursor: pointer;
 }
 
-.pdf-replacement-button:hover {
-  border-color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .pdf-replacement-button:hover {
+    border-color: var(--accent);
+  }
 }
 
 .pdf-replacement-button:focus-within {
@@ -812,8 +825,10 @@
   overflow-wrap: anywhere;
 }
 
-.evidence-source-link:hover {
-  text-decoration: underline;
+@media (hover: hover) and (pointer: fine) {
+  .evidence-source-link:hover {
+    text-decoration: underline;
+  }
 }
 
 .evidence-card-badges {
@@ -886,8 +901,10 @@
   cursor: pointer;
 }
 
-.evidence-meta-text:hover {
-  color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .evidence-meta-text:hover {
+    color: var(--accent);
+  }
 }
 
 .evidence-meta-edit {
@@ -918,8 +935,10 @@
   font-size: var(--text-control);
 }
 
-.evidence-inline-add:hover {
-  color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .evidence-inline-add:hover {
+    color: var(--accent);
+  }
 }
 
 .evidence-card-actions {
@@ -1208,8 +1227,10 @@ dialog.evidence-modal-dialog::backdrop {
   text-align: left;
 }
 
-.source-dependencies-toggle:hover {
-  color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .source-dependencies-toggle:hover {
+    color: var(--accent);
+  }
 }
 
 .dependent-conclusions-list {
@@ -1276,8 +1297,10 @@ dialog.evidence-modal-dialog::backdrop {
   transition: background var(--motion-control) var(--ease-ui-out), color var(--motion-control) var(--ease-ui-out);
 }
 
-.evidence-view-btn:hover {
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .evidence-view-btn:hover {
+    color: var(--text);
+  }
 }
 
 .evidence-view-btn.active {
@@ -1340,8 +1363,10 @@ dialog.evidence-modal-dialog::backdrop {
   cursor: pointer;
 }
 
-.claim-matrix-export-btn:hover:not(:disabled) {
-  border-color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .claim-matrix-export-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
 }
 
 .claim-matrix-export-btn:disabled {
@@ -1489,8 +1514,10 @@ dialog.evidence-modal-dialog::backdrop {
   transition: transform var(--motion-control) var(--ease-ui-out);
 }
 
-.claim-cell-badge:hover {
-  transform: translateY(-1px);
+@media (hover: hover) and (pointer: fine) {
+  .claim-cell-badge:hover {
+    transform: translateY(-1px);
+  }
 }
 
 .claim-cell-empty {

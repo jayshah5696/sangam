@@ -250,9 +250,11 @@
   overflow-wrap: anywhere;
 }
 
-.project-home .project-briefing-title:hover,
-.project-home .project-briefing-aside:hover {
-  text-decoration: underline;
+@media (hover: hover) and (pointer: fine) {
+  .project-home .project-briefing-title:hover,
+  .project-home .project-briefing-aside:hover {
+    text-decoration: underline;
+  }
 }
 
 .project-home .project-briefing-aside {

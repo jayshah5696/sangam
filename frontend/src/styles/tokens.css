@@ -34,14 +34,15 @@
   --radius-control: 0.375rem;
   --radius-panel: 0.5rem;
   --radius-pill: 999px;
+  --motion-none: 0ms;
   --motion-instant: 80ms;
   --motion-fast: 120ms;
   --motion-control: 160ms;
   --motion-panel: 220ms;
+  --motion-tooltip-delay: 400ms;
   --ease-ui-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-ui-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-spring-snappy: cubic-bezier(0.175, 0.885, 0.32, 1.1);
-  --transition-fast: var(--motion-control) ease;
+  --transition-fast: var(--motion-control) var(--ease-ui-out);
   --shadow-dialog: 0 28px 80px color-mix(in srgb, var(--shadow) 70%, transparent);
   --shadow-drawer: 18px 0 45px color-mix(in srgb, var(--shadow) 60%, transparent);
   --annotation-badge-text: #151515;
@@ -53,6 +54,7 @@
     --motion-fast: 0.01ms;
     --motion-control: 0.01ms;
     --motion-panel: 0.01ms;
+    --motion-tooltip-delay: 0.01ms;
   }
 }
 

@@ -78,6 +78,14 @@ test('App creates one document after a lost response and preserves the outgoing 
     expect(
       (await app.getByRole('button', { name: 'Create document', exact: true }).boundingBox())?.height,
     ).toBeGreaterThanOrEqual(44)
+    const titleFontSize = await app
+      .getByLabel('Document title', { exact: true })
+      .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))
+    const contentFontSize = await app
+      .getByLabel('Initial content', { exact: true })
+      .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))
+    expect(titleFontSize).toBeGreaterThanOrEqual(16)
+    expect(contentFontSize).toBeGreaterThanOrEqual(16)
   }
   await app.getByLabel('Document title', { exact: true }).scrollIntoViewIfNeeded()
   await expect(app.getByLabel('Document title', { exact: true })).toBeInViewport()

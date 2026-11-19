@@ -4,16 +4,31 @@ import path from 'node:path'
 
 import { expect, test } from './fixtures'
 
-test('capture the README workspace and settings screenshots', async ({ page, request, seededWorkspace }) => {
+test('capture the README workspace and settings screenshots', async ({ page, request }) => {
+  test.setTimeout(60_000)
   test.skip(!process.env.SANGAM_UPDATE_SCREENSHOTS, 'Run just update-screenshots to update docs assets')
 
   const repositoryRoot = path.resolve(import.meta.dirname, '../..')
   const narrow = page.viewportSize()?.width === 390
 
   if (narrow) {
+    const mobileDocRes = await request.post('/api/v1/documents', {
+      headers: { 'Idempotency-Key': randomUUID() },
+      data: {
+        title: 'Product launch review',
+        path: 'reviews/mobile-launch-review.md',
+        content:
+          '# Product review\n\nSangam keeps document state, citations, and proposed changes visible.\n\n## Next decision\n\nReview the pending work before publishing.',
+        content_type: 'text/markdown',
+      },
+    })
+    expect(mobileDocRes.ok(), await mobileDocRes.text()).toBeTruthy()
+    // SAFETY: POST /api/v1/documents returns document entity with document_id
+    const mobileDoc = (await mobileDocRes.json()) as { document_id: string }
+
     // 1. Mobile Document Workbench
-    await page.goto(`/documents/${seededWorkspace.documentId}`)
-    await expect(page.getByRole('heading', { name: seededWorkspace.documentTitle })).toBeVisible()
+    await page.goto(`/documents/${mobileDoc.document_id}`)
+    await expect(page.getByRole('heading', { name: 'Product launch review' })).toBeVisible()
     await page.waitForTimeout(400)
     await page.screenshot({
       path: path.join(repositoryRoot, 'docs/assets/crisp-workspace-narrow.png'),
@@ -46,6 +61,14 @@ test('capture the README workspace and settings screenshots', async ({ page, req
           fullPage: false,
         })
       }
+
+      const collapseInspector = page.getByRole('button', { name: 'Collapse document inspector' })
+      if (await collapseInspector.isVisible()) {
+        await collapseInspector.click()
+      } else {
+        await page.keyboard.press('Escape')
+      }
+      await expect(page.getByRole('dialog', { name: 'Document inspector' })).not.toBeVisible()
     }
 
     // 4. Mobile Settings
@@ -100,7 +123,15 @@ test('capture the README workspace and settings screenshots', async ({ page, req
       const htmlDoc = (await htmlDocRes.json()) as { document_id: string }
       await page.goto(`/documents/${htmlDoc.document_id}`)
       await expect(page.getByRole('heading', { name: 'Interactive Sales Dashboard' })).toBeVisible()
-      await page.getByRole('radio', { name: 'preview' }).click()
+      const htmlCollapse = page.getByRole('button', { name: 'Collapse document inspector' })
+      if (await htmlCollapse.isVisible()) {
+        await htmlCollapse.click()
+        await expect(page.getByRole('dialog', { name: 'Document inspector' })).not.toBeVisible()
+      }
+      const previewRadio = page.getByRole('radio', { name: 'preview' })
+      if ((await previewRadio.getAttribute('aria-checked')) !== 'true') {
+        await previewRadio.click()
+      }
       await page.waitForTimeout(500)
       await page.screenshot({
         path: path.join(repositoryRoot, 'docs/assets/phase-4-publishing-narrow.png'),
@@ -112,10 +143,23 @@ test('capture the README workspace and settings screenshots', async ({ page, req
   }
 
   // Desktop captures
+  const companion = await request.post('/api/v1/documents', {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: {
+      title: 'Release checklist',
+      path: 'research/release-checklist.md',
+      content:
+        '# Release checklist\n\n- Verify backup drill\n- Review open proposals\n- Confirm published revisions',
+      content_type: 'text/markdown',
+    },
+  })
+  expect(companion.ok(), await companion.text()).toBeTruthy()
+
   const document = await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': randomUUID() },
     data: {
       title: 'Product launch review',
+      path: 'reviews/product-launch-review.md',
       content:
         '# Product review\n\nSangam keeps document state, citations, and proposed changes visible.\n\n## Next decision\n\nReview the pending work before publishing.',
       content_type: 'text/markdown',
@@ -134,6 +178,10 @@ test('capture the README workspace and settings screenshots', async ({ page, req
   })
 
   // Document chat expands from the inspector into the full conversation route.
+  const openInspector = page.getByRole('button', { name: 'Open document inspector' })
+  if (await openInspector.isVisible()) {
+    await openInspector.click()
+  }
   await page.getByRole('tab', { name: 'chat', exact: true }).click()
   await page.getByRole('button', { name: 'Open full chat' }).click()
   await expect(page.getByRole('heading', { name: 'Workspace chat' })).toBeVisible()

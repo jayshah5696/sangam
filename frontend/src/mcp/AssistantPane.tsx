@@ -321,42 +321,43 @@ export function AssistantPane({
           />
         )}
         {result && !attempt && (
-          <StateMessage
-            compact
-            kind={
-              running
-                ? 'loading'
-                : result.status === 'completed'
-                  ? 'success'
-                  : result.status === 'needs_review'
-                    ? 'empty'
-                    : 'error'
-            }
-            title={statuses[result.status]}
-            description={result.error ?? undefined}
-          />
-        )}
-        {running && (
-          <button
-            className="secondary-action"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                if (!result) return
-                const cancelled = assistantResultSchema.parse(
-                  await callAppTool(app, {
-                    type: 'assistant_cancel',
-                    workspace_id: workspace.workspace_id,
-                    request_key: result.request_key,
-                  }),
-                )
-                setResult(cancelled)
-                await onAccepted()
-              })
+          <div
+            className="mcp-turn-status"
+            data-status={result.status}
+            role={
+              running || result.status === 'completed' || result.status === 'needs_review'
+                ? 'status'
+                : 'alert'
             }
           >
-            Cancel request
-          </button>
+            <span className="mcp-turn-dot" aria-hidden="true" />
+            <div className="mcp-turn-copy">
+              <strong>{statuses[result.status]}</strong>
+              {result.error && <p>{result.error}</p>}
+            </div>
+            {running && (
+              <button
+                className="secondary-action"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    if (!result) return
+                    const cancelled = assistantResultSchema.parse(
+                      await callAppTool(app, {
+                        type: 'assistant_cancel',
+                        workspace_id: workspace.workspace_id,
+                        request_key: result.request_key,
+                      }),
+                    )
+                    setResult(cancelled)
+                    await onAccepted()
+                  })
+                }
+              >
+                Cancel request
+              </button>
+            )}
+          </div>
         )}
         {history && (
           <div className="mcp-assistant-messages" aria-label="Conversation messages">
