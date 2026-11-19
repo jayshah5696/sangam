@@ -3,7 +3,9 @@
 Sangam uses one visual grammar across the workbench, both sidebars, settings,
 activity, menus, and embedded Pierre components. A dark navigation rail and a
 light inspector rail are valid theme roles; they must still share typography,
-spacing, control dimensions, and component anatomy.
+spacing, control dimensions, and component anatomy. For the condensed contract
+and product principles, see [DESIGN.md](../DESIGN.md) and
+[PRODUCT.md](../PRODUCT.md).
 
 The interface should feel quiet, dense, and obvious. Use whitespace to separate
 regions, one-pixel borders to show structure, and color to communicate selection
@@ -253,7 +255,10 @@ shared button, field, row, tab, badge, and `StateMessage` anatomy before creatin
 a local variant.
 
 - **Rest and hover:** the default state stays visually quiet; hover adds only
-  enough contrast to show that the item is interactive.
+  enough contrast to show that the item is interactive. Guard pointer-only
+  `:hover` rules inside `@media (hover: hover) and (pointer: fine)` so touch
+  devices do not show sticky hover states; keep `:focus-visible`, `.active`,
+  `[aria-selected="true"]`, and `[aria-expanded="true"]` unconditional.
 - **Focus:** keyboard focus uses the shared focus ring and is never conveyed by
   color alone. Destination focus may use a short pulse when reduced motion is
   not requested.
@@ -273,7 +278,9 @@ a local variant.
   explicitly. The workspace rail owns global refresh and connectivity status.
 - **Disabled:** use the shared disabled treatment and keep the label readable.
 - **Narrow and touch:** reflow instead of clipping. Coarse-pointer targets must
-  be at least `--control-touch` tall.
+  be at least `--control-touch` tall, and form inputs must use
+  `--text-input-mobile` (16px) on narrow or coarse-pointer viewports to prevent
+  mobile Safari auto-zoom.
 
 Use `StateMessage` for loading, empty, error, success, and offline messages on
 utility routes and recoverable workbench surfaces. Use compact mode inside a
@@ -296,7 +303,9 @@ no information, keep it subtle or omit it.
 
 1. **Motion explains a state or spatial relationship:** It clarifies where a panel
    or menu came from, which tab became active, whether work is running/complete/failed,
-   or how expanded content relates to its trigger.
+   or how expanded content relates to its trigger. Portaled popovers (`ActionMenu` and
+   `ActionDialog`) expose `data-side` (`top` / `bottom`) and `data-align` (`left` /
+   `right`) so `transform-origin` matches the trigger corner.
 2. **Immediate interaction results:** Animation must not delay input readiness,
    keyboard focus, navigation, saving, approvals, or error recovery.
 3. **Composite performance:** Large surfaces animate using `transform` and `opacity`
@@ -309,9 +318,11 @@ no information, keep it subtle or omit it.
    with an intuitive reverse action, backdrop click, Escape key dismiss, and focus return.
 7. **Active work representation:** Loading animation runs during real asynchronous
    work and stops immediately when work completes, fails, or unmounts.
-8. **Reduced-motion parity:** `prefers-reduced-motion: reduce` strips travel, scale,
-   blur, and infinite animation while keeping final states (open, selected, success,
-   error) fully visible and functional without delay.
+8. **Reduced-motion and reduced-transparency parity:** `prefers-reduced-motion: reduce`
+   strips travel, scale, blur, and infinite animation while keeping final states (open,
+   selected, success, error) fully visible and functional without delay.
+   `prefers-reduced-transparency: reduce` removes `backdrop-filter` blur on dialog and
+   drawer backdrops while keeping contrast intact.
 9. **No document content animation:** Document text and code surfaces do not animate
    merely because adjacent application chrome changed.
 10. **ChatKit boundary:** ChatKit owns motion inside its iframe; Sangam owns the
@@ -319,13 +330,15 @@ no information, keep it subtle or omit it.
 
 ### Tokens
 
+- `--motion-none` (0ms): immediate exit/reset transitions and focus-revealed tooltips.
 - `--motion-instant` (80ms): instant feedback, micro-interactions, and brief delays.
 - `--motion-fast` (120ms): tooltips, split handle feedback, badges, and small menu popovers.
 - `--motion-control` (160ms): standard buttons, inputs, tabs, and interactive state transitions.
 - `--motion-panel` (220ms): drawers, dialog overlays, command palette, and bottom sheets.
+- `--motion-tooltip-delay` (400ms, reduced to `0.01ms` under reduced motion): pointer hover delay before revealing rail tooltips.
 - `--ease-ui-out` (`cubic-bezier(0.16, 1, 0.3, 1)`): standard decelerating curve for natural entries and overlays.
 - `--ease-ui-in-out` (`cubic-bezier(0.4, 0, 0.2, 1)`): smooth balanced curve for continuous element transitions.
-- `--transition-fast` (`var(--motion-control) ease`): compatibility alias for legacy controls.
+- `--transition-fast` (`var(--motion-control) var(--ease-ui-out)`): compatibility alias for legacy controls.
 
 ### Implementation and dependencies
 
@@ -338,7 +351,7 @@ performance benchmarks.
 
 - Raw millisecond durations or custom `cubic-bezier()` curves defined outside `tokens.css`.
 - Bouncy, elastic, or overshooting transforms that distract from content.
-- Animated dimensions (`width`, `height`) during drag/resize interactions.
+- `transition: all` or animated dimensions (`width`, `height`) during drag/resize interactions.
 - Unbounded or unconstrained infinite animations when no work is active.
 
 ## Settings

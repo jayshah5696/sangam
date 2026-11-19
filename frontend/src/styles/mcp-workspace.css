@@ -9,7 +9,7 @@
   font-size: var(--text-body);
 }
 .mcp-host { display: grid; height: 100dvh; overflow: hidden; }
-.mcp-host-rail { display: flex; flex-direction: column; min-height: 0; overflow: auto; border-right: 1px solid var(--line); }
+.mcp-host-rail { display: flex; flex-direction: column; min-height: 0; overflow: auto; overscroll-behavior: contain; border-right: 1px solid var(--line); }
 .mcp-host-workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--app-bg); }
 .mcp-host-workspace > .ui-state { margin: auto; }
 .mcp-theme-control { display: grid; gap: var(--space-2); margin-top: auto; padding: var(--space-4); color: var(--muted); font-size: var(--text-control); }
@@ -38,14 +38,16 @@
 .mcp-results span { color: var(--muted); overflow-wrap: anywhere; }
 .mcp-host-rail > .mcp-results { margin: 0; padding: var(--space-2); }
 .mcp-host-rail > .mcp-results button { display: grid; gap: var(--space-1); border: 0; background: transparent; padding: var(--space-2); }
-.mcp-host-rail > .mcp-results button:hover { background: var(--surface-soft); }
+@media (hover: hover) and (pointer: fine) {
+  .mcp-host-rail > .mcp-results button:hover { background: var(--surface-soft); }
+}
 .mcp-host-rail > .mcp-results span { font-size: var(--text-meta); }
 .mcp-app-mount { display: flex; flex: 1; min-height: 0; }
 .mcp-app-mount:empty { display: none; }
 .mcp-app-mount iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--surface); }
 .mcp-app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
 .mcp-document-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-.mcp-workspace-search { flex: none; max-block-size: 40dvh; overflow: auto; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
+.mcp-workspace-search { flex: none; max-block-size: 40dvh; overflow: auto; overscroll-behavior: contain; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
 .mcp-workspace-search summary { cursor: pointer; min-height: var(--control-height); align-content: center; font-size: var(--text-control); }
 .mcp-search-description { color: var(--muted); font-size: var(--text-control); overflow-wrap: anywhere; }
 .mcp-tabs { display: flex; flex: none; overflow-x: auto; min-width: 0; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
@@ -67,7 +69,7 @@
 .mcp-editor { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid var(--line); }
 .mcp-document-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .mcp-document-body > .mcp-editor { min-width: 0; }
-.mcp-comparison { flex: 1; min-width: 0; overflow: auto; padding: var(--space-3) var(--space-4); border-left: 1px solid var(--line); }
+.mcp-comparison { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-3) var(--space-4); border-left: 1px solid var(--line); }
 .mcp-comparison:not([open]) { flex: none; }
 .mcp-comparison summary { cursor: pointer; min-height: var(--control-height); align-content: center; }
 .mcp-comparison h2 { font: inherit; font-weight: 650; }
@@ -81,7 +83,7 @@
 .mcp-pdf { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .mcp-pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2); }
 .mcp-pdf-toolbar button { min-width: var(--control-height); }
-.mcp-pdf-scroll { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2); }
+.mcp-pdf-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-2); }
 .mcp-pdf-page { position: relative; width: fit-content; }
 .mcp-pdf-page canvas { display: block; }
 .mcp-pdf-page .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; text-size-adjust: none; transform-origin: 0 0; --total-scale-factor: 1; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
@@ -105,25 +107,46 @@
 .mcp-proposal-review[hidden], .mcp-editor[hidden], .mcp-comparison[hidden] { display: none; }
 .mcp-new-document, .mcp-assistant { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 .mcp-assistant[hidden] { display: none; }
-.mcp-action-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: var(--space-4); }
+.mcp-action-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-4); }
 .mcp-action-content .mcp-controls, .mcp-document-header .mcp-controls { flex-wrap: wrap; }
 .mcp-review-field select { min-width: 0; min-height: var(--control-height); padding: var(--space-2); background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-control); font: inherit; }
+.mcp-turn-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); }
+.mcp-turn-status[data-status="needs_review"] { border-color: color-mix(in srgb, var(--warning) 45%, var(--line)); background: color-mix(in srgb, var(--warning-soft) 50%, var(--surface)); }
+.mcp-turn-status[data-status="failed"],
+.mcp-turn-status[data-status="cancelled"],
+.mcp-turn-status[data-status="interrupted"],
+.mcp-turn-status[data-status="result_expired"] { border-color: color-mix(in srgb, var(--danger) 42%, var(--line)); background: color-mix(in srgb, var(--danger-soft) 48%, var(--surface)); }
+.mcp-turn-dot { width: var(--space-2); height: var(--space-2); flex: none; border-radius: var(--radius-pill); background: var(--muted); }
+.mcp-turn-status[data-status="running"] .mcp-turn-dot { background: var(--accent); animation: mcp-turn-pulse 1.6s var(--ease-ui-in-out) infinite; }
+.mcp-turn-status[data-status="completed"] .mcp-turn-dot { background: var(--success); }
+.mcp-turn-status[data-status="needs_review"] .mcp-turn-dot { background: var(--warning); }
+.mcp-turn-status[data-status="failed"] .mcp-turn-dot,
+.mcp-turn-status[data-status="cancelled"] .mcp-turn-dot,
+.mcp-turn-status[data-status="interrupted"] .mcp-turn-dot,
+.mcp-turn-status[data-status="result_expired"] .mcp-turn-dot { background: var(--danger); }
+@keyframes mcp-turn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.mcp-turn-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.mcp-turn-copy strong { font-size: var(--text-control); line-height: var(--leading-ui); color: var(--text); }
+.mcp-turn-copy p { margin: 0; font-size: var(--text-meta); line-height: var(--leading-ui); color: var(--muted); overflow-wrap: anywhere; }
 .mcp-assistant-messages { display: grid; gap: var(--space-4); }
 .mcp-assistant-message { min-width: 0; border-bottom: 1px solid var(--line); padding-block: var(--space-3); }
 .mcp-assistant-message strong { font-size: var(--text-control); }
 .mcp-message-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-block: var(--space-2); }
-.mcp-assistant-artifact { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-block: var(--space-3); }
+.mcp-assistant-artifact { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-block: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); }
 .mcp-assistant-composer { border-top: 1px solid var(--line); margin-top: var(--space-4); padding-top: var(--space-3); }
-.mcp-assistant-context { display: grid; gap: var(--space-1); max-block-size: 20dvh; overflow: auto; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); }
+.mcp-assistant-context { display: grid; gap: var(--space-1); max-block-size: 20dvh; overflow: auto; overscroll-behavior: contain; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); }
 .mcp-assistant-context blockquote { margin: var(--space-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mcp-review-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
 .mcp-review-toolbar h2 { margin: 0; font-size: var(--text-body); }
 .mcp-review-toolbar .mcp-controls { flex-wrap: wrap; }
 .mcp-review-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); flex: 1; min-height: 0; overflow: hidden; }
-.mcp-review-list { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; overflow: auto; padding: var(--space-3); border-right: 1px solid var(--line); }
+.mcp-review-list { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-3); border-right: 1px solid var(--line); }
 .mcp-review-list button { display: grid; justify-items: start; gap: var(--space-2); height: auto; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .mcp-review-list button[aria-current] { background: var(--accent-soft); }
-.mcp-review-content { min-width: 0; min-height: 0; overflow: auto; padding: var(--space-4); }
+.mcp-review-content { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-4); }
 .mcp-review-content h3 { font-size: var(--text-body); margin-block: 0 var(--space-3); }
 .mcp-review-reference { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-meta); overflow-wrap: anywhere; }
 .mcp-review-content .mcp-controls { flex-wrap: wrap; justify-content: flex-start; }
@@ -148,14 +171,27 @@
   .mcp-document-header .mcp-controls { width: 100%; justify-content: flex-end; }
   .mcp-document-header.mcp-pdf-header .mcp-controls { width: auto; }
 }
+@media (max-width: 768px), (pointer: coarse) {
+  .mcp-host input,
+  .mcp-app input,
+  .mcp-host textarea,
+  .mcp-app textarea,
+  .mcp-review-field input,
+  .mcp-review-field textarea,
+  .mcp-review-field select,
+  .mcp-pdf-field input,
+  .mcp-pdf-field textarea,
+  .mcp-theme-control select {
+    font-size: var(--text-input-mobile);
+  }
+}
 @media (pointer: coarse) {
-  .mcp-review-field select { min-height: var(--control-touch); font-size: var(--text-input-mobile); }
+  .mcp-review-field select { min-height: var(--control-touch); }
   .mcp-review-content summary { min-height: var(--control-touch); }
   .mcp-app .mcp-tab-close { min-width: var(--control-touch); }
   .mcp-pdf-toolbar button { min-width: var(--control-touch); }
   .mcp-pdf-scroll summary, .mcp-workspace-search summary, .mcp-comparison summary { min-height: var(--control-touch); }
   .mcp-host button, .mcp-app button, .mcp-host input, .mcp-app input { min-height: var(--control-touch); }
-  .mcp-host input, .mcp-app input { font-size: var(--text-input-mobile); }
 }
 @media (max-height: 500px) {
   .mcp-app { height: auto; overflow: auto; }

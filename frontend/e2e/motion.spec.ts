@@ -21,19 +21,23 @@ test.describe('Restrained motion language and workbench interactions', () => {
       const tokens = await page.evaluate(() => {
         const style = getComputedStyle(document.documentElement)
         return {
+          none: style.getPropertyValue('--motion-none').trim(),
           instant: style.getPropertyValue('--motion-instant').trim(),
           fast: style.getPropertyValue('--motion-fast').trim(),
           control: style.getPropertyValue('--motion-control').trim(),
           panel: style.getPropertyValue('--motion-panel').trim(),
+          tooltipDelay: style.getPropertyValue('--motion-tooltip-delay').trim(),
           easeOut: style.getPropertyValue('--ease-ui-out').trim(),
           easeInOut: style.getPropertyValue('--ease-ui-in-out').trim(),
         }
       })
 
+      expect(Math.round(parseMs(tokens.none))).toBe(0)
       expect(Math.round(parseMs(tokens.instant))).toBe(80)
       expect(Math.round(parseMs(tokens.fast))).toBe(120)
       expect(Math.round(parseMs(tokens.control))).toBe(160)
       expect(Math.round(parseMs(tokens.panel))).toBe(220)
+      expect(Math.round(parseMs(tokens.tooltipDelay))).toBe(400)
       expect(tokens.easeOut).toMatch(/cubic-bezier\(0?\.16,\s*1,\s*0?\.3,\s*1\)/)
       expect(tokens.easeInOut).toMatch(/cubic-bezier\(0?\.4,\s*0,\s*0?\.2,\s*1\)/)
     })
@@ -50,6 +54,8 @@ test.describe('Restrained motion language and workbench interactions', () => {
 
       const popover = page.locator('.action-dialog-popover')
       await expect(popover).toBeVisible()
+      await expect(popover).toHaveAttribute('data-side', /^(top|bottom)$/)
+      await expect(popover).toHaveAttribute('data-align', /^(left|right)$/)
 
       // Escape closes the menu and returns focus to trigger
       await page.keyboard.press('Escape')

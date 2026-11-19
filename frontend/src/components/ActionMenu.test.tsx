@@ -75,6 +75,66 @@ describe('ActionMenu', () => {
     fireEvent.keyDown(menu, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(item2)
   })
+
+  it('sets data-side and data-align from available viewport space', () => {
+    const originalInnerHeight = window.innerHeight
+    const originalInnerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 400 })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 })
+
+    const makeRect = (left: number, top: number, width: number, height: number): DOMRect => ({
+      x: left,
+      y: top,
+      left,
+      top,
+      width,
+      height,
+      right: left + width,
+      bottom: top + height,
+      toJSON: () => ({}),
+    })
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.getAttribute('role') === 'menu') {
+        return makeRect(0, 0, 180, 140)
+      }
+      if (this.getAttribute('aria-label') === 'Bottom trigger') {
+        return makeRect(40, 350, 32, 32)
+      }
+      return makeRect(480, 40, 32, 32)
+    })
+
+    try {
+      const { unmount } = render(
+        <ActionMenu label="Top trigger" icon={<span>•••</span>}>
+          {(close) => <ActionMenuItem onSelect={close}>Action</ActionMenuItem>}
+        </ActionMenu>,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Top trigger' }))
+      const belowMenu = screen.getByRole('menu', { name: 'Top trigger' })
+      expect(belowMenu.getAttribute('data-side')).toBe('bottom')
+      expect(belowMenu.getAttribute('data-align')).toBe('right')
+      unmount()
+
+      render(
+        <ActionMenu label="Bottom trigger" icon={<span>•••</span>}>
+          {(close) => <ActionMenuItem onSelect={close}>Action</ActionMenuItem>}
+        </ActionMenu>,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Bottom trigger' }))
+      const flippedMenu = screen.getByRole('menu', { name: 'Bottom trigger' })
+      expect(flippedMenu.getAttribute('data-side')).toBe('top')
+      expect(flippedMenu.getAttribute('data-align')).toBe('left')
+    } finally {
+      rectSpy.mockRestore()
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
+    }
+  })
 })
 
 describe('ActionDialog', () => {
