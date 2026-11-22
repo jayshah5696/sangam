@@ -613,7 +613,10 @@ def test_trusted_preview_uses_fragment_grant_restrictive_csp_and_live_trust_chec
     assert "location.hash" in shell.text
     assert "history.replaceState" in shell.text
     assert shell.headers["Referrer-Policy"] == "no-referrer"
-    assert "frame-ancestors" in shell.headers["Content-Security-Policy"]
+    shell_csp = shell.headers["Content-Security-Policy"]
+    assert "frame-ancestors" in shell_csp
+    assert "img-src data: blob:" in shell_csp
+    assert "script-src 'unsafe-inline' blob:" in shell_csp
     assert client.get("/api/v1/health").headers["X-Content-Type-Options"] == "nosniff"
 
     rendered = client.get(
