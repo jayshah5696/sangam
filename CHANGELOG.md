@@ -7,6 +7,12 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.14.2] - 2026-11-22
+
+### Fixed
+
+- Trusted interactive previews now load `data:` and `blob:` images and attached JavaScript assets. The preview shell's Content-Security-Policy header was missing `img-src` and `blob:` in `script-src`, and the shell header overrides the looser policy in the preview content (#593).
+
 ## [0.14.1] - 2026-11-21
 
 ### Added
@@ -660,7 +666,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.14.2...HEAD
+[0.14.2]: https://github.com/jayshah5696/sangam/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/jayshah5696/sangam/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/jayshah5696/sangam/compare/v0.13.7...v0.14.0
 [0.13.7]: https://github.com/jayshah5696/sangam/compare/v0.13.6...v0.13.7
