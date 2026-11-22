@@ -7,6 +7,22 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.14.1] - 2026-11-21
+
+### Added
+
+- MCP document workspace with document editing, PDF reading and annotations, revision and proposal review, saved layouts, skills, and assistant requests (#581). See [MCP documentation](docs/mcp.md) for configuration, permissions, and limits.
+
+### Fixed
+
+- Corrected document mutation lock ordering to prevent deadlocks (#580).
+
+### Changed
+
+- Refined workspace motion, touch behavior, and surface hierarchy (#582).
+- Added database migrations 038–045 for MCP workspace state, skills, assistant requests, and proposals (#581). Back up and rehearse the upgrade before deployment as described in the [release checklist](docs/operations/release-checklist.md).
+- MCP operations use scoped authorization; inference requires an explicit grant (#581).
+
 ## [0.14.0] - 2026-11-10
 
 ### Security
@@ -644,7 +660,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/jayshah5696/sangam/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/jayshah5696/sangam/compare/v0.13.7...v0.14.0
 [0.13.7]: https://github.com/jayshah5696/sangam/compare/v0.13.6...v0.13.7
 [0.13.6]: https://github.com/jayshah5696/sangam/compare/v0.13.5...v0.13.6
