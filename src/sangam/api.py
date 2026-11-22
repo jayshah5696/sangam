@@ -1429,8 +1429,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_preview_host(request)
         parents = " ".join(resolved_settings.trusted_preview_parent_origins) or "'none'"
         csp = (
-            "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; "
-            f"style-src 'unsafe-inline'; frame-ancestors {parents}; "
+            "default-src 'none'; script-src 'unsafe-inline' blob:; connect-src 'self'; "
+            "style-src 'unsafe-inline'; img-src data: blob:; "
+            f"frame-ancestors {parents}; "
             "base-uri 'none'; form-action 'none'"
         )
         shell = """<!doctype html><meta charset=\"utf-8\"><title>Trusted Sangam preview</title>
