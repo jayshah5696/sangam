@@ -41,7 +41,6 @@ def generate_pdf(text: str) -> bytes:
 def seed(base_url: str, output_path: Path | None = None) -> dict:
     client = httpx.Client(timeout=20.0)
 
-    # 1. Seed Markdown document
     md_payload = {
         "title": "Getting Started with Sangam",
         "path": "guides/getting-started.md",
@@ -68,7 +67,6 @@ export function calculateDigest(content: string): string {
     )
     md_doc = md_resp.json() if md_resp.status_code in (200, 201) else {"error": md_resp.text}
 
-    # 2. Seed HTML document for trusted preview
     html_payload = {
         "title": "Interactive System Dashboard",
         "path": "widgets/dashboard.html",
@@ -102,7 +100,6 @@ export function calculateDigest(content: string): string {
         html_resp.json() if html_resp.status_code in (200, 201) else {"error": html_resp.text}
     )
 
-    # 3. Generate & upload PDF document
     pdf_bytes = generate_pdf(
         "Sangam Research: Distributed consensus with raft-protocol-state and vector clocks."
     )
@@ -117,7 +114,6 @@ export function calculateDigest(content: string): string {
     )
     pdf_doc = pdf_resp.json() if pdf_resp.status_code in (200, 201) else {"error": pdf_resp.text}
 
-    # 4. Issue scoped agent token
     token_payload = {
         "actor_id": "agent:verification-runner",
         "display_name": "Verification Runner",
@@ -130,7 +126,6 @@ export function calculateDigest(content: string): string {
     token_resp = client.post(f"{base_url}/agent-tokens", json=token_payload)
     token_data = token_resp.json() if token_resp.status_code == 201 else {"error": token_resp.text}
 
-    # 5. Verify search indexes
     time.sleep(0.3)
     s_md = client.get(f"{base_url}/search", params={"q": "vector-search-term"}).json()
     s_html = client.get(f"{base_url}/search", params={"q": "telemetry-html-widget"}).json()

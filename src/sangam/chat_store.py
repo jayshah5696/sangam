@@ -110,7 +110,6 @@ class BoundedThreadRunner:
 
         return await asyncio.wrap_future(fut)
 
-    # Shutdown owns in-flight writes; it must bound draining without cancelling them.
     async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         cond = self._get_cond()
         async with cond:
@@ -152,7 +151,6 @@ class SQLiteChatKitStore(Store[TContext]):
     async def _run_bounded(self, func: Callable[..., T], *args: Any) -> T:
         return await self._runner.run(func, *args)
 
-    # Forward the shutdown deadline to the runner that owns in-flight writes.
     async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         await self._runner.close(timeout=timeout)
 

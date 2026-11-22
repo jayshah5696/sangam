@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 
 ATTACHMENTS_FOLDER = "attachments"
 
-# SVG is excluded on purpose: it is a script-capable document, not a picture.
 _SIGNATURES: dict[ImageMediaType, tuple[str, tuple[bytes, ...]]] = {
     "image/png": (".png", (b"\x89PNG\r\n\x1a\n",)),
     "image/jpeg": (".jpg", (b"\xff\xd8\xff",)),
@@ -160,7 +159,6 @@ class DocumentAssetService:
         if not _matches_signature(media_type, content):
             raise ValidationError("The uploaded bytes are not a valid image of the declared type")
         extension = _SIGNATURES[media_type][0]
-        # 16 hex digits keep names unguessable without the image itself.
         digest = hashlib.sha256(content).hexdigest()[:16]
         name = f"{_stem(filename)}-{digest}{extension}"
         asset_path = f"{ATTACHMENTS_FOLDER}/{name}"

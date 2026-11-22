@@ -53,8 +53,6 @@ class MutationCoordinator:
     def document(self, document_id: str) -> Iterator[None]:
         lock = self._retain_document_lock(document_id)
         try:
-            # Never hold a document lock while waiting for a generation. An
-            # active pipeline may need that lock to finish before the backup.
             with self.mutation(), lock:
                 yield
         finally:
@@ -80,8 +78,6 @@ class MutationCoordinator:
     def mutation(self) -> Iterator[None]:
         """Enter a mutation generation without requiring a document identity."""
         if getattr(self._local, "mutating", False):
-            # This pipeline already owns a generation. Waiting again would
-            # deadlock a nested storage call against a queued backup.
             yield
             return
         with self._condition:

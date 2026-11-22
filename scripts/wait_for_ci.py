@@ -17,7 +17,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-# Branch protection requires these names, so a green set means the commit passed CI.
 REQUIRED_CHECKS = (
     "Source, UI, and docs",
     "Wheel and sdist clean install",

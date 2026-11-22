@@ -176,7 +176,6 @@ export function FileExplorerPanel() {
         const filename = ensureDocumentExtension(workspaceBasename(destinationPath), document.content_type)
         return api.moveDocument(document, joinWorkspacePath(parent, filename))
       }
-      // A draft has no path, so renaming it changes its title through the session store.
       return sessions.rename(
         document.document_id,
         workspaceBasename(destinationPath).trim() || 'Untitled document',
@@ -376,7 +375,6 @@ export function FileExplorerPanel() {
     density: 'compact',
     icons: 'minimal',
     flattenEmptyDirectories: false,
-    // Hide Pierre's MiddleTruncate and render label from aria-label (upstream: pierrecomputer/pierre#939)
     unsafeCSS: `
       [data-type="item"]:not(:has([data-item-rename-input]))
         > [data-item-section="content"] {
@@ -445,8 +443,6 @@ export function FileExplorerPanel() {
   }, [adapter, model, sortComparator])
 
   useEffect(() => {
-    // Pierre's virtual scroll host can contain no tabbable rows when the
-    // selected row is offscreen. Give the actual scroll owner keyboard access.
     const makeScrollFocusable = () => {
       const scroll = model
         .getFileTreeContainer()

@@ -1,4 +1,3 @@
-/* Phase 2.1 workbench shell */
 .workbench-shell {
   display: flex;
   width: 100%;
@@ -467,7 +466,6 @@
   .split-workbench .editor-tools > span { width: 100%; margin-left: 0; }
 }
 
-/* Mobile Single Working Surface Switcher (Issue 312) */
 .mobile-workbench-single-surface {
   display: flex;
   flex-direction: column;
@@ -577,7 +575,6 @@
   .command-palette { animation: none; }
 }
 
-/* Issue 325: Explore alternative drafts */
 .alternative-drafts-modal {
   box-sizing: border-box;
   width: min(640px, calc(100vw - var(--space-3) * 2));
@@ -825,7 +822,6 @@
   border-bottom: 1px solid var(--line);
 }
 
-/* Issue 327: Attach interactive explanations to documents */
 .interactive-explanation-rail {
   display: flex;
   flex-direction: column;

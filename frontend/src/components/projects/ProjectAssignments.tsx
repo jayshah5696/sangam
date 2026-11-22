@@ -243,12 +243,10 @@ export function ProjectBriefing({
       await client.invalidateQueries({ queryKey: ['project-briefing', project.project_id] })
     },
   })
-  // A first visit has no baseline to compare against, so record one instead of asking.
   const needsBaseline = briefing.data?.since === null
   useEffect(() => {
     if (needsBaseline && visit.isIdle) visit.mutate()
   }, [needsBaseline, visit])
-  // Pending proposals and updated sources already have their own rows below.
   const updatedIds = new Set(updatedSources.map((d) => d.document_id))
   const changes = (briefing.data?.changes ?? []).filter(
     (change) => change.kind !== 'pending_proposal' && !updatedIds.has(change.document_id),

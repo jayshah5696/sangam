@@ -47,8 +47,6 @@ def _cross_create_replay_process(root: str, result_pipe) -> None:
             if capability == Capability.READ and path in {"docs/a.md", "docs/b.md"}:
                 sources_authorized.wait(timeout=5)
 
-        # Observe the real authorization boundary after both source locks are held.
-        # Authorization and all storage operations still execute their production code.
         policy.require = observed_require
         responses = []
         errors = []
@@ -67,7 +65,6 @@ def _cross_create_replay_process(root: str, result_pipe) -> None:
                     headers=headers(f"create-{'b' if index == 0 else 'a'}"),
                 )
                 responses.append(response.status_code)
-            # Collect every worker failure for assertion after joining the threads.
             except Exception as error:  # noqa: BLE001
                 errors.append(repr(error))
 
@@ -80,7 +77,6 @@ def _cross_create_replay_process(root: str, result_pipe) -> None:
             worker.join(timeout=8)
         if any(worker.is_alive() for worker in workers):
             result_pipe.send({"deadlocked": True, "responses": responses, "errors": errors})
-            # Parent terminates this process, including blocked API/audit workers.
             return
         with client.app.state.services.documents.database.connection() as connection:
             count = connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -175,8 +171,6 @@ def test_body_only_duplicate_identity_and_legacy_replay_are_source_bound(client)
     )
     assert outside.status_code == 403
 
-    # Older releases duplicated through a wrapper that stored the storage-shaped
-    # create key and an accepted duplicate audit row. Reproduce exactly those writes.
     def legacy_duplicate(*, title: str, path: str, key: str, operation_id: str):
         services = client.app.state.services
         principal = Principal.trusted_human(
@@ -370,7 +364,6 @@ def test_audit_readmission_refreshes_diff_after_waiting_for_capacity(client):
                     headers={**headers("waiting-update"), "If-Match": "*"},
                 )
             )
-        # Collect every worker failure for assertion after joining the threads.
         except Exception as error:  # noqa: BLE001
             errors.append(repr(error))
 

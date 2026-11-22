@@ -97,7 +97,6 @@ class AssistantApp:
                 action.model_dump(exclude={"type", "workspace_id"})
             )
             try:
-                # Recovery uses the accepted context, independent of later tab/draft changes.
                 if not await asyncio.to_thread(self.accepted, principal, query.request_key):
                     query = await asyncio.to_thread(self.prepare, principal, action)
                 value = await requests.submit(

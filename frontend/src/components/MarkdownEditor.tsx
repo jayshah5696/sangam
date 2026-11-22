@@ -283,7 +283,6 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
                       ['Mod-b', 'bold'],
                       ['Mod-i', 'italic'],
                       ['Mod-e', 'code'],
-                      // Mod-k stays the global command palette; links come from the selection toolbar.
                     ] as const
                   ).map(([key, format]) => ({
                     key,
@@ -393,7 +392,6 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } })
   }, [value])
 
-  // Queued cursor transactions run after the mount's controlled value effect.
   useEffect(() => onReady?.(), [onReady, value])
 
   return <div className="editor" ref={hostRef} />

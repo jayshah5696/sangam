@@ -38,6 +38,7 @@
   - Do not widen known values to open dictionary or generic object types when precise inference or `satisfies` is available.
   - Parse and validate external or untrusted payloads at I/O boundaries (e.g. using Zod schemas) rather than using unconstrained dictionary types (`Record<string, unknown>`), loose runtime `typeof` branches, or functions exposing `unknown` parameters/returns.
   - Do not use conditional empty object spread (`...(condition ? { key: value } : {})`) or module mocking in application code.
+  - Do not write implementation comments (`#`, `//`, or non-JSDoc `/* */`) in Python, TypeScript/JavaScript, or CSS; keep Python docstrings, TypeScript JSDoc (`/** ... */`), and supported machine/safety directives (`// SAFETY:`, `# noqa`, `# type: ignore`, etc.), move non-obvious decisions to `docs/adr/`, and track workarounds as issues. Use `.agents/skills/delete-comment/SKILL.md` for comment audits.
 - Run `just anti-slop` (or `just lint`) to verify all TypeScript and JavaScript files comply with the anti-slop Oxlint rules.
 
 ## Asset and documentation hygiene

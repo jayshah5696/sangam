@@ -122,9 +122,7 @@ describe('DocumentCommentsRail', () => {
     })
     expect(screen.getByText('This comment was on an edited out section.')).toBeTruthy()
 
-    // comm-1 matches current content -> Anchored
     expect(screen.getByText('Anchored')).toBeTruthy()
-    // comm-2 does not match current content -> Detached
     expect(screen.getByText(/Detached/)).toBeTruthy()
   })
 
@@ -135,7 +133,6 @@ describe('DocumentCommentsRail', () => {
       expect(screen.getByText('Resolved (1)')).toBeTruthy()
     })
 
-    // Click Resolved tab
     fireEvent.click(screen.getByText('Resolved (1)'))
 
     expect(screen.getByText('Good title.')).toBeTruthy()

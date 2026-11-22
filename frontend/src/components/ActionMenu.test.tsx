@@ -186,11 +186,9 @@ describe('ActionDialog', () => {
     lastButton.focus()
     expect(document.activeElement).toBe(lastButton)
 
-    // Tab from last wraps to first
     fireEvent.keyDown(lastButton, { key: 'Tab', shiftKey: false })
     expect(document.activeElement).toBe(firstInput)
 
-    // Shift+Tab from first wraps to last
     firstInput.focus()
     fireEvent.keyDown(firstInput, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(lastButton)

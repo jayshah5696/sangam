@@ -83,7 +83,6 @@ class WorkspaceSearchInput(StrictCapabilityModel):
     query: str = Field(min_length=1, max_length=500)
     limit: int = Field(default=5, ge=1, le=25)
     offset: int = Field(default=0, ge=0, le=10_000)
-    # The same filters the Search page offers.
     tag_id: str | None = Field(default=None, max_length=200)
     category: str | None = Field(default=None, max_length=120)
     content_type: Literal["text/markdown", "text/html", "application/pdf"] | None = None
@@ -99,7 +98,6 @@ class CitationSource(StrictCapabilityModel):
     annotation_id: str | None = Field(default=None, max_length=200)
     citation: str = Field(max_length=2000)
     snippet: str | None = Field(default=None, max_length=4000)
-    # What the UI shows beside a document; present when the tool loaded the document itself.
     category: str | None = Field(default=None, max_length=120)
     tags: list[str] | None = Field(default=None, max_length=50)
     trust_level: str | None = Field(default=None, max_length=40)
@@ -146,7 +144,6 @@ class WebSourceItem(StrictCapabilityModel):
     source_id: str = Field(max_length=40)
     title: str = Field(max_length=500)
     url: str = Field(max_length=2000)
-    # The URL is the citation for an outside source.
     citation: str = Field(max_length=2000)
     snippet: str = Field(max_length=2000)
     published_at: str | None = Field(default=None, max_length=64)
@@ -199,9 +196,7 @@ class ReadDocumentResult(StrictCapabilityModel):
     limit: int = Field(ge=1, le=40_000)
     total_chars: int = Field(ge=0)
     truncated: bool
-    # Documents that link here, as the editor's Links panel shows them.
     backlinks: list[CitationSource] = Field(default_factory=list, max_length=20)
-    # Present only for someone who may publish this document.
     publication: PublicationStateResult | None = None
 
 
@@ -349,7 +344,6 @@ class ProjectAnnotationChange(StrictCapabilityModel):
     annotation_id: str = Field(min_length=1, max_length=200)
 
 
-# A model cannot supply highlight geometry, so chat annotates with the types that need none.
 ChatAnnotationType = Literal["comment", "page_note", "bookmark", "citation_marker"]
 
 
@@ -445,7 +439,6 @@ class ReadPdfPageInput(StrictCapabilityModel):
 
 class PdfAnnotationResult(StrictCapabilityModel):
     annotation_id: str = Field(max_length=200)
-    # Required to edit or delete the annotation.
     version: int = Field(ge=1)
     color: str = Field(max_length=9)
     type: str = Field(max_length=80)
@@ -555,12 +548,8 @@ class ChatCapability:
     max_result_bytes: int
     timeout_seconds: float
     required_any_authority: tuple[Capability, ...] = ()
-    # Project operations are administrator-only in the UI, so they are here too.
     requires_administrator: bool = False
-    # What the model needs to know to use this tool. The run's instructions are
-    # the base text plus the guidance of exactly the tools the run was given.
     guidance: str = ""
-    # Outside-web tools exist only when the server enables web research.
     requires_web: bool = False
 
     @property

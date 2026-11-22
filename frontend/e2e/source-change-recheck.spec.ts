@@ -86,7 +86,6 @@ test.describe('Issue #323 - Recheck source changes and dependent conclusions', (
     page,
     request,
   }, testInfo) => {
-    // 1. Create source document (v1)
     const sourceV1Content = `# Cold Storage Protocol
 
 Recent benchmark runs established our efficiency baseline.
@@ -98,7 +97,6 @@ Safety margins were maintained across all cycles.
     const sourceDoc = await createDocument(request, 'Cold Storage Protocol', sourceV1Content)
     const rev1 = sourceDoc.current_revision_id!
 
-    // 2. Create draft document citing source v1
     const draftContent = `# Research Synthesis
 
 Initial trials established the baseline efficiency.
@@ -113,7 +111,6 @@ Future trials will assess thermal expansion across extended operations.
 `
     const draftDoc = await createDocument(request, 'Thermal Baseline Synthesis', draftContent)
 
-    // 3. Create project with both documents
     const project = await createProject(request, 'Thermal Stability Investigation', [
       { document_id: sourceDoc.document_id, role: 'source', notes: 'Primary benchmark protocol' },
       {
@@ -123,20 +120,16 @@ Future trials will assess thermal expansion across extended operations.
       },
     ])
 
-    // Verify before state: open draft when source has NOT changed
     await page.goto(`/documents/${draftDoc.document_id}`)
     await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue(
       'Thermal Baseline Synthesis',
     )
-    // No source recheck alert should exist yet
     await expect(page.getByRole('alert', { name: 'Source changed alert' })).toHaveCount(0)
 
-    // Capture "before" screenshot on desktop
     if (testInfo.project.name === 'chromium-desktop') {
       await captureScreenshot(page, 'draft-before-source-changed-river.png')
     }
 
-    // 4. Update the source document to revision 2
     const sourceV2Content = `# Cold Storage Protocol
 
 Recent benchmark runs established our efficiency baseline.
@@ -148,14 +141,12 @@ Safety margins were maintained across all cycles.
     const sourceV2 = await updateDocument(request, sourceDoc.document_id, sourceV2Content)
     expect(sourceV2.current_revision_id).not.toBe(rev1)
 
-    // 5. Re-open draft document: Verify inline recheck notice appears!
     await page.goto(`/documents/${draftDoc.document_id}`)
     const initialNoticeAlert = page.getByRole('alert', { name: 'Source changed alert' })
     await expect(initialNoticeAlert).toBeVisible()
     await expect(initialNoticeAlert).toContainText('The source behind this paragraph has changed.')
     await expect(initialNoticeAlert).toContainText('Cold Storage Protocol')
 
-    // Capture "after" screenshot with recheck alert across themes
     if (testInfo.project.name === 'chromium-desktop') {
       for (const theme of ['river', 'midnight', 'parchment', 'cobalt'] as const) {
         await setTheme(page, theme)
@@ -164,13 +155,11 @@ Safety margins were maintained across all cycles.
       await setTheme(page, 'river')
     }
 
-    // 6. Click "Compare the old passage with the new one"
     const compareBtn = initialNoticeAlert.getByRole('button', {
       name: 'Compare the old passage with the new one',
     })
     await compareBtn.click()
 
-    // 7. Verify comparison modal contents
     const modal = page.getByRole('dialog', { name: 'Compare source versions' })
     await expect(modal).toBeVisible()
     await expect(modal).toContainText('Compare source versions: Cold Storage Protocol')
@@ -183,7 +172,6 @@ Safety margins were maintained across all cycles.
       'The original passage was removed or significantly rewritten in the current head revision.',
     )
 
-    // Capture modal screenshots across themes
     if (testInfo.project.name === 'chromium-desktop') {
       for (const theme of ['river', 'midnight', 'parchment', 'cobalt'] as const) {
         await setTheme(page, theme)
@@ -192,23 +180,19 @@ Safety margins were maintained across all cycles.
       await setTheme(page, 'river')
     }
 
-    // Test "Keep original pinned reference"
     const keepBtn = modal.getByRole('button', { name: 'Keep original pinned reference' })
     await keepBtn.click()
     await expect(modal).toHaveCount(0)
 
-    // Reopen modal and test "Revise conclusion"
     await compareBtn.click()
     await expect(modal).toBeVisible()
     const reviseBtn = modal.getByRole('button', { name: 'Revise conclusion' })
     await reviseBtn.click()
     await expect(modal).toHaveCount(0)
 
-    // 8. Test Project Dependencies Inspection View
     await page.goto(`/projects?project=${project.project_id}`)
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Thermal Stability Investigation')
 
-    // The project doc row for Cold Storage Protocol should show source updated
     const sourceCard = page.locator('.project-doc-row', {
       hasText: 'Cold Storage Protocol',
     })
@@ -216,11 +200,9 @@ Safety margins were maintained across all cycles.
     await expect(sourceCard).toContainText('Source updated')
     await expect(sourceCard).toContainText('Which conclusions in this project depend on this paper? (1)')
 
-    // Expand dependent conclusions
     const toggleDependencies = sourceCard.getByRole('button', {
       name: /Which conclusions in this project depend on this paper\?/,
     })
-    // If not already expanded, click to open
     const conclusionCard = sourceCard.locator('.dependent-conclusion-card')
     if (!(await conclusionCard.isVisible())) {
       await toggleDependencies.click()
@@ -229,7 +211,6 @@ Safety margins were maintained across all cycles.
     await expect(conclusionCard).toContainText('Storage baseline maintained above 80%')
     await expect(conclusionCard).toContainText('Needs rechecking · Source updated')
 
-    // Capture project dependencies screenshot across themes
     if (testInfo.project.name === 'chromium-desktop') {
       for (const theme of ['river', 'midnight', 'parchment', 'cobalt'] as const) {
         await setTheme(page, theme)
@@ -238,7 +219,6 @@ Safety margins were maintained across all cycles.
       await setTheme(page, 'river')
     }
 
-    // Click "Compare old and new evidence" from within the project dependencies view
     const projectCompareBtn = conclusionCard.getByRole('button', {
       name: 'Compare old and new evidence',
     })
@@ -248,16 +228,13 @@ Safety margins were maintained across all cycles.
     await expect(projectModal).toBeVisible()
     await expect(projectModal).toContainText('Storage baseline maintained above 80%')
 
-    // Close modal via Keep original
     await projectModal.getByRole('button', { name: 'Keep original pinned reference' }).click()
     await expect(projectModal).toHaveCount(0)
 
-    // Click "Mark source reviewed" while on project page
     const markReviewedBtn = sourceCard.getByRole('button', { name: 'Mark source reviewed' })
     await markReviewedBtn.click()
     await expect(sourceCard.locator('.source-recheck-callout')).toHaveCount(0)
 
-    // 9. Go back to draft and test "Update to current head revision"
     await page.goto(`/documents/${draftDoc.document_id}`)
     const returnNoticeAlert = page.getByRole('alert', { name: 'Source changed alert' })
     await expect(returnNoticeAlert).toBeVisible()
@@ -273,8 +250,6 @@ Safety margins were maintained across all cycles.
     await updateBtn.click()
     await expect(draftModal).toHaveCount(0)
 
-    // The notice must disappear because the citation was updated, not because its
-    // revision parameter was lost and the link stopped being recognized.
     await expect(page.getByRole('alert', { name: 'Source changed alert' })).toHaveCount(0)
     await expect
       .poll(async () => {

@@ -49,7 +49,6 @@ def atomic[T, **P](
         with self.database.transaction():
             return method(self, principal, *args, **kwargs)
 
-    # wraps retains named parameters; the wrapper accepts every positional call in Concatenate.
     return cast("Callable[Concatenate[ProjectService, Principal, P], T]", run)
 
 
@@ -146,9 +145,6 @@ class ProjectService:
                 (principal.actor_id, key, result.model_dump_json()),
             )
             return result
-
-    # The three changes below are exposed to both the HTTP API and chat. Each runs once
-    # per idempotency key under the operation name every caller shares.
 
     def create_project_once(
         self, principal: Principal, key: str, request: CreateProject
@@ -364,7 +360,6 @@ class ProjectService:
     def _audit(self, principal: Principal, action: str, project_id: str) -> None:
         """Name the project as the ledger target of the enclosing audited change."""
         del principal, action
-        # A brief created in the same transaction may already have named its document.
         self.database.clear_audit_target()
         self.database.set_audit_target(resource_id=project_id)
 
@@ -403,7 +398,6 @@ class ProjectService:
 
     @staticmethod
     def _thread_title(data_json: str) -> str | None:
-        # Chat store writes versioned payloads, while legacy rows contain the metadata directly.
         data = json.loads(data_json)
         return ThreadMetadata.model_validate(
             data["payload"] if data.get("schema_version") == 1 else data
@@ -718,7 +712,6 @@ class ProjectService:
                 and "workbench_state_json" not in fields
                 and row["workbench_state_json"]
             ):
-                # Choosing a draft changes selection and keeps the saved sources and splits.
                 layout = ProjectLayout.model_validate_json(row["workbench_state_json"])
                 group = next(g for g in layout.groups() if g.id == layout.active_group_id)
                 for candidate in layout.groups():

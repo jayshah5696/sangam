@@ -157,8 +157,6 @@ DocumentWriteBody = (
     | RestoreDocument
     | UpdateDocumentTrust
 )
-# The capability each document write needs on the document's current path.
-# Trust changes are administrator-only and have no workspace capability.
 _DOCUMENT_WRITE_CAPABILITY: dict[DocumentWriteAction, Capability | None] = {
     "update": Capability.UPDATE,
     "duplicate": Capability.READ,
@@ -268,8 +266,6 @@ def compute_document_diff(
     safe_old = sanitize_sensitive_text(old_content)
     safe_new = sanitize_sensitive_text(new_content)
     if safe_old != old_content or safe_new != new_content:
-        # Redact before diffing so a hunk inside a PEM block cannot lose its
-        # identifying delimiters. Counts still describe the actual edit.
         diff = compute_document_diff(safe_old, safe_new, fromfile, tofile)[0] or "[REDACTED]\n"
     return diff, lines_added, lines_removed, metadata
 
@@ -399,8 +395,6 @@ class WorkspaceAccessService:
 
                 needed_bound = self.activity.estimate_payload_bytes(details)
                 if needed_bound > admitted_bound:
-                    # Do not expand an audit reservation inside a transaction,
-                    # or wait for capacity while retaining document locks.
                     raise _RetryHttpMutationError(needed_bound + 2048)
 
                 if not has_conditions and action != "duplicate":
@@ -414,7 +408,6 @@ class WorkspaceAccessService:
                         "if_none_match": if_none_match,
                     }
                 )
-                # Replay precedes precondition evaluation, but never authorization.
                 with self.documents.database.connection() as connection:
                     replay = self.documents.idempotency.lookup(
                         connection, actor_id=principal.actor_id, key=idempotency_key
@@ -445,8 +438,6 @@ class WorkspaceAccessService:
                                 "Idempotency key was already used for a different mutation"
                             )
                         if replay.resource_id not in locked_document_ids:
-                            # Re-enter with all locks in one order. Never acquire
-                            # an arbitrary replay target while holding its source.
                             raise _RetryHttpMutationError(admitted_bound, replay.resource_id)
                         with self.documents.mutations.document(replay.resource_id):
                             result = self.documents.get_document(
@@ -460,8 +451,6 @@ class WorkspaceAccessService:
                     snapshot = self.documents.get_document_in_connection(connection, document_id)
                     conditions.evaluate(document_etag(snapshot))
 
-                # Validate before any filesystem side effect, then again in the
-                # committing storage transaction through its replay lookup.
                 with self.documents.database.connection() as connection:
                     validate(connection)
                 with conditional_mutation(ConditionalMutation(fingerprint, validate)):
@@ -2540,8 +2529,6 @@ class WorkspaceAccessService:
                 ):
                     result = operation()
             except _RetryHttpMutationError:
-                # The operation has unwound its locks and commit hooks without
-                # writing. Admission releases this unused ticket before retry.
                 raise
             except Exception as error:
                 audit_err: Exception | None = None
@@ -2562,7 +2549,6 @@ class WorkspaceAccessService:
                             revision_id=recorded_revision_id,
                             details=fail_details,
                         )
-                    # Chain any audit failure to the original operation error below.
                     except Exception as ae:  # noqa: BLE001
                         audit_err = ae
                 elif audit_inserted or reservation.spent:
@@ -2588,7 +2574,6 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=fail_details or None,
                         )
-                    # Chain any audit failure to the original operation error below.
                     except Exception as ae:  # noqa: BLE001
                         audit_err = ae
                 else:
@@ -2612,7 +2597,6 @@ class WorkspaceAccessService:
                             error_code=getattr(error, "code", "INTERNAL_ERROR"),
                             details=combined_details or None,
                         )
-                    # Chain any audit failure to the original operation error below.
                     except Exception as ae:  # noqa: BLE001
                         audit_err = ae
 

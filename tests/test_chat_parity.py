@@ -350,7 +350,6 @@ def test_instructions_describe_exactly_the_tools_the_run_has(client: TestClient)
 
     assert "publish_document" in full and "publish_document" not in narrow
     assert "update_project" in full and "update_project" not in narrow
-    # Trash is a real plan operation, so the prompt must not forbid it.
     assert "Do not add delete" not in full
     assert "trash_document" in full
 

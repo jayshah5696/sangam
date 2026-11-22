@@ -67,7 +67,6 @@ export function useSourceSelection({
     }
   }
 
-  // Asking saves the draft first so chat reads exactly the passage the user selected.
   const askAbout = async (selectedText: string) => {
     const current = sessions.getSession(documentId).content ?? document.content
     const saved = current === document.content ? document : await sessions.flushSnapshot(documentId, current)

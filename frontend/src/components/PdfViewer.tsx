@@ -115,7 +115,6 @@ export function PdfViewer({
       active = false
       void task.destroy()
     }
-    // Loading owns the PDF.js worker and must only follow document identity.
   }, [document.document_id])
 
   useEffect(() => {
@@ -134,8 +133,6 @@ export function PdfViewer({
   useLayoutEffect(() => {
     const host = scrollRef.current
     if (!pdf || !host || host.clientHeight === 0) return
-    // Restore after page placeholders commit and again when a hidden tab is
-    // revealed. Hidden scroll notifications must not overwrite saved position.
     const state = initialStateRef.current
     const boundedPage = Math.min(Math.max(state.pageNumber, 1), pdf.numPages)
     if (state.scrollTop > 0) host.scrollTop = state.scrollTop
@@ -288,8 +285,6 @@ export function PdfViewer({
         onScroll={(event) => {
           const host = event.currentTarget
           if (host.clientHeight === 0) return
-          // A queued scroll notification can arrive after selection finished at
-          // this same position. Only actual movement invalidates its geometry.
           if (selectionScrollTop.current !== null && host.scrollTop !== selectionScrollTop.current)
             dismissSelection()
           const position = host.scrollTop + host.offsetTop + host.clientHeight * 0.35

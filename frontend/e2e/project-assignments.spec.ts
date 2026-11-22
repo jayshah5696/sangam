@@ -67,7 +67,6 @@ test('stale review shows intervening edits and starts a durable fresh candidate'
   request,
   seededWorkspace,
 }) => {
-  // Fixture route seeds through the same proposal service as the model tools.
   const threadResponse = await request.post('/api/v1/chatkit', {
     headers: { 'X-Sangam-Workspace-Context': '1' },
     data: {
@@ -105,7 +104,6 @@ test('stale review shows intervening edits and starts a durable fresh candidate'
   const recovery = card.getByRole('region', { name: 'Document changed since this proposal' })
   await recovery.getByRole('button', { name: 'Compare edits' }).click()
   await expect(recovery.getByRole('region', { name: 'Edits since this proposal' })).toBeVisible()
-  // Stale cards offer revision only from the recovery panel, not a second copy in the action row.
   await expect(card.getByRole('button', { name: 'Request a revision', exact: true })).toHaveCount(1)
   await recovery.getByRole('button', { name: 'Request a revision', exact: true }).click()
   await recovery.getByLabel('What should be revised?').fill('Preserve the new evidence')

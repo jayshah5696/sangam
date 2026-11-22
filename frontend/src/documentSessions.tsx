@@ -492,7 +492,6 @@ export class DocumentSessionStore {
     } catch (error) {
       const current = this.getSession(documentId)
       const conflicted = error instanceof ApiError && error.kind === 'conflict'
-      // A failed rename leaves unsaved content to autosave; only a conflict stops it.
       const failedState = renaming && current.content === runtime.savedContent ? 'saved' : 'failed'
       this.setSession(documentId, {
         ...current,

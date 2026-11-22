@@ -8,7 +8,6 @@
 @import './styles/projects.css';
 
 @media (pointer: coarse) {
-  /* Icon-only controls keep their compact glyphs while exposing a full touch target. */
   .icon-button.icon-button {
     width: var(--control-touch);
     min-width: var(--control-touch);

@@ -78,11 +78,8 @@ export function TextSelectionToolbar({
     )
   }, [anchor, isCommenting])
 
-  // Dismiss on clicking outside or pressing Escape
   useEffect(() => {
     const dismiss = () => {
-      // Escape does not collapse a native selection in every browser. Clear it
-      // so the workspace's keyup/pointerup capture cannot reopen this toolbar.
       window.getSelection()?.removeAllRanges()
       onDismiss()
     }
@@ -205,7 +202,6 @@ export function TextSelectionToolbar({
                   type="button"
                   aria-label={label}
                   title={label}
-                  // Keep the editor's selection: a pressed button must not take focus first.
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => {
                     onFormat(format)

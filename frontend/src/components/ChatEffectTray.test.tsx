@@ -102,7 +102,6 @@ describe('ChatEffectTray component behavior', () => {
     const disclosure = screen.getByRole('button', { name: /Attention required/i })
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
 
-    // Click to expand
     fireEvent.click(disclosure)
     expect(disclosure.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByRole('region', { name: 'Attention effects list' })).toBeDefined()
@@ -126,7 +125,6 @@ describe('ChatEffectTray component behavior', () => {
       failure: { message: 'Deterministic validation error', retry_safe: false },
     })
 
-    // Pass in reverse order
     render(
       <ChatEffectTray
         attentionEffects={[terminal, active, retryable]}
@@ -138,7 +136,6 @@ describe('ChatEffectTray component behavior', () => {
       />,
     )
 
-    // Expand tray
     fireEvent.click(screen.getByRole('button', { name: /Attention required/i }))
 
     const titles = screen.getAllByRole('strong').map((el) => el.textContent)
@@ -148,9 +145,7 @@ describe('ChatEffectTray component behavior', () => {
       'Document creation failed',
     ])
 
-    // Active item shows "Approved effect ready to resume"
     expect(screen.getByText('Approved effect ready to resume')).toBeDefined()
-    // Retryable offers "Retry safely"
     expect(screen.getByRole('button', { name: 'Retry safely' })).toBeDefined()
   })
 
@@ -244,10 +239,8 @@ describe('ChatEffectTray component behavior', () => {
       />,
     )
 
-    // Initially no announcement
     expect(screen.queryByRole('status')).toBeNull()
 
-    // Add failure
     act(() => {
       rerender(
         <ChatEffectTray
@@ -261,7 +254,6 @@ describe('ChatEffectTray component behavior', () => {
       )
     })
 
-    // Now polite announcer has the message
     expect(screen.getByText(/1 new failed effect require attention/)).toBeDefined()
   })
 

@@ -191,7 +191,6 @@ describe('review inbox', () => {
 
     render(<ReviewInbox />)
 
-    // Check editorial answers
     expect(screen.getByText('What changed & why')).toBeTruthy()
     expect(screen.getByText('The previous section lacked production container instructions.')).toBeTruthy()
     expect(screen.getByText('Judgment needed')).toBeTruthy()
@@ -199,13 +198,11 @@ describe('review inbox', () => {
       screen.getByText('Confirm whether Docker or Podman is the preferred container runtime.'),
     ).toBeTruthy()
 
-    // Supporting passages
     expect(screen.getByText('Supporting passages')).toBeTruthy()
     expect(screen.getByText('Production Guide')).toBeTruthy()
     expect(screen.getByText('Containers must be run in unprivileged user namespaces.')).toBeTruthy()
     expect(screen.getByText(/Location: Section 4\.1/)).toBeTruthy()
 
-    // Sources retrieved during turn
     expect(screen.getByText('Sources retrieved during turn')).toBeTruthy()
     expect(screen.getByText('Infrastructure RFC')).toBeTruthy()
   })
@@ -234,11 +231,9 @@ describe('review inbox', () => {
 
     render(<ReviewInbox />)
 
-    // Initial state: diff view is shown
     expect(screen.getByTestId('merge-view')).toBeTruthy()
     expect(screen.queryByLabelText('Editable proposed wording')).toBeNull()
 
-    // Toggle edit wording mode
     const editBtn = screen.getByRole('button', { name: /Edit wording/i })
     fireEvent.click(editBtn)
 
@@ -246,24 +241,19 @@ describe('review inbox', () => {
     const textarea = screen.getByLabelText('Editable proposed wording') as HTMLTextAreaElement
     expect(textarea.value).toBe('Draft by AI agent.')
 
-    // Edit content
     fireEvent.change(textarea, { target: { value: 'Refined by human reviewer.' } })
 
-    // "Edited" badge and "Reset to proposal" button should now be visible
     expect(screen.getByText('Edited')).toBeTruthy()
     const resetBtn = screen.getByRole('button', { name: /Reset to proposal/i })
     expect(resetBtn).toBeTruthy()
 
-    // Apply button text reflects that edited change will be applied
     const applyBtn = screen.getByRole('button', { name: /Apply edited change/i })
     expect(applyBtn).toBeTruthy()
 
-    // Reset back to original proposal
     fireEvent.click(resetBtn)
     expect(textarea.value).toBe('Draft by AI agent.')
     expect(screen.queryByText('Edited')).toBeNull()
 
-    // Edit again and apply
     fireEvent.change(textarea, { target: { value: 'Refined by human reviewer final.' } })
     fireEvent.click(screen.getByRole('button', { name: /Apply edited change/i }))
 
@@ -299,11 +289,9 @@ describe('review inbox', () => {
 
     render(<ReviewInbox />)
 
-    // Click "Request a revision" button
     const requestRevBtn = screen.getByRole('button', { name: /Request a revision/i })
     fireEvent.click(requestRevBtn)
 
-    // Revision input prompt appears
     const input = screen.getByPlaceholderText(/e\.g\. Tighten the second paragraph/i)
     fireEvent.change(input, { target: { value: 'Please add benchmarks to the performance section' } })
 

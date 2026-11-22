@@ -83,7 +83,6 @@ def test_an_approved_effect_resumes_the_run_with_its_stored_result(client: TestC
     thread_id, first = create_thread_with_model(client, "Create a project called Atlas")
     review = review_request(first)
 
-    # The run is parked at the effect: the model was asked once, and nothing was created.
     assert len(seen) == 1
     assert client.get("/api/v1/projects").json() == []
     effect = client.get(f"/api/v1/chat/effects/{review['effect_id']}").json()
@@ -101,7 +100,6 @@ def test_an_approved_effect_resumes_the_run_with_its_stored_result(client: TestC
 
     assert assistant_text(resumed) == "Atlas is ready."
     assert [p["name"] for p in client.get("/api/v1/projects").json()] == ["Atlas"]
-    # The model saw the stored result as the tool's output before it answered.
     assert len(seen) == 2
     outputs = [
         item

@@ -91,7 +91,6 @@ class CaptureService:
         response = self.client.fetch(url)
         now = datetime.now(UTC)
 
-        # Determine document title
         doc_title = title.strip() if title and title.strip() else None
         if not doc_title:
             doc_title = response.title
@@ -115,9 +114,7 @@ class CaptureService:
                 idempotency_key=idempotency_key,
             )
         else:
-            # HTML or text/plain
             if response.content_type == "text/html":
-                # Convert HTML body using KarakeepExtractor cleaning logic
                 raw_html = response.body.decode("utf-8", errors="replace")
                 cleaned_html = re.sub(
                     r"<(script|style|noscript)\b[^>]*>.*?</\1\s*>",
@@ -156,7 +153,6 @@ class CaptureService:
                 idempotency_key=idempotency_key,
             )
 
-        # Attach to project if requested
         if project_id:
             with contextlib.suppress(Exception):
                 self.projects.add_document(

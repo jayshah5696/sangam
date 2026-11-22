@@ -62,17 +62,14 @@ describe('PublicationEvidenceDrawer', () => {
     expect(screen.getByText(/rev_abcd/i)).toBeDefined()
     expect(screen.getByText('Workspace source')).toBeDefined()
 
-    // Public source link
     const publicLink = screen.getByRole('link', { name: /Public source/i })
     expect(publicLink.getAttribute('href')).toBe('/p/pv-benchmark-2025')
 
-    // Find in text button
     const findButtons = screen.getAllByRole('button', { name: /Find in text/i })
     expect(findButtons).toHaveLength(2)
     fireEvent.click(findButtons[0]!)
     expect(onHighlight).toHaveBeenCalledWith(sampleEvidence[0]!.selected_text)
 
-    // Close button
     const closeBtn = screen.getByRole('button', { name: /Close evidence drawer/i })
     fireEvent.click(closeBtn)
     expect(onClose).toHaveBeenCalled()

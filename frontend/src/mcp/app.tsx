@@ -229,8 +229,6 @@ function DocumentApp() {
     if (unsavedReview.current)
       throw new Error('Finish or discard your proposal review edits before reopening the App.')
     if (unsavedPdfNote.current) throw new Error('Save or discard the page note before reopening the App.')
-    // The host can remove this frame after the acknowledgement. Apply the
-    // editing guard synchronously before taking the final checkpoint.
     flushSync(() => setNavigating(true))
     try {
       await queue.current
@@ -331,8 +329,6 @@ function DocumentApp() {
       const state = current.current
       if (!state) return
       const next = await requestWorkspace(makeRequest(state))
-      // A keystroke queued before the editor became read-only still belongs to
-      // the outgoing document. Acknowledge it before replacing the active view.
       while (content.current !== (current.current?.draft ?? current.current?.document.content))
         await checkpoint()
       const latest = current.current

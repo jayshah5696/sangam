@@ -330,8 +330,6 @@ function PrimarySidebar({
   )
 }
 
-// Visible labels keep destinations recognizable without hovering. Each
-// accessible name contains its visible label so voice control matches both.
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   const { preferences } = useTheme()
   const links = [

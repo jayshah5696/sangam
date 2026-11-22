@@ -15,7 +15,6 @@ import { CaptureDialog } from '../components/capture/CaptureDialog'
 import { InboxSection } from '../components/capture/InboxSection'
 import { openSearch, useSavedViews } from '../savedViews'
 
-// `?capture=1` lets the command palette open the capture dialog from anywhere.
 const homeSearch = z.object({ capture: z.coerce.boolean().optional() })
 
 export const Route = createFileRoute('/')({ component: Welcome, validateSearch: homeSearch })

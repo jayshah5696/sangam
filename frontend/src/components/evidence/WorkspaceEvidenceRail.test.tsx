@@ -256,7 +256,6 @@ describe('WorkspaceEvidenceRail', () => {
 
     expect(screen.getByText(/Select another excerpt below to compare side by side/i)).toBeTruthy()
 
-    // Click compare on second card
     const remainingCompareButtons = screen.getAllByRole('button', { name: 'Compare' })
     fireEvent.click(remainingCompareButtons[1]!)
 

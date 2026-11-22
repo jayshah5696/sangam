@@ -1,13 +1,3 @@
-/*
- * Sangam application UI system
- *
- * Inter is the only application-chrome font. Georgia is reserved for document
- * and display headings; the mono stack is reserved for editable/code-like data.
- * Component styles should consume the tokens here instead of adding local type,
- * radius, spacing, or control-height values.
- */
-
-/* Mobile native platform baseline */
 html {
   -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
@@ -202,7 +192,6 @@ textarea::placeholder {
   line-height: var(--leading-ui);
 }
 
-/* Shared panel anatomy: the color treatment can differ, the grammar cannot. */
 .ui-rail {
   font-family: var(--font-ui);
   font-size: var(--text-body);
@@ -236,7 +225,6 @@ textarea::placeholder {
   border-color: color-mix(in srgb, var(--sidebar-text) 11%, transparent);
 }
 
-/* One control language across rails, toolbars, settings, and menus. */
 :where(
   .sidebar-mode-switch button,
   .sidebar-actions button,
@@ -293,7 +281,6 @@ textarea::placeholder {
   line-height: var(--leading-ui);
 }
 
-/* Reusable text roles. Nothing interactive should fall below 12px. */
 :where(
   .sidebar-mode-switch button,
   .sidebar-actions button,
@@ -423,7 +410,6 @@ textarea::placeholder {
   font: var(--text-meta)/var(--leading-ui) var(--font-mono);
 }
 
-/* Shared loading, empty, error, success, and offline anatomy. */
 .ui-state {
   min-height: 7rem;
   display: grid;
@@ -544,7 +530,6 @@ textarea::placeholder {
   }
 }
 
-/* Explicit, limited exceptions to the UI font. */
 :where(.sidebar-brand strong, .welcome h1, .settings-header h1, .document-header h1, .settings-title h2, .markdown-preview h1, .markdown-preview h2, .markdown-preview h3) {
   font-family: var(--font-display);
 }
@@ -553,7 +538,6 @@ textarea::placeholder {
   font-family: var(--font-mono);
 }
 
-/* Shared dialog anatomy */
 :where(dialog, .shared-dialog) {
   position: fixed;
   inset: 0;

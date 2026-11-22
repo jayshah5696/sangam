@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 const stylesDirectory = new URL('../src/styles/', import.meta.url)
 const sourceDirectory = new URL('../src/', import.meta.url)
+const cssRatchetUrl = new URL('./css-comment-ratchet.json', import.meta.url)
 const files = (await readdir(stylesDirectory)).filter((file) => file.endsWith('.css'))
 const violations = []
 const definedVariables = new Set()
@@ -22,12 +23,42 @@ const forbidden = [
   [/\brgba?\(/g, 'use a semantic color token (raw rgb/rgba colors are only allowed in tokens.css)'],
 ]
 
+const cssRatchet = JSON.parse(await readFile(cssRatchetUrl, 'utf8')).files ?? {}
+const seenCssKeys = new Set()
+
+function checkCssComments(relativePath, source) {
+  seenCssKeys.add(relativePath)
+  const budget = cssRatchet[relativePath] ?? 0
+  const matches = [...source.matchAll(/\/\*[\s\S]*?\*\//g)]
+  if (matches.length > budget) {
+    for (const match of matches.slice(budget)) {
+      const lineNumber = source.slice(0, match.index).split('\n').length
+      violations.push(
+        `${relativePath}:${lineNumber}: delete CSS comments; move non-obvious UI invariants to docs/adr/`,
+      )
+    }
+  } else if (budget > 0 && matches.length < budget) {
+    violations.push(
+      `${relativePath}:1: file has ${matches.length} CSS comments, below ratchet budget ${budget}; lower or remove its entry in frontend/scripts/css-comment-ratchet.json`,
+    )
+  }
+}
+
 const sources = new Map()
 for (const file of files) {
   const source = await readFile(new URL(file, stylesDirectory), 'utf8')
   sources.set(file, source)
+  checkCssComments(join('src/styles', file), source)
   for (const match of source.matchAll(/--[a-zA-Z0-9_-]+\s*:/g)) {
     definedVariables.add(match[0].slice(0, -1).trim())
+  }
+}
+
+const rootStylesSource = await readFile(new URL('styles.css', sourceDirectory), 'utf8')
+checkCssComments('src/styles.css', rootStylesSource)
+for (const staleKey of Object.keys(cssRatchet)) {
+  if (!seenCssKeys.has(staleKey)) {
+    violations.push(`scripts/css-comment-ratchet.json:1: stale CSS ratchet entry "${staleKey}"`)
   }
 }
 
@@ -51,9 +82,6 @@ for (const [file, source] of sources) {
 const sourceFiles = (await readdir(sourceDirectory, { recursive: true })).filter((file) =>
   file.endsWith('.tsx'),
 )
-// A class that no stylesheet defines does nothing, so a component that relies on it (a button
-// that was meant to look primary) silently renders unstyled. Structural hooks that predate
-// this check are listed in the baseline file; new classes need a rule.
 const definedClasses = new Set()
 for (const source of sources.values()) {
   for (const match of source.matchAll(/\.([A-Za-z_][\w-]*)/g)) definedClasses.add(match[1])

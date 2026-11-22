@@ -426,8 +426,9 @@ or RTL layout for file extensions.
   content section, keeping the rename input visible and focused.
 - Pierre's `MiddleTruncate` content section is hidden via `display: none` on
   `[data-item-section="content"]`, guarded by `:not(:has([data-item-rename-input]))`.
-- Overrides live in the `unsafeCSS` boundary of `FileExplorer.tsx` and name
-  the upstream issue (`pierrecomputer/pierre#939`) as the removal condition.
+- Overrides live in the `unsafeCSS` boundary of `FileExplorer.tsx`; upstream
+  `pierrecomputer/pierre#939` (tracked in Sangam issue #587) is the removal
+  condition.
 - Folder and draft counts remain visible in the decoration lane.
   `frontend/patches/@pierre__trees@1.0.0-beta.5.patch` adds the optional
   `includeInLabel` decoration property to Pierre's renderer and type declarations.

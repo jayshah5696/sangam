@@ -227,19 +227,14 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
     concurrent_errors = []
     real_parse_pages = service._parse_pages
 
-    # Simulate simultaneous read while subprocess writes output file
     def check_no_partial_reads(doc_id, cancel_event):
-        # Call subprocess extraction
         pages = real_parse_pages(doc_id, cancel_event)
-
-        # Execute direct python entry point to test atomic replace behavior
 
         with tempfile.TemporaryDirectory() as tmpdir:
             src_pdf = Path(tmpdir) / "source.pdf"
             src_pdf.write_bytes(source.getvalue())
             out_json = Path(tmpdir) / "pages.json"
 
-            # Launch subprocess
             proc = subprocess.Popen(
                 [
                     sys.executable,
@@ -252,7 +247,6 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
                 ]
             )
 
-            # Attempt to read output file concurrently in a loop until done
             for _ in range(50):
                 if out_json.exists():
                     try:
@@ -261,7 +255,6 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
                             concurrent_errors.append(
                                 "Read zero bytes from output file during write!"
                             )
-                    # Collect every worker failure for assertion after joining the threads.
                     except Exception as err:  # noqa: BLE001
                         concurrent_errors.append(f"Read error during write: {err}")
                 time.sleep(0.001)
@@ -270,7 +263,6 @@ def test_pdf_parser_atomic_write_and_cleanup_on_race(client, monkeypatch):
             assert proc.returncode == 0
             assert out_json.exists()
             assert out_json.read_text(encoding="utf-8").startswith("[")
-            # Verify no temp artifacts were left in tmpdir
             leftover = [p for p in Path(tmpdir).iterdir() if ".sangam-" in p.name]
             if leftover:
                 concurrent_errors.append(f"Orphaned temp files found: {leftover}")
@@ -331,7 +323,6 @@ def test_pdf_research_spooling_hash_mismatch_unlinks_staging(client, monkeypatch
         idempotency_key="mismatch-test",
     )
 
-    # Tamper with workspace binary hash iterator to simulate corrupt spooling
     def bad_iter_binary(path, *, start=0, end=None, chunk_size=65536):
         yield b"%PDF-corrupt-bytes"
 

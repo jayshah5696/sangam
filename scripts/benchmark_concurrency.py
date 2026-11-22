@@ -92,7 +92,6 @@ def print_stats(name: str, latencies: list[float], errors: int, total_time: floa
 def run_read_benchmark(
     client: TestClient, token: str, workers: int, requests_per_worker: int
 ) -> tuple[int, list[str]]:
-    # Seed 50 documents first and assert HTTP 201
     seed_doc_ids: list[str] = []
     for i in range(50):
         resp = client.post(
@@ -201,14 +200,12 @@ def run_update_benchmark(
     updated_doc_ids: list[str] = []
     start = time.perf_counter()
 
-    # Assign distinct documents to each worker to avoid conflict errors
     def worker(worker_id: int):
         w_latencies = []
         w_errors = 0
         w_ids = []
         doc_id = doc_ids[worker_id % len(doc_ids)]
         for req in range(requests_per_worker):
-            # Fetch current revision
             current_resp = client.get(
                 f"/api/v1/documents/{doc_id}",
                 headers={"Authorization": f"Bearer {token}"},
@@ -279,7 +276,7 @@ def run_mixed_benchmark(
         for req in range(requests_per_worker):
             mod = req % 5
             t0 = time.perf_counter()
-            if mod == 0:  # 20% create
+            if mod == 0:
                 resp = client.post(
                     "/api/v1/documents",
                     json={
@@ -295,7 +292,7 @@ def run_mixed_benchmark(
                 success = resp.status_code == 201
                 if success:
                     w_cids.append(resp.json()["document_id"])
-            elif mod == 1:  # 20% update
+            elif mod == 1:
                 doc_id = doc_ids[(worker_id + len(doc_ids) // 2) % len(doc_ids)]
                 curr = client.get(
                     f"/api/v1/documents/{doc_id}",
@@ -320,7 +317,7 @@ def run_mixed_benchmark(
                         w_uids.append(doc_id)
                 else:
                     success = False
-            else:  # 60% read
+            else:
                 resp = client.get(
                     "/api/v1/documents",
                     headers={
@@ -371,9 +368,8 @@ def run_saturated_backpressure_benchmark(workers: int = 20, ops_per_worker: int 
         )
         with client:
             token = issue_benchmark_agent_token(client)
-            expected_audits = 1  # token issue
+            expected_audits = 1
 
-            # Seed distinct documents per worker with ~4 KB content
             large_seed_ids: list[str] = []
             for i in range(max(workers, 20)):
                 body = f"# Seed {i}\n" + ("Line of substantial benchmark payload.\n" * 80)
@@ -407,7 +403,6 @@ def run_saturated_backpressure_benchmark(workers: int = 20, ops_per_worker: int 
                         continue
                     rev_id = curr.json()["current_revision_id"]
 
-                    # Generate substantial diff payload (~5 KB)
                     body = f"# Sat Update {worker_id}-{req}\n" + (
                         f"Content modification block {worker_id}-{req} padding line.\n" * 90
                     )
@@ -441,12 +436,11 @@ def run_saturated_backpressure_benchmark(workers: int = 20, ops_per_worker: int 
             total_time = time.perf_counter() - start
             print_stats("Saturated Backpressure (64KB cap)", latencies, errors, total_time)
             assert errors == 0, f"Saturated benchmark had {errors} errors"
-            expected_audits += len(latencies) * 2  # get_document read + patch update
+            expected_audits += len(latencies) * 2
 
             activity_svc = client.app.state.services.activity
             activity_svc.list_events(limit=1)
 
-            # Assert strict memory bound enforcement under saturation
             peak_total = activity_svc.peak_total_bytes
             peak_queue = activity_svc.peak_queue_bytes
             assert peak_total <= tight_total_bytes, (
@@ -455,7 +449,6 @@ def run_saturated_backpressure_benchmark(workers: int = 20, ops_per_worker: int 
             assert peak_queue <= tight_queue_bytes, (
                 f"Peak queue {peak_queue} exceeded tight queue budget {tight_queue_bytes}"
             )
-            # Verify backpressure was tested (peak reached substantial portion of budget)
             assert peak_total >= 16 * 1024, (
                 f"Peak total {peak_total} was too low; saturation was not exercised"
             )
@@ -463,7 +456,6 @@ def run_saturated_backpressure_benchmark(workers: int = 20, ops_per_worker: int 
             assert activity_svc._queue_bytes == 0, "Leaked queue bytes"
             assert activity_svc._reserved_producer_bytes == 0, "Leaked producer bytes"
 
-            # Check audit durability in SQLite
             with activity_svc.database.connection() as conn:
                 row = conn.execute("SELECT count(*) as cnt FROM operation_events").fetchone()
                 assert row["cnt"] == expected_audits, (
@@ -493,8 +485,8 @@ def main() -> None:
         client, settings = make_client(Path(temp_dir))
         with client:
             token = issue_benchmark_agent_token(client)
-            expected_audits = 1  # token creation
-            expected_audits += 50  # 50 seed documents
+            expected_audits = 1
+            expected_audits += 50
 
             read_ops, seed_doc_ids = run_read_benchmark(
                 client,
@@ -519,7 +511,7 @@ def main() -> None:
                 workers=args.workers,
                 requests_per_worker=args.ops_per_worker,
             )
-            expected_audits += update_ops * 2  # read (get_document) + update (patch)
+            expected_audits += update_ops * 2
 
             mixed_ops, mixed_created_ids, mixed_updated_ids = run_mixed_benchmark(
                 client,
@@ -528,11 +520,10 @@ def main() -> None:
                 workers=args.workers,
                 requests_per_worker=args.ops_per_worker,
             )
-            expected_audits += mixed_ops + len(mixed_updated_ids)  # mixed ops + get_document reads
+            expected_audits += mixed_ops + len(mixed_updated_ids)
 
             all_created_doc_ids = set(seed_doc_ids + write_doc_ids + mixed_created_ids)
 
-            # Deep audit validation & database integrity verification across ALL event types
             activity_svc = client.app.state.services.activity
             activity_svc.list_events(limit=1)
             db = activity_svc.database
@@ -541,7 +532,6 @@ def main() -> None:
                 row = conn.execute("SELECT count(*) as cnt FROM operation_events").fetchone()
                 persisted_events = row["cnt"]
 
-                # 1. Exact payload validation for 'create' events
                 create_rows = conn.execute(
                     "SELECT event_id, resource_id, revision_id, path, action, outcome, detail_json "
                     "FROM operation_events WHERE action = 'create' AND resource_type = 'document'"
@@ -560,7 +550,6 @@ def main() -> None:
                     assert "diff" in details, f"Event {r['event_id']} missing diff"
                     assert "X" * 10 not in details["diff"], "Event diff contains placeholder X"
 
-                    # Correlate with documents table
                     doc = conn.execute(
                         "SELECT document_id, current_revision_id, path "
                         "FROM documents WHERE document_id = ?",
@@ -574,7 +563,6 @@ def main() -> None:
                     f"Missing: {all_created_doc_ids - found_create_ids}"
                 )
 
-                # 2. Exact payload validation for 'update' events
                 update_rows = conn.execute(
                     "SELECT event_id, resource_id, revision_id, path, action, outcome, detail_json "
                     "FROM operation_events WHERE action = 'update' AND resource_type = 'document'"
@@ -597,7 +585,6 @@ def main() -> None:
                     valid_diff = any(k in details["diff"] for k in ("---", "+++", "\n"))
                     assert valid_diff, "Update diff missing unified diff structure"
 
-                # 3. Validation for 'list' and 'read' events
                 list_rows = conn.execute(
                     "SELECT count(*) as cnt FROM operation_events "
                     "WHERE action = 'list' AND resource_type = 'document'"
@@ -618,7 +605,6 @@ def main() -> None:
                     f"Read events count mismatch: {read_rows['cnt']} vs {expected_reads}"
                 )
 
-                # 4. Validation for 'issue' token event
                 issue_rows = conn.execute(
                     "SELECT event_id, action, resource_type, outcome "
                     "FROM operation_events WHERE action = 'issue'"
@@ -638,7 +624,6 @@ def main() -> None:
                 f"Expected: {expected_audits}"
             )
 
-            # Memory and WAL storage statistics
             assert activity_svc._admitted_bytes == 0, "Leaked admitted bytes in ActivityService"
             assert activity_svc._queue_bytes == 0, "Drained queue bytes not zero"
             assert activity_svc._reserved_producer_bytes == 0, "Leaked reserved producer bytes"
@@ -660,7 +645,6 @@ def main() -> None:
                 f"{activity_svc.max_total_bytes / 1024:.1f} KB\n"
             )
 
-    # Run dedicated saturated backpressure benchmark
     print("=== Running Saturated Backpressure Benchmark (Constrained Memory) ===")
     run_saturated_backpressure_benchmark(workers=args.workers, ops_per_worker=args.ops_per_worker)
 

@@ -11,8 +11,6 @@ async function expectChatFrameContained(page: Page) {
       ])
       const viewport = page.viewportSize()
       if (!frame || !panel || !viewport || frame.height <= 0) throw new Error('Chat frame is not laid out')
-      // Account for the shared one-pixel border and fractional scroll rounding.
-      // Return the largest overflow so a failure reports its size in CSS pixels.
       return Math.max(
         panel.x - frame.x,
         panel.y - frame.y,
@@ -98,8 +96,6 @@ test('chat context stays compact and closing preserves drafts until explicit dis
         .toBe(true)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
       await page.keyboard.press('Escape')
-      // Short landscape can require scrolling past status notices; the complete
-      // chat frame must remain reachable rather than being clipped by its host.
       if (width === 844) await page.locator('.chatkit-frame').scrollIntoViewIfNeeded()
       await expectChatFrameContained(page)
       await trigger.click()

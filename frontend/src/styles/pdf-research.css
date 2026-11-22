@@ -714,7 +714,6 @@
   }
 }
 
-/* Reusable Workspace Evidence System */
 .workspace-evidence-rail {
   display: flex;
   flex-direction: column;
@@ -977,7 +976,6 @@
   padding: 0;
 }
 
-/* Modal styles for comparison */
 .evidence-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1118,8 +1116,6 @@ dialog.evidence-modal-dialog::backdrop {
   .workspace-evidence-rail .icon-button-sm, .evidence-modal-backdrop .icon-button-sm { min-width: var(--control-touch); }
 }
 
-
-/* Issue 323: Recheck source changes and dependent conclusions */
 .source-recheck-callout {
   display: flex;
   flex-direction: column;
@@ -1271,7 +1267,6 @@ dialog.evidence-modal-dialog::backdrop {
   font-style: italic;
 }
 
-/* Issue 324: Claim-versus-source matrix */
 .evidence-view-toggle {
   display: flex;
   background: var(--surface-soft);

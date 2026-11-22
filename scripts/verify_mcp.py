@@ -59,7 +59,6 @@ async def verify_events(base: str, token: str, workspace: dict) -> dict:
                 snapshot = json.loads(resource.contents[0].text)
                 assert snapshot["draft"] == "# Event draft"
                 assert snapshot["document"]["content"] == workspace["document"]["content"]
-            # Reconnect/refetch recovers state without replaying missed events.
             async with client.listen(resource_subscriptions=[uri]):
                 restored = json.loads((await client.read_resource(uri)).contents[0].text)
                 reply = await client.call_tool(
@@ -481,7 +480,6 @@ async def verify() -> None:
             assert refreshed.structured_content["layout"]["unavailable_count"] == 1
             resource = await session.read_resource("ui://sangam/document-workspace.html")
             assert resource.contents and "<html" in str(resource.contents)
-            # The self-contained bridge resource must not include every Shiki grammar.
             assert len(resource.contents[0].text.encode()) < 6_000_000
         proposal_proof = await verify_proposals(base, issued.token, rest)
         assert (await rest.delete(f"/api/v1/agent-tokens/{issued.token_id}")).status_code == 200

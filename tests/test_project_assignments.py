@@ -205,7 +205,6 @@ def test_child_assignment_scope_and_budget_constraints(settings: Settings):
     assert parent.working_on == "Queued for execution"
     assert parent.child_assignments == []
 
-    # Child attempting to include document not in parent scope
     with pytest.raises(ValidationError, match="subset of parent sources"):
         service.create(
             principal,
@@ -218,7 +217,6 @@ def test_child_assignment_scope_and_budget_constraints(settings: Settings):
             "child-invalid-scope",
         )
 
-    # Child exceeding steps
     with pytest.raises(ValidationError, match="cannot exceed parent remaining steps"):
         service.create(
             principal,
@@ -232,7 +230,6 @@ def test_child_assignment_scope_and_budget_constraints(settings: Settings):
             "child-invalid-steps",
         )
 
-    # Child exceeding budget
     with pytest.raises(ValidationError, match="cannot exceed parent remaining budget"):
         service.create(
             principal,
@@ -246,7 +243,6 @@ def test_child_assignment_scope_and_budget_constraints(settings: Settings):
             "child-invalid-budget",
         )
 
-    # Valid child
     child = service.create(
         principal,
         project.project_id,
@@ -300,18 +296,15 @@ def test_pause_and_stop_propagation_to_children(settings: Settings):
         "child-cascade",
     )
 
-    # Pause propagation
     service.control(principal, parent.assignment_id, "pause", "", "parent-pause")
     assert service.get(principal, parent.assignment_id).status == "paused"
     assert service.get(principal, child.assignment_id).status == "paused"
 
-    # Resume parent & child
     service.control(principal, parent.assignment_id, "resume", "", "parent-resume")
     service.control(principal, child.assignment_id, "resume", "", "child-resume")
     assert service.get(principal, parent.assignment_id).status == "queued"
     assert service.get(principal, child.assignment_id).status == "queued"
 
-    # Stop propagation
     service.control(principal, parent.assignment_id, "stop", "", "parent-stop")
     assert service.get(principal, parent.assignment_id).status == "stopped"
     assert service.get(principal, child.assignment_id).status == "stopped"
@@ -345,13 +338,11 @@ def test_assignment_activity_and_judgment_state(settings: Settings):
     claimed = service.claim()
     assert claimed.working_on == "Checking claims against workspace sources"
 
-    # Simulate needs_judgment set by model
     expected_judgment = "Is 10ms measured on warm cache?"
     claimed.needs_judgment = expected_judgment
     service._save(claimed)
     assert service.get(principal, assignment.assignment_id).needs_judgment == expected_judgment
 
-    # Steering resolves needs_judgment and records current direction
     service.control(principal, assignment.assignment_id, "steer", "Yes, warm cache", "steer-warm")
     refreshed = service.get(principal, assignment.assignment_id)
     assert refreshed.needs_judgment is None

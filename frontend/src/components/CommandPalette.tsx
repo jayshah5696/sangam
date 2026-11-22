@@ -295,7 +295,6 @@ export function CommandPalette({ onFiles, onSearch }: { onFiles: () => void; onS
         event.preventDefault()
         openPalette()
       }
-      // "/" jumps straight to workspace search without opening this palette.
       if (event.key === '/' && !editable) {
         event.preventDefault()
         onSearch()

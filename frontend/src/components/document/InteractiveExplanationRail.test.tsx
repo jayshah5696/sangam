@@ -99,18 +99,15 @@ describe('InteractiveExplanationRail', () => {
     const submitBtn = screen.getByRole('button', { name: 'Attach Explanation' })
     fireEvent.click(submitBtn)
 
-    // Card should now be rendered
     expect(screen.getByText('Parameter Estimation Calculator')).toBeTruthy()
     expect(screen.getByTestId('mock-html-preview')).toBeTruthy()
 
-    // Switch to Source Inputs tab
     const assumptionsTab = screen.getByRole('tab', { name: /Source Inputs/i })
     fireEvent.click(assumptionsTab)
 
     expect(screen.getByText('Model Evaluation Paper')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Inspect in source' })).toBeTruthy()
 
-    // Switch to HTML spec tab
     const codeTab = screen.getByRole('tab', { name: 'HTML Spec' })
     fireEvent.click(codeTab)
 

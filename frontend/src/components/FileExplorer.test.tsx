@@ -224,7 +224,6 @@ describe('FileExplorerPanel', () => {
     const { container } = render(<FileExplorerPanel />)
     const tree = container.querySelector('[data-testid="pierre-tree"]') ?? container.firstElementChild!
 
-    // Simulate F2 keydown
     const event = new KeyboardEvent('keydown', { key: 'F2', bubbles: true })
     tree.dispatchEvent(event)
 
@@ -274,7 +273,6 @@ describe('FileExplorerPanel', () => {
     const treeShell = container.querySelector('.pierre-tree-shell')
     expect(treeShell).not.toBeNull()
 
-    // Simulate custom element with shadow root hosting virtualized tree items
     const customHost = window.document.createElement('file-tree-container')
     const shadow = customHost.attachShadow({ mode: 'open' })
     const item = window.document.createElement('div')

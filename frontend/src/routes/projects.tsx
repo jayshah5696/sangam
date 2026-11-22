@@ -598,7 +598,7 @@ function ProjectView({ projectId }: { projectId: string }) {
               try {
                 await replaceEvidenceRevision(comparisonTarget.evidenceItem.id, newRevisionId, newContent)
               } catch {
-                // If evidence excerpt cannot be remapped, project document revision still updates
+                void 0
               }
             }
             await refresh()

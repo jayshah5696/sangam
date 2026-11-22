@@ -152,7 +152,6 @@ export function DocumentLocationControl({ document, saveState, onUpdated }: Docu
   const popoverRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
-  // Dismiss on outside click and Escape
   useEffect(() => {
     if (!isOpen) return
     const handleKeyDown = (event: KeyboardEvent) => {

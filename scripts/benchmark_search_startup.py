@@ -66,7 +66,6 @@ def main() -> None:
             )
             after = root / "after"
             shutil.copytree(before, after)
-            # Exclude the one-time migration repair from healthy-startup samples.
             measure(after)
             samples = {
                 "main_full_rebuild": [measure(before, baseline_environment) for _ in range(3)],

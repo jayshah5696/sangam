@@ -11,7 +11,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"playwright.config.ts\"",
     "anti-slop": "oxlint",
     "lint": "oxlint && eslint . && node scripts/check-ui-system.mjs",
-    "test": "vitest run src",
+    "test": "vitest run src tools/oxlint/anti-slop/rules/no-comments.test.ts",
     "test:e2e": "pnpm run build && playwright test",
     "update:screenshots": "pnpm run build && SANGAM_UPDATE_SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts"
   },

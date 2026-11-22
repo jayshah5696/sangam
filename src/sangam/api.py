@@ -243,7 +243,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     unsafe_shutdown = True
             try:
                 await assignments.close()
-            # Defer the failure until all writers are stopped and lock ownership is decided.
             except Exception as error:  # noqa: BLE001
                 shutdown_error = error
                 unsafe_shutdown = True
@@ -257,7 +256,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 except TimeoutError as error:
                     shutdown_error = error
                     unsafe_shutdown = True
-                # Defer unexpected backup failures through the common shutdown path.
                 except Exception as error:  # noqa: BLE001
                     shutdown_error = error
                     unsafe_shutdown = True
@@ -267,7 +265,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await pdf_scheduler.close(
                     timeout=resolved_settings.pdf_extraction_shutdown_timeout_seconds
                 )
-            # Retain ownership on any scheduler failure; report after the other writers stop.
             except Exception as error:  # noqa: BLE001
                 if shutdown_error is None:
                     shutdown_error = error
@@ -275,14 +272,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if hasattr(services, "chat") and hasattr(services.chat, "store_adapter"):
                 try:
                     await services.chat.close()
-                # Finish closing other writers before reporting this chat shutdown failure.
                 except Exception as error:  # noqa: BLE001
                     if shutdown_error is None:
                         shutdown_error = error
                     unsafe_shutdown = True
             try:
                 services.activity.close()
-            # The stored failure is raised after retaining ownership of unsafe storage.
             except Exception as error:  # noqa: BLE001
                 if shutdown_error is None:
                     shutdown_error = error
@@ -322,8 +317,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         @app.get("/mcp-host.html", include_in_schema=False)
         def mcp_local_host() -> FileResponse:
-            # srcdoc inherits its host's CSP. Permit only the compiled App's
-            # exact inline script, retaining the main application's strict CSP.
             html = (resolved_settings.frontend_dist / "mcp-app" / "mcp-app.html").read_text()
             scripts = re.findall(r"<script\b[^>]*>([\s\S]*?)</script>", html)
             hashes = []
@@ -596,7 +589,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.openapi_schema = schema
         return schema
 
-    # FastAPI documents replacing this instance method to customize the schema.
     app.openapi = openapi_schema  # type: ignore[method-assign]
 
     @app.middleware("http")

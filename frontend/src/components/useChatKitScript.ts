@@ -30,8 +30,6 @@ export function useChatKitScript(enabled: boolean) {
       clearTimeout(timeout)
       setStatus('error')
     }
-    // A blocked or stalled CDN request must surface as a retryable error
-    // instead of leaving an eternally blank chat panel.
     const timeout = window.setTimeout(() => {
       setStatus((current) => (current === 'loading' ? 'error' : current))
     }, SCRIPT_LOAD_TIMEOUT_MS)

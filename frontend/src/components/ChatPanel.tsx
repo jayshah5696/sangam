@@ -50,8 +50,6 @@ import {
 export { DurableEffectStatus, shortId }
 
 const SELECTION_LIMIT = 20_000
-// One workspace-scoped chat thread persists across document tabs; the active
-// document is passed as live context rather than switching threads per tab.
 const THREAD_STORAGE_KEY = 'sangam.chat-thread.workspace'
 
 export type PublishConfirmationRequest = {
@@ -97,7 +95,6 @@ export function ChatPanel({
   )
   const [chatEpoch, setChatEpoch] = useState(0)
   const [instructionsOverride, setInstructionsOverride] = useState('')
-  // One review is pending at a time: the card for the effect the model is waiting on.
   const [review, setReview] = useState<PendingReview | null>(null)
   const [decisionError, setDecisionError] = useState(false)
   const [deciding, setDeciding] = useState(false)
@@ -311,10 +308,6 @@ export function ChatPanel({
     },
     [],
   )
-  // ChatKit initializes a heavy web-component session from its options. To keep a
-  // single instance alive across document-tab switches, the options must stay
-  // referentially stable; the live document/selection/refresh are read through a
-  // ref instead of being baked into the options on every render.
   const liveRef = useRef({
     documentId: activeDocument?.document_id ?? null,
     revisionId: activeDocument?.current_revision_id ?? null,
@@ -402,8 +395,6 @@ export function ChatPanel({
     },
     [],
   )
-  // Remount a failed frame. An explicit handoff stays in its source thread;
-  // ordinary workspace chat clears a potentially obsolete stored thread.
   const resetChatSurface = useCallback(() => {
     const currentThreadId = threadIdRef.current
     if (currentThreadId) void api.cancelChatRun(currentThreadId)
@@ -472,8 +463,6 @@ export function ChatPanel({
     },
     [clearPendingReview, queryClient],
   )
-  // What the page shows and refreshes once an effect has really been applied. The
-  // result is the stored one, so a resumed or retried effect announces the same way.
   const announceApplied = useCallback(
     async (effect: ChatEffect, result: Record<string, JsonPayload>) => {
       if (effect.capability_id === 'create_document') {
@@ -484,7 +473,6 @@ export function ChatPanel({
       if (effect.capability_id === 'publish_document') {
         setPublished(issuedPublicationSchema.parse(result))
       } else if (effect.capability_id === 'update_publication') {
-        // Changing a publication to unlisted issues a token, shown once.
         const issued = issuedPublicationSchema.safeParse(result)
         if (issued.success && issued.data.token) setPublished(issued.data)
       }
@@ -1456,9 +1444,6 @@ function WorkspaceChatSurface({
   const [promptError, setPromptError] = useState(false)
   const [promptAttempt, setPromptAttempt] = useState(0)
   useEffect(() => {
-    // ChatKit can fail silently (blocked CDN subresource, stale thread id after a
-    // server reset). If the frame never reports ready, surface a recoverable
-    // error instead of leaving the panel blank.
     const timeout = window.setTimeout(
       () => setPhase((current) => (current === 'connecting' ? 'error' : current)),
       CHAT_FRAME_TIMEOUT_MS,
@@ -1550,10 +1535,7 @@ function WorkspaceChatSurface({
       : { text: 'Edits stay as proposals until you review and apply the diff.' },
     threadItemActions: { retry: true, feedback: false },
     thread: { autoScroll: true },
-    onReady: () => {
-      // `chatkit.ready` only means the host initialized. Domain verification and
-      // iframe mounting happen afterward, so keep waiting for usable UI.
-    },
+    onReady: () => {},
     onError: () => setPhase('error'),
     onClientTool: ({ name, params }) => {
       if (name === 'review_chat_effect') return liveRef.current.requestEffectReview(params)
@@ -1594,9 +1576,6 @@ function WorkspaceChatSurface({
         observedRoot = host.shadowRoot
         observer.observe(observedRoot, { childList: true, subtree: true })
       }
-      // DOM presence establishes initial mounting, not transport recovery. A failed
-      // frame retains its composer/iframe and can still deliver late DOM work.
-      // Only an explicit retry remounts the surface in the connecting phase.
       if (hasMountedChatInterface(host)) {
         setPhase((current) => (current === 'connecting' ? 'ready' : current))
       }

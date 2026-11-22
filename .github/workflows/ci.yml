@@ -30,7 +30,7 @@ jobs:
         with:
           just-version: "1.40.0"
       - run: uv sync --frozen
-      - name: Lint, types, API contract, and parallel tests
+      - name: Lint, comment ban, types, API contract, and parallel tests
         run: just test-python
       - name: Backup restore drill
         run: just verify-restore-drill
@@ -69,9 +69,9 @@ jobs:
           just-version: "1.40.0"
       - run: uv sync --frozen
       - run: pnpm --dir frontend install --frozen-lockfile
-      - name: Format, build, lint, and unit tests
+      - name: Format, build, anti-slop/comment lint, and unit tests
         run: just test-frontend
-      - name: Documentation gates
+      - name: Documentation links, references, and Markdown gates
         run: just test-docs
       - name: Live MCP protocol, Monty, App resource, and write recovery
         run: just verify-mcp

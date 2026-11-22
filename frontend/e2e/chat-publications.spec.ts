@@ -245,7 +245,6 @@ test('compact document chat stays contained across supported inspector widths an
     expect(overflows).toBe(false)
   }
 
-  // Keyboard resize with Home (min 290) and End (max 720) and arrow keys
   await handle.focus()
   await page.keyboard.press('Home')
   await expectChatToFit()
@@ -795,7 +794,6 @@ test('failed chat effects are recoverable, dismissible, bounded, and save eviden
   await page.addInitScript((value) => localStorage.setItem('sangam.chat-thread.workspace', value), threadId)
   await page.goto('/chat')
 
-  // Tray is collapsed initially
   const tray = page.locator('.chat-effect-tray')
   await expect(tray).toBeVisible()
   const disclosure = tray.getByRole('button', { name: /Attention required/i })
@@ -803,14 +801,12 @@ test('failed chat effects are recoverable, dismissible, bounded, and save eviden
   await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
   await expect(disclosure).toContainText('1 retry available, 2 failed plans')
 
-  // Expand the tray
   await disclosure.click()
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
 
   const scrollContainer = tray.locator('.chat-effect-tray-scroll')
   await expect(scrollContainer).toBeVisible()
 
-  // Cards are sorted: retryable before terminal
   const retryableCard = scrollContainer.locator('[data-effect-id="eff-retryable"]')
   const terminalCard1 = scrollContainer.locator('[data-effect-id="eff-terminal-1"]')
   const terminalCard2 = scrollContainer.locator('[data-effect-id="eff-terminal-2"]')
@@ -831,7 +827,6 @@ test('failed chat effects are recoverable, dismissible, bounded, and save eviden
   await expect(terminalCard2.getByText('Document creation failed')).toBeVisible()
   await expect(terminalCard2.getByRole('button', { name: 'Dismiss' })).toBeVisible()
 
-  // Clear button is present because 3 eligible failed effects exist
   const clearBtn = tray.getByRole('button', { name: 'Clear resolved failures' })
   await expect(clearBtn).toBeVisible()
 
@@ -845,7 +840,6 @@ test('failed chat effects are recoverable, dismissible, bounded, and save eviden
     expect(clearBox!.height).toBeGreaterThanOrEqual(44)
   }
 
-  // Visual evidence capture
   const evidenceDir = process.env.SANGAM_EVIDENCE_DIR
   if (evidenceDir) {
     await page.locator('.chat-panel').screenshot({
@@ -853,17 +847,14 @@ test('failed chat effects are recoverable, dismissible, bounded, and save eviden
     })
   }
 
-  // Dismiss retryable card
   await retryableCard.getByRole('button', { name: 'Dismiss' }).click()
   expect(acknowledgedIds).toContain('eff-retryable')
 
-  // Clear button is still visible because 2 terminal effects remain
   await expect(clearBtn).toBeVisible()
   await clearBtn.click()
   expect(acknowledgedIds).toContain('eff-terminal-1')
   expect(acknowledgedIds).toContain('eff-terminal-2')
 
-  // Tray disappears
   await expect(page.locator('.chat-effect-tray')).toHaveCount(0)
 })
 

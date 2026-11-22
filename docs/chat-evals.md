@@ -17,7 +17,7 @@ just eval-chat-policy
 To compare against another checkout, for example to show what a harness change improved on `main`:
 
 ```sh
-just eval-chat-against /Users/jshah/Documents/GitHub/sangam
+just eval-chat-against /path/to/baseline-sangam
 ```
 
 The recipe runs this checkout's eval script with the other checkout's installed `sangam` package, so the only variable is the code under test.

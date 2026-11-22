@@ -433,8 +433,6 @@ class ProviderConnectionService:
         normalized = self._validate_base_url(base_url)
         if current.base_url == normalized:
             return
-        # Environment configuration only migrates the untouched preset. Once an
-        # operator edits the connection, SQLite is authoritative across restarts.
         if current.version != 1 or current.health_status != "unknown":
             return
         self.repository.update(

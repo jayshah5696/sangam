@@ -28,7 +28,6 @@ def test_comment_lifecycle_create_list_resolve(client: TestClient) -> None:
     start = content.index(exact)
     end = start + len(exact)
 
-    # 1. Create a comment
     create_res = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -50,14 +49,12 @@ def test_comment_lifecycle_create_list_resolve(client: TestClient) -> None:
     assert comment["resolved_at"] is None
     assert comment["version"] == 1
 
-    # 2. List comments
     list_res = client.get(f"/api/v1/documents/{doc_id}/comments")
     assert list_res.status_code == 200
     comments = list_res.json()
     assert len(comments) == 1
     assert comments[0]["comment_id"] == comment["comment_id"]
 
-    # 3. Resolve the comment
     resolve_res = client.post(
         f"/api/v1/documents/{doc_id}/comments/{comment['comment_id']}/resolve",
         json={"resolved": True, "expected_version": 1},
@@ -67,7 +64,6 @@ def test_comment_lifecycle_create_list_resolve(client: TestClient) -> None:
     assert resolved_comment["resolved_at"] is not None
     assert resolved_comment["version"] == 2
 
-    # 4. List open only vs all
     open_res = client.get(f"/api/v1/documents/{doc_id}/comments?include_resolved=false")
     assert open_res.status_code == 200
     assert len(open_res.json()) == 0
@@ -76,7 +72,6 @@ def test_comment_lifecycle_create_list_resolve(client: TestClient) -> None:
     assert all_res.status_code == 200
     assert len(all_res.json()) == 1
 
-    # 5. Reopen the comment
     reopen_res = client.post(
         f"/api/v1/documents/{doc_id}/comments/{comment['comment_id']}/resolve",
         json={"resolved": False, "expected_version": 2},
@@ -92,7 +87,6 @@ def test_comment_idempotency_and_version_conflict(client: TestClient) -> None:
     doc_id = doc["document_id"]
     rev_id = doc["current_revision_id"]
 
-    # Post comment with idempotency key
     res1 = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -106,7 +100,6 @@ def test_comment_idempotency_and_version_conflict(client: TestClient) -> None:
     )
     assert res1.status_code == 201
 
-    # Replay with same key
     res2 = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -121,7 +114,6 @@ def test_comment_idempotency_and_version_conflict(client: TestClient) -> None:
     assert res2.status_code == 201
     assert res1.json()["comment_id"] == res2.json()["comment_id"]
 
-    # Version conflict on resolve
     conflict_res = client.post(
         f"/api/v1/documents/{doc_id}/comments/{res1.json()['comment_id']}/resolve",
         json={"resolved": True, "expected_version": 99},
@@ -134,15 +126,12 @@ def test_comment_authorization(client: TestClient) -> None:
     doc_id = doc["document_id"]
     rev_id = doc["current_revision_id"]
 
-    # Issue token with read only
     read_token = issue_agent_token(client, capabilities=("read",))
     read_headers = {"Authorization": f"Bearer {read_token}"}
 
-    # Reading comments succeeds
     get_res = client.get(f"/api/v1/documents/{doc_id}/comments", headers=read_headers)
     assert get_res.status_code == 200
 
-    # Creating comment fails (needs update capability)
     create_res = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -156,7 +145,6 @@ def test_comment_authorization(client: TestClient) -> None:
     )
     assert create_res.status_code == 403
 
-    # Issue token with update capability
     update_token = issue_agent_token(client, capabilities=("read", "update"))
     update_headers = {"Authorization": f"Bearer {update_token}"}
 
@@ -179,7 +167,6 @@ def test_comment_input_sanitization(client: TestClient) -> None:
     doc_id = doc["document_id"]
     rev_id = doc["current_revision_id"]
 
-    # Null byte in body
     res_null_body = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -193,7 +180,6 @@ def test_comment_input_sanitization(client: TestClient) -> None:
     )
     assert res_null_body.status_code == 422 or res_null_body.status_code == 400
 
-    # Control char in exact
     res_ctrl_exact = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -207,7 +193,6 @@ def test_comment_input_sanitization(client: TestClient) -> None:
     )
     assert res_ctrl_exact.status_code == 422 or res_ctrl_exact.status_code == 400
 
-    # Null byte in prefix
     res_null_prefix = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -222,7 +207,6 @@ def test_comment_input_sanitization(client: TestClient) -> None:
     )
     assert res_null_prefix.status_code == 422 or res_null_prefix.status_code == 400
 
-    # Control char in suffix
     res_ctrl_suffix = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -237,7 +221,6 @@ def test_comment_input_sanitization(client: TestClient) -> None:
     )
     assert res_ctrl_suffix.status_code == 422 or res_ctrl_suffix.status_code == 400
 
-    # Start greater than end offset
     res_invalid_offsets = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -251,7 +234,6 @@ def test_comment_input_sanitization(client: TestClient) -> None:
     )
     assert res_invalid_offsets.status_code == 422
 
-    # Blank comment body
     res_blank_body = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -271,7 +253,6 @@ def test_concurrent_comment_resolution_version_precondition(client: TestClient) 
     doc_id = doc["document_id"]
     rev_id = doc["current_revision_id"]
 
-    # Issue tokens for two separate agent identities
     token_agent1 = issue_agent_token(
         client, actor_id="agent:one", capabilities=("read", "update"), path_prefix="notes.md"
     )
@@ -279,7 +260,6 @@ def test_concurrent_comment_resolution_version_precondition(client: TestClient) 
         client, actor_id="agent:two", capabilities=("read", "update"), path_prefix="notes.md"
     )
 
-    # Create a comment
     create_res = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -338,7 +318,6 @@ def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
     doc_id = doc["document_id"]
     rev_id = doc["current_revision_id"]
 
-    # Post a comment as human
     comment_res = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -353,21 +332,17 @@ def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
     assert comment_res.status_code == 201
     comment_id = comment_res.json()["comment_id"]
 
-    # Issue agent token scoped to notes.md
     agent_token = issue_agent_token(client, capabilities=("read",), path_prefix="notes.md")
     agent_headers = {"Authorization": f"Bearer {agent_token}"}
 
-    # List comments as agent
     list_res = client.get(f"/api/v1/documents/{doc_id}/comments", headers=agent_headers)
     assert list_res.status_code == 200
     assert len(list_res.json()) == 1
 
-    # Get single comment as agent
     get_res = client.get(f"/api/v1/documents/{doc_id}/comments/{comment_id}", headers=agent_headers)
     assert get_res.status_code == 200
     assert get_res.json()["comment_id"] == comment_id
 
-    # Check activity ledger for agent events
     activity_res = client.get("/api/v1/activity?actor_kind=agent")
     assert activity_res.status_code == 200
     events = activity_res.json()
@@ -375,7 +350,6 @@ def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
     assert "list_comments" in actions
     assert "get_comment" in actions
 
-    # Agent with different path prefix scope is denied
     other_token = issue_agent_token(client, capabilities=("read",), path_prefix="other")
     other_headers = {"Authorization": f"Bearer {other_token}"}
 
@@ -389,12 +363,10 @@ def test_agent_comment_reads_are_audited_and_scoped(client: TestClient) -> None:
 
 
 def test_out_of_scope_comment_resolution_authorization(client: TestClient) -> None:
-    # Create document in an out-of-scope path for the agent
     secret_doc = create_doc(client, "Secret Doc", "Sensitive secret content.", path="secret/doc.md")
     secret_doc_id = secret_doc["document_id"]
     secret_rev_id = secret_doc["current_revision_id"]
 
-    # Post a valid comment as human
     comment_res = client.post(
         f"/api/v1/documents/{secret_doc_id}/comments",
         json={
@@ -409,13 +381,11 @@ def test_out_of_scope_comment_resolution_authorization(client: TestClient) -> No
     assert comment_res.status_code == 201
     valid_comment_id = comment_res.json()["comment_id"]
 
-    # Issue an agent token scoped ONLY to "allowed/path"
     scoped_token = issue_agent_token(
         client, capabilities=("read", "update"), path_prefix="allowed/path"
     )
     scoped_headers = {"Authorization": f"Bearer {scoped_token}"}
 
-    # 1. Attempting to resolve an existing comment on an out-of-scope document returns 403
     resolve_existing_res = client.post(
         f"/api/v1/documents/{secret_doc_id}/comments/{valid_comment_id}/resolve",
         json={"resolved": True, "expected_version": 1},
@@ -423,7 +393,6 @@ def test_out_of_scope_comment_resolution_authorization(client: TestClient) -> No
     )
     assert resolve_existing_res.status_code == 403
 
-    # 2. Attempting to resolve a non-existent comment ID on an out-of-scope document returns 403
     resolve_nonexistent_res = client.post(
         f"/api/v1/documents/{secret_doc_id}/comments/cmt_nonexistent999/resolve",
         json={"resolved": True, "expected_version": 1},

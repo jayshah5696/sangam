@@ -3,7 +3,6 @@ import MarkdownIt from 'markdown-it'
 import { citationLink, textLocatorSchema, type TextLocator } from './citationNavigation'
 const markdownText = new MarkdownIt({ html: false, linkify: true, typographer: true })
 
-// The locator is relative to the immutable source text, never the destination draft.
 export function locatePassage(content: string, exact: string, occurrence = 0): TextLocator | undefined {
   let start = content.indexOf(exact)
   for (let index = 0; index < occurrence && start >= 0; index++)

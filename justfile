@@ -418,11 +418,11 @@ format:
     uv run ruff format .
     pnpm --dir frontend run format
 
-# Verify documentation links, Markdown style, and Mermaid fences.
+# Verify documentation links, repo references, Markdown style, and Mermaid fences.
 test-docs:
     uv run python scripts/verify-docs.py
     node frontend/scripts/verify-mermaid.mjs
-    pnpm --dir frontend exec markdownlint-cli2 "../README.md" "../SECURITY.md" "../docs/**/*.md"
+    pnpm --dir frontend exec markdownlint-cli2 "../README.md" "../SECURITY.md" "../AGENTS.md" "../DESIGN.md" "../PRODUCT.md" "../docs/**/*.md"
 
 # Serve the API and frontend development server with live reload.
 serve backend_port="8000" frontend_port="5173":

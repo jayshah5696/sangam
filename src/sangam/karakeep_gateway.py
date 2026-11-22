@@ -188,7 +188,6 @@ class KarakeepClient:
     ) -> KarakeepSourceBookmark:
         content = payload.content or _KarakeepContentPayload()
         content_type: Literal["link", "text", "asset", "unknown"]
-        # The membership check restricts the external string to these literal values.
         content_type = (
             cast(Literal["link", "text", "asset"], content.type)
             if content.type in {"link", "text", "asset"}

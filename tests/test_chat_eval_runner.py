@@ -182,7 +182,6 @@ def _run_web_item(tmp_path: Path, answer: str) -> tuple[dict, dict]:
 def test_web_eval_grades_only_sources_retrieved_in_the_trial(tmp_path: Path) -> None:
     item, outcome = _run_web_item(tmp_path / "ok", f"Meridian announced the Flow. [src]({WEB_URL})")
     assert outcome["error"] is None
-    # The frozen clock and date bound excluded the 2024 review from search results.
     assert "https://vrweekly.example.com/orbit-one-review" not in {
         s["url"] for s in outcome["web_sources"]
     }
@@ -361,7 +360,6 @@ def test_source_judge_invalid_response_remains_ungraded() -> None:
 
 
 def test_baseline_loader_preserves_the_retrieval_check(tmp_path: Path) -> None:
-    # HEAD is available in shallow CI checkouts. The comparison recipe selects the pre-PR ref.
     baseline, commit, source_hash = evals.load_baseline_evaluator("HEAD", tmp_path)
     assert len(commit) == 40
     assert source_hash

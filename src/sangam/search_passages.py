@@ -21,7 +21,6 @@ from sangam.schemas import DocumentSummary, SearchMatch
 WINDOW = 160
 CONTEXT_BEFORE = 60
 MAX_MATCHES = 3
-# Enough to find the densest window; repetitive documents stop scanning early.
 MAX_HITS_PER_SOURCE = 200
 MAX_CANDIDATE_PAGES = 50
 _HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
@@ -46,7 +45,6 @@ class _Passage:
 @dataclass(frozen=True)
 class Term:
     pattern: re.Pattern[str]
-    # First literal part, used to prefilter PDF pages in SQL.
     prefix: str
 
 
@@ -75,7 +73,6 @@ def _hits(text: str, terms: Sequence[Term]) -> list[_Hit]:
 
 
 def _snippet(text: str, hits: Sequence[_Hit], anchor: _Hit) -> str:
-    # Stay inside the passage's paragraph; its heading is reported separately.
     paragraph_start = text.rfind("\n\n", 0, anchor.start)
     paragraph_start = 0 if paragraph_start < 0 else paragraph_start + 2
     paragraph_end = text.find("\n\n", anchor.end)
@@ -102,7 +99,6 @@ def _snippet(text: str, hits: Sequence[_Hit], anchor: _Hit) -> str:
 
 
 def _plain(value: str) -> str:
-    # Literal brackets would be read as highlight markers by clients.
     return value.replace("[[", "[ [").replace("]]", "] ]")
 
 
@@ -183,7 +179,6 @@ def _content_matches(
 def _pdf_matches(
     connection: sqlite3.Connection, document_id: str, terms: Sequence[Term]
 ) -> list[tuple[int, SearchMatch]]:
-    # SQLite's lower() folds ASCII only, so this is a prefilter; the regex decides.
     clauses = " OR ".join("instr(lower(text), ?) > 0" for _term in terms)
     page_rows = connection.execute(
         f"SELECT page_number, text FROM pdf_pages WHERE document_id = ? AND ({clauses})"
@@ -301,7 +296,6 @@ def attach_search_matches(
             candidates = _content_matches(
                 contents.get(document.document_id, ""), document.content_type, terms
             )
-        # Stable sort keeps source order (text, pages, annotations) within a score.
         candidates.sort(key=lambda item: -item[0])
         matches = [match for _score, match in candidates[:MAX_MATCHES]]
         if not matches:

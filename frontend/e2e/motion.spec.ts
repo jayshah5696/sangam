@@ -57,7 +57,6 @@ test.describe('Restrained motion language and workbench interactions', () => {
       await expect(popover).toHaveAttribute('data-side', /^(top|bottom)$/)
       await expect(popover).toHaveAttribute('data-align', /^(left|right)$/)
 
-      // Escape closes the menu and returns focus to trigger
       await page.keyboard.press('Escape')
       await expect(popover).not.toBeVisible()
       await expect(trigger).toBeFocused()
@@ -69,7 +68,6 @@ test.describe('Restrained motion language and workbench interactions', () => {
     }) => {
       await page.goto(`/documents/${seededWorkspace.documentId}`)
 
-      // Try Ctrl+k and Meta+k for robust cross-platform activation
       await page.keyboard.press('Control+k')
       const dialog = page.getByRole('dialog', { name: 'Command palette' })
       if (!(await dialog.isVisible())) {
@@ -80,7 +78,6 @@ test.describe('Restrained motion language and workbench interactions', () => {
       const input = dialog.locator('input')
       await expect(input).toBeFocused()
 
-      // Escape closes palette
       await page.keyboard.press('Escape')
       await expect(dialog).not.toBeVisible()
     })
@@ -101,13 +98,11 @@ test.describe('Restrained motion language and workbench interactions', () => {
 
       await expect(propertiesTab).toHaveAttribute('aria-selected', 'true')
 
-      // Switch to Outline
       await outlineTab.click()
       await expect(outlineTab).toHaveAttribute('aria-selected', 'true')
       const outlineHeight = await tabsContainer.evaluate((el) => el.getBoundingClientRect().height)
       expect(outlineHeight).toBe(initialHeight)
 
-      // Switch to History
       await historyTab.click()
       await expect(historyTab).toHaveAttribute('aria-selected', 'true')
       const historyHeight = await tabsContainer.evaluate((el) => el.getBoundingClientRect().height)
@@ -145,13 +140,11 @@ test.describe('Restrained motion language and workbench interactions', () => {
       await page.setViewportSize({ width: 390, height: 844 })
       await page.goto(`/documents/${seededWorkspace.documentId}`)
 
-      // Collapse inspector first if open
       const collapseBtn = page.locator('button[aria-label="Collapse document inspector"]')
       if (await collapseBtn.isVisible()) {
         await collapseBtn.click()
       }
 
-      // Open inspector on mobile
       const toggle = page.locator('.mobile-inspector-toggle')
       await expect(toggle).toBeVisible()
       await toggle.click()
@@ -162,18 +155,15 @@ test.describe('Restrained motion language and workbench interactions', () => {
       await expect(inspector).toHaveAttribute('aria-modal', 'true')
       await expect(page.getByRole('tab', { name: 'properties' })).toBeFocused()
 
-      // Check viewport containment
       const box = await inspector.boundingBox()
       expect(box).not.toBeNull()
       expect(box!.width).toBeLessThanOrEqual(390)
       expect(box!.y).toBeGreaterThanOrEqual(0)
 
-      // Escape returns focus to the invoking control.
       await page.keyboard.press('Escape')
       await expect(inspector).not.toBeVisible()
       await expect(toggle).toBeFocused()
 
-      // The backdrop remains a reversible pointer path.
       await toggle.click()
       const backdrop = page.locator('.inspector-backdrop')
       await expect(backdrop).toBeVisible()
@@ -214,13 +204,11 @@ test.describe('Restrained motion language and workbench interactions', () => {
       )
       expect(matchesReducedMotion).toBe(true)
 
-      // Open ActionMenu under reduced motion - it is immediately open and visible
       const trigger = page.locator('.document-actions-trigger')
       await trigger.click()
       const popover = page.locator('.action-dialog-popover')
       await expect(popover).toBeVisible()
 
-      // Escape closes cleanly
       await page.keyboard.press('Escape')
       await expect(popover).not.toBeVisible()
       await expect(trigger).toBeFocused()

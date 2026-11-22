@@ -30,7 +30,6 @@ export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassificatio
   const [copied, setCopied] = useState(false)
   const [activeCellItem, setActiveCellItem] = useState<EvidenceItem | null>(null)
 
-  // Collect unique source documents
   const sources: SourceColumn[] = useMemo(() => {
     const map = new Map<string, string>()
     for (const item of evidence) {
@@ -44,7 +43,6 @@ export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassificatio
     }))
   }, [evidence])
 
-  // Collect unique claims from evidence + custom additions
   const claims: string[] = useMemo(() => {
     const set = new Set<string>()
     for (const item of evidence) {
@@ -57,14 +55,12 @@ export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassificatio
     return Array.from(set)
   }, [evidence, customClaims])
 
-  // Filtered claims and sources
   const filteredClaims = useMemo(() => {
     if (!filterQuery.trim()) return claims
     const q = filterQuery.toLowerCase()
     return claims.filter((claim) => claim.toLowerCase().includes(q))
   }, [claims, filterQuery])
 
-  // Map from `${claim}:${sourceDocumentId}` to EvidenceItem
   const cellMap = useMemo(() => {
     const map = new Map<string, EvidenceItem>()
     for (const item of evidence) {
@@ -76,7 +72,6 @@ export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassificatio
     return map
   }, [evidence])
 
-  // Summary counts
   const statusCounts = useMemo(() => {
     const counts = {
       Supports: 0,
@@ -127,7 +122,7 @@ export function ClaimMatrixView({ evidence, onOpenPassage, onUpdateClassificatio
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      /* clipboard failure ignored */
+      return
     }
   }
 

@@ -164,7 +164,6 @@ class AssistantRequests:
                 (principal.actor_id, conversation_id),
             ).fetchall()
         if truncated:
-            # An incomplete source inventory cannot prove a narrowed read grant is sufficient.
             self.chat.workspace.policy.require(principal, Capability.READ, None)
         for row in rows:
             document = self.chat.workspace.documents.get_document(
@@ -377,12 +376,10 @@ class AssistantRequests:
         )
         self.accepting.add(task)
         task.add_done_callback(self.accepted)
-        # A disconnected execute does not abandon a committed acceptance record.
         return await asyncio.shield(task)
 
     def accepted(self, task: asyncio.Task[AssistantResult]) -> None:
         self.accepting.discard(task)
-        # Retrieve errors even when the MCP caller disconnected during acceptance.
         if not task.cancelled() and (error := task.exception()) is not None:
             logger.info("Assistant acceptance failed (%s)", type(error).__name__)
 
@@ -592,7 +589,6 @@ class AssistantRequests:
         await asyncio.to_thread(self.authorize, principal, query.request_key)
         task = self.tasks.get((principal.actor_id, query.request_key))
         if task and query.wait_seconds:
-            # asyncio.wait observes the task without transferring cancellation ownership.
             await asyncio.wait({task}, timeout=query.wait_seconds)
         return await asyncio.to_thread(self.get, principal, query)
 
@@ -673,7 +669,6 @@ class AssistantRequests:
 
     async def close(self) -> None:
         self.closing = True
-        # Release active slots before waiting for acceptance calls queued behind them.
         for task in list(self.tasks.values()):
             if not task.cancelling():
                 task.cancel()

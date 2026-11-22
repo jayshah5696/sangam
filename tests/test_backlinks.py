@@ -9,7 +9,6 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
     app = create_app(settings)
 
     with TestClient(app) as client:
-        # Create target document A
         res_a = client.post(
             "/api/v1/documents",
             headers=headers("doc-a"),
@@ -23,7 +22,6 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
         doc_a = res_a.json()
         doc_a_id = doc_a["document_id"]
 
-        # Create linking document B (sangam:// scheme)
         res_b = client.post(
             "/api/v1/documents",
             headers=headers("doc-b"),
@@ -38,7 +36,6 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
         assert res_b.status_code == 201
         doc_b = res_b.json()
 
-        # Create linking document C (/documents/ relative href)
         res_c = client.post(
             "/api/v1/documents",
             headers=headers("doc-c"),
@@ -51,7 +48,6 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
         assert res_c.status_code == 201
         doc_c = res_c.json()
 
-        # Create unrelated document D
         res_d = client.post(
             "/api/v1/documents",
             headers=headers("doc-d"),
@@ -63,7 +59,6 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
         )
         assert res_d.status_code == 201
 
-        # Query backlinks for target doc A
         res_backlinks = client.get(f"/api/v1/documents/{doc_a_id}/backlinks")
         assert res_backlinks.status_code == 200
         backlinks = res_backlinks.json()
@@ -73,12 +68,10 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
         assert doc_c["document_id"] in backlink_ids
         assert res_d.json()["document_id"] not in backlink_ids
 
-        # Check search_snippet
         b_summary = next(b for b in backlinks if b["document_id"] == doc_b["document_id"])
         assert "Target Doc" in b_summary["search_snippet"]
         assert doc_a_id in b_summary["search_snippet"]
 
-        # Rename / Move target document A: verify backlinks persist across rename
         res_move = client.post(
             f"/api/v1/documents/{doc_a_id}/move",
             headers={**headers("move-target"), "If-Match": res_a.headers["ETag"]},
@@ -91,7 +84,6 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
         backlink_ids_after_move = {b["document_id"] for b in res_backlinks_after_move.json()}
         assert backlink_ids_after_move == backlink_ids
 
-        # Update doc A to link to itself: ensure document does not include itself as a backlink
         res_self = client.patch(
             f"/api/v1/documents/{doc_a_id}",
             headers={**headers("self-link"), "If-Match": res_move.headers["ETag"]},
@@ -106,7 +98,6 @@ def test_document_backlinks_discovery_and_snippets(settings: Settings) -> None:
         assert res_backlinks_self.status_code == 200
         assert doc_a_id not in {b["document_id"] for b in res_backlinks_self.json()}
 
-        # Soft delete referencing doc C: ensure deleted documents do not appear in backlinks
         res_delete_c = client.request(
             "DELETE",
             f"/api/v1/documents/{doc_c['document_id']}",

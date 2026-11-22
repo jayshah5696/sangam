@@ -24,7 +24,6 @@ def _create_doc(client: TestClient, title: str, content: str) -> str:
 
 
 def test_parse_skill_content():
-    # Valid
     valid = (
         "---\nname: code-review\ndescription: Review pull requests\n---\n"
         "## Instructions\nDo review."
@@ -36,24 +35,20 @@ def test_parse_skill_content():
     assert "Do review." in proc
     assert len(diags) == 0
 
-    # Malformed frontmatter
     malformed = "---\nname: [unclosed\n---\nBody"
     parsed, proc, diags = parse_skill_content(malformed)
     assert parsed is None
     assert any("Malformed YAML" in d for d in diags)
 
-    # Missing frontmatter
     no_fm = "Just some text without frontmatter"
     parsed, proc, diags = parse_skill_content(no_fm)
     assert parsed is None
     assert any("must begin with YAML frontmatter" in d for d in diags)
 
-    # Invalid name
     bad_name = "---\nname: Invalid_Name!\ndescription: Test\n---\nProcedure"
     parsed, proc, diags = parse_skill_content(bad_name)
     assert any("must be 1-64 characters matching lowercase alphanumeric" in d for d in diags)
 
-    # Scripts declared
     with_scripts = (
         "---\nname: run-tests\ndescription: Run tests\nscripts:\n  - ./test.sh\n---\nBody"
     )
@@ -69,7 +64,6 @@ def test_register_and_get_personal_skill(client: TestClient):
     )
     doc_id = _create_doc(client, "Summarize Spec Skill", content)
 
-    # Register
     res = client.post(
         "/api/v1/chat/skills",
         json={"document_id": doc_id},
@@ -84,7 +78,6 @@ def test_register_and_get_personal_skill(client: TestClient):
     assert skill["has_scripts"] is False
     assert skill["skill_id"].endswith(":user:summarize-spec")
 
-    # Replay with same idempotency key
     replay = client.post(
         "/api/v1/chat/skills",
         json={"document_id": doc_id},
@@ -93,12 +86,10 @@ def test_register_and_get_personal_skill(client: TestClient):
     assert replay.status_code == 201
     assert replay.json()["skill_id"] == skill["skill_id"]
 
-    # Get by ID
     get_res = client.get(f"/api/v1/chat/skills/{skill['skill_id']}")
     assert get_res.status_code == 200
     assert get_res.json()["skill_id"] == skill["skill_id"]
 
-    # List skills
     list_res = client.get("/api/v1/chat/skills")
     assert list_res.status_code == 200
     skills = list_res.json()
@@ -115,7 +106,6 @@ def test_register_project_scoped_skill(client: TestClient):
     )
     doc_id = _create_doc(client, "Atlas Deploy Skill", content)
 
-    # Cannot register as project skill if document is not in project
     fail_res = client.post(
         "/api/v1/chat/skills",
         json={"document_id": doc_id, "project_id": project_id},
@@ -123,7 +113,6 @@ def test_register_project_scoped_skill(client: TestClient):
     assert fail_res.status_code == 422
     assert "must be an explicit member" in fail_res.text
 
-    # Add document to project
     add_doc = client.post(
         f"/api/v1/projects/{project_id}/documents",
         json={"document_id": doc_id},
@@ -131,7 +120,6 @@ def test_register_project_scoped_skill(client: TestClient):
     )
     assert add_doc.status_code == 201
 
-    # Now register succeeds
     res = client.post(
         "/api/v1/chat/skills",
         json={"document_id": doc_id, "project_id": project_id},
@@ -166,7 +154,6 @@ def test_conflict_on_duplicate_name_different_document(client: TestClient):
     res1 = client.post("/api/v1/chat/skills", json={"document_id": doc1})
     assert res1.status_code == 201
 
-    # Conflict in same personal scope
     res2 = client.post("/api/v1/chat/skills", json={"document_id": doc2})
     assert res2.status_code == 409
 
@@ -182,7 +169,6 @@ def test_unregister_skill(client: TestClient):
     del_res = client.delete(f"/api/v1/chat/skills/{skill_id}")
     assert del_res.status_code == 204
 
-    # Now get returns 404
     get_res = client.get(f"/api/v1/chat/skills/{skill_id}")
     assert get_res.status_code == 404
 
@@ -207,12 +193,10 @@ def test_skill_activation_and_revision_pinning(client: TestClient):
         context_snapshot_id=turn.context_id,
     )
 
-    # First activation
     act1 = chat.skills.activate(principal, req_context, skill_id)
     assert act1.procedure.strip() == "Original instructions."
     original_rev = act1.revision_id
 
-    # Update the document to a new revision
     doc_res = client.get(f"/api/v1/documents/{doc_id}").json()
     patch_res = client.patch(
         f"/api/v1/documents/{doc_id}",
@@ -228,12 +212,10 @@ def test_skill_activation_and_revision_pinning(client: TestClient):
     assert patch_res.status_code == 200
     assert patch_res.json()["current_revision_id"] != original_rev
 
-    # Second activation in the SAME turn context pins the original revision!
     act2 = chat.skills.activate(principal, req_context, skill_id)
     assert act2.revision_id == original_rev
     assert act2.procedure.strip() == "Original instructions."
 
-    # In a NEW turn context, the new revision is loaded
     turn2 = chat.evidence.create_turn_context(
         principal, entry_point="workspace", document_id=None, revision_id=None, selected_text=""
     )

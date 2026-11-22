@@ -163,17 +163,14 @@ describe('DocumentSourcesAndNotes', () => {
 
     renderWithClient(<DocumentSourcesAndNotes document={sampleDoc} />)
 
-    // Project Sources
     expect(await screen.findByText('Project Sources')).toBeDefined()
     expect(screen.getByText('Primary Data Source')).toBeDefined()
     expect(screen.getByText('Contains core empirical measurements.')).toBeDefined()
 
-    // Project Notes
     expect(screen.getByText('Project Notes')).toBeDefined()
     expect(screen.getByText('Methodology Outline')).toBeDefined()
     expect(screen.getByText('Initial protocol considerations.')).toBeDefined()
 
-    // Related Notes / Backlinks
     expect(screen.getByText('Related Notes')).toBeDefined()
     expect(screen.getByText('Related Research Review')).toBeDefined()
     expect(screen.getByText(/refers to \[Main Synthesis Draft\]/i)).toBeDefined()

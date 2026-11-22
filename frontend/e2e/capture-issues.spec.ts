@@ -55,11 +55,9 @@ test.describe('Issue Verification Real Screenshots', () => {
     await expect(page.locator('.document-header h1')).toHaveText('Raft & Paxos Comparative Analysis')
     await page.waitForTimeout(600)
 
-    // Ensure Files mode is active
     await page.locator('#workspace-tab-files').click()
     await page.waitForTimeout(400)
 
-    // Issue #60 / #140: clean single-line truncation via aria-label pseudo-element.
     const longDocument = page.locator('.sangam-file-tree').getByRole('treeitem', {
       name: 'raft-and-paxos-comparative-study-2026.md',
     })
@@ -72,7 +70,6 @@ test.describe('Issue Verification Real Screenshots', () => {
     expect(labelLayout.scrollWidth).toBeLessThanOrEqual(labelLayout.clientWidth)
     await page.locator('.primary-sidebar').screenshot({ path: getOutputPath('issue-60-file-tree.png') })
 
-    // Issue #61: context menu is portaled beyond the sidebar clip and dismisses with Escape.
     await longDocument.click({ button: 'right' })
     const contextMenu = page.getByRole('menu', {
       name: 'Actions for raft-and-paxos-comparative-study-2026.md',
@@ -112,17 +109,14 @@ test.describe('Issue Verification Real Screenshots', () => {
     await expect(page.locator('.document-header h1')).toHaveText('Cluster Performance Metrics')
     await page.waitForTimeout(400)
 
-    // Open Document actions menu and click Split right
     await page.getByRole('button', { name: 'Document actions' }).click()
     await page.getByRole('button', { name: /Split right/ }).click()
     await expect(page.getByRole('tablist', { name: 'Open documents' })).toHaveCount(2)
 
-    // Issue #62: Split panes with close tab and close split controls
     await page
       .locator('.workbench-center')
       .screenshot({ path: getOutputPath('issue-62-split-pane-close.png') })
 
-    // Issue #70: 40px Tab actions trigger aligned with rail
     await page
       .locator('.editor-tabbar')
       .first()
@@ -157,7 +151,6 @@ test.describe('Issue Verification Real Screenshots', () => {
       .screenshot({ path: getOutputPath('issue-67-folder-organization.png') })
     await page.locator('.pierre-tree-shell').screenshot({ path: getOutputPath('issue-63-folder-rename.png') })
 
-    // Issue #100: Context menu Rename on folder must show visible inline input and update path
     const folderItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: initialFolder })
     await expect(folderItem).toBeVisible()
     await folderItem.click({ button: 'right' })
@@ -177,7 +170,6 @@ test.describe('Issue Verification Real Screenshots', () => {
       page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedFolder }),
     ).toBeVisible()
 
-    // Issue #100: F2 rename on file item must show visible inline input and update path
     const docItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: initialDoc })
     await expect(docItem).toBeVisible()
     await docItem.focus()
@@ -192,7 +184,6 @@ test.describe('Issue Verification Real Screenshots', () => {
 
     await expect(page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })).toBeVisible()
 
-    // Issue #100: Escape cancels rename mode without modifying path
     const renamedDocItem = page.locator('.sangam-file-tree').getByRole('treeitem', { name: renamedDoc })
     await expect(renamedDocItem).toBeVisible()
     await renamedDocItem.focus()
@@ -211,10 +202,8 @@ test.describe('Issue Verification Real Screenshots', () => {
     await page.goto('/')
     await page.waitForTimeout(400)
 
-    // Issue #64 & #75 footer (Karakeep hidden)
     await page.locator('.sidebar-footer').screenshot({ path: getOutputPath('issue-64-sidebar-nav.png') })
 
-    // Issue #66: Search single focus ring
     await page.locator('#workspace-tab-search').click()
     await page.waitForTimeout(300)
     const searchInput = page.locator('.sidebar-search-input input')
@@ -274,18 +263,15 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await expect(page.locator('.document-header h1')).toHaveText('Sangam System Architecture')
     await page.waitForTimeout(400)
 
-    // Open inspector if collapsed
     const openInspectorBtn = page.getByRole('button', { name: 'Open document inspector' })
     if (await openInspectorBtn.isVisible()) {
       await openInspectorBtn.click()
       await page.waitForTimeout(400)
     }
 
-    // Switch to Outline tab
     await page.getByRole('tab', { name: 'outline' }).click()
     await page.waitForTimeout(400)
 
-    // Issue #71: clean rendered text, self-link removed, fenced heading ignored.
     await expect(page.getByRole('button', { name: 'Transaction Boundary Verification' })).toBeVisible()
     await expect(page.getByText(/Link to this section/)).toHaveCount(0)
     await expect(
@@ -295,28 +281,23 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
       .locator('.document-inspector')
       .screenshot({ path: getOutputPath('issue-71-clean-outline.png') })
 
-    // Switch to Preview mode
     await page.getByRole('radio', { name: 'preview' }).click()
     await page.waitForTimeout(400)
 
-    // Click outline item to scroll
     const targetHeading = page.getByRole('button', { name: 'Distributed Synchronization Protocol' })
     if (await targetHeading.isVisible()) {
       await targetHeading.click()
       await page.waitForTimeout(400)
     }
 
-    // Issue #72: Outline jump in preview
     await page
       .locator('.document-workspace')
       .screenshot({ path: getOutputPath('issue-72-outline-preview.png') })
 
-    // Issue #73: Bounded workspace
     await page
       .locator('.workbench-main')
       .screenshot({ path: getOutputPath('issue-73-bounded-workspace.png') })
 
-    // Issue #74: Direct triggers on collapsed rail
     const collapseBtn = page.getByRole('button', { name: 'Collapse document inspector' })
     if (await collapseBtn.isVisible()) {
       await collapseBtn.click()
@@ -331,14 +312,12 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await page.goto('/settings')
     await page.waitForTimeout(500)
 
-    // Issue #104 supersedes #65: Settings replaces workspace navigation inside the shared rail.
     const settingsSidebar = page.getByRole('complementary', { name: 'Settings sidebar' })
     await expect(settingsSidebar).toBeVisible()
     await expect(page.getByRole('complementary', { name: 'Workspace sidebar' })).toHaveCount(0)
     await expect(settingsSidebar.getByRole('navigation', { name: 'Settings pages' })).toBeVisible()
     await page.screenshot({ path: getOutputPath('issue-104-settings-sidebar.png'), fullPage: false })
 
-    // Issue #75: installed version and truthful server status in Operations.
     await page.getByRole('button', { name: /Operations/ }).click()
     await expect(page.getByText(/Sangam Server v/)).toBeVisible()
     await expect(page.getByRole('button', { name: 'Refresh server status' })).toBeVisible()
@@ -425,17 +404,14 @@ Cryptographically signed capability tokens with fine-grained path prefixes.`,
     await page.goto(`/documents/${d1.document_id}`)
     await expect(page.locator('.editor-tab')).toHaveCount(3)
 
-    // Capture tab strip showing equal-width distribution with pinned tab
     await page
       .locator('.editor-tabbar')
       .first()
       .screenshot({ path: getOutputPath('issue-133-equal-width-tabs.png') })
 
-    // The inspector is closed by default; open its explicit tools before choosing chat.
     await page.getByRole('button', { name: 'Open document inspector' }).click()
     await expect(page.getByRole('tab', { name: 'chat', exact: true })).toBeVisible()
 
-    // Open chat tab in inspector and resize to minimum 290px
     await page.getByRole('tab', { name: 'chat', exact: true }).click()
     await page.evaluate(() => {
       const stored = JSON.parse(localStorage.getItem('sangam.theme-preferences') || '{}')

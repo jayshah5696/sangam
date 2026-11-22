@@ -58,7 +58,6 @@ export function extractDraftCitations(content: string, draftDocumentId?: string)
   const citations: DraftCitationReference[] = []
   if (!content) return citations
 
-  // Match Markdown citation links: [Source: ...](sangam://document/... or /documents/...)
   const linkRegex =
     /\[(?:Source:\s*)?([^\]]+)\]\((?:sangam:\/\/document\/|\/documents\/)([^?)]+)(?:\?([^)]+))?\)/g
   let match: RegExpExecArray | null
@@ -72,7 +71,6 @@ export function extractDraftCitations(content: string, draftDocumentId?: string)
     const pageNumber = params.get('page') ? Number(params.get('page')) : undefined
     const annotationId = params.get('annotation') || undefined
 
-    // Inspect the lines before this citation to extract blockquoted text and optional claim
     const textBefore = content.slice(0, match.index)
     const linesBefore = textBefore.split('\n')
     const quoteLines: string[] = []
@@ -138,7 +136,6 @@ export function checkSourceChanged(
 ): SourceChangeStatus {
   if (!source) return { changed: false }
 
-  // PDF replacement check
   if (source.superseded_by_document_id) {
     const replacement = source.superseded_by_title
       ? `"${source.superseded_by_title}"`
@@ -149,7 +146,6 @@ export function checkSourceChanged(
     }
   }
 
-  // Revision comparison for text/markdown/html
   if (source.current_revision_id && pinnedRevisionId && source.current_revision_id !== pinnedRevisionId) {
     return {
       changed: true,
@@ -205,7 +201,6 @@ export function analyzePassageRecheck(
     }
   }
 
-  // Check if significant tokens exist to distinguish modified vs completely removed
   const words = trimmed.split(/\s+/).filter(Boolean)
   if (words.length >= 3) {
     const half = Math.floor(words.length / 2)
@@ -253,7 +248,6 @@ export function findSourceDependencies({
   const results: DependentConclusion[] = []
   const seenKeys = new Set<string>()
 
-  // 1. Gather from workspace evidence items
   for (const item of evidenceItems) {
     if (item.sourceDocumentId !== sourceDocumentId) continue
 
@@ -298,7 +292,6 @@ export function findSourceDependencies({
     }
   }
 
-  // 2. Gather from draft contents citations
   for (const draft of drafts) {
     if (!draft.content) continue
     const citations = extractDraftCitations(draft.content, draft.document_id)

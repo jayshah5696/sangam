@@ -13,7 +13,8 @@ must still check domain logic, error recovery, and whether an abstraction is nee
   handling every case, so avoid one when a new variant needs explicit behavior.
 - Catch specific exceptions. A broad catch must preserve the traceback through
   re-raising or exception logging. Ruff checks this with `BLE001`. Recovery at an
-  application boundary can require a documented, local exception to the rule.
+  application boundary can require a local `# noqa: BLE001` directive with the
+  rationale recorded in [docs/adr/README.md](adr/README.md).
 - Use explicit timezones. Ruff checks datetime operations with `DTZ`.
 - Pass logging values as arguments rather than formatting the message first.
   Ruff checks this with `G`.
@@ -50,6 +51,12 @@ Ruff upgrade also apply.
 - Use complete branches for complicated choices. `GPC002` rejects conditional
   expressions nested in another conditional expression. This is Sangam's explicit
   interpretation of Google's section 2.11, not a rule quoted from Google.
+- Do not write implementation comments. `GPC003` rejects `#` comments outside
+  supported machine directives (`#!`, `# noqa`, `# type:`, `# pyright:`,
+  `# mypy:`, `# pragma:`, `# fmt:`, `# ruff:`) and enforces the per-file ratchet
+  in `scripts/comment-ratchet.json`. Record non-obvious invariants in
+  [docs/adr/README.md](adr/README.md) and file issues for workarounds. Docstrings
+  remain allowed and are checked by Ruff.
 - Make return and exception flow clear. Ruff enables `RET`, `PLE`, `PLW`,
   `TRY002`, `TRY203`, `TRY400`, and `TRY401`. These catch inconsistent returns,
   control-flow mistakes, generic exceptions, redundant handlers, and lost or
@@ -90,7 +97,9 @@ Sangam keeps its 100-column formatter setting and existing direct symbol imports
 These differ from Google's exact layout and import conventions. We do not ban
 FastAPI dependency defaults, Pydantic models, nested transaction callbacks, or
 necessary exception boundaries merely because a general rule has exceptions.
-Document each necessary suppression locally with its exact rule code.
+Name the exact rule code on each necessary suppression directive and record
+non-obvious rationale in [docs/adr/README.md](adr/README.md) rather than in an
+inline comment.
 
 ## TypeScript
 
@@ -98,6 +107,15 @@ Document each necessary suppression locally with its exact rule code.
 - Preserve type evidence. The existing vendored
   [anti-slop rules](https://github.com/dmmulroy/anti-slop) reject unsafe assertions
   and widening. Non-const assertions need a preceding `SAFETY` comment.
+- Do not write implementation comments. `anti-slop/no-comments` rejects `//` and
+  non-JSDoc `/* */` comments outside supported machine directives (`SAFETY:`,
+  `eslint-disable`, `oxlint-disable`, `@ts-*`, `@vitest-environment`,
+  `vite-ignore`, `prettier-ignore`, coverage ignores, and triple-slash
+  references) using the per-file ratchet in
+  `frontend/tools/oxlint/comment-ratchet.json`. `frontend/scripts/check-ui-system.mjs`
+  enforces the same ban and ratchet (`frontend/scripts/css-comment-ratchet.json`)
+  for CSS. Move non-obvious decisions to [docs/adr/README.md](adr/README.md) and
+  use `.agents/skills/delete-comment/SKILL.md` for future comment cleanups.
 - Handle every union or enum member in a `switch`. Type-aware ESLint enables
   `switch-exhaustiveness-check` for application sources. A default branch does
   not excuse missing members of a union.
@@ -117,12 +135,20 @@ project. The anti-slop plugin permits module mocking in test files only.
 Run `just lint`, `just typecheck`, and `just test` before submitting changes.
 `just test-python` runs Python lint, format, types, API-contract checks, and tests.
 `just lint-python` includes `just python-standards`, which checks the Google-derived
-expression rules. `just test-python-standards` checks accepted and rejected syntax
-and the checker's CLI failure behavior. Both are part of `just test-python` in CI.
+expression rules and the implementation comment ban (`GPC003`).
+`just test-python-standards` checks accepted and rejected syntax, comment rules,
+ratchet behavior, and the checker's CLI failure behavior. Both are part of
+`just test-python` in CI.
 `just test-frontend` runs frontend format, build, lint, and unit tests. CI runs
-both recipes. Browser behavior also requires `just test-e2e`.
+both recipes, plus `just test-docs` (which checks local Markdown links,
+backticked repository paths, `just` recipes, hardcoded developer home paths,
+Mermaid fences, and `markdownlint` across canonical documentation and skills).
+Browser behavior also requires `just test-e2e`.
 
-Use a local suppression only when the rule rejects necessary behavior. Explain
-the invariant next to it and name the exact rule. Do not disable a rule across a
-file or weaken a type just to pass CI. For new custom rules, write failure cases
-before implementing the rule and prove that valid code still passes.
+Use a local suppression only when the rule rejects necessary behavior, naming the
+exact rule code on the directive. Record non-obvious invariants in
+[docs/adr/README.md](adr/README.md) (or a `// SAFETY:` comment immediately before
+a non-const TypeScript assertion) rather than adding inline implementation
+comments. Do not disable a rule across a file or weaken a type just to pass CI.
+For new custom rules, write failure cases before implementing the rule and prove
+that valid code still passes.

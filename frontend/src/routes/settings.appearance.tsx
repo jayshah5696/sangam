@@ -615,7 +615,6 @@ function CreateThemeSection() {
     })
   }
 
-  // Background and accent are the only required picks. Everything else follows from them.
   const setCorePick = (theme: CustomTheme, key: 'appBg' | 'accent', value: string) => {
     const current = resolveCustomThemeColors(theme)
     const next = deriveThemeColors(
@@ -631,7 +630,6 @@ function CreateThemeSection() {
 
   const createTheme = () => {
     const id = `theme-${Date.now().toString(36)}`
-    // Start from the theme in use, so tuning what you already run is an edit, not a rebuild.
     const seed = active
       ? resolveCustomThemeColors(active)
       : baseThemeColors[themes.find((t) => t.id === preferences.theme)?.id ?? 'midnight']

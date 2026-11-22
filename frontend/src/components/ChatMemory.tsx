@@ -162,7 +162,6 @@ function MemoryEditor({
   const editButton = useRef<HTMLButtonElement>(null)
   const [forget, setForget] = useState(false)
   const dirty = content !== baseline.content
-  // Refresh clean rows, but a draft keeps the revision against which it was written.
   if (entry.version > baseline.version && !dirty) {
     setBaseline(entry)
     setContent(entry.content)

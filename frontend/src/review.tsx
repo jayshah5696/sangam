@@ -210,10 +210,8 @@ function ProposalCard({
 
   const citations: ChatProposalCitation[] = proposal.citations ?? []
   const sourcesRetrieved: ChatProposalSource[] = proposal.sources_retrieved ?? []
-  // Stale only once the document has loaded; a loading card is not yet known to be stale.
   const stale = Boolean(document) && !current
 
-  // Stale cards put recovery in the warning banner; current cards keep it in the action row.
   const revisionButton = (
     <button
       type="button"

@@ -16,7 +16,6 @@ def add_document_path_filter(
         return
     clauses = []
     for prefix in path_prefixes:
-        # Binary ordering bounds descendants without treating SQL wildcards specially.
         clauses.append("(d.path = ? OR (d.path >= ? AND d.path < ?))")
         parameters.extend((prefix, f"{prefix}/", f"{prefix}0"))
     conditions.append(f"({' OR '.join(clauses)})")

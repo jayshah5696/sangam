@@ -133,11 +133,7 @@ export function WorkspaceEvidenceRail({ document }: { document?: Document | null
               className="icon-button-sm"
               title="Clear all kept evidence"
               aria-label="Clear all kept evidence"
-              onClick={() =>
-                void clearEvidence().catch(() => {
-                  /* Store displays persistence failure. */
-                })
-              }
+              onClick={() => void clearEvidence().catch(() => {})}
             >
               <Trash2 size="var(--icon-detail)" />
             </button>
@@ -316,7 +312,6 @@ function EvidenceCard({
     }
   }
 
-  // Query source document to see if head revision has changed
   const sourceDocQuery = useQuery({
     queryKey: ['document', item.sourceDocumentId],
     queryFn: () => api.getDocument(item.sourceDocumentId),

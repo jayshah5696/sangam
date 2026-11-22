@@ -45,7 +45,6 @@ def test_invalid_scopes_never_issue_global_grants(client: TestClient, scope):
 def test_authorization_error_details_omits_out_of_scope_paths():
     policy = AuthorizationPolicy()
 
-    # Path-scoped agent targeting an out-of-scope path
     agent_principal = Principal(
         actor_id="agent:scoped",
         display_name="Scoped Agent",
@@ -59,7 +58,6 @@ def test_authorization_error_details_omits_out_of_scope_paths():
     assert "path" not in exc_info.value.details
     assert exc_info.value.details["capability"] == "read"
 
-    # Path-scoped agent targeting an in-scope path with missing capability (e.g. UPDATE)
     with pytest.raises(AuthorizationError) as exc_info:
         policy.require(agent_principal, Capability.UPDATE, "allowed/path/doc.md")
     assert exc_info.value.details.get("path") == "allowed/path/doc.md"
@@ -73,7 +71,6 @@ def test_authorization_error_details_omits_out_of_scope_paths():
         identity_kind="system",
         operation_id="op_3",
     )
-    # Admin and system pass allows(), so let's verify require doesn't raise for them:
     policy.require(admin_principal, Capability.READ, "secret/path/doc.md")
     policy.require(system_principal, Capability.READ, "secret/path/doc.md")
 
@@ -101,7 +98,6 @@ def test_publication_evidence_rejects_null_bytes_and_control_chars(
         field: value,
     }
 
-    # Test POST /api/v1/publications
     response_post = client.post(
         "/api/v1/publications",
         json={
@@ -115,7 +111,6 @@ def test_publication_evidence_rejects_null_bytes_and_control_chars(
     assert response_post.status_code == 422
     assert "cannot contain" in response_post.json()["error"]["message"]
 
-    # Create a valid publication first on a separate document
     doc2 = create(client, path=f"docs/item-patch-{slug_field}.md")
     doc2_id = doc2.json()["document_id"]
     valid_pub = client.post(
@@ -131,7 +126,6 @@ def test_publication_evidence_rejects_null_bytes_and_control_chars(
     pub_id = valid_pub.json()["publication_id"]
     version = valid_pub.json()["version"]
 
-    # Test PATCH /api/v1/publications/{publication_id}
     response_patch = client.patch(
         f"/api/v1/publications/{pub_id}",
         json={
@@ -262,7 +256,6 @@ def test_agent_scope_boundary_enforcement(client: TestClient):
     )
     auth = {"Authorization": f"Bearer {token}"}
 
-    # Allowed in docs/
     allowed = client.post(
         "/api/v1/documents",
         json={"title": "Allowed", "content": "ok", "path": "docs/item.md"},
@@ -270,7 +263,6 @@ def test_agent_scope_boundary_enforcement(client: TestClient):
     )
     assert allowed.status_code == 201
 
-    # Denied in docs-private/
     denied = client.post(
         "/api/v1/documents",
         json={"title": "Denied", "content": "secret", "path": "docs-private/secret.md"},

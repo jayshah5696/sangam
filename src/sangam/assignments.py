@@ -734,8 +734,6 @@ class AssignmentService:
             raise
 
     def commit_result(self, assignment_id: str) -> None:
-        # Keep control input and finalization serialized. The stable keys and
-        # persisted model result recover committed writes without re-inference.
         with self._control_lock:
             with self.database.connection() as conn:
                 row = conn.execute(
@@ -888,8 +886,6 @@ class AssignmentService:
             assignment.output_tokens += output_tokens
             assignment.result = result
 
-            # Merge the result into the current record so a pause/stop/steer
-            # acknowledged during inference cannot be overwritten.
             def checkpoint() -> None:
                 with self.database.transaction():
                     try:
@@ -902,7 +898,6 @@ class AssignmentService:
 
             await self.chat.admission.run_sync(checkpoint)
             await self.chat.admission.run_sync(self.commit_result, assignment.assignment_id)
-        # Persist any provider or worker failure so the assignment cannot remain running.
         except Exception as error:  # noqa: BLE001
 
             def failed(failure: Exception = error) -> None:

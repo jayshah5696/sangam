@@ -73,7 +73,7 @@ def test_a_competing_write_during_the_file_step_fails_the_commit_and_restores_th
 
         def wrapped(*args, **kwargs):
             result = original(*args, **kwargs)
-            if not competing:  # the undo step moves files too
+            if not competing:
                 competing.append(write_from_another_process(client, document["document_id"]))
             return result
 

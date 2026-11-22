@@ -177,7 +177,6 @@ class ChatSkillService:
             )
 
         if project_id:
-            # Check project membership
             detail = self.projects.get_project(project_id, principal=principal)
             if not any(item.document_id == document_id for item in detail.documents):
                 raise ValidationError(
@@ -208,8 +207,6 @@ class ChatSkillService:
         payload = request.model_dump(mode="json")
 
         def mutate() -> SkillSummary:
-            # Agent reads write their audit on another connection. Do these
-            # before holding the registration writer lock.
             skill_id, parsed = self.preflight_registration(
                 principal, request.document_id, request.project_id
             )
@@ -397,7 +394,6 @@ class ChatSkillService:
         if has_scripts and msg not in diagnostics:
             diagnostics.append(msg)
 
-        # Check referenced documents
         ref_ids = set(_INTERNAL_DOC_PATTERN.findall(procedure))
         for ref_id in ref_ids:
             try:
@@ -551,7 +547,6 @@ class ChatSkillService:
         if not parsed:
             raise ValidationError("Skill frontmatter could not be parsed at pinned revision")
 
-        # Resolve referenced resources
         ref_ids = sorted(set(_INTERNAL_DOC_PATTERN.findall(procedure)))
         resources: list[SkillResource] = []
         for ref_id in ref_ids:

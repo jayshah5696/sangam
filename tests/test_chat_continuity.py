@@ -149,7 +149,6 @@ def test_task_context_never_reports_background_work_or_grants_authority(client):
     assert "No work continues after a request ends" in prompt
     assert "Await publication decision" in prompt
     assert len(prompt.encode()) < 20000
-    # A fresh service instance reads persisted state, rather than process-local memory.
 
     chat = client.app.state.services.chat
     restored = ChatContinuityService(chat.evidence.database, chat.workspace, chat.projects)

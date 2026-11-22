@@ -595,7 +595,6 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
     client: TestClient,
 ) -> None:
 
-    # Real agents authenticate with a token; the effect is later run with that token's grants.
     identity = client.app.state.services.identity
     issued = identity.issue_agent_token(
         actor_id="agent:researcher",
@@ -673,7 +672,6 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
     )
     assert effect.requested_by == "agent:researcher"
 
-    # A non-admin agent attempting to decide the effect is rejected
     with pytest.raises((AuthorizationError, NotFoundError)):
         chat.effects.decide(
             non_admin_agent,
@@ -683,7 +681,6 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
             reason=None,
         )
 
-    # The administrator successfully decides (approves) the agent's proposed effect
     decision = chat.effects.decide(
         admin_principal,
         effect_id=effect.effect_id,
@@ -694,11 +691,9 @@ def test_administrator_can_decide_and_acknowledge_agent_requested_effects(
     assert decision.effect.status == "completed"
     assert decision.client_result["title"] == "Agent Created Doc"
 
-    # Cross-owner acknowledgement is rejected
     with pytest.raises((AuthorizationError, NotFoundError)):
         chat.effects.acknowledge(non_admin_agent, effect_ids=[effect.effect_id])
 
-    # The administrator successfully acknowledges the agent's completed effect
     ack_res = chat.effects.acknowledge(admin_principal, effect_ids=[effect.effect_id])
     assert ack_res.acknowledged_ids == [effect.effect_id]
     assert ack_res.effects[0].acknowledged_by == "human:jay"
@@ -965,7 +960,6 @@ def test_retry_classification_safety() -> None:
 
 def test_preflight_rejection_create_document(client: TestClient) -> None:
 
-    # Collision with existing document
     client.post(
         "/api/v1/documents",
         headers=headers("create-existing"),
@@ -984,7 +978,6 @@ def test_preflight_rejection_create_document(client: TestClient) -> None:
             },
         )
 
-    # Invalid document path syntax raises InvalidPathError
     with pytest.raises(InvalidPathError):
         prepare_effect(
             client,
@@ -997,7 +990,6 @@ def test_preflight_rejection_create_document(client: TestClient) -> None:
             },
         )
 
-    # Mismatched extension vs content type raises ValidationError
     with pytest.raises(ValidationError):
         prepare_effect(
             client,
@@ -1018,7 +1010,6 @@ def test_preflight_rejection_organization_plan(client: TestClient) -> None:
         json={"title": "Doc", "path": "docs/test.md", "content": "Content"},
     ).json()
 
-    # Destination lacking extension raises InvalidPathError during preflight
     with pytest.raises(InvalidPathError):
         prepare_effect(
             client,
@@ -1036,7 +1027,6 @@ def test_preflight_rejection_organization_plan(client: TestClient) -> None:
             },
         )
 
-    # Missing document raises ConflictError
     with pytest.raises(ConflictError):
         prepare_effect(
             client,
@@ -1068,14 +1058,12 @@ def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
     )
     effect_id = prepared.effect.effect_id
 
-    # Active effect cannot be acknowledged
     ack_res = client.post(
         "/api/v1/chat/effects/acknowledge",
         json={"effect_ids": [effect_id]},
     )
     assert ack_res.status_code == 409
 
-    # Deny effect -> now eligible for acknowledgement
     deny_res = client.post(
         f"/api/v1/chat/effects/{effect_id}/decision",
         json={
@@ -1086,7 +1074,6 @@ def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
     )
     assert deny_res.status_code == 200
 
-    # Acknowledge the denied effect
     ack_res = client.post(
         "/api/v1/chat/effects/acknowledge",
         json={"effect_ids": [effect_id]},
@@ -1097,14 +1084,12 @@ def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
     assert ack_data["effects"][0]["acknowledged_at"] is not None
     assert ack_data["effects"][0]["acknowledged_by"] == "human:jay"
 
-    # Repeated acknowledgement is idempotent
     ack_again = client.post(
         "/api/v1/chat/effects/acknowledge",
         json={"effect_ids": [effect_id]},
     )
     assert ack_again.status_code == 200
 
-    # Issue token for other agent to register actor in DB
     client.app.state.services.identity.issue_agent_token(
         actor_id="agent:unprivileged",
         display_name="Unprivileged Agent",
@@ -1124,7 +1109,6 @@ def test_effect_acknowledgement_and_retries(client: TestClient) -> None:
 
 
 def test_attention_vs_history_queries_and_summary(client: TestClient) -> None:
-    # Create thread with 2 effects: 1 completed, 1 denied and acknowledged
     client.post(
         "/api/v1/documents",
         headers=headers("thread-doc"),
@@ -1152,7 +1136,6 @@ def test_attention_vs_history_queries_and_summary(client: TestClient) -> None:
         },
     )
 
-    # 2nd effect: denied and acknowledged
     turn = first.chat.evidence.create_turn_context(
         first.principal,
         entry_point="workspace",
@@ -1211,7 +1194,6 @@ def test_attention_vs_history_queries_and_summary(client: TestClient) -> None:
         json={"effect_ids": [second_effect.effect_id]},
     )
 
-    # 3rd effect: left in pending_approval (attention)
     third_effect = first.chat.effects.propose(
         first.principal,
         run_id=run_id,
@@ -1232,25 +1214,21 @@ def test_attention_vs_history_queries_and_summary(client: TestClient) -> None:
         },
     )
 
-    # Query summary
     summary = client.get(f"/api/v1/chat/effects/summary?thread_id={thread_id}").json()
     assert summary["thread_id"] == thread_id
     assert summary["total_attention"] == 1
     assert summary["total_history"] == 2
 
-    # Query attention: returns third_effect
     attention = client.get(f"/api/v1/chat/effects?thread_id={thread_id}&view=attention").json()
     assert len(attention) == 1
     assert attention[0]["effect_id"] == third_effect.effect_id
 
-    # Query history: returns first and second
     history = client.get(f"/api/v1/chat/effects?thread_id={thread_id}&view=history").json()
     assert len(history) == 2
     history_ids = [h["effect_id"] for h in history]
     assert first.effect.effect_id in history_ids
     assert second_effect.effect_id in history_ids
 
-    # Query history with limit 1 and cursor
     page1 = client.get(f"/api/v1/chat/effects?thread_id={thread_id}&view=history&limit=1").json()
     assert len(page1) == 1
     page2 = client.get(
@@ -1326,7 +1304,6 @@ def test_reviewed_action_approval_digest_binding_and_tamper_rejection(
         assert approved.json()["effect"]["status"] == "completed"
     else:
         prepared = prepare_proposal(client, tool_call_id="call_digest_proposal")
-        # First apply attempt binds the payload digest to the idempotency key
         approved = client.post(
             f"/api/v1/chat/proposals/{prepared.proposal.proposal_id}/apply",
             headers={"Idempotency-Key": f"key-bound-{prepared.proposal.proposal_id}"},
@@ -1338,7 +1315,6 @@ def test_reviewed_action_approval_digest_binding_and_tamper_rejection(
         assert approved.status_code == 200
         assert approved.json()["status"] == "applied"
 
-        # Tampered retry with same idempotency key fails with 409 Conflict (digest mismatch)
         tampered = client.post(
             f"/api/v1/chat/proposals/{prepared.proposal.proposal_id}/apply",
             headers={"Idempotency-Key": f"key-bound-{prepared.proposal.proposal_id}"},
@@ -1522,7 +1498,6 @@ def test_organization_plan_restore_document_lifecycle(client: TestClient) -> Non
         headers=headers("trash-target"),
         json={"title": "To Trash", "path": "trash.md", "content": "# Trash me"},
     ).json()
-    # Trash it
     trash_effect = prepare_effect(
         client,
         capability_id="apply_workspace_organization_plan",
@@ -1549,12 +1524,10 @@ def test_organization_plan_restore_document_lifecycle(client: TestClient) -> Non
     assert appr_trash.status_code == 200
     assert client.get(f"/api/v1/documents/{doc['document_id']}").status_code == 404
 
-    # Fetch the deleted document revision state
     trashed_meta = client.app.state.services.documents.get_document(
         doc["document_id"], include_deleted=True
     )
 
-    # Restore it
     restore_effect = prepare_effect(
         client,
         capability_id="apply_workspace_organization_plan",

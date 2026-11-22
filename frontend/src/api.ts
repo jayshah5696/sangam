@@ -510,7 +510,6 @@ export const operationEventSchema = z.object({
     current_metadata_version: z.number().optional(),
     expected_metadata_version: z.number().optional(),
     capability: z.string().optional(),
-    // Set when the change came through chat, for example "chat-effect:eff_123".
     via: z.string().optional(),
     approved_by: z.string().optional(),
   }),

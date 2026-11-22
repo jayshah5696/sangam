@@ -194,7 +194,7 @@ function PublicationCard({
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // clipboard write error handled gracefully
+      return
     }
   }
 

@@ -67,7 +67,6 @@ def test_sensitive_header_and_data_sanitization() -> None:
 
 
 def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
-    # 1. Issue an agent token
     issue_resp = client.post(
         "/api/v1/agent-tokens",
         json={
@@ -94,7 +93,6 @@ def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
         "X-Sangam-Operation-Id": "agent_op_001",
     }
 
-    # 2. Create document as agent
     create_resp = client.post(
         "/api/v1/documents",
         json={
@@ -109,7 +107,6 @@ def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
     doc_id = created_doc["document_id"]
     rev1 = created_doc["current_revision_id"]
 
-    # 3. Update document as agent
     update_resp = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -123,7 +120,6 @@ def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
     updated_doc = update_resp.json()
     rev2 = updated_doc["current_revision_id"]
 
-    # 4. Move document as agent
     move_resp = client.post(
         f"/api/v1/documents/{doc_id}/move",
         json={
@@ -136,7 +132,6 @@ def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
     moved_doc = move_resp.json()
     rev3 = moved_doc["current_revision_id"]
 
-    # 5. Delete document as agent
     delete_resp = client.request(
         "DELETE",
         f"/api/v1/documents/{doc_id}",
@@ -145,7 +140,6 @@ def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
     )
     assert delete_resp.status_code == 200
 
-    # Query activity logs for agent actor_kind
     activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
     assert activity_resp.status_code == 200
     events = activity_resp.json()
@@ -182,7 +176,6 @@ def test_agent_document_mutation_audit_provenance(client: TestClient) -> None:
 
 
 def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> None:
-    # 1. Create a document
     create_resp = client.post(
         "/api/v1/documents",
         json={
@@ -197,7 +190,6 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     doc_id = created_doc["document_id"]
     rev1 = created_doc["current_revision_id"]
 
-    # 2. Update document
     update_resp = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -211,7 +203,6 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     updated_doc = update_resp.json()
     rev2 = updated_doc["current_revision_id"]
 
-    # 3. Move document
     move_resp = client.post(
         f"/api/v1/documents/{doc_id}/move",
         json={
@@ -224,7 +215,6 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     moved_doc = move_resp.json()
     rev3 = moved_doc["current_revision_id"]
 
-    # 4. Delete document
     delete_resp = client.request(
         "DELETE",
         f"/api/v1/documents/{doc_id}",
@@ -235,7 +225,6 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     deleted_doc = delete_resp.json()
     rev4 = deleted_doc["current_revision_id"]
 
-    # 5. Restore document
     restore_resp = client.post(
         f"/api/v1/documents/{doc_id}/restore",
         json={
@@ -246,12 +235,10 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
     )
     assert restore_resp.status_code == 200
 
-    # Query activity logs for human actor
     activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
     assert activity_resp.status_code == 200
     events = activity_resp.json()
 
-    # Verify event types are recorded with accurate paths and actors
     actions = {event["action"]: event for event in events if event["resource_id"] == doc_id}
     assert "create" in actions
     assert actions["create"]["path"] == "docs/audit_test.md"
@@ -280,7 +267,6 @@ def test_document_mutation_audit_provenance_lifecycle(client: TestClient) -> Non
 
 
 def test_export_json_lines_audit_logs(client: TestClient) -> None:
-    # Create document to generate activity
     client.post(
         "/api/v1/documents",
         json={
@@ -298,7 +284,6 @@ def test_export_json_lines_audit_logs(client: TestClient) -> None:
     lines = [line.strip() for line in jsonl_resp.text.strip().split("\n") if line.strip()]
     assert len(lines) > 0
 
-    # Verify each line parses as valid JSON matching OperationEvent structure
     parsed_events = [json.loads(line) for line in lines]
     for event in parsed_events:
         assert "event_id" in event
@@ -460,7 +445,6 @@ def test_extended_sensitive_header_and_data_sanitization() -> None:
 
 
 def test_folder_mutation_audit_provenance(client: TestClient) -> None:
-    # 1. Create a folder
     create_resp = client.post(
         "/api/v1/folders",
         json={"path": "projects/audit_folder", "category": "engineering"},
@@ -470,7 +454,6 @@ def test_folder_mutation_audit_provenance(client: TestClient) -> None:
     folder = create_resp.json()
     folder_id = folder["folder_id"]
 
-    # 2. Update folder metadata
     update_resp = client.patch(
         f"/api/v1/folders/{folder_id}",
         json={
@@ -483,7 +466,6 @@ def test_folder_mutation_audit_provenance(client: TestClient) -> None:
     assert update_resp.status_code == 200
     assert update_resp.json()["category"] == "research"
 
-    # 3. Move folder
     move_resp = client.post(
         f"/api/v1/folders/{folder_id}/move",
         json={"path": "projects/moved_audit_folder"},
@@ -491,7 +473,6 @@ def test_folder_mutation_audit_provenance(client: TestClient) -> None:
     )
     assert move_resp.status_code == 200
 
-    # Query activity logs for human actor
     activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
     assert activity_resp.status_code == 200
     events = activity_resp.json()
@@ -517,7 +498,6 @@ def test_folder_mutation_audit_provenance(client: TestClient) -> None:
 
 
 def test_organization_plan_audit_provenance(client: TestClient) -> None:
-    # 1. Create a document to be moved in plan
     create_doc_resp = client.post(
         "/api/v1/documents",
         json={
@@ -532,7 +512,6 @@ def test_organization_plan_audit_provenance(client: TestClient) -> None:
     doc_id = doc["document_id"]
     rev1 = doc["current_revision_id"]
 
-    # 2. Apply organization plan with folder creation and document move
     plan_resp = client.post(
         "/api/v1/organization/plans",
         json={
@@ -558,7 +537,6 @@ def test_organization_plan_audit_provenance(client: TestClient) -> None:
     plan_result = plan_resp.json()
     assert plan_result["status"] == "completed"
 
-    # Query activity logs
     activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
     assert activity_resp.status_code == 200
     events = activity_resp.json()
@@ -607,7 +585,6 @@ def test_extended_credential_keys_sanitization() -> None:
 
 
 def test_audit_provenance_and_structured_change_events_detail(client: TestClient) -> None:
-    # 1. Create a document with initial content
     create_resp = client.post(
         "/api/v1/documents",
         json={
@@ -622,7 +599,6 @@ def test_audit_provenance_and_structured_change_events_detail(client: TestClient
     doc_id = doc["document_id"]
     rev1 = doc["current_revision_id"]
 
-    # 2. Update the document to generate patch diff metadata
     update_resp = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -633,7 +609,6 @@ def test_audit_provenance_and_structured_change_events_detail(client: TestClient
     )
     assert update_resp.status_code == 200
 
-    # 3. Duplicate the document
     dupe_resp = client.post(
         f"/api/v1/documents/{doc_id}/duplicate",
         json={
@@ -646,7 +621,6 @@ def test_audit_provenance_and_structured_change_events_detail(client: TestClient
     assert dupe_resp.status_code == 201
     dupe_doc_id = dupe_resp.json()["document_id"]
 
-    # 4. Inspect activity log for structured change events and provenance
     activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
     assert activity_resp.status_code == 200
     events = activity_resp.json()
@@ -763,7 +737,6 @@ def test_audit_details_automatically_include_action_type_and_target_file(
     assert actions["update"]["details"]["action_type"] == "update"
     assert actions["update"]["details"]["target_file"] == "docs/action_type_target_file.md"
 
-    # Export JSONL and verify structured details carry action_type and target_file
     jsonl_resp = client.get("/api/v1/activity/export.jsonl", params={"actor_kind": "human"})
     assert jsonl_resp.status_code == 200
     lines = [json.loads(line) for line in jsonl_resp.text.strip().split("\n") if line.strip()]
@@ -802,7 +775,6 @@ def test_operation_event_action_and_path_provenance(client: TestClient) -> None:
 
 def test_chronicle_provenance_and_structured_patch_events(client: TestClient) -> None:
     """Verify write, patch, rename, and delete operations log actor identity and change details."""
-    # 1. Issue token for agent:chronicle-bot
     issue_resp = client.post(
         "/api/v1/agent-tokens",
         json={
@@ -827,7 +799,6 @@ def test_chronicle_provenance_and_structured_patch_events(client: TestClient) ->
         "X-Sangam-Operation-Id": "chronicle_op_100",
     }
 
-    # 2. Agent creates a document
     create_resp = client.post(
         "/api/v1/documents",
         json={
@@ -842,7 +813,6 @@ def test_chronicle_provenance_and_structured_patch_events(client: TestClient) ->
     doc_id = created["document_id"]
     rev1 = created["current_revision_id"]
 
-    # 3. Agent patches (updates) document
     update_resp = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -855,7 +825,6 @@ def test_chronicle_provenance_and_structured_patch_events(client: TestClient) ->
     assert update_resp.status_code == 200
     rev2 = update_resp.json()["current_revision_id"]
 
-    # 4. Agent renames/moves document
     move_resp = client.post(
         f"/api/v1/documents/{doc_id}/move",
         json={
@@ -867,7 +836,6 @@ def test_chronicle_provenance_and_structured_patch_events(client: TestClient) ->
     assert move_resp.status_code == 200
     rev3 = move_resp.json()["current_revision_id"]
 
-    # 5. Agent deletes document
     delete_resp = client.request(
         "DELETE",
         f"/api/v1/documents/{doc_id}",
@@ -876,7 +844,6 @@ def test_chronicle_provenance_and_structured_patch_events(client: TestClient) ->
     )
     assert delete_resp.status_code == 200
 
-    # Query activity log for agent
     activity_resp = client.get("/api/v1/activity", params={"actor_kind": "agent"})
     assert activity_resp.status_code == 200
     events = activity_resp.json()
@@ -922,7 +889,6 @@ def test_chronicle_sensitive_credential_assignment_sanitization() -> None:
 
 def test_chronicle_publication_folder_reconciliation_audit_provenance(client: TestClient) -> None:
     """Verify publication, folder, and reconciliation actions log action_type and target_file."""
-    # 1. Create document to publish
     doc_resp = client.post(
         "/api/v1/documents",
         json={
@@ -936,7 +902,6 @@ def test_chronicle_publication_folder_reconciliation_audit_provenance(client: Te
     doc_id = doc_resp.json()["document_id"]
     rev_id = doc_resp.json()["current_revision_id"]
 
-    # 2. Create publication
     pub_resp = client.post(
         "/api/v1/publications",
         json={
@@ -951,7 +916,6 @@ def test_chronicle_publication_folder_reconciliation_audit_provenance(client: Te
     pub_id = pub_resp.json()["publication_id"]
     pub_version = pub_resp.json()["version"]
 
-    # 3. Update publication
     update_pub_resp = client.patch(
         f"/api/v1/publications/{pub_id}",
         json={
@@ -963,7 +927,6 @@ def test_chronicle_publication_folder_reconciliation_audit_provenance(client: Te
     )
     assert update_pub_resp.status_code == 200
 
-    # 4. Expose publication revision
     expose_resp = client.post(
         f"/api/v1/publications/{pub_id}/revisions",
         json={"revision_id": rev_id},
@@ -971,7 +934,6 @@ def test_chronicle_publication_folder_reconciliation_audit_provenance(client: Te
     )
     assert expose_resp.status_code == 200
 
-    # 5. Unpublish
     unpub_resp = client.delete(
         f"/api/v1/publications/{pub_id}",
         params={"expected_version": update_pub_resp.json()["version"]},
@@ -979,7 +941,6 @@ def test_chronicle_publication_folder_reconciliation_audit_provenance(client: Te
     )
     assert unpub_resp.status_code == 200
 
-    # Verify publication events carry action_type and target_file
     act_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
     assert act_resp.status_code == 200
     events = act_resp.json()
@@ -1092,7 +1053,6 @@ def test_activity_service_auto_populates_action_type_and_target_file() -> None:
     assert detail_json["action_type"] == "update"
     assert detail_json["target_file"] == "docs/test.md"
 
-    # Test auto-populating target_file from destination_path when path is None
     row_dest, _ = service._prepare_event_row(
         principal=principal,
         action="move",
@@ -1106,7 +1066,6 @@ def test_activity_service_auto_populates_action_type_and_target_file() -> None:
     assert detail_json_dest["action_type"] == "move"
     assert detail_json_dest["target_file"] == "docs/moved.md"
 
-    # Test auto-populating target_file from expected_source_path and path in details
     row_exp, _ = service._prepare_event_row(
         principal=principal,
         action="move",
@@ -1202,7 +1161,6 @@ def test_document_comment_audit_provenance(client: TestClient) -> None:
     doc_id = doc["document_id"]
     rev_id = doc["current_revision_id"]
 
-    # Create comment
     comment_resp = client.post(
         f"/api/v1/documents/{doc_id}/comments",
         json={
@@ -1218,7 +1176,6 @@ def test_document_comment_audit_provenance(client: TestClient) -> None:
     comment = comment_resp.json()
     comment_id = comment["comment_id"]
 
-    # Resolve comment
     resolve_resp = client.post(
         f"/api/v1/documents/{doc_id}/comments/{comment_id}/resolve",
         json={"resolved": True, "expected_version": comment["version"]},
@@ -1226,7 +1183,6 @@ def test_document_comment_audit_provenance(client: TestClient) -> None:
     )
     assert resolve_resp.status_code == 200
 
-    # Verify activity events
     activity_resp = client.get("/api/v1/activity", params={"actor_kind": "human"})
     assert activity_resp.status_code == 200
     events = [e for e in activity_resp.json() if e["resource_id"] == doc_id]
@@ -1269,7 +1225,6 @@ def test_document_asset_attachment_audit_provenance(client: TestClient) -> None:
     assert create_doc_resp.status_code == 201
     doc_id = create_doc_resp.json()["document_id"]
 
-    # 1x1 transparent PNG bytes
     png_bytes = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
         b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc\x00\x01"
@@ -1343,7 +1298,6 @@ def test_chronicle_sanitizing_log_filter() -> None:
     """Verify SanitizingLogFilter strips sensitive tokens and secrets from log messages and args."""
     filter_instance = SanitizingLogFilter()
 
-    # 1. Message containing Bearer token and password assignment
     record1 = logging.LogRecord(
         name="test_logger",
         level=logging.INFO,
@@ -1361,7 +1315,6 @@ def test_chronicle_sanitizing_log_filter() -> None:
     assert "my_db_pass" not in record1.msg
     assert "[REDACTED]" in record1.msg
 
-    # 2. Log record with format string and args dictionary
     payload_args = {
         "api_key": "sk-proj-1234567890abcdef12345678",
         "doc_title": "Project Overview",
@@ -1387,7 +1340,6 @@ def test_chronicle_sanitizing_log_filter() -> None:
 
 def test_chronicle_expanded_tokens_and_headers_sanitization() -> None:
     """Verify newly added token patterns and sensitive headers are sanitized."""
-    # Extended token formats
     text = (
         "AWS STS: ASIAIOSFODNN7EXAMPLE "
         "GitHub Server: ghs_1234567890abcdef12345678 "
@@ -1404,7 +1356,6 @@ def test_chronicle_expanded_tokens_and_headers_sanitization() -> None:
     assert "pypi-AgEIcHlwaS5vcmcCJDEyMzQ1Njc4LT" not in sanitized
     assert "SG.1234567890abcdef123456" not in sanitized
 
-    # Extended sensitive headers
     headers_to_check = {
         "x-amzn-oidc-data": "oidc_raw_data_token",
         "x-hub-signature-256": "sha256=abcdef1234567890",
@@ -1423,7 +1374,6 @@ def test_chronicle_action_type_and_path_propagation() -> None:
     )
     service = ActivityService.__new__(ActivityService)
 
-    # Event with destination_path in details but path=None
     row_dest, _ = service._prepare_event_row(
         principal=principal,
         action="move",
@@ -1436,5 +1386,4 @@ def test_chronicle_action_type_and_path_propagation() -> None:
     details_dest = json.loads(str(row_dest[11]))
     assert details_dest["action_type"] == "move"
     assert details_dest["target_file"] == "docs/final_location.md"
-    # Row's path column must be populated from target_file
     assert row_dest[7] == "docs/final_location.md"

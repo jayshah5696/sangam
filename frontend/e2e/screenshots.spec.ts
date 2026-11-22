@@ -26,7 +26,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     // SAFETY: POST /api/v1/documents returns document entity with document_id
     const mobileDoc = (await mobileDocRes.json()) as { document_id: string }
 
-    // 1. Mobile Document Workbench
     await page.goto(`/documents/${mobileDoc.document_id}`)
     await expect(page.getByRole('heading', { name: 'Product launch review' })).toBeVisible()
     await page.waitForTimeout(400)
@@ -35,7 +34,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
       fullPage: false,
     })
 
-    // 2. Mobile Inspector Sheet
     const inspectorToggle = page.getByRole('button', { name: 'Open document inspector' })
     if (await inspectorToggle.isVisible()) {
       await inspectorToggle.click()
@@ -45,7 +43,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
         fullPage: false,
       })
 
-      // 3. Mobile AI Chat Tab inside Inspector
       const chatTab = page.getByRole('tab', { name: 'chat' })
       if (await chatTab.isVisible()) {
         await chatTab.click()
@@ -71,7 +68,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
       await expect(page.getByRole('dialog', { name: 'Document inspector' })).not.toBeVisible()
     }
 
-    // 4. Mobile Settings
     await page.goto('/settings?category=appearance')
     await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible()
     await page.screenshot({
@@ -79,7 +75,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
       fullPage: false,
     })
 
-    // 5. Mobile PDF Research Workspace
     const samplePdfPath = path.join(repositoryRoot, 'data/workspace/research/architecture.pdf')
     if (fs.existsSync(samplePdfPath)) {
       const pdfBuffer = fs.readFileSync(samplePdfPath)
@@ -106,7 +101,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
       }
     }
 
-    // 6. Mobile HTML Preview
     const htmlDocRes = await request.post('/api/v1/documents', {
       headers: { 'Idempotency-Key': randomUUID() },
       data: {
@@ -142,7 +136,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     return
   }
 
-  // Desktop captures
   const companion = await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': randomUUID() },
     data: {
@@ -177,7 +170,6 @@ test('capture the README workspace and settings screenshots', async ({ page, req
     fullPage: false,
   })
 
-  // Document chat expands from the inspector into the full conversation route.
   const openInspector = page.getByRole('button', { name: 'Open document inspector' })
   if (await openInspector.isVisible()) {
     await openInspector.click()

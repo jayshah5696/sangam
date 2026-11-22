@@ -440,9 +440,6 @@ def _entry_to_model(entry: _CatalogEntry) -> CatalogModel:
         connection_id, raw_id = split_model_ref(raw_id)
     else:
         connection_id = entry.connection_id
-    # Catalogs written before connection support stored only an OpenRouter model
-    # ID. Recover the curated compatibility contract instead of downgrading a
-    # previously supported model to "unknown" during migration.
     if entry.model_id is None and connection_id == "openrouter":
         curated = next((item for item in CURATED_CATALOG if item.model_id == raw_id), None)
         if curated is not None:

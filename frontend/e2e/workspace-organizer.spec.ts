@@ -263,7 +263,6 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
   await expect(mdRow).toBeVisible()
   await expect(pdfRow).toBeVisible()
 
-  // 1. Verify full action context menu on PDF document
   await pdfRow.click({ button: 'right' })
   const menu = page.getByRole('menu', { name: `Actions for ${pdfName}` })
   await expect(menu).toBeVisible()
@@ -274,7 +273,6 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
   await expect(menu.getByRole('menuitem', { name: 'Edit tags and category…' })).toBeVisible()
   await expect(menu.getByRole('menuitem', { name: 'Move to trash' })).toBeVisible()
 
-  // 2. Duplicate PDF via context menu
   await menu.getByRole('menuitem', { name: 'Duplicate' }).click()
   const dupName = `paper-${suffix} copy.pdf`
   await expect(page.getByRole('tab', { name: `Paper ${suffix} copy` })).toBeVisible()
@@ -282,14 +280,12 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
   const dupRow = tree.getByRole('treeitem', { name: dupName, exact: true })
   await expect(dupRow).toBeVisible()
 
-  // Trash the duplicate to keep tree clean
   await dupRow.focus()
   await page.keyboard.press('Shift+F10')
   const dupMenu = page.getByRole('menu', { name: `Actions for ${dupName}` })
   await dupMenu.getByRole('menuitem', { name: 'Move to trash' }).click()
   await expect(dupRow).toBeHidden()
 
-  // 3. Multi-selection of Markdown + PDF
   await page.goto(`/documents/${mdDoc.document_id}`)
   await showFiles(page)
   await mdRow.click()
@@ -297,14 +293,12 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
   const actions = page.getByLabel('Selected item actions')
   await expect(actions).toContainText('2 selected')
 
-  // Move both to target folder
   await actions.getByRole('button', { name: 'Move selected items', exact: true }).click()
   const moveDialog = page.getByRole('dialog', { name: 'Move 2 items' })
   await moveDialog.getByRole('option', { name: target, exact: true }).click()
   await moveDialog.getByRole('button', { name: 'Move here' }).click()
   await expect(moveDialog).toBeHidden()
 
-  // Verify paths on server
   const currentMdResponse = await request.get(`/api/v1/documents/${mdDoc.document_id}`)
   // SAFETY: GET /api/v1/documents/{id} returns the validated document entity.
   const currentMd = (await currentMdResponse.json()) as CreatedDocument
@@ -315,7 +309,6 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
   const currentPdf = (await currentPdfResponse.json()) as CreatedDocument
   expect(currentPdf.path).toBe(`${target}/${pdfName}`)
 
-  // 4. Trash and Restore PDF
   await showFiles(page)
   const movedPdfRow = tree.getByRole('treeitem', { name: pdfName, exact: true })
   await movedPdfRow.focus()
@@ -324,7 +317,6 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
   await targetMenu.getByRole('menuitem', { name: 'Move to trash' }).click()
   await expect(movedPdfRow).toBeHidden()
 
-  // Go to /trash and restore
   await page.goto('/trash')
   const trashHeading = page.getByRole('heading', { name: 'Trash' })
   await expect(trashHeading).toBeVisible()
@@ -332,7 +324,6 @@ test('mixed markdown and PDF multi-selection can be tagged, moved, duplicated, a
   await expect(restoreBtn).toBeVisible()
   await restoreBtn.click()
 
-  // Verify navigation to restored document
   await expect(page).toHaveURL(new RegExp(`/documents/${pdfDoc.document_id}`))
   await showFiles(page)
   await expect(tree.getByRole('treeitem', { name: pdfName, exact: true })).toBeVisible()

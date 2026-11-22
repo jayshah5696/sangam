@@ -197,8 +197,6 @@ class SkillExports:
         self, principal: Principal, skill_id: str, execution_key: str | None = None
     ) -> SkillEntry:
         self.cleanup()
-        # Read audits use another SQLite connection. Record the bundle read
-        # after its snapshot transaction releases the write lock.
         return self.services.workspace_access.audited(
             principal,
             reads("export_skill", "skill"),
@@ -221,7 +219,6 @@ class SkillExports:
             connection.execute("DELETE FROM mcp_skill_snapshots WHERE superseded_at < ?", (before,))
 
     def _build(self, principal: Principal, skill_id: str, execution_key: str | None) -> SkillEntry:
-        # BEGIN IMMEDIATE keeps source revisions and the published manifest in one view.
         with self.database.transaction() as connection:
             if skill_id == "builtin:sangam":
                 origin: Literal["builtin", "personal", "project"] = "builtin"
