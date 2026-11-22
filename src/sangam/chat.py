@@ -143,7 +143,6 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         self.clock: Callable[[], datetime] = lambda: datetime.now(UTC)
         self.capabilities = ChatCapabilityRegistry(web_enabled=self.web is not None)
         self.evidence = ChatEvidenceRepository(database, workspace)
-        # Runs outlive requests, so every chat entry point refreshes token grants.
         identity = IdentityService(database)
         self.effects = ChatEffectService(
             database=database,
@@ -189,7 +188,6 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
             return self._model_provider
         return self.provider_connections.model_provider(connection_id)
 
-    # Keep both storage owners' shutdown deadlines without cancelling committed work.
     async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         try:
             await self.admission.close(timeout=timeout)
@@ -509,8 +507,6 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
         except (asyncio.CancelledError, GeneratorExit):
             if result is not None:
                 result.cancel()
-                # Agents SDK requires draining after cancellation to settle its
-                # provider tasks before the HTTP request releases admission.
                 async for _event in result.stream_events():
                     pass
             await asyncio.shield(
@@ -577,7 +573,6 @@ class SangamChatServer(ChatKitServer[ChatRequestContext]):
                 allowed.update(note.source_item_ids)
             allowed.update(entry.item_id for entry in sources)
             output_schema = AgentOutputSchema(TaskDraft)
-            # TaskDraft's note schema limits provenance to the observed message IDs.
             output_schema.json_schema()["$defs"]["TaskNote"]["properties"]["source_item_ids"][
                 "items"
             ]["enum"] = sorted(allowed)

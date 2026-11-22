@@ -89,14 +89,11 @@ class BoundedChatAdmission:
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError:
-            # The request still owns its slot and transaction until the worker
-            # finishes. A cancelled await cannot cancel a committing thread.
             try:
                 await task
             finally:
                 raise
 
-    # Shutdown must drain owned writes before its deadline instead of cancelling them.
     async def close(self, timeout: float = 35.0) -> None:  # noqa: ASYNC109
         async with self._condition:
             self._closing = True

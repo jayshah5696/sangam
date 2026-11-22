@@ -156,7 +156,6 @@ def main() -> None:
             )
             replay = call("POST", base + "/assignments", body, "review", 201)
             assert replay["assignment_id"] == assignment.assignment_id
-            # HTTP observers detach immediately; the owning server continues.
             assignment = settled(assignment.assignment_id)
             assert assignment.artifact_ids and assignment.input_tokens > 0
             artifact = Document.model_validate(
@@ -165,8 +164,6 @@ def main() -> None:
             assert "Evidence missing" in artifact.content or "Inspect source" in artifact.content
             checks.append("live provider: project skeptic persisted findings after HTTP detached")
 
-            # Reproduce a lost completion acknowledgement after the document
-            # operation committed. Restart must use its original operation key.
             stop()
             with sqlite3.connect(env["SANGAM_DATABASE_PATH"]) as db:
                 saved = assignment.model_copy(update={"status": "running", "artifact_ids": []})
@@ -181,8 +178,6 @@ def main() -> None:
                 "real process restart reconciled the original document operation without duplicates"
             )
 
-            # Seed an ordinary revision-pinned proposal through the same domain
-            # service used by capabilities, while the server is stopped.
             stop()
 
             settings = Settings(

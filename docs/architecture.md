@@ -115,3 +115,7 @@ Archived Karakeep bookmarks can be imported selectively as editable Markdown. Pr
 ## Recovery
 
 Restore always means: stop writes, restore the paired pair together, run reconciliation, verify. Upgrades are forward-only migrations. Rollback is deploying the previous image digest plus a full paired restore. See [operations/backups.md](operations/backups.md).
+
+## Architecture decision records
+
+Non-obvious implementation invariants live in [docs/adr/README.md](adr/README.md) rather than inline code comments.

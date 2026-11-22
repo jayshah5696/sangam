@@ -280,7 +280,6 @@ def test_assistant_results_and_execution_replay_recheck_current_source_grants(
     assert execute(
         mcp_client, narrow, f"await executions_get(execution_key='{execution_key}')"
     ).get("isError")
-    # A known conversation can also originate in REST rather than this request service.
     response = mcp_client.post(
         "/api/v1/chatkit",
         headers={"Authorization": f"Bearer {token}", "X-Sangam-Document-ID": source["document_id"]},
@@ -485,7 +484,6 @@ def test_legacy_conversation_upgrade_marks_its_source_inventory_incomplete(
                 ],
             },
         ).json()["token"]
-    # Restore the schema-042 shape while retaining canonical thread/run records.
     database = Database(settings.database_path)
     with database.transaction() as connection:
         connection.execute("DROP TABLE mcp_execution_chat_refs")

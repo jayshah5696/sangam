@@ -82,7 +82,6 @@ async def verify() -> None:
             assert submitted["output"] == "submitted"
             if "pending_jobs" in submitted:
                 assert submitted["pending_jobs"][0]["request_key"] == request_key
-            # The submitted execute has ended. A fresh program observes the owned model run.
             first = await finished(request_key)
             assert first["status"] == "completed", first
             assert "SANGAM_ASSISTANT_PROOF" in first["answer"]

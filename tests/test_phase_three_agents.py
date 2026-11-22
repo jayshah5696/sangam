@@ -883,12 +883,10 @@ def test_extend_and_rotate_expired_agent_token(client: TestClient) -> None:
             """,
             (token_id,),
         )
-    # Bearer token is rejected because it is expired
     expired_call = client.get("/api/v1/documents", headers=bearer(raw_token))
     assert expired_call.status_code == 401
     assert "expired" in expired_call.json()["error"]["message"].lower()
 
-    # Extending the expired token to future reactivates the SAME secret
     future_expiry = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     update_res = client.patch(
         f"/api/v1/agent-tokens/{token_id}",
@@ -904,11 +902,9 @@ def test_extend_and_rotate_expired_agent_token(client: TestClient) -> None:
     assert updated_data["label"] == "Extended token"
     assert updated_data["version"] == issued["version"] + 1
 
-    # Now the ORIGINAL raw token works immediately!
     reactivated_call = client.get("/api/v1/documents", headers=bearer(raw_token))
     assert reactivated_call.status_code == 200
 
-    # Rotating an expired token also works and sets a future expiration
     with services.documents.database.transaction() as connection:
         connection.execute(
             """

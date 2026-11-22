@@ -61,7 +61,6 @@ class TaskCorrection(ContinuityModel):
     thread_id: str = Field(min_length=1, max_length=200)
     expected_version: int = Field(ge=0)
     key: str = Field(min_length=1, max_length=60)
-    # Empty text dismisses this field. It remains superseded in the version history.
     text: str = Field(max_length=600)
 
 
@@ -375,13 +374,11 @@ class ChatContinuityService:
                 "AND t.created_by=?" + scope + " ORDER BY rank LIMIT ? OFFSET ?",
                 params,
             ).fetchall()
-        # Each result checks current document/project authority. Never return inaccessible excerpts.
         entries = []
         for row in rows[: request.limit]:
             try:
                 entries.extend(self.read(principal, row["thread_id"], row["item_id"]).entries)
             except (AuthorizationError, NotFoundError):
-                # Access can narrow after a conversation was created. Exclude its excerpts.
                 continue
         return HistoryPage(entries=entries, has_more=len(rows) > request.limit)
 

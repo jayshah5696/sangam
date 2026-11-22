@@ -97,7 +97,6 @@ class PdfOperations:
                 query="",
                 include_deleted=False,
             )
-            # The canonical annotation API bounds field sizes; cap each page of notes.
             end = operation.offset + operation.limit
             return PdfAnnotationResult(
                 items=notes[operation.offset : end], next_offset=end if end < len(notes) else None
@@ -214,7 +213,6 @@ class PdfOperations:
                     color=operation.color,
                     idempotency_key=operation.operation_key,
                 )
-            # A replay may return before opening a transaction. Reconcile its reference too.
             with self.state.database.transaction() as connection:
                 record_target(connection)
             if execution_key:

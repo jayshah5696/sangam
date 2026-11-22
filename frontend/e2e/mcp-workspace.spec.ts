@@ -299,7 +299,6 @@ test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals',
   page,
   request,
 }, testInfo) => {
-  // This covers three durable mutations, transport recovery, and the responsive review layouts.
   test.setTimeout(60_000)
   const suffix = randomUUID()
   const created = await request.post('/api/v1/documents', {
@@ -372,7 +371,6 @@ test('MCP App prepares, reviews, recovers apply, and dismisses owned proposals',
     }
     await page.setViewportSize(testInfo.project.use.viewport ?? { width: 1440, height: 900 })
     const frame = page.locator('iframe[title="Sangam document workspace"]')
-    // The App has its own 600px breakpoint, independent of the host document rail.
     for (const width of [599, 601]) {
       await frame.evaluate((element, width) => {
         element.style.width = `${width}px`
@@ -498,7 +496,6 @@ test('PDF App renders authorized bytes, restores its page, and saves a note with
   const passageWidth = (await passage.boundingBox())?.width ?? 0
   const pageWidth =
     (await app.getByRole('img', { name: 'PDF page 2', exact: true }).boundingBox())?.width ?? 1
-  // This fixture's title covers 36% of the PDF page. Selection must cover the same glyphs.
   expect(passageWidth / pageWidth).toBeGreaterThan(0.3)
   expect(passageWidth / pageWidth).toBeLessThan(0.4)
   await passage.evaluate((element) => {
@@ -1117,7 +1114,6 @@ test('background App refresh preserves tab keyboard navigation and drafts', asyn
   })
   await refreshStarted.promise
   try {
-    // Background polling must not remove focus or swallow an arrow-key action.
     await expect(firstTab).toBeEnabled()
     await firstTab.press('ArrowRight')
   } finally {

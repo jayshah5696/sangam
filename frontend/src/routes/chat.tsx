@@ -18,7 +18,6 @@ const chatSearchSchema = z.object({
   prompt: z.string().max(2000).optional(),
   thread: z.string().max(200).optional(),
   proposal: z.string().max(200).optional(),
-  // The project the conversation starts from; chat is told about it.
   project: z.string().max(200).optional(),
   message: z.string().max(200).optional(),
 })

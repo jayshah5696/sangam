@@ -235,18 +235,14 @@ describe('AgentAccessSettings', () => {
 
     renderSettings()
 
-    // Main active token is shown
     expect(await screen.findByText(/Research runner/)).not.toBeNull()
 
-    // Revoked token is not in main table by default, but in the history toggle
     const toggleBtn = screen.getByRole('button', { name: /Inactive & rotated tokens \(1\)/ })
     expect(toggleBtn).not.toBeNull()
 
-    // Expanding history reveals the revoked token
     fireEvent.click(toggleBtn)
     expect(screen.getByText(/Rotated predecessor/)).not.toBeNull()
 
-    // Clicking Rotate key... opens the dedicated warning dialog
     const rotateBtn = screen.getByRole('button', { name: /Rotate key…/ })
     fireEvent.click(rotateBtn)
 
@@ -257,7 +253,6 @@ describe('AgentAccessSettings', () => {
     expect(screen.getByText('Rotate secret key')).not.toBeNull()
     expect(screen.getByText(/Immediate runner disruption warning/)).not.toBeNull()
 
-    // Confirm rotation
     const confirmBtn = rotateDialog!.querySelector<HTMLButtonElement>('.agent-token-rotate-actions .danger')
     expect(confirmBtn?.textContent).toContain('Revoke old key & generate new')
     fireEvent.click(confirmBtn!)

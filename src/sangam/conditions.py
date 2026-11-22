@@ -42,7 +42,6 @@ def parse_condition(value: str | None) -> TagCondition | None:
         return TagCondition(wildcard=True)
     tags: list[EntityTag] = []
     position = 0
-    # RFC list syntax permits empty members. A wholly empty field is rejected.
     while position < len(value):
         if value[position] in " \t,":
             position += 1

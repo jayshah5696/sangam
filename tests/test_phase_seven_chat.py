@@ -715,9 +715,6 @@ def test_stale_chat_proposal_can_be_dismissed_with_a_reason(client: TestClient) 
     )
     assert conflict.status_code == 409
 
-    # A stale proposal offers a Dismiss button in the review UI, so dismissing it
-    # must succeed and clear it from the reviewable list rather than deadlocking on
-    # the spent apply reservation.
     dismissed = client.post(
         f"/api/v1/chat/proposals/{proposal.proposal_id}/dismiss",
         json={"reason": "Wrong section for this edit"},
@@ -930,7 +927,6 @@ def test_agents_sdk_function_tool_invokes_authorized_workspace_read(
     assert agent_context.workflow_item.workflow.tasks[0].status_indicator == "complete"
     events = client.get("/api/v1/activity", params={"actor_id": principal.actor_id}).json()
     tool_events = [event for event in events if event["operation_id"] == "tool-invocation"]
-    # Each read_document is two audited reads: the document, then the links to it.
     assert len(tool_events) == 4
     assert len({event["event_id"] for event in tool_events}) == 4
     assert {event["outcome"] for event in tool_events} == {"accepted"}
@@ -1314,11 +1310,8 @@ def test_follow_on_request_replays_assistant_history_as_plain_text(client: TestC
 
     follow_on = send_user_message(client, thread_id, "what can you do")
 
-    # The follow-on turn must succeed — this is the regression the user reported.
     assert "error" not in {event["type"] for event in follow_on}
 
-    # The prior assistant turn is replayed to the model as provider-safe input_text
-    # (no fabricated output-only fields such as ``logprobs``) so OpenRouter accepts it.
     follow_on_input = captured[1]
     assistant_items = [item for item in follow_on_input if item.get("role") == "assistant"]
     assert assistant_items, "prior assistant turn should be replayed as context"

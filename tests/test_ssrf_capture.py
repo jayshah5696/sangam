@@ -126,7 +126,6 @@ def test_dns_rebinding_connection_pinning() -> None:
 
     def mock_resolver(host: str, port: int) -> list[str]:
         dns_lookups.append(host)
-        # First lookup gives public IP
         return ["93.184.216.34"]
 
     resolved_ip = resolve_and_validate_host("rebind.example.com", 80, resolver=mock_resolver)
@@ -137,7 +136,6 @@ def test_redirect_from_public_to_private_blocked() -> None:
     """A public host returning a redirect to a private address must be blocked."""
 
     def mock_fetch(url: str):
-        # First hop is public
         if url == "http://public.example.com/start":
             return (302, {"Location": "http://10.0.0.1/admin"}, b"")
         return (200, {"Content-Type": "text/html"}, b"<h1>Secret</h1>")
@@ -232,7 +230,6 @@ def test_successful_html_capture() -> None:
 
 def test_admin_only_capture_endpoint(client: TestClient) -> None:
     """Verify that POST /api/v1/captures/url is accessible to admins and rejected for non-admins."""
-    # Issue a read-only agent token
     token = issue_agent_token(
         client,
         actor_id="agent:researcher",
@@ -240,7 +237,6 @@ def test_admin_only_capture_endpoint(client: TestClient) -> None:
         capabilities=("read", "search"),
     )
 
-    # Calling as non-admin token must return 403 Forbidden
     forbidden_resp = client.post(
         "/api/v1/captures/url",
         headers={"Authorization": f"Bearer {token}", **headers("cap-fail")},
@@ -248,7 +244,6 @@ def test_admin_only_capture_endpoint(client: TestClient) -> None:
     )
     assert forbidden_resp.status_code == 403
 
-    # Admin call (unauthenticated local session acts as admin)
     with patch("sangam.capture.SafeCaptureClient.fetch") as mock_fetch:
         mock_fetch.return_value = SafeCaptureResponse(
             original_url="https://example.com/article",
@@ -340,7 +335,6 @@ def test_pinned_backend_connects_to_ip() -> None:
     backend = _PinnedBackend("93.184.216.34")
     with patch("httpcore._backends.sync.SyncBackend.connect_tcp") as mock_connect:
         backend.connect_tcp("malicious.example.com", 80)
-        # First argument to connect_tcp must be the pinned IP, not the host!
         mock_connect.assert_called_once_with("93.184.216.34", 80, None, None, None)
 
 
@@ -375,7 +369,6 @@ def test_capture_url_attaches_to_project(client: TestClient) -> None:
         assert resp.status_code == 201
         captured_doc_id = resp.json()["document_id"]
 
-        # Retrieve project and verify the document is listed as a member
         get_proj = client.get(
             f"/api/v1/projects/{project_id}",
             headers=headers("get-proj"),

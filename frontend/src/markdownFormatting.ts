@@ -31,7 +31,6 @@ export function toggleInlineMarker(doc: string, from: number, to: number, marker
     const text = selected.slice(size, -size)
     return { from, to, insert: text, selection: { anchor: from, head: from + text.length } }
   }
-  // Markers must touch the words: `** word **` is not bold in CommonMark.
   const leading = selected.length - selected.trimStart().length
   const trailing = selected.length - selected.trimEnd().length
   const start = from + leading

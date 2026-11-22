@@ -55,7 +55,6 @@ export function CaptureDialog({
   const project = projects.find((candidate) => candidate.project_id === projectId)
   const unsupported = files.filter((file) => !captureKindForFile(file))
 
-  // Copy first: a FileList is live and empties when its input is reset.
   const addFiles = (incoming: Iterable<File>) => {
     const added = [...incoming]
     setFiles((current) => [...current, ...added])
@@ -261,7 +260,6 @@ function CaptureResultRow({
 }) {
   const documentId = outcome.document?.document_id
   const isPdf = outcome.document?.content_type === 'application/pdf'
-  // A PDF is saved immediately and made searchable in the background.
   const live = useQuery({
     queryKey: ['document', documentId],
     queryFn: () => api.getDocument(documentId ?? ''),
@@ -324,7 +322,6 @@ async function captureOne(item: CaptureItem, project: ProjectSummary | undefined
     await api.addProjectDocument(project.project_id, { document_id: document.document_id, role: 'source' })
     return { item, state: 'saved', document, message: `Added to ${project.name}.` }
   } catch (error) {
-    // Keep the saved file; retrying captures again only if the user asks.
     return {
       item,
       state: 'attention',
@@ -376,7 +373,6 @@ async function saveToInbox(item: CaptureItem): Promise<Document> {
         await item.file.text(),
       )
     case 'image': {
-      // An image is captured as a note that shows it, with the file in the shared attachments folder.
       const note = await api.createDocument(
         title,
         inboxPath(title, 'md', now, suffix),

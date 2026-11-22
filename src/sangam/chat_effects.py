@@ -358,8 +358,6 @@ class ChatEffectService:
             )
         effect = self.get(principal, effect_id)
         if self._autonomy_allows():
-            # The operator approved every authorized effect in advance; the requester's own
-            # authority still bounds what runs.
             return self._decide(
                 principal,
                 effect_id=effect.effect_id,
@@ -867,7 +865,6 @@ class ChatEffectService:
         }
         if publication.token:
             result["token"] = publication.token
-        # The capability token is shown once to the approving client and never stored.
         stored = {key: value for key, value in result.items() if key != "token"}
         return EffectOutcome(result, stored, "publication", publication.publication_id)
 
@@ -995,7 +992,6 @@ class ChatEffectService:
         }
         if token:
             result["token"] = token
-        # An unlisted token is shown once to the approving client and never stored.
         stored = {key: value for key, value in result.items() if key != "token"}
         return EffectOutcome(result, stored, "publication", publication.publication_id)
 
@@ -1006,7 +1002,6 @@ class ChatEffectService:
             validate_metadata_text(change.name, "Project name")
             validate_metadata_text(change.description, "Project description")
             return
-        # Opening the project and reading what it points at fail now, not after approval.
         project = self.projects.get_project(change.project_id, principal)
         if isinstance(change, AddProjectDocumentChange):
             self.workspace.get_document(principal, change.document_id)

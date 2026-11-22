@@ -45,7 +45,6 @@ test('skill command copy reports clipboard failure and waits for a successful re
     data: { document_id: skillDocument.document_id },
   })
   expect(registered.ok(), await registered.text()).toBeTruthy()
-  // Control only the browser permission boundary. Skill registration uses the real API.
   await page.addInitScript(() => {
     let attempts = 0
     Object.defineProperty(navigator, 'clipboard', {
@@ -239,7 +238,6 @@ test('document assignment start and stop persist through the real HTTP service',
   await rail.getByRole('textbox').fill('Check the measured CPU latency.')
   await rail.getByRole('button', { name: 'Run review', exact: true }).click()
   await expect(rail).toContainText('Check the measured CPU latency.')
-  // The isolated fixture disables remote inference. This proves controls, not model execution.
   await expect(rail).toContainText('Failed')
   await rail.getByRole('button', { name: 'Stop', exact: true }).click()
   await expect(rail).toContainText('Stopped')

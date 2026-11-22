@@ -100,8 +100,6 @@ export function DocumentWorkspace({
   const saveState = session.saveState
   const mode = session.mode
   const selection = session.selection
-  // Keep the complete document index in its own cache entry. The paged explorer
-  // and search queries use different shapes and must never share this key.
   const documentsQuery = useQuery({ queryKey: ['documents', 'all'], queryFn: api.listDocuments })
   const htmlJavascript = useQuery({
     queryKey: ['html-javascript-settings'],
@@ -119,8 +117,6 @@ export function DocumentWorkspace({
     [documentId],
   )
 
-  // Images go to the shared attachments folder and are inserted as root-relative Markdown,
-  // so moving this document never breaks them.
   const uploadImages = async (files: File[]) => {
     const images = files.filter((file) => SUPPORTED_IMAGE_TYPES.includes(file.type))
     if (!images.length) {
@@ -155,11 +151,9 @@ export function DocumentWorkspace({
   useEffect(() => {
     if (revealedCitation.current === citationTarget) return
     revealedCitation.current = citationTarget
-    // Reveal each new source navigation, while allowing Research to reopen afterward.
     if (citationTarget && matchMedia('(max-width: 900px)').matches) updatePreferences({ rightVisible: false })
   }, [citationTarget, updatePreferences])
   const [draftTitle, setDraftTitle] = useState(document.title)
-  // A rename from the file tree, chat, or a restore changes the server title under the input.
   useEffect(() => setDraftTitle(document.title), [document.title])
 
   useEffect(() => {
@@ -194,7 +188,6 @@ export function DocumentWorkspace({
       ),
     [documentId, sessions],
   )
-  // Search results open the current revision at a line; reveal it once the surface exists.
   const revealedPassage = useRef<CitationTarget | null>(null)
   useEffect(() => {
     const target = citationTarget
@@ -203,9 +196,6 @@ export function DocumentWorkspace({
     let frames = 0
     let handle = 0
     const reveal = () => {
-      // On narrow screens the sidebar drawer and inspector sheet close after navigation
-      // and hand focus back to their triggers. Reveal only once they are gone so the
-      // selection and focus land in the editor.
       const overlayOpen = window.document.querySelector('[role="dialog"][aria-modal="true"]')
       if (overlayOpen && frames < 60) {
         frames += 1
@@ -337,7 +327,7 @@ export function DocumentWorkspace({
       try {
         await replaceEvidenceRevision(recheckComparisonItem.evidenceItem.id, newRevisionId, newContent)
       } catch {
-        // If the passage text cannot be remapped, keep the original evidence item pinned
+        void 0
       }
     }
 
@@ -708,9 +698,7 @@ export function DocumentWorkspace({
                 if (!sel) return
                 void source
                   .keepSelection(sel, snapshot, captured?.revisionId, captured?.occurrence ?? 0)
-                  .catch(() => {
-                    /* The capture error is displayed above. */
-                  })
+                  .catch(() => {})
               }}
               title="Keep selected text as evidence"
             >
@@ -823,7 +811,6 @@ function CitedRevisionEvidence({
   const ref = useRef<HTMLElement>(null)
   const quoteRef = useRef<HTMLElement>(null)
   const hasQuote = !target.textLocator && target.quoteStart !== undefined && target.quoteEnd !== undefined
-  // Editorial offsets address raw UTF-16 source; evidence locators may address rendered text.
   const quoteLocator = useMemo<TextLocator | undefined>(
     () =>
       !target.textLocator &&
@@ -856,7 +843,6 @@ function CitedRevisionEvidence({
         : undefined
   useEffect(() => {
     if (!revision || !locator) return
-    // The citation owns destination focus after the inspector sheet has closed.
     const frame = requestAnimationFrame(() => {
       if (hasQuote && quoteLocator) {
         quoteRef.current?.scrollIntoView({ block: 'nearest' })
@@ -993,8 +979,6 @@ function DocumentToolbar({
   const sessions = useDocumentSessions()
   const [title, setTitle] = useState(document.title)
   const [path, setPath] = useState(document.path ?? '')
-  // Each step builds on the revision the previous one wrote, so a title and path change
-  // together cannot conflict with themselves.
   const saveDetails = useMutation({
     mutationFn: async () => {
       let current = document
@@ -1164,7 +1148,6 @@ export function MobileCompanionBar({ currentDocument }: { currentDocument: Docum
   const isCurrentDraft =
     !isPdf && (currentDocument.path?.startsWith('drafts/') || !currentDocument.path?.startsWith('sources/'))
 
-  // 1. Check if another group or another tab in workbench has an active document
   const currentGroup = groups.find((g) => g.tabs.some((t) => t.documentId === currentDocument.document_id))
   const otherGroup = groups.find((g) => g.activeTabId && g.activeTabId !== currentDocument.document_id)
   const otherTabInGroup = currentGroup?.tabs.find((t) => t.documentId !== currentDocument.document_id)
@@ -1177,7 +1160,6 @@ export function MobileCompanionBar({ currentDocument }: { currentDocument: Docum
     enabled: Boolean(candidateDocId),
   })
 
-  // 2. Check project documents for companion source/draft
   // SAFETY: In non-strict router context, search params may contain an optional project query parameter.
   const search = useSearch({ strict: false }) as { project?: string }
   const projectQuery = useQuery<ProjectDetail | null>({

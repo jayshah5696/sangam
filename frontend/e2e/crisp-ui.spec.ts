@@ -90,7 +90,6 @@ test('create theme builds, applies, persists, imports, and deletes', async ({ pa
 
   await builder.getByRole('button', { name: 'New theme' }).click()
   await builder.getByLabel('Theme name').fill('Sunset')
-  // Two picks: a dark background and an accent. The theme becomes dark and keeps readable contrast.
   await builder.getByLabel('Background').fill('#1f2937')
   await builder.getByLabel('Accent', { exact: true }).fill('#ff8800')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight')
@@ -225,7 +224,6 @@ test('file tree labels remain bound to their rows through collapse, focus, and r
   if ((await agents.getAttribute('aria-expanded')) === 'true') await agents.press('ArrowLeft')
   await expect(linux).toBeHidden()
   await expect(agentic).toHaveAttribute('aria-label', secondFolder)
-  // Label is rendered via ::after pseudo-element from aria-label, not Pierre's MiddleTruncate
   const agenticLayout = await agentic.evaluate((row) => ({
     clientWidth: row.clientWidth,
     scrollWidth: row.scrollWidth,
@@ -466,7 +464,6 @@ test('workspace tabs distribute available width equally across short, medium, an
     ids.push(data.document_id)
   }
 
-  // Seed 3 tabs initially: short, medium, long
   await page.addInitScript(
     ({ allIds, allTitles }) => {
       localStorage.setItem(
@@ -495,7 +492,6 @@ test('workspace tabs distribute available width equally across short, medium, an
   const tabLocator = page.locator('.editor-tab')
   await expect(tabLocator).toHaveCount(3)
 
-  // Verify 3 tabs with short, medium, and long titles have equal widths within 1px
   const width0 = (await tabLocator.nth(0).boundingBox())!.width
   const width1 = (await tabLocator.nth(1).boundingBox())!.width
   const width2 = (await tabLocator.nth(2).boundingBox())!.width
@@ -503,7 +499,6 @@ test('workspace tabs distribute available width equally across short, medium, an
   expect(Math.abs(width0 - width1)).toBeLessThanOrEqual(1.01)
   expect(Math.abs(width1 - width2)).toBeLessThanOrEqual(1.01)
 
-  // Pin first tab, ensure outer width remains equal
   await page.getByRole('button', { name: 'Editor group actions' }).click()
   await page.getByRole('menuitem', { name: 'Pin tab' }).click()
   const pinnedWidth0 = (await tabLocator.nth(0).boundingBox())!.width
@@ -561,7 +556,6 @@ test('workspace tabs clamp at 118px minimum width, enable horizontal scroll, and
   const tabLocator = page.locator('.editor-tab')
   await expect(tabLocator).toHaveCount(14)
 
-  // Verify tabs clamp at minimum width of 118px
   const tab0Box = await tabLocator.nth(0).boundingBox()
   expect(Math.round(tab0Box!.width)).toBe(118)
 
@@ -569,13 +563,11 @@ test('workspace tabs clamp at 118px minimum width, enable horizontal scroll, and
   const isOverflowing = await scrollContainer.evaluate((el) => el.scrollWidth > el.clientWidth)
   expect(isOverflowing).toBe(true)
 
-  // Switch to first tab, then activate last tab (which is offscreen)
   await tabLocator.nth(0).getByRole('tab').click()
   const lastTab = tabLocator.nth(13)
   await lastTab.getByRole('tab').click()
   await expect(lastTab).toHaveClass(/active/)
 
-  // Verify the active tab is scrolled into view
   const scrollBox = await scrollContainer.boundingBox()
   const lastTabBox = await lastTab.boundingBox()
   expect(lastTabBox).not.toBeNull()
@@ -783,7 +775,6 @@ test('large search remains bounded and exposes the next result page', async ({ p
   await page.goto('/')
   await expect(page.locator('.welcome h1')).toBeVisible()
   expect(documentsRequests.every((query) => query.includes('limit=200'))).toBeTruthy()
-  // Inbox loads its complete index; search itself stays bounded below.
 
   await page.locator('body').press('/')
   const search = page.getByRole('searchbox', { name: 'Search documents', exact: true })
@@ -821,7 +812,6 @@ test('internal link picker keeps documents beyond the first page', async ({
     },
   })
   expect(targetResponse.ok(), await targetResponse.text()).toBeTruthy()
-  // Keep the target outside the first updated-at page returned by the picker.
   for (let start = 0; start < 205; start += 10) {
     const responses = await Promise.all(
       Array.from({ length: Math.min(10, 205 - start) }, (_, offset) => {

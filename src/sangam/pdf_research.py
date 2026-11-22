@@ -162,9 +162,6 @@ class PdfResearchService:
                 file_hash = self.workspace.write_atomic_stream(normalized_path, content)
                 file_written_by_this_call = True
             else:
-                # An import may have been interrupted after the durable file rename but
-                # before SQLite committed. Adopt only the exact bytes the caller supplied;
-                # a different existing file must remain a visible reconciliation conflict.
                 file_hash = self.workspace.binary_hash(normalized_path)
                 if file_hash != content_hash:
                     raise ValidationError("A different workspace file already exists at that path")
@@ -384,7 +381,6 @@ class PdfResearchService:
                     (document_id,),
                 )
             return False
-        # Persist every parser failure for the UI and retry flow, including plugin errors.
         except Exception as error:  # noqa: BLE001
             with self.database.transaction() as connection:
                 connection.execute(
@@ -442,7 +438,6 @@ class PdfResearchService:
                 temporary.unlink(missing_ok=True)
 
             deadline = time.monotonic() + self.extraction_timeout_seconds
-            # A file bounds diagnostic buffering even when a corrupt PDF is noisy.
             with (
                 (Path(directory) / "parser.log").open("w+b") as diagnostics,
                 subprocess.Popen(

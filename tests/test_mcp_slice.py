@@ -698,7 +698,6 @@ def test_app_checkpoint_conflict_recovery_and_save(mcp_client: TestClient) -> No
         ]["draft"]
         == "# My recoverable draft"
     )
-    # A deliberate discard adopts the new saved base; a new checkpoint can then save.
     discarded = app_action(
         mcp_client,
         token,

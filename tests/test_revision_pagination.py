@@ -44,7 +44,6 @@ def test_revision_pages_are_bounded_stable_and_fetch_exact_content(client: TestC
     assert all("content" not in item for item in first_page["items"])
     assert first_page["next_cursor"]
 
-    # A revision added between page requests must not shift the older page boundary.
     document = revise_document(client, document, "concurrent newest revision")
     second = client.get(
         f"/api/v1/documents/{document['document_id']}/revisions",

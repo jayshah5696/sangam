@@ -148,9 +148,6 @@ def create_chat_router(
 
     @router.get("/chat/models", response_model=ChatModelSettings)
     def get_models(_principal: Principal = principal_dependency) -> ChatModelSettings:
-        # The catalog contains no provider credentials and authenticated chat clients
-        # need it to render valid model choices. Only the mutations below are global
-        # operator actions.
         return chat.model_catalog.as_schema()
 
     @router.put("/chat/models", response_model=ChatModelSettings)
@@ -218,7 +215,6 @@ def create_chat_router(
         connection_id: str,
         principal: Principal = admin_dependency,
     ) -> ProviderConnectionTest:
-        # A provider probe spends credentials outside Sangam, so it is ledgered like a write.
         connection, models = chat.workspace.audited(
             principal,
             writes("test", "provider_connection"),
@@ -500,8 +496,6 @@ def _overloaded_response(error: ServiceUnavailableError) -> JSONResponse:
 
 
 def _request_is_loopback(request: Request, origin: str | None) -> bool:
-    # Browsers send Origin for this same-origin API request. Prefer it so a
-    # reverse proxy cannot make a public browser look like localhost.
     candidate = origin or str(request.base_url)
     try:
         hostname = (urlsplit(candidate).hostname or "").lower().rstrip(".")

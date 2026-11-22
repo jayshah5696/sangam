@@ -118,13 +118,10 @@ def test_scan_documents_skips_symlinks_and_traversal_targets(tmp_path: Path) -> 
     outside_doc = outside_dir / "secret.md"
     outside_doc.write_text("secret content", encoding="utf-8")
 
-    # Symlink to outside file
     (workspace_dir / "linked_secret.md").symlink_to(outside_doc)
 
-    # Symlink to outside directory
     (workspace_dir / "linked_dir").symlink_to(outside_dir, target_is_directory=True)
 
-    # Symlink to inside file
     (workspace_dir / "linked_valid.md").symlink_to(workspace_dir / "valid.md")
 
     scanned = workspace.scan_documents()
@@ -139,7 +136,6 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
     destination_path = workspace.root / "corrupted.md"
 
-    # Simulate hash failure on temporary staging file before replace
     monkeypatch.setattr(
         hashlib, "file_digest", lambda _file, _algorithm: hashlib.sha256(b"corrupted content")
     )
@@ -147,10 +143,8 @@ def test_write_atomic_bytes_cleanup_on_hash_mismatch_failure(
     with pytest.raises(OSError, match="Materialized file hash does not match"):
         workspace.write_atomic("corrupted.md", "expected content")
 
-    # Destination should not exist on failure (replace was never performed)
     assert not destination_path.exists()
 
-    # No leftover temporary staging files
     temp_files = [f for f in workspace.root.glob("*") if ".sangam-" in f.name]
     assert temp_files == []
 
@@ -165,7 +159,6 @@ def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> 
         try:
             for _ in range(30):
                 workspace.write_atomic(doc_path, content)
-        # Collect every worker failure for assertion after joining the threads.
         except Exception as exc:  # noqa: BLE001
             errors.append(exc)
 
@@ -182,7 +175,6 @@ def test_concurrent_write_atomic_does_not_unlink_destination(tmp_path: Path) -> 
     final_content = workspace.read_document(doc_path)
     assert final_content in ("content A " * 100, "content B " * 100)
 
-    # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if f.is_file() and ".sangam-" in f.name]
     assert temp_files == []
 
@@ -205,7 +197,6 @@ def test_concurrent_move_document_prevents_overwrite_and_prunes_staging(
             workspace.move_document(src, destination_path)
             with lock:
                 results.append((src, None))
-        # Collect every worker failure for assertion after joining the threads.
         except Exception as exc:  # noqa: BLE001
             with lock:
                 results.append((src, exc))
@@ -228,12 +219,10 @@ def test_concurrent_move_document_prevents_overwrite_and_prunes_staging(
     winning_source = successes[0][0]
     losing_source = failures[0][0]
 
-    # Target has content of winner, losing source file was NOT overwritten or destroyed
     expected_content = "source 1 content" if winning_source == "source1.md" else "source 2 content"
     assert workspace.read_document(destination_path) == expected_content
     assert workspace.is_document_file(losing_source)
 
-    # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if f.is_file() and ".sangam-" in f.name]
     assert temp_files == []
 
@@ -243,7 +232,6 @@ def test_concurrent_restore_trash_document_prevents_overwrite_and_prunes_staging
 ) -> None:
     workspace = DiskWorkspaceFilesystem(tmp_path / "workspace")
 
-    # Create and trash two separate documents
     content1 = "trash 1 content"
     content2 = "trash 2 content"
     hash1 = hashlib.sha256(content1.encode("utf-8")).hexdigest()
@@ -267,7 +255,6 @@ def test_concurrent_restore_trash_document_prevents_overwrite_and_prunes_staging
             workspace.restore_trash_document(doc_id, destination_path, c_hash, size)
             with lock:
                 results.append((doc_id, None))
-        # Collect every worker failure for assertion after joining the threads.
         except Exception as exc:  # noqa: BLE001
             with lock:
                 results.append((doc_id, exc))
@@ -287,7 +274,6 @@ def test_concurrent_restore_trash_document_prevents_overwrite_and_prunes_staging
     assert len(failures) == 1
     assert isinstance(failures[0][1], ConflictError)
 
-    # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if f.is_file() and ".sangam-" in f.name]
     assert temp_files == []
 
@@ -307,7 +293,6 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
             try:
                 content = workspace.read_document(doc_path)
                 read_results.append(content)
-            # Collect every worker failure for assertion after joining the threads.
             except Exception as exc:  # noqa: BLE001
                 read_errors.append(str(exc))
 
@@ -333,12 +318,10 @@ def test_concurrent_workspace_atomic_writes_and_reads(tmp_path: Path) -> None:
 
     assert not read_errors
     assert len(read_results) > 0
-    # Confirm every read was non-empty and zero-byte reads never occurred
     for res in read_results:
         assert len(res) > 0
         assert "content" in res
 
-    # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
     assert temp_files == []
 
@@ -353,7 +336,6 @@ def test_directory_fsync_oserror_resilience_during_concurrent_writes(
     original_fsync = os.fsync
 
     def unsupported_dir_fsync(fd: int) -> None:
-        # If the file descriptor corresponds to a directory, simulate unsupported fsync
         try:
             stat_res = os.fstat(fd)
 
@@ -377,7 +359,6 @@ def test_directory_fsync_oserror_resilience_during_concurrent_writes(
             try:
                 content = workspace.read_document(doc_path)
                 read_results.append(content)
-            # Collect every worker failure for assertion after joining the threads.
             except Exception as exc:  # noqa: BLE001
                 read_errors.append(str(exc))
 
@@ -388,7 +369,6 @@ def test_directory_fsync_oserror_resilience_during_concurrent_writes(
                     workspace.write_atomic(
                         doc_path, f"unsupported fsync content from thread {thread_id} iteration {i}"
                     )
-                # Collect every worker failure for assertion after joining the threads.
                 except Exception as exc:  # noqa: BLE001
                     write_errors.append(str(exc))
 
@@ -417,6 +397,5 @@ def test_directory_fsync_oserror_resilience_during_concurrent_writes(
         assert len(res) > 0
         assert "content" in res
 
-    # Confirm workspace clean of temporary staging files
     temp_files = [f for f in workspace.root.rglob("*") if ".sangam-" in f.name]
     assert temp_files == []

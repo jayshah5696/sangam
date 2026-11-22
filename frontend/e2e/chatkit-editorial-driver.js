@@ -1,5 +1,3 @@
-// Deterministic substitute for the external ChatKit component, using its public
-// methods and the real options.api.fetch transport supplied by ChatPanel.
 class EditorialChatKit extends HTMLElement {
   static instanceCount = 0
 
@@ -17,8 +15,6 @@ class EditorialChatKit extends HTMLElement {
     this.status.setAttribute('role', 'status')
     send.addEventListener('click', () => this.sendUserMessage({ text: this.composer.value }))
     root.append(style, this.composer, send, this.status)
-    // A transport failure does not remove the already-mounted iframe/composer.
-    // Late initialization notifications and DOM work can arrive after that failure.
     this.addEventListener('editorial:transport-error', () => {
       this.dispatchEvent(new CustomEvent('chatkit.error', { detail: { message: 'Transport interrupted' } }))
     })

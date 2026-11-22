@@ -62,7 +62,6 @@ def main() -> None:
         ]
         return next(e["thread"]["id"] for e in events if e["type"] == "thread.created")
 
-    # Real simultaneous identical create requests, including automatic ordinary Markdown brief.
     barrier = Barrier(4)
 
     def replay_create(_: int):
@@ -266,7 +265,6 @@ def main() -> None:
     attached = call(
         "POST", f"{project_path}/threads", {"thread_id": thread_id}, expected=201
     ).json()
-    # Rename through ChatKit itself, proving the normal serialized title location is read.
     call(
         "POST",
         "/chatkit",

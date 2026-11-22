@@ -25,11 +25,8 @@ class SearchMatch(BaseModel):
 
     source: Literal["content", "pdf_page", "annotation", "title", "path", "metadata"]
     snippet: str
-    # The matched word as written, for locating it within `line`.
     exact: str | None = None
-    # 1-based line in the current revision (content matches).
     line: int | None = None
-    # Nearest Markdown heading above the passage.
     heading: str | None = None
     page_number: int | None = None
     annotation_id: str | None = None
@@ -85,7 +82,6 @@ class DocumentSummary(BaseModel):
     trust_version: int
     tags: list[Tag] = Field(default_factory=list)
     search_snippet: str | None = None
-    # Only search results carry located passages (best first); null elsewhere.
     search_matches: list[SearchMatch] | None = None
     pdf_page_count: int | None = None
     pdf_extraction_status: Literal["pending", "processing", "ready", "failed"] | None = None
@@ -372,8 +368,6 @@ class ApplyOrganizationPlan(MutationRequest):
             elif operation.kind == "create_tag":
                 key = ("tag", " ".join(operation.name.split()).casefold())
             elif operation.kind == "duplicate_document":
-                # A copy changes no existing resource; copies may not share a path, which
-                # preflight checks.
                 continue
             elif isinstance(
                 operation,
@@ -782,9 +776,7 @@ class Publication(BaseModel):
     created_at: str
     updated_at: str
     url: str
-    # Readers see exactly this revision until the publication is updated deliberately.
     revision_id: str
-    # The document's current head, so clients can tell whether the draft moved on.
     document_revision_id: str
     evidence: list[PublishedEvidenceItem] = Field(default_factory=list)
 
@@ -797,7 +789,6 @@ class CreatePublication(MutationRequest):
     document_id: str
     slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
     access_policy: Literal["private", "public", "unlisted"] = "private"
-    # Defaults to the document's current revision.
     revision_id: str | None = None
     evidence: list[PublishedEvidenceItem] | None = None
 
@@ -806,7 +797,6 @@ class UpdatePublication(MutationRequest):
     expected_version: int = Field(ge=0)
     slug: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
     access_policy: Literal["private", "public", "unlisted"]
-    # Omit to keep the published revision; pass a revision to publish it.
     revision_id: str | None = None
     evidence: list[PublishedEvidenceItem] | None = None
 

@@ -165,7 +165,6 @@ describe('AlternativeDraftsModal', () => {
 
     expect(screen.getByText('Original Argument (Alternative)')).toBeTruthy()
 
-    // Toggle comparison
     const compareBtn = screen.getByRole('button', { name: 'Compare assumptions and arguments' })
     fireEvent.click(compareBtn)
 
@@ -173,7 +172,6 @@ describe('AlternativeDraftsModal', () => {
       expect(screen.getByTestId('mock-revision-merge-view')).toBeTruthy()
     })
 
-    // Bring changes to original
     const applyBtn = screen.getByRole('button', { name: 'Bring selected changes back to original' })
     fireEvent.click(applyBtn)
 

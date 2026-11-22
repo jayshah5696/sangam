@@ -239,8 +239,6 @@ def test_search_only_returns_readable_sources_at_the_run_limit(
     for start in range(0, 40, 10):
         assert len(search(list(range(start, start + 10)))) == 10
     assert len(search(list(range(40, 49)))) == 9
-    # A duplicate must not consume the last slot. A rejected new source must not
-    # prevent a later, already-recorded source from being returned.
     assert search([0, 49, 50, 1]) == [
         "https://news.example.com/0",
         "https://news.example.com/49",

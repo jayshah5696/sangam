@@ -34,7 +34,6 @@ export function DocumentSourcesAndNotes({ document, enabled = true }: DocumentSo
 
   return (
     <section className="document-sources-notes" aria-label="Sources and related notes">
-      {/* Project Sources */}
       {projectSources.length > 0 && (
         <div className="sources-notes-group">
           <div className="sources-notes-header">
@@ -66,7 +65,6 @@ export function DocumentSourcesAndNotes({ document, enabled = true }: DocumentSo
         </div>
       )}
 
-      {/* Project Notes */}
       {projectNotes.length > 0 && (
         <div className="sources-notes-group">
           <div className="sources-notes-header">
@@ -97,7 +95,6 @@ export function DocumentSourcesAndNotes({ document, enabled = true }: DocumentSo
         </div>
       )}
 
-      {/* Related Notes via Backlinks */}
       <div className="sources-notes-group">
         <div className="sources-notes-header">
           <h4 className="sources-notes-title">

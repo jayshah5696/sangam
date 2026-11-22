@@ -40,8 +40,6 @@ class McpState:
         self.services = services
         self.settings = settings
         self.database = services.documents.database
-        # A single Sangam process owns storage. Serialize draft/save transitions;
-        # document writes still go through the canonical service's own locking.
         self.lock = threading.RLock()
 
     def cleanup(self) -> None:
@@ -172,8 +170,6 @@ class McpState:
     def _layout_view(
         self, principal: Principal, row: sqlite3.Row, workspace_id: str
     ) -> WorkspaceLayout:
-        # Project only metadata. Reading every saved document body on a tab refresh
-        # would multiply memory and I/O by the number of open documents.
         with self.database.connection() as connection:
             rows = connection.execute(
                 "SELECT w.workspace_id, w.document_id, w.draft IS NOT NULL AS has_draft, "
@@ -553,8 +549,6 @@ class McpState:
                 if row["draft"] is None:
                     raise ValidationError("There is no checkpointed draft to save.")
 
-                # Capture save evidence in the same transaction as the canonical
-                # document commit; a lost response cannot create a second save.
                 def record_save(connection: sqlite3.Connection) -> None:
                     committed = IdempotencyStore.lookup(
                         connection, actor_id=principal.actor_id, key=action.operation_key

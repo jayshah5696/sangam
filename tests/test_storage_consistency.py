@@ -137,7 +137,6 @@ def test_duplicate_rechecks_source_after_concurrent_change(
                     },
                     headers=headers("duplicate-source-move"),
                 )
-            # A source lock may serialize the change behind the paused snapshot.
             try:
                 response = changed.result(timeout=1)
                 changed_first = True
@@ -348,8 +347,6 @@ def test_document_pipeline_serializes_revision_materialization_and_search(
         )
         _wait_for_pipeline_attempt(service, created["document_id"])
 
-        # The second mutation has reached the document boundary, but cannot commit
-        # while the first revision still owns materialization and FTS synchronization.
         assert service.get_document(created["document_id"]).current_revision_id == first_revision
         release_first_write.set()
         assert first_future.result(timeout=5).status_code == 200
@@ -573,7 +570,6 @@ def test_backup_barrier_and_pair_verification_cover_pdf_bytes(
     executor.shutdown()
     assert manager.verify(backup.backup_id).valid is True
 
-    # Re-signing artifact metadata cannot hide a database/workspace generation mismatch.
     backup_dir = manager.backup_root / backup.backup_id
     workspace_archive = backup_dir / "workspace.tar.gz"
     extracted_root = backup_dir / "tampered-workspace"
@@ -599,17 +595,14 @@ def test_backup_barrier_and_pair_verification_cover_pdf_bytes(
 
 
 def test_backup_archive_skips_symlinks_and_traversal_targets(client: TestClient, settings) -> None:
-    # Set up files inside workspace
     _create_text(client, path="valid.md")
     manager = client.app.state.services.backups.manager
 
-    # Set up outside secret file and dir
     outside_dir = settings.workspace_root.parent / "outside_backup_test"
     outside_dir.mkdir(exist_ok=True)
     outside_file = outside_dir / "secret.txt"
     outside_file.write_text("secret payload", encoding="utf-8")
 
-    # Add symlinks in workspace
     (settings.workspace_root / "linked_file.txt").symlink_to(outside_file)
     (settings.workspace_root / "linked_dir").symlink_to(outside_dir, target_is_directory=True)
 
@@ -655,22 +648,18 @@ def test_backup_delete_uses_lifecycle_lock_and_syncs_parent(
 
 
 def test_backup_deletion_via_api(client: TestClient) -> None:
-    # Create backup first
     create_res = client.post("/api/v1/backups", headers=headers("create-backup-for-del"))
     assert create_res.status_code == 201
     created_backup = create_res.json()
     backup_id = created_backup["backup_id"]
 
-    # Ensure it is listed
     list_res = client.get("/api/v1/backups", headers=headers("list-backups-1"))
     assert list_res.status_code == 200
     assert any(b["backup_id"] == backup_id for b in list_res.json())
 
-    # Delete backup
     del_res = client.delete(f"/api/v1/backups/{backup_id}", headers=headers("delete-backup-action"))
     assert del_res.status_code == 204
 
-    # Ensure it is no longer listed
     list_after = client.get("/api/v1/backups", headers=headers("list-backups-2")).json()
     assert not any(b["backup_id"] == backup_id for b in list_after)
 
@@ -713,12 +702,10 @@ def test_concurrent_read_write_atomic_file_replacement(client: TestClient, setti
 
     assert not read_errors
     assert len(read_results) > 0
-    # Verify every read content is complete, valid, and non-zero-byte
     for content in read_results:
         assert len(content) > 0
         assert content.startswith((b"base", b"content revision iteration"))
 
-    # Verify no temporary staging files exist in workspace directory
     parent_dir = settings.workspace_root
     temp_files = [f for f in parent_dir.glob("*") if ".sangam-" in f.name]
     assert temp_files == []
@@ -727,7 +714,6 @@ def test_concurrent_read_write_atomic_file_replacement(client: TestClient, setti
 def test_concurrent_folder_metadata_atomic_write_and_cleanup(
     client: TestClient, settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Create folder via API
     res = client.post(
         "/api/v1/folders",
         json={"path": "projects/active", "category": "initial", "tag_ids": []},
@@ -750,7 +736,6 @@ def test_concurrent_folder_metadata_atomic_write_and_cleanup(
                 try:
                     content = manifest_file.read_bytes()
                     read_results.append(content)
-                # Collect every worker failure for assertion after joining the threads.
                 except Exception as exc:  # noqa: BLE001
                     read_errors.append(str(exc))
 
@@ -776,17 +761,14 @@ def test_concurrent_folder_metadata_atomic_write_and_cleanup(
 
     assert not read_errors
     assert len(read_results) > 0
-    # Confirm every read content was valid JSON and non-zero-byte
     for content in read_results:
         assert len(content) > 0
         parsed = json.loads(content.decode("utf-8"))
         assert parsed["folder_id"] == folder_id
 
-    # Verify no temporary staging files left behind
     temp_files = list(folder_dir.glob(".sangam-folder-*"))
     assert temp_files == []
 
-    # Test failure cleanup when writing folder metadata throws error
     def failing_write(*args, **kwargs):
         raise OSError("Simulated disk error during folder metadata write")
 
@@ -802,7 +784,6 @@ def test_concurrent_folder_metadata_atomic_write_and_cleanup(
             headers=headers("update-folder-meta-fail"),
         )
 
-    # Clean up verified: no leftover temporary files in folder directory
     temp_files_after_fail = list(folder_dir.glob(".sangam-folder-*"))
     assert temp_files_after_fail == []
 
@@ -819,20 +800,17 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
     backup_dir = manager.backup_root / backup.backup_id
     workspace_archive = backup_dir / "workspace.tar.gz"
 
-    # Create a fake extracted directory and inject a path traversal tar member
     extracted_root = backup_dir / "malicious-workspace"
     extracted_root.mkdir()
     (extracted_root / "safe.txt").write_text("safe content")
 
     with tarfile.open(workspace_archive, "w:gz", format=tarfile.PAX_FORMAT) as archive:
         archive.add(extracted_root / "safe.txt", arcname="safe.txt")
-        # Add entry with dangerous member name
         tarinfo = tarfile.TarInfo(name=malicious_member)
         content = b"evil payload"
         tarinfo.size = len(content)
         archive.addfile(tarinfo, io.BytesIO(content))
 
-    # Update manifest to match tampered workspace archive
     manifest_path = backup_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     workspace_artifact = next(
@@ -854,7 +832,6 @@ def test_restore_to_rejects_path_traversal_in_workspace_archive(
 
 
 def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
-    # 1. Create document and check ETag on 201 Created
     res_create = client.post(
         "/api/v1/documents",
         json={"title": "ETag Doc", "content": "Initial ETag content", "path": "etag_test.md"},
@@ -866,12 +843,10 @@ def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
     expected_etag = res_create.headers["ETag"]
     assert res_create.headers.get("ETag") == expected_etag
 
-    # 2. GET document and check ETag header
     res_get = client.get(f"/api/v1/documents/{doc_id}", headers=headers("get-etag-doc"))
     assert res_get.status_code == 200
     assert res_get.headers.get("ETag") == expected_etag
 
-    # 3. GET document with If-None-Match returning 304 Not Modified
     res_304 = client.get(
         f"/api/v1/documents/{doc_id}",
         headers={**headers("get-if-none-match"), "If-None-Match": expected_etag},
@@ -879,7 +854,6 @@ def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
     assert res_304.status_code == 304
     assert res_304.headers.get("ETag") == expected_etag
 
-    # 4. GET raw with If-None-Match
     res_raw_304 = client.get(
         f"/api/v1/documents/{doc_id}/raw",
         headers={
@@ -889,7 +863,6 @@ def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
     )
     assert res_raw_304.status_code == 304
 
-    # 5. GET download with If-None-Match
     res_dl_304 = client.get(
         f"/api/v1/documents/{doc_id}/download",
         headers={
@@ -899,7 +872,6 @@ def test_document_etag_and_if_none_match_headers(client: TestClient) -> None:
     )
     assert res_dl_304.status_code == 304
 
-    # 6. GET document with mismatched If-None-Match returns 200 OK
     res_200 = client.get(
         f"/api/v1/documents/{doc_id}",
         headers={**headers("get-if-none-match-diff"), "If-None-Match": '"other_rev"'},
@@ -913,7 +885,6 @@ def test_document_if_match_conditional_update_and_conflict(client: TestClient) -
     rev_1 = created["current_revision_id"]
     etag_1 = client.get(f"/api/v1/documents/{doc_id}").headers["ETag"]
 
-    # 1. Update using If-Match header without expected_revision_id in body
     update_1 = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={"content": "Updated via If-Match header"},
@@ -924,7 +895,6 @@ def test_document_if_match_conditional_update_and_conflict(client: TestClient) -
     assert rev_2 != rev_1
     assert update_1.headers.get("ETag") == client.get(f"/api/v1/documents/{doc_id}").headers["ETag"]
 
-    # HTTP precondition failures use 412 independently of body revision conflicts.
     stale_update = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={"content": "Stale edit attempt"},
@@ -933,7 +903,6 @@ def test_document_if_match_conditional_update_and_conflict(client: TestClient) -
     assert stale_update.status_code == 412
     assert stale_update.json()["error"]["code"] == "precondition_failed"
 
-    # A false supplied header is evaluated before the independent body guard.
     mismatched_update = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={"expected_revision_id": rev_2, "content": "Mismatched edit attempt"},
@@ -941,7 +910,6 @@ def test_document_if_match_conditional_update_and_conflict(client: TestClient) -
     )
     assert mismatched_update.status_code == 412
 
-    # 4. Update using wildcard If-Match: "*"
     wildcard_update = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={"content": "Wildcard edit"},
@@ -984,9 +952,7 @@ def test_concurrent_race_conditional_updates_with_if_match(client: TestClient) -
         f2.result(timeout=5)
 
     status_codes = sorted([agent1_status, agent2_status])
-    # Exactly one succeeds; the stale HTTP precondition fails.
     assert status_codes == [200, 412], f"Unexpected status codes: {status_codes}"
 
-    # Verify final document is consistent
     final_doc = client.get(f"/api/v1/documents/{doc_id}", headers=headers("get-final-race")).json()
     assert final_doc["content"] in ("Content from Agent 1", "Content from Agent 2")

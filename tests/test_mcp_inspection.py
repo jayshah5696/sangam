@@ -171,7 +171,6 @@ def test_proposal_root_and_cached_history_use_current_read_grants(mcp_client: Te
     assert execute(mcp_client, narrow, code).get("isError")
     assert execute(mcp_client, narrow, code, key).get("isError")
     assert output(mcp_client, narrow, "await proposals_list()")["items"] == []
-    # The REST and MCP entry points must use the same read rule.
     reply = mcp_client.get("/api/v1/chat/proposals", headers={"Authorization": f"Bearer {narrow}"})
     assert reply.status_code == 200 and reply.json() == []
     history_key = str(uuid4())

@@ -16,25 +16,24 @@ from httpcore._backends.sync import SyncBackend
 
 from sangam.errors import ValidationError
 
-# Additional reserved/special networks not fully covered by basic stdlib is_private
 _ADDITIONAL_PROHIBITED_NETWORKS = (
-    ipaddress.ip_network("100.64.0.0/10"),  # Carrier-Grade NAT (CGNAT)
-    ipaddress.ip_network("192.0.0.0/24"),  # IETF Protocol Assignments
-    ipaddress.ip_network("192.0.2.0/24"),  # TEST-NET-1
-    ipaddress.ip_network("198.51.100.0/24"),  # TEST-NET-2
-    ipaddress.ip_network("203.0.113.0/24"),  # TEST-NET-3
-    ipaddress.ip_network("198.18.0.0/15"),  # Network Interconnect Device Benchmark
-    ipaddress.ip_network("255.255.255.255/32"),  # Limited Broadcast
-    ipaddress.ip_network("2001:db8::/32"),  # IPv6 Documentation
-    ipaddress.ip_network("100::/64"),  # IPv6 Discard Prefix
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("192.0.0.0/24"),
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("198.18.0.0/15"),
+    ipaddress.ip_network("255.255.255.255/32"),
+    ipaddress.ip_network("2001:db8::/32"),
+    ipaddress.ip_network("100::/64"),
 )
 
 _SPECIFIC_METADATA_IPS = {
-    ipaddress.ip_address("169.254.169.254"),  # AWS/GCP/Azure/OpenStack metadata
-    ipaddress.ip_address("169.254.169.253"),  # AWS DNS
-    ipaddress.ip_address("169.254.169.123"),  # AWS Time
-    ipaddress.ip_address("100.100.100.200"),  # Alibaba Cloud metadata
-    ipaddress.ip_address("fd00:ec2::254"),  # AWS IPv6 metadata
+    ipaddress.ip_address("169.254.169.254"),
+    ipaddress.ip_address("169.254.169.253"),
+    ipaddress.ip_address("169.254.169.123"),
+    ipaddress.ip_address("100.100.100.200"),
+    ipaddress.ip_address("fd00:ec2::254"),
 }
 
 ALLOWED_MEDIA_TYPES = {"text/html", "text/plain", "application/pdf"}
@@ -51,13 +50,10 @@ def is_prohibited_ip(ip_input: str | ipaddress.IPv4Address | ipaddress.IPv6Addre
     except ValueError:
         return True
 
-    # Check for IPv4-mapped IPv6 (::ffff:127.0.0.1, etc.)
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         return is_prohibited_ip(ip.ipv4_mapped)
 
-    # Check 6to4 embedded IPv4 addresses (2002::/16)
     if isinstance(ip, ipaddress.IPv6Address) and ip in ipaddress.ip_network("2002::/16"):
-        # The 32 bits following 2002:: contain the IPv4 address
         embedded_ipv4 = ipaddress.IPv4Address(ip.packed[2:6])
         if is_prohibited_ip(embedded_ipv4):
             return True
@@ -137,7 +133,6 @@ def resolve_and_validate_host(
 
     Returns the first verified IP address for connection pinning.
     """
-    # If hostname is already a raw IP literal:
     try:
         raw_ip = ipaddress.ip_address(hostname)
         if is_prohibited_ip(raw_ip):
@@ -286,7 +281,6 @@ class SafeCaptureClient:
                     fetch_time=fetch_time,
                 )
 
-            # Live network fetch using PinnedTransport
             transport = PinnedTransport(pinned_ip)
             try:
                 with (
@@ -324,7 +318,6 @@ class SafeCaptureClient:
                             f"Disallowed Content-Type '{media_type}'. Allowed: {allowed}."
                         )
 
-                    # Read stream with byte limit enforcement
                     chunks = []
                     total_bytes = 0
                     for chunk in response.iter_bytes():
@@ -355,7 +348,6 @@ class SafeCaptureClient:
                 raise ValidationError(f"Capture network request failed: {exc}") from exc
 
     def _extract_title(self, html_bytes: bytes) -> str | None:
-        # Decode prefix to find <title>; invalid UTF-8 bytes are ignored.
         sample = html_bytes[:65536].decode("utf-8", errors="ignore")
         match = re.search(r"<title\b[^>]*>(.*?)</title>", sample, re.IGNORECASE | re.DOTALL)
         if match:

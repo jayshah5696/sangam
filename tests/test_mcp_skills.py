@@ -245,7 +245,6 @@ def test_reregistered_unchanged_skill_becomes_current_again(
     entry = get(mcp_client, token, source["document_id"])
     mcp_client.delete(f"/api/v1/chat/skills/{registration['skill_id']}").raise_for_status()
     assert "error" in protocol(mcp_client, token, "skills/get", {"uri": entry["uri"]})
-    # Discovery observes the removal and starts retention of the old manifest.
     assert not execute(mcp_client, token, "await skills_list()").get("isError")
     register(mcp_client, source)
     restored = get(mcp_client, token, source["document_id"])

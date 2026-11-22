@@ -346,7 +346,6 @@ class ChatToolset:
                     self._document_source(
                         document,
                         snippet=document.search_snippet,
-                        # A hit inside a PDF names the page, so it can be cited there.
                         page_number=next(
                             (
                                 match.page_number

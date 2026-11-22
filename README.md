@@ -82,6 +82,8 @@ integrations.
 | Doc | Contents |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Core concepts, trust model, data flow |
+| [docs/adr/README.md](docs/adr/README.md) | Architecture Decision Records for non-obvious invariants |
+| [docs/coding-standards.md](docs/coding-standards.md) | Enforced lint, type, and comment rules |
 | [docs/chat-capabilities.md](docs/chat-capabilities.md) | Chat capability, turn context, effect, and evidence contract |
 | [docs/ui-system.md](docs/ui-system.md) | Visual grammar for UI contributions |
 | [docs/configuration.md](docs/configuration.md) | Every `SANGAM_*` environment variable |

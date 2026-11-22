@@ -397,10 +397,6 @@ class ChatProposalRepository:
             proposal = _proposal_from_row(row)
             if proposal.status not in ("pending", "stale"):
                 raise ConflictError(f"The proposal is already {proposal.status}")
-            # A stale proposal's apply has already terminated, so its reserved
-            # idempotency key is spent and dismissing it is safe. Only a pending
-            # proposal with a live reservation is still mid-apply and must not be
-            # dismissed out from under the in-flight document update.
             if proposal.status == "pending" and row["apply_idempotency_key"] is not None:
                 raise ConflictError("The proposal is already being applied")
             connection.execute(
@@ -461,8 +457,6 @@ class ChatProposalService:
         self.workspace = workspace
         self.evidence = evidence
         self.identity = identity
-        # Track active applies per proposal. The database payload binding
-        # survives interruption; canonical document idempotency recovers its commit.
         self._apply_lock = Lock()
         self._applying: set[str] = set()
 
@@ -736,7 +730,6 @@ class ChatProposalService:
                     annotation_id=citation.annotation_id,
                     snippet=citation.snippet,
                     location=location,
-                    # Browser/editor offsets use UTF-16 code units, including emoji.
                     quote_start=len(source_text[:start].encode("utf-16-le")) // 2,
                     quote_end=len(source_text[:end].encode("utf-16-le")) // 2,
                 )

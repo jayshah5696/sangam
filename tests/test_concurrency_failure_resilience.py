@@ -124,7 +124,6 @@ def test_audit_service_shutdown_drains_during_active_production(
     for t in threads:
         t.start()
 
-    # Synchronize startup, let writes begin, then trigger shutdown while active
     barrier.wait()
     time.sleep(0.02)
     activity_service.close(timeout=35.0)
@@ -132,7 +131,6 @@ def test_audit_service_shutdown_drains_during_active_production(
     for t in threads:
         t.join(timeout=10.0)
 
-    # Every single admitted event MUST be persisted in SQLite with exact identity
     with real_db.connection() as conn:
         rows = conn.execute("SELECT resource_id FROM operation_events").fetchall()
         persisted_ids = {r["resource_id"] for r in rows}
@@ -143,7 +141,6 @@ def test_audit_service_shutdown_drains_during_active_production(
             f"Admitted event {admitted_id} was lost during shutdown!"
         )
 
-    # Subsequent record attempt must immediately fail with ServiceUnavailableError
     with pytest.raises(ServiceUnavailableError, match="Activity audit logging is shutting down"):
         activity_service.record(
             principal=principal,
@@ -204,7 +201,6 @@ def test_audit_service_rejects_mutations_on_storage_failure_and_does_not_clear_o
             raise sqlite3.OperationalError("database or disk is full")
 
         def execute(self, sql, params=()):
-            # SELECT 1 succeeds even on a full or readonly disk
             return self._raw.execute(sql, params)
 
         def __getattr__(self, item):
@@ -224,10 +220,8 @@ def test_audit_service_rejects_mutations_on_storage_failure_and_does_not_clear_o
                 resource_id="doc_disk_full",
             )
 
-        # Worker must be marked unhealthy; read liveness must NOT reset health
         assert service.is_healthy() is False
 
-        # Attempting further admission must fail with ServiceUnavailableError
         with pytest.raises(ServiceUnavailableError, match="Audit persistence is unavailable"):
             service.admit()
     finally:
@@ -244,7 +238,7 @@ def test_audit_service_preserves_complete_untruncated_diff(client: TestClient) -
     service = ActivityService(real_db)
 
     try:
-        huge_diff = "A" * 65_536  # 64 KB diff
+        huge_diff = "A" * 65_536
         service.record(
             principal=principal,
             action="patch",
@@ -278,44 +272,35 @@ def test_chat_store_cancellation_holds_permit_until_worker_completes() -> None:
     async def scenario():
         task = asyncio.create_task(runner.run(slow_sync_worker))
 
-        # Wait for thread to actually start executing
         assert await asyncio.to_thread(worker_started.wait, 2.0)
 
         assert runner._active_workers == 1
 
-        # Cancel the asyncio task
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        # Even though the task is cancelled, the permit MUST remain held
         assert runner._active_workers == 1
 
-        # Allow the synchronous worker to complete
         worker_can_finish.set()
         assert await asyncio.to_thread(worker_finished.wait, 2.0)
 
-        # Give asyncio loop a slice to process done_callback
         await asyncio.sleep(0.05)
         assert runner._active_workers == 0
 
-        # Now test max_waiting bound
         slow_again = threading.Event()
 
         def block_worker():
             slow_again.wait(timeout=5.0)
             return "ok"
 
-        # Occupy active worker
         t_active = asyncio.create_task(runner.run(block_worker))
         await asyncio.sleep(0.01)
 
-        # Fill waiting queue (max_waiting = 2)
         t_wait1 = asyncio.create_task(runner.run(lambda: "w1"))
         t_wait2 = asyncio.create_task(runner.run(lambda: "w2"))
         await asyncio.sleep(0.01)
 
-        # 3rd waiting item must be rejected immediately with ServiceUnavailableError
         with pytest.raises(ServiceUnavailableError, match="queue limit exceeded"):
             await runner.run(lambda: "overflow")
 
@@ -333,11 +318,9 @@ def test_audit_service_enforces_memory_budget_under_expansion(client: TestClient
         display_name="Jay",
         operation_id="op_mem_budget_test",
     )
-    # Small budget: 16 KB max
     service = ActivityService(real_db, max_queue_bytes=16 * 1024)
 
     try:
-        # Fill queue with an event that expands to 12 KB
         payload = "x" * 12_000
         service.record(
             principal=principal,
@@ -803,7 +786,6 @@ def test_app_lifespan_reports_chat_shutdown_error_while_preserving_activity_clea
 
     orig_close = runner.close
 
-    # Match the shutdown method under test, which owns its bounded drain.
     async def fast_close(timeout: float = 0.05) -> None:  # noqa: ASYNC109
         await orig_close(timeout=0.05)
 
@@ -863,12 +845,9 @@ def test_audit_queue_capacity_accounts_for_full_event_size_preventing_undercount
         res1 = service.admit(estimated_bytes=8 * 1024)
         res2 = service.admit(estimated_bytes=8 * 1024)
 
-        # P1 expands to 12 KB
         payload_12k = "A" * (12 * 1024 - 400)
-        # P2 produces 8 KB
         payload_8k = "B" * (8 * 1024 - 400)
 
-        # Thread 1 records P1
         t1 = threading.Thread(
             target=lambda: res1.record(
                 principal=principal,
@@ -881,7 +860,6 @@ def test_audit_queue_capacity_accounts_for_full_event_size_preventing_undercount
         t1.start()
         assert commit_started.wait(timeout=3.0)
 
-        # Thread 2 records P2 while P1 is committing
         p2_completed = threading.Event()
 
         def run_p2():
@@ -898,14 +876,11 @@ def test_audit_queue_capacity_accounts_for_full_event_size_preventing_undercount
         t2.start()
 
         time.sleep(0.15)
-        # P2 must be waiting because 12 KB + 8 KB > 16 KB budget
         assert not p2_completed.is_set(), "P2 should be waiting on budget capacity!"
         max_b = 16 * 1024
         assert service._queue_bytes + service._committing_bytes <= max_b, "Exceeded budget!"
-        # Crucially: P2 has not serialized its payload while waiting, preserving total memory bounds
         assert len(service._queue) == 0, "P2 must not enter the queue while waiting!"
 
-        # Unblock worker so P1 finishes and P2 can proceed
         pause_commit.set()
         t1.join(timeout=3.0)
         t2.join(timeout=3.0)
@@ -920,7 +895,6 @@ def test_mutation_and_audit_event_are_atomic_in_same_transaction(
 ) -> None:
     db = Database(settings.database_path)
 
-    # Verify successful mutation persists both document and audit event
     res = client.post(
         "/api/v1/documents",
         json={"title": "Atomic Doc", "content": "content", "path": "atomic.md"},
@@ -929,7 +903,6 @@ def test_mutation_and_audit_event_are_atomic_in_same_transaction(
     assert res.status_code == 201
     doc_id = res.json()["document_id"]
 
-    # Verify both exist in sqlite
     with db.connection() as conn:
         doc_row = conn.execute(
             "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
@@ -943,7 +916,6 @@ def test_mutation_and_audit_event_are_atomic_in_same_transaction(
         assert audit_row is not None
         assert audit_row["outcome"] == "accepted"
 
-    # Now verify failed transaction rolls back both document mutation and audit event
     orig_record_with_conn = client.app.state.services.activity.record_with_connection
 
     def fail_audit(*args, **kwargs):
@@ -961,7 +933,6 @@ def test_mutation_and_audit_event_are_atomic_in_same_transaction(
     finally:
         client.app.state.services.activity.record_with_connection = orig_record_with_conn
 
-    # Verify fail.md does NOT exist in documents table at all!
     with db.connection() as conn:
         failed_doc = conn.execute("SELECT * FROM documents WHERE path = ?", ("fail.md",)).fetchone()
         assert failed_doc is None, "Document must NOT have committed if audit write failed!"
@@ -972,7 +943,6 @@ def test_audit_records_correct_document_and_revision_on_pathless_create_and_dupl
 ) -> None:
     db = Database(settings.database_path)
 
-    # 1. Pathless create
     res = client.post(
         "/api/v1/documents",
         json={"title": "Pathless Doc", "content": "Hello world from pathless", "path": None},
@@ -984,7 +954,6 @@ def test_audit_records_correct_document_and_revision_on_pathless_create_and_dupl
     created_rev = created["current_revision_id"]
     assert created["path"] is None
 
-    # Check operation_events in SQLite
     with db.connection() as conn:
         event = conn.execute(
             "SELECT resource_id, revision_id, path, action, outcome FROM operation_events "
@@ -997,7 +966,6 @@ def test_audit_records_correct_document_and_revision_on_pathless_create_and_dupl
         assert event["path"] is None
         assert event["outcome"] == "accepted"
 
-    # 2. Duplicate document
     dup_res = client.post(
         f"/api/v1/documents/{created_id}/duplicate",
         json={"expected_revision_id": created_rev, "title": "Duplicated Doc"},
@@ -1009,7 +977,6 @@ def test_audit_records_correct_document_and_revision_on_pathless_create_and_dupl
     dup_rev = dup_doc["current_revision_id"]
     assert dup_id != created_id
 
-    # Check operation_events for the duplicate action
     with db.connection() as conn:
         dup_event = conn.execute(
             "SELECT resource_id, revision_id, action, outcome FROM operation_events "
@@ -1021,7 +988,6 @@ def test_audit_records_correct_document_and_revision_on_pathless_create_and_dupl
         assert dup_event["revision_id"] == dup_rev
         assert dup_event["outcome"] == "accepted"
 
-        # Ensure source document ID was NOT recorded as the duplicate target
         source_dup_event = conn.execute(
             "SELECT event_id FROM operation_events WHERE resource_id = ? AND action = 'duplicate'",
             (created_id,),
@@ -1037,21 +1003,16 @@ def test_audit_service_enforces_total_memory_bound_before_serialization(
         actor_id="human:jay", display_name="Jay", operation_id="op_mem_bound_pre_alloc"
     )
 
-    # max_queue_bytes = 16 KB, max_total_bytes = 16 KB
     service = ActivityService(real_db, max_queue_bytes=16 * 1024, max_total_bytes=16 * 1024)
 
     try:
-        # Producer 1 reserves 8 KB
         res1 = service.admit(estimated_bytes=8 * 1024)
-        # Producer 2 reserves 8 KB -> admitted_bytes is now 16 KB (total memory fully reserved)
         res2 = service.admit(estimated_bytes=8 * 1024)
         assert service._admitted_bytes == 16 * 1024
 
-        # Producer 3 tries to admit -> must fail or block because total memory is at budget
         with pytest.raises(ServiceUnavailableError, match="Audit queue capacity exceeded"):
             service.admit(estimated_bytes=1024, timeout=0.05)
 
-        # Producer 1 records an event with diff
         res1.record(
             principal=principal,
             action="read",
@@ -1060,8 +1021,6 @@ def test_audit_service_enforces_total_memory_bound_before_serialization(
             details={"diff": "A" * 6000},
         )
 
-        # After Producer 1 is committed, capacity is freed
-        # Producer 2 can now record
         res2.record(
             principal=principal,
             action="read",
@@ -1081,21 +1040,17 @@ def test_set_audit_target_outside_transaction_raises_and_cleans_up_on_exit(
 ) -> None:
     db = client.app.state.services.activity.database
 
-    # 1. Calling set_audit_target outside an active transaction raises RuntimeError
     with pytest.raises(RuntimeError, match="set_audit_target called outside an active transaction"):
         db.set_audit_target(resource_id="doc_outside", revision_id="rev_outside")
 
-    # 2. Inside a transaction, setting audit target works
     with db.transaction():
         db.set_audit_target(resource_id="doc_inside", revision_id="rev_inside")
         target = db.get_audit_target()
         assert target.get("resource_id") == "doc_inside"
         assert target.get("revision_id") == "rev_inside"
 
-    # 3. After transaction exits, target is cleaned up
     assert db.get_audit_target() == {}
 
-    # 4. Next transaction on the same thread starts with empty target
     with db.transaction():
         assert db.get_audit_target() == {}
 
@@ -1115,7 +1070,6 @@ def test_pdf_move_delete_restore_audit_records_correct_revisions_and_isolates_sa
     document_id = imported["document_id"]
     rev_1 = imported["current_revision_id"]
 
-    # 1. Move PDF -> revision becomes rev_2
     move_resp = client.post(
         f"/api/v1/documents/{document_id}/move",
         json={"path": "archive/audit_track.pdf", "expected_revision_id": rev_1},
@@ -1137,7 +1091,6 @@ def test_pdf_move_delete_restore_audit_records_correct_revisions_and_isolates_sa
         assert move_event["revision_id"] == rev_2
         assert move_event["outcome"] == "accepted"
 
-    # 2. Delete (trash) PDF -> revision becomes rev_3
     del_resp = client.request(
         "DELETE",
         f"/api/v1/documents/{document_id}",
@@ -1160,7 +1113,6 @@ def test_pdf_move_delete_restore_audit_records_correct_revisions_and_isolates_sa
         assert del_event["revision_id"] == rev_3
         assert del_event["outcome"] == "accepted"
 
-    # 3. Restore PDF -> revision becomes rev_4
     restore_resp = client.post(
         f"/api/v1/documents/{document_id}/restore",
         headers=headers("pdf-restore-k1"),
@@ -1182,7 +1134,6 @@ def test_pdf_move_delete_restore_audit_records_correct_revisions_and_isolates_sa
         assert restore_event["revision_id"] == rev_4
         assert restore_event["outcome"] == "accepted"
 
-    # 4. Immediate subsequent transaction on same thread has no stale audit target
     subsequent_resp = client.post(
         "/api/v1/documents",
         json={"title": "Subsequent Doc", "content": "hello world", "path": "subsequent.md"},
@@ -1226,7 +1177,6 @@ def test_audit_conservative_json_bound_handles_escapes_and_unicode(client: TestC
     ]
 
     for i, payload in enumerate(test_payloads):
-        # 1. Conservative bound estimate must be >= actual serialized JSON size
         est = service.estimate_payload_bytes(payload)
         row, actual_size = service._prepare_event_row(
             principal=principal,
@@ -1240,7 +1190,6 @@ def test_audit_conservative_json_bound_handles_escapes_and_unicode(client: TestC
             f"Estimate {est} was less than actual {actual_size} for payload {i}"
         )
 
-        # 2. Record with reservation preserves payload verbatim without truncation or corruption
         with service.admit(estimated_bytes=est) as res:
             res.record(
                 principal=principal,
@@ -1265,11 +1214,10 @@ def test_audit_exclusive_oversized_ownership_and_atomic_capacity(client: TestCli
     )
 
     try:
-        # Two producers admit small 512B reservations
         res1 = service.admit(estimated_bytes=512)
         res2 = service.admit(estimated_bytes=512)
 
-        oversized_payload = "X" * 10_000  # 10 KB > 8 KB limit
+        oversized_payload = "X" * 10_000
         p1_started = threading.Event()
         p1_done = threading.Event()
         p2_done = threading.Event()
@@ -1384,7 +1332,6 @@ def test_overlap_write_transaction_and_oversized_audit_event(client: TestClient)
                 "SELECT * FROM documents WHERE document_id = ?", (created_doc_id,)
             ).fetchone()
             assert doc is not None
-            # Verify mutation audit event has document_id and revision_id
             mut_event = conn.execute(
                 "SELECT * FROM operation_events WHERE resource_id = ?", (created_doc_id,)
             ).fetchone()
@@ -1485,24 +1432,20 @@ def test_worker_recovery_from_transient_lock_and_uncertain_reconciliation(
     """Area 6 acceptance: Worker recovery and event reconciliation."""
     activity_service = client.app.state.services.activity
 
-    # Transient error
     activity_service._worker_healthy = False
     activity_service._worker_error = sqlite3.OperationalError("database is locked")
     assert activity_service.is_healthy() is True, "Must recover from transient lock contention"
 
-    # Terminal / disk failure
     activity_service._worker_healthy = False
     activity_service._worker_error = OSError("Disk device removed")
     assert activity_service.is_healthy() is False, "Must NOT recover from terminal OS error"
     activity_service._worker_healthy = True
     activity_service._worker_error = None
 
-    # Uncertain event reconciliation
     event_id = "evt_reconcile_test_1"
     activity_service._uncertain_events[event_id] = time.time()
     assert activity_service.reconcile_event(event_id) == "uncertain"
 
-    # Insert into database
     principal = Principal.trusted_human(
         actor_id="human:jay", display_name="Jay", operation_id="op_rec"
     )
@@ -1515,7 +1458,6 @@ def test_worker_recovery_from_transient_lock_and_uncertain_reconciliation(
             outcome="accepted",
             resource_id="doc_rec_1",
         )
-        # Check reconcile on real row
         row = conn.execute(
             "SELECT event_id FROM operation_events WHERE resource_id = ?", ("doc_rec_1",)
         ).fetchone()
@@ -1645,7 +1587,6 @@ def test_two_expanding_producers_do_not_deadlock_on_empty_queue(client: TestClie
                     resource_id=doc_id,
                     details={"diff": payload},
                 )
-            # Collect every worker failure for assertion after joining the threads.
             except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
@@ -1788,7 +1729,6 @@ def test_worker_recovery_from_real_sqlite_write_lock(client: TestClient, setting
 
 def test_document_update_persists_actual_diff_not_placeholder(client: TestClient) -> None:
     """Finding 1: Document updates and restores persist real diffs, not placeholders."""
-    # 1. Create document
     create_resp = client.post(
         "/api/v1/documents",
         json={
@@ -1802,7 +1742,6 @@ def test_document_update_persists_actual_diff_not_placeholder(client: TestClient
     doc_id = create_resp.json()["document_id"]
     rev1 = create_resp.json()["current_revision_id"]
 
-    # 2. Update document
     update_resp = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -1815,7 +1754,6 @@ def test_document_update_persists_actual_diff_not_placeholder(client: TestClient
     assert update_resp.status_code == 200
     rev2 = update_resp.json()["current_revision_id"]
 
-    # Query operation_events for the update
     activity_svc = client.app.state.services.activity
     with activity_svc.database.connection() as conn:
         row = conn.execute(
@@ -1836,7 +1774,6 @@ def test_document_update_persists_actual_diff_not_placeholder(client: TestClient
         assert details.get("lines_added") == 1
         assert details.get("lines_removed") == 1
 
-    # 3. Update to third version
     update3 = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -1848,7 +1785,6 @@ def test_document_update_persists_actual_diff_not_placeholder(client: TestClient
     assert update3.status_code == 200
     rev3 = update3.json()["current_revision_id"]
 
-    # 4. Restore back to rev1
     restore_resp = client.post(
         f"/api/v1/documents/{doc_id}/restore",
         json={
@@ -1873,7 +1809,6 @@ def test_document_update_persists_actual_diff_not_placeholder(client: TestClient
         assert row["revision_id"] == rev4
         details = json.loads(row["detail_json"])
         diff_text = details.get("diff", "")
-        # Restore diff is from rev3 ("third text") to rev1 ("old text")
         assert "-third text" in diff_text
         assert "+old text" in diff_text
 
@@ -1912,26 +1847,21 @@ def test_full_budget_expansion_strictly_enforces_advertised_bound(client: TestCl
                     details={"diff": large_diff},
                 )
                 res1_completed.set()
-            # Collect every worker failure for assertion after joining the threads.
             except Exception as e:  # noqa: BLE001
                 res1_error.append(e)
 
         t1 = threading.Thread(target=worker1)
         t1.start()
 
-        # Res 1 cannot expand yet because total_in_flight (16,384) + expansion > 16,384!
         time.sleep(0.1)
         assert not res1_completed.is_set(), "Res 1 should wait while Res 2 is holding capacity"
 
-        # Now Res 2 releases its capacity
         res2.release()
 
-        # Res 1 can now expand within the 16,384 budget!
         t1.join(timeout=5.0)
         assert res1_completed.is_set()
         assert not res1_error
 
-        # CRITICAL ASSERTION: Peak total memory must NEVER exceed 16,384!
         assert activity_svc.peak_total_bytes <= 16_384, (
             f"Peak total bytes {activity_svc.peak_total_bytes} exceeded budget 16,384!"
         )
@@ -1947,7 +1877,6 @@ def test_transactional_admitted_oversized_owner_permitted(client: TestClient) ->
     activity_svc.max_total_bytes = 10_000
 
     try:
-        # Admitted as exclusive oversized owner
         res = activity_svc.admit(estimated_bytes=15_000)
         assert res._is_oversized_owner is True
 
@@ -1955,7 +1884,6 @@ def test_transactional_admitted_oversized_owner_permitted(client: TestClient) ->
             actor_id="human:jay", display_name="Jay", operation_id="op_tx_oversized"
         )
         with activity_svc.database.connection() as conn:
-            # Must succeed without raising ServiceUnavailableError
             res.record_with_connection(
                 conn,
                 principal=principal,
@@ -1989,7 +1917,6 @@ def test_failure_audit_persistence_failure_is_not_swallowed(
 
     monkeypatch.setattr(AuditReservation, "record", failing_reservation_record)
 
-    # Make request that fails with 409 (revision conflict)
     resp = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -1998,10 +1925,8 @@ def test_failure_audit_persistence_failure_is_not_swallowed(
         },
         headers=headers("fail-audit-k1"),
     )
-    # The original 409 Conflict status code is returned
     assert resp.status_code == 409
     body = resp.json()
-    # The error details explicitly record the audit persistence failure
     assert body["error"]["code"] == "revision_conflict"
     assert body["error"]["details"].get("audit_persisted") is False
     assert "Simulated audit queue failure" in str(body["error"]["details"].get("audit_error"))
@@ -2044,7 +1969,6 @@ def test_two_expanding_producers_break_circular_wait_under_strict_capacity(
                     details={"diff": large_diff},
                 )
                 results[name] = "success"
-            # Collect every worker failure for assertion after joining the threads.
             except Exception as e:  # noqa: BLE001
                 results[name] = f"error: {e}"
                 errors.append(e)
@@ -2067,7 +1991,6 @@ def test_two_expanding_producers_break_circular_wait_under_strict_capacity(
         assert results.get("p1") == "success"
         assert results.get("p2") == "success"
 
-        # Strictly enforce peak memory bound <= 16,384 bytes
         assert activity_svc.peak_total_bytes <= 16_384, (
             f"Peak total bytes {activity_svc.peak_total_bytes} exceeded configured budget 16,384!"
         )
@@ -2083,7 +2006,6 @@ def test_audit_diff_preserves_line_endings_and_diff_header_lines(client: TestCli
     """
     db = client.app.state.services.activity.database
 
-    # Case 1: Missing final newline addition: "line" -> "line\n"
     c1 = client.post(
         "/api/v1/documents",
         json={"title": "Newline Doc", "content": "line", "path": "newline.md"},
@@ -2114,7 +2036,6 @@ def test_audit_diff_preserves_line_endings_and_diff_header_lines(client: TestCli
         assert details.get("final_newline") is True
         assert details.get("line_ending") == "lf"
 
-    # Case 2: Content lines starting with ++ and --
     c2 = client.post(
         "/api/v1/documents",
         json={"title": "Symbols Doc", "content": "++var\n--flag\n", "path": "symbols.md"},
@@ -2139,13 +2060,11 @@ def test_audit_diff_preserves_line_endings_and_diff_header_lines(client: TestCli
         assert ev2 is not None
         details2 = json.loads(ev2["detail_json"])
         diff2 = details2.get("diff", "")
-        # Both additions and removals must be present and counted
         assert "++++var" in diff2
         assert "+---flag" in diff2
         assert details2.get("lines_added") == 2
         assert details2.get("lines_removed") == 2
 
-    # Case 3: CRLF to LF change
     c3 = client.post(
         "/api/v1/documents",
         json={"title": "CRLF Doc", "content": "header\r\nbody\r\n", "path": "crlf.md"},
@@ -2182,7 +2101,6 @@ def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_re
 
     Reject SSE error events and verify the item ID and content in SQLite.
     """
-    # 1. Five-event error sequence simulation
     error_stream_events = [
         {
             "type": "thread.created",
@@ -2206,7 +2124,6 @@ def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_re
         {"type": "thread.updated", "thread": {"id": "thr_err_test"}},
     ]
 
-    # Evaluate against gate criteria
     error_events = [ev for ev in error_stream_events if ev.get("type") == "error"]
     assert len(error_events) == 1
     assert error_events[0].get("code") == "custom"
@@ -2221,7 +2138,6 @@ def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_re
     ]
     assert len(completed_asst) == 0, "Error stream must not have completed assistant response"
 
-    # 2. Valid stream sequence with completed assistant response and SQLite persistence
     db = client.app.state.services.activity.database
     store = SQLiteChatKitStore(db)
     principal = Principal.trusted_human(
@@ -2259,7 +2175,6 @@ def test_streaming_gate_rejects_error_events_and_requires_persisted_assistant_re
         {"type": "thread.updated", "thread": {"id": "thr_success_1"}},
     ]
 
-    # Gate verification
     success_errs = [ev for ev in success_stream_events if ev.get("type") == "error"]
     assert not success_errs
 
@@ -2297,7 +2212,6 @@ def test_concurrent_text_document_mutations_targeting_same_path_preserves_winnin
 ) -> None:
     target_path = "research/raced_doc.md"
 
-    # Initial setup: Create Document 1 at target_path
     res1 = client.post(
         "/api/v1/documents",
         json={
@@ -2312,7 +2226,6 @@ def test_concurrent_text_document_mutations_targeting_same_path_preserves_winnin
     doc1_id = doc1["document_id"]
     doc1_rev = doc1["current_revision_id"]
 
-    # Also create Document 2 at a separate path
     res2 = client.post(
         "/api/v1/documents",
         json={
@@ -2380,7 +2293,6 @@ def test_concurrent_folder_metadata_updates_preserve_latest_manifest(
 ) -> None:
     folder_path = "research/projects"
 
-    # Create initial folder
     res = client.post(
         "/api/v1/folders",
         json={"path": folder_path, "category": "Initial"},
@@ -2432,7 +2344,6 @@ def test_concurrent_folder_move_and_metadata_update_preserves_manifest_consisten
     source_path = "research/team"
     sub_path = "research/team/docs"
 
-    # Create folder hierarchy
     res_parent = client.post(
         "/api/v1/folders",
         json={"path": source_path, "category": "Team Folder"},
@@ -2481,7 +2392,6 @@ def test_concurrent_folder_move_and_metadata_update_preserves_manifest_consisten
         f1.result(timeout=10)
         f2.result(timeout=10)
 
-    # Verify created/moved folders have matching .sangam-folder.json manifests on disk
     db = client.app.state.services.activity.database
     with db.connection() as conn:
         for folder_id in (parent_id, sub_id):
@@ -2514,7 +2424,6 @@ def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestCl
     )
     doc_id = document.document_id
 
-    # Run simultaneous extractions
     results = []
 
     def run_extraction():
@@ -2526,15 +2435,11 @@ def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestCl
         for f in futures:
             f.result(timeout=10)
 
-    # Exactly one extraction attempt claims and completes, returning True; others return False
     assert sorted(results) == [False, False, True]
 
-    # Verify pages extracted cleanly
     pages = pdf_service.pages(doc_id)
     assert len(pages) == 1
     assert "Atomic PDF Extraction Test Content" in pages[0].text
-
-    # Verify no orphan temporary files exist in system temp directory or workspace
 
     temp_dir = Path(tempfile.gettempdir())
     orphaned_temp_files = list(temp_dir.glob(".pages.json.sangam-*"))
@@ -2544,7 +2449,6 @@ def test_concurrent_pdf_text_extraction_atomic_output_and_cleanup(client: TestCl
 def test_concurrent_document_asset_uploads_atomic_write_and_cleanup(
     client: TestClient, settings
 ) -> None:
-    # Create Markdown document
     res_doc = client.post(
         "/api/v1/documents",
         json={
@@ -2589,7 +2493,6 @@ def test_concurrent_document_asset_uploads_atomic_write_and_cleanup(
         assert asset_file.is_file()
         assert asset_file.read_bytes() == png_bytes
 
-    # Check attachments directory for orphaned temporary files
     attachments_dir = settings.workspace_root / "attachments"
     if attachments_dir.is_dir():
         temp_files = list(attachments_dir.glob(".*.sangam-*"))
@@ -2599,7 +2502,6 @@ def test_concurrent_document_asset_uploads_atomic_write_and_cleanup(
 def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient, settings) -> None:
     target_path = "research/simultaneous_rw.md"
 
-    # Create initial document
     res = client.post(
         "/api/v1/documents",
         json={
@@ -2670,7 +2572,6 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient
         for rf in reader_futures:
             rf.result(timeout=10)
 
-    # Validate reader results: NO zero-byte reads or error statuses
     assert len(read_results) > 0, "Readers should have executed reads"
     for status_code, kind, content in read_results:
         assert status_code == 200, f"Reader received unexpected status code: {status_code}"
@@ -2680,14 +2581,11 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient
             f"Corrupted or invalid read content detected: {text!r}"
         )
 
-    # Validate writer results: at least one update succeeded,
-    # and conflicting updates failed cleanly (409)
     status_codes = [code for code, _ in write_results]
     assert 200 in status_codes, "At least one update write should have succeeded"
     for code in status_codes:
         assert code in (200, 409), f"Writer encountered unexpected status code: {code}"
 
-    # Verify final winning revision on disk matches database
     fetch_resp = client.get(f"/api/v1/documents/{doc_id}", headers=headers("fetch-final"))
     assert fetch_resp.status_code == 200
     final_doc = fetch_resp.json()
@@ -2697,7 +2595,6 @@ def test_simultaneous_reads_and_writes_concurrency_resilience(client: TestClient
     disk_content = file_path.read_text(encoding="utf-8")
     assert disk_content == final_doc["content"]
 
-    # Verify no orphaned temporary files exist in the parent directory
     parent_dir = file_path.parent
     orphaned_temp_files = list(parent_dir.glob(".simultaneous_rw.md.sangam-*"))
     assert len(orphaned_temp_files) == 0, f"Found orphaned temp files: {orphaned_temp_files}"
@@ -2710,7 +2607,6 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     doc_service = client.app.state.services.documents
     target_path = "research/stale_mat_race.md"
 
-    # Step 1: Create initial document (Version 1)
     res1 = client.post(
         "/api/v1/documents",
         json={
@@ -2725,12 +2621,10 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     doc_id = doc1["document_id"]
     rev_1 = doc1["current_revision_id"]
 
-    # Read Document object representing Version 1 state
     stale_doc_v1 = doc_service.get_document(doc_id)
     assert stale_doc_v1.current_revision_id == rev_1
     assert stale_doc_v1.content == "Version 1 content\n"
 
-    # Step 2: Update document to Version 2
     res2 = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -2742,7 +2636,6 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     assert res2.status_code == 200
     rev_2 = res2.json()["current_revision_id"]
 
-    # Step 3: Update document to Version 3
     res3 = client.patch(
         f"/api/v1/documents/{doc_id}",
         json={
@@ -2753,20 +2646,16 @@ def test_delayed_materialization_stale_revision_does_not_overwrite_newer_revisio
     )
     assert res3.status_code == 200
 
-    # Ensure disk currently holds Version 3
     file_path = settings.workspace_root / target_path
     assert file_path.read_text(encoding="utf-8") == "Version 3 content\n"
 
-    # Step 4: Simulate a delayed materialization call for Version 1
     doc_service._finish_materialization(stale_doc_v1)
 
-    # Step 5: Verify disk file was NOT overwritten with Version 1 content
     disk_content = file_path.read_text(encoding="utf-8")
     assert disk_content == "Version 3 content\n", (
         f"Disk was corrupted/overwritten by stale materialization! Found: {disk_content!r}"
     )
 
-    # Verify DB state is clean and matches Version 3
     current_doc = doc_service.get_document(doc_id)
     assert current_doc.content == "Version 3 content\n"
     assert current_doc.materialization_state == "clean"
@@ -2778,7 +2667,6 @@ def test_concurrent_document_writes_with_if_match_and_atomic_staging(
     """Simulate simultaneous reads and writes with If-Match preconditions."""
     target_path = "research/if_match_concurrency.md"
 
-    # Create initial document
     res = client.post(
         "/api/v1/documents",
         json={
@@ -2810,7 +2698,6 @@ def test_concurrent_document_writes_with_if_match_and_atomic_staging(
             read_results.append((r2.status_code, "raw", r2.content))
             time.sleep(0.001)
 
-    # Fetch full Document etag header
     doc_resp = client.get(f"/api/v1/documents/{doc_id}", headers=headers("fetch-initial-etag"))
     initial_etag = doc_resp.headers["ETag"]
 
@@ -2839,17 +2726,14 @@ def test_concurrent_document_writes_with_if_match_and_atomic_staging(
         for rf in r_futures:
             rf.result(timeout=10)
 
-    # Validate reader results: NO zero-byte reads or error statuses
     assert len(read_results) > 0
     for status_code, kind, content in read_results:
         assert status_code == 200, f"Reader got status code {status_code}"
         assert len(content) > 0, f"Zero-byte read detected for {kind}"
 
-    # Exactly one writer must succeed (200), and others fail with precondition error (412)
     status_codes = sorted([code for code, _ in write_results])
     assert status_codes == [200, 412, 412], f"Unexpected status codes: {status_codes}"
 
-    # Verify disk content matches final database state
     fetch_resp = client.get(f"/api/v1/documents/{doc_id}", headers=headers("fetch-if-match-final"))
     assert fetch_resp.status_code == 200
     final_doc = fetch_resp.json()
@@ -2858,7 +2742,6 @@ def test_concurrent_document_writes_with_if_match_and_atomic_staging(
     assert file_path.is_file()
     assert file_path.read_text(encoding="utf-8") == final_doc["content"]
 
-    # Verify no orphaned temporary files remain
     parent_dir = file_path.parent
     orphaned = list(parent_dir.glob(".if_match_concurrency.md.sangam-*"))
     assert len(orphaned) == 0, f"Found orphaned temp files: {orphaned}"

@@ -182,7 +182,6 @@ def test_deleted_brief_is_not_a_resume_reference(client: TestClient) -> None:
 
 
 def test_project_crud_and_auto_brief(client: TestClient) -> None:
-    # 1. Create project with auto-generated brief
     create_res = client.post(
         "/api/v1/projects",
         json={
@@ -202,7 +201,6 @@ def test_project_crud_and_auto_brief(client: TestClient) -> None:
     assert len(project["documents"]) == 1
     assert project["documents"][0]["role"] == "note"
 
-    # Verify brief document exists as an ordinary Markdown document
     brief_id = project["brief_document_id"]
     doc_res = client.get(f"/api/v1/documents/{brief_id}")
     assert doc_res.status_code == 200
@@ -211,12 +209,10 @@ def test_project_crud_and_auto_brief(client: TestClient) -> None:
     assert "Distributed Consensus Review" in brief_doc["content"]
     assert "Evaluate Raft and Paxos" in brief_doc["content"]
 
-    # 2. Get project details
     get_res = client.get(f"/api/v1/projects/{project_id}")
     assert get_res.status_code == 200
     assert get_res.json()["project_id"] == project_id
 
-    # 3. Update project details and workbench state
     layout_state = {
         "schemaVersion": 1,
         "activeGroupId": "group-1",
@@ -240,7 +236,6 @@ def test_project_crud_and_auto_brief(client: TestClient) -> None:
     assert updated["name"] == "Distributed Consensus Deep Dive"
     assert json.loads(updated["workbench_state_json"]) == layout_state
 
-    # 4. List projects
     list_res = client.get("/api/v1/projects")
     assert list_res.status_code == 200
     summaries = list_res.json()
@@ -249,7 +244,6 @@ def test_project_crud_and_auto_brief(client: TestClient) -> None:
 
 
 def test_document_membership_shared_across_projects(client: TestClient) -> None:
-    # Create two source documents
     doc1 = client.post(
         "/api/v1/documents",
         json={"title": "Raft Paper", "content": "# Raft\nIn Search of Understandable Consensus."},
@@ -261,7 +255,6 @@ def test_document_membership_shared_across_projects(client: TestClient) -> None:
         headers=headers("create-paxos"),
     ).json()
 
-    # Create two distinct projects
     p1 = client.post(
         "/api/v1/projects",
         json={"name": "Storage Engine", "create_brief": False},
@@ -271,14 +264,12 @@ def test_document_membership_shared_across_projects(client: TestClient) -> None:
         json={"name": "Replication Protocol", "create_brief": False},
     ).json()
 
-    # Add Raft paper to p1 as 'source' with pinned page 1
     add_res1 = client.post(
         f"/api/v1/projects/{p1['project_id']}/documents",
         json={"document_id": doc1["document_id"], "role": "source", "pinned_page": 1},
     )
     assert add_res1.status_code == 201
 
-    # Add same Raft paper to p2 as 'output' with pinned page 10 and custom notes
     add_res2 = client.post(
         f"/api/v1/projects/{p2['project_id']}/documents",
         json={
@@ -290,20 +281,17 @@ def test_document_membership_shared_across_projects(client: TestClient) -> None:
     )
     assert add_res2.status_code == 201
 
-    # Add Paxos paper only to p2
     client.post(
         f"/api/v1/projects/{p2['project_id']}/documents",
         json={"document_id": doc2["document_id"], "role": "source"},
     )
 
-    # Verify Project 1 has only Raft with role 'source' and pinned page 1
     p1_detail = client.get(f"/api/v1/projects/{p1['project_id']}").json()
     assert p1_detail["document_count"] == 1
     assert p1_detail["documents"][0]["document_id"] == doc1["document_id"]
     assert p1_detail["documents"][0]["role"] == "source"
     assert p1_detail["documents"][0]["pinned_page"] == 1
 
-    # Verify Project 2 has both documents, with Raft role 'output' and pinned page 10
     p2_detail = client.get(f"/api/v1/projects/{p2['project_id']}").json()
     assert p2_detail["document_count"] == 2
     raft_in_p2 = next(d for d in p2_detail["documents"] if d["document_id"] == doc1["document_id"])
@@ -311,7 +299,6 @@ def test_document_membership_shared_across_projects(client: TestClient) -> None:
     assert raft_in_p2["pinned_page"] == 10
     assert raft_in_p2["notes"] == "Reference for state machine replication"
 
-    # Update document role in Project 1
     patch_doc = client.patch(
         f"/api/v1/projects/{p1['project_id']}/documents/{doc1['document_id']}",
         json={"role": "note", "notes": "Audited for storage"},
@@ -320,29 +307,23 @@ def test_document_membership_shared_across_projects(client: TestClient) -> None:
     assert patch_doc.json()["role"] == "note"
     assert patch_doc.json()["notes"] == "Audited for storage"
 
-    # Verify Project 2 was NOT affected
     p2_detail_after = client.get(f"/api/v1/projects/{p2['project_id']}").json()
     raft_in_p2_after = next(
         d for d in p2_detail_after["documents"] if d["document_id"] == doc1["document_id"]
     )
     assert raft_in_p2_after["role"] == "output"
 
-    # Remove document from Project 1
     del_res = client.delete(f"/api/v1/projects/{p1['project_id']}/documents/{doc1['document_id']}")
     assert del_res.status_code == 204
 
-    # Verify Project 1 now has 0 documents
     p1_empty = client.get(f"/api/v1/projects/{p1['project_id']}").json()
     assert p1_empty["document_count"] == 0
 
-    # Underlying document must still exist!
     assert client.get(f"/api/v1/documents/{doc1['document_id']}").status_code == 200
-    # And Project 2 still has Raft!
     assert client.get(f"/api/v1/projects/{p2['project_id']}").json()["document_count"] == 2
 
 
 def test_delete_project_preserves_documents(client: TestClient) -> None:
-    # Create project with brief
     p = client.post(
         "/api/v1/projects",
         json={"name": "Temporary Project", "create_brief": True},
@@ -350,14 +331,11 @@ def test_delete_project_preserves_documents(client: TestClient) -> None:
     brief_id = p["brief_document_id"]
     project_id = p["project_id"]
 
-    # Delete project
     del_res = client.delete(f"/api/v1/projects/{project_id}")
     assert del_res.status_code == 204
 
-    # Project is gone
     assert client.get(f"/api/v1/projects/{project_id}").status_code == 404
 
-    # Brief document is still intact!
     assert client.get(f"/api/v1/documents/{brief_id}").status_code == 200
 
 
@@ -384,7 +362,6 @@ def test_project_performance_and_bulk_operations(settings: Settings) -> None:
         operation_id="op_bench",
     )
 
-    # Create 50 documents
     doc_ids: list[str] = []
     for i in range(50):
         doc = services.documents.create_document(
@@ -396,7 +373,6 @@ def test_project_performance_and_bulk_operations(settings: Settings) -> None:
         )
         doc_ids.append(doc.document_id)
 
-    # Create 10 projects
     project_ids: list[str] = []
     for i in range(10):
         proj = services.projects.create_project(
@@ -405,7 +381,6 @@ def test_project_performance_and_bulk_operations(settings: Settings) -> None:
         )
         project_ids.append(proj.project_id)
 
-    # Attach all 50 documents across projects
     for p_idx, p_id in enumerate(project_ids):
         for d_idx in range(p_idx * 4, min(len(doc_ids), (p_idx + 1) * 8)):
             services.projects.add_document(
@@ -419,12 +394,10 @@ def test_project_performance_and_bulk_operations(settings: Settings) -> None:
                 ),
             )
 
-    # Verify list query returns all 10 projects efficiently with correct counts
     summaries = services.projects.list_projects()
     assert len(summaries) == 10
     assert all(s.document_count >= 1 for s in summaries)
 
-    # Verify query plan for project listing uses index
     with services.projects.database.connection() as conn:
         plan = conn.execute(
             "EXPLAIN QUERY PLAN SELECT * FROM projects ORDER BY updated_at DESC"
@@ -436,7 +409,6 @@ def test_project_performance_and_bulk_operations(settings: Settings) -> None:
 def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters(
     client: TestClient,
 ) -> None:
-    # 1. Project creation rejecting null bytes and control characters
     bad_name_null = client.post("/api/v1/projects", json={"name": "Bad\x00Name"})
     assert bad_name_null.status_code == 422
     msg = bad_name_null.json()["error"]["message"]
@@ -461,11 +433,9 @@ def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters
     msg = bad_desc_ctrl.json()["error"]["message"]
     assert "Project description cannot contain control characters" in msg
 
-    # Create a valid project for update tests
     project = client.post("/api/v1/projects", json={"name": "Sanitization Test"}).json()
     project_id = project["project_id"]
 
-    # 2. Project update rejecting null bytes and control characters
     bad_update_name = client.patch(f"/api/v1/projects/{project_id}", json={"name": "Bad\x00Update"})
     assert bad_update_name.status_code == 422
     msg = bad_update_name.json()["error"]["message"]
@@ -478,14 +448,12 @@ def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters
     msg = bad_update_desc.json()["error"]["message"]
     assert "Project description cannot contain control characters" in msg
 
-    # Create a valid document to attach
     doc = client.post(
         "/api/v1/documents",
         json={"title": "Test Doc", "content": "Sample content"},
         headers=headers("doc-sanitization"),
     ).json()
 
-    # 3. Adding project document notes rejecting null bytes and control characters
     bad_add_notes_null = client.post(
         f"/api/v1/projects/{project_id}/documents",
         json={"document_id": doc["document_id"], "role": "source", "notes": "Bad\x00Note"},
@@ -502,13 +470,11 @@ def test_project_metadata_sanitization_rejects_null_bytes_and_control_characters
     msg = bad_add_notes_ctrl.json()["error"]["message"]
     assert "Document notes cannot contain control characters" in msg
 
-    # Add document with valid notes
     client.post(
         f"/api/v1/projects/{project_id}/documents",
         json={"document_id": doc["document_id"], "role": "source", "notes": "Valid notes"},
     )
 
-    # 4. Updating project document notes rejecting null bytes and control characters
     bad_update_notes_null = client.patch(
         f"/api/v1/projects/{project_id}/documents/{doc['document_id']}",
         json={"notes": "Bad\x00UpdateNote"},
@@ -537,7 +503,6 @@ def test_project_pdf_document_and_superseded_source_update(client: TestClient) -
     assert create_pdf.status_code == 201
     orig_id = create_pdf.json()["document_id"]
 
-    # Create project and add original PDF as source
     proj = client.post(
         "/api/v1/projects", json={"name": "Paper Review", "create_brief": False}
     ).json()
@@ -549,7 +514,6 @@ def test_project_pdf_document_and_superseded_source_update(client: TestClient) -
     )
     assert add_res.status_code == 201
 
-    # Project detail has the PDF, not updated
     p_detail = client.get(f"/api/v1/projects/{proj_id}").json()
     assert p_detail["document_count"] == 1
     doc_item = p_detail["documents"][0]
@@ -558,7 +522,6 @@ def test_project_pdf_document_and_superseded_source_update(client: TestClient) -
     assert doc_item["source_updated"] is False
     assert doc_item["superseded_by_document_id"] is None
 
-    # Now upload replacement PDF superseding the original
     rep_bytes = text_pdf("Updated research findings with new benchmark.")
     create_rep = client.post(
         "/api/v1/pdfs",
@@ -573,7 +536,6 @@ def test_project_pdf_document_and_superseded_source_update(client: TestClient) -
     assert create_rep.status_code == 201
     rep_id = create_rep.json()["document_id"]
 
-    # Project detail now detects source_updated=True and records superseded_by
     p_detail_updated = client.get(f"/api/v1/projects/{proj_id}").json()
     doc_item_updated = p_detail_updated["documents"][0]
     assert doc_item_updated["source_updated"] is True

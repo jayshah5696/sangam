@@ -77,7 +77,6 @@ class ProfileContext(BaseModel):
     memories: list[MemoryEntry] = Field(default_factory=list, max_length=20)
 
     def prompt(self) -> str:
-        # JSON escaping prevents saved text from impersonating surrounding source delimiters.
         payload = self.model_dump_json().replace("<", "\\u003c").replace(">", "\\u003e")
         return (
             "\n<SAVED_CHAT_PROFILE>\n"
@@ -359,7 +358,6 @@ class ChatProfileService:
                     raise ValidationError("A turn can recall at most 20 facts; narrow the search")
                 for entry in page.entries:
                     scope = f"project:{entry.project_id}" if entry.project_id else "user"
-                    # Keep bounded, content-free references. Live versions are authoritative.
                     conn.execute(
                         "INSERT INTO chat_profile_memory_reads VALUES (?, ?, ?, ?, ?) "
                         "ON CONFLICT(context_id, actor_id, scope, memory_id) "
@@ -513,8 +511,6 @@ class ChatProfileService:
                 if context.context_snapshot_id
                 else None
             )
-        # Agent document reads enqueue an audit on another connection. Complete
-        # these reads before taking the writer lock used to pin the profile.
         if row:
             profile = ProfileContext.model_validate_json(row["profile_json"])
             self.authorize(context.principal, profile.project_id, context.document_id)

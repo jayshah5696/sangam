@@ -38,7 +38,6 @@ export default defineConfig({
     rollupOptions: {
       input: { main: 'index.html', mcpHost: 'mcp-host.html' },
     },
-    // CodeMirror and the complete Mermaid renderer are optional lazy chunks.
     chunkSizeWarningLimit: 700,
     manifest: true,
   },

@@ -39,7 +39,6 @@ markdown.renderer.rules.heading_open = (tokens, index, options, environment, sel
   return defaultHeadingOpen(tokens, index, options, environment, self)
 }
 
-// Source lines on blocks let search results and the outline scroll the preview to a passage.
 for (const rule of ['paragraph_open', 'list_item_open', 'blockquote_open'] as const) {
   const fallback =
     markdown.renderer.rules[rule] ??
@@ -70,8 +69,6 @@ export function MarkdownPreview({ content, resolveAsset, readable = false }: Mar
       }),
     [content],
   )
-  // React compares this prop by identity. Replacing the object for unchanged
-  // content rewrites the DOM and destroys an in-progress native selection.
   const markup = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 
   useEffect(() => {

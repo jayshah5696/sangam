@@ -74,7 +74,6 @@ describe('DocumentLocationControl', () => {
     expect(trigger).toBeDefined()
     expect(trigger.textContent).toContain('Saved draft')
 
-    // Click trigger to open popover
     fireEvent.click(trigger)
 
     const dialog = screen.getByRole('dialog', { name: 'Draft location' })
@@ -82,7 +81,6 @@ describe('DocumentLocationControl', () => {
     expect(screen.getByLabelText('Workspace folder')).toBeDefined()
     expect(screen.getByLabelText('Workspace filename')).toBeDefined()
 
-    // Press Escape to close
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull()

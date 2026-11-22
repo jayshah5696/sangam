@@ -337,7 +337,6 @@ class FixtureWebProvider:
 class ToolCallRecord:
     tool: str
     args: dict[str, Any] = field(default_factory=dict)
-    # Eval-only evidence is the actual returned text, never the full fixture page.
     source_evidence: list[dict[str, str]] = field(default_factory=list)
 
 
@@ -392,8 +391,6 @@ def validate_source_grade(
     """Reject invented grading evidence before accepting a semantic judgment."""
     linked = set(re.findall(r"\]\((https?://[^)\s]+)\)", answer))
 
-    # A judge may quote rendered strong text without its paired Markdown markers.
-    # Preserve wording, punctuation, and every source quote when checking provenance.
     def claim_text(value: str) -> str:
         return re.sub(r"(\*\*|__)(\S(?:.*?\S)?)\1", r"\2", value)
 
@@ -479,10 +476,8 @@ async def grade_source_support(
         async for _event in result.stream_events():
             pass
         raise
-    # Record any provider failure as an inconclusive grade after draining its stream.
     except Exception as error:  # noqa: BLE001
         result.cancel()
-        # Drain the SDK stream to settle provider tasks after timeout or invalid JSON.
         with contextlib.suppress(Exception):
             async for _event in result.stream_events():
                 pass
@@ -539,7 +534,6 @@ def resolve_api_key(env_file: str | None) -> str:
 
 def detect_variant() -> str:
     try:
-        # The evaluator also runs against older checkouts without this capability.
         from sangam.chat_capabilities import ProposeUpdateInput  # noqa: PLC0415
     except ImportError:
         return "unknown"
@@ -754,7 +748,6 @@ async def run_item(
                 },
             },
         }
-        # Each continuation must use the stored effect result, just as the browser does.
         for _ in range(env.settings.chat_max_tool_rounds):
             response = await server.process(json.dumps(request), request_context)
             if not isinstance(response, StreamingResult):
@@ -900,10 +893,6 @@ async def run_item(
     }
 
 
-# ---------------------------------------------------------------------------
-# Checks
-# ---------------------------------------------------------------------------
-
 CITATION_RE = re.compile(r"chatkit-link://|\[[^\]]+\]\((https?://|chatkit-link://)")
 
 
@@ -954,7 +943,6 @@ def evaluate_checks(item: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
         elif check.startswith("answer_not_contains:"):
             passed = not answer_contains(check.split(":", 1)[1])
         elif check == "web_cited_sources_retrieved":
-            # At least one outside link, and every outside link was retrieved this run.
             retrieved = {source["url"] for source in outcome["web_sources"]}
             linked = set(re.findall(r"\]\((https?://[^)\s]+)\)", text))
             passed = bool(linked) and linked <= retrieved

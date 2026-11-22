@@ -33,7 +33,6 @@ class KeyRecord:
     operation: str
     request_hash: str
     resource_id: str
-    # Set for document revisions; resource mutations have no revision.
     revision_id: str | None
     completed: bool
 

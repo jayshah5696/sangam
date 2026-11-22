@@ -1,6 +1,5 @@
 import { McpUiHostContextSchema, type McpUiHostContext } from '@modelcontextprotocol/ext-apps'
 
-// Translate the shared Sangam tokens through the standard MCP host-style contract.
 const roles = [
   ['--surface', '--color-background-primary'],
   ['--app-bg', '--color-background-secondary'],

@@ -94,9 +94,6 @@
   color: var(--muted);
 }
 
-/* Links use the accent; links styled as buttons keep their own button colors. :where()
-   keeps the exclusion from raising specificity above component rules such as
-   .project-home .project-briefing-title. */
 .projects-page a:where(:not(.primary-button, .secondary-action)),
 .project-home a:where(:not(.primary-button, .secondary-action)) {
   color: var(--accent);
@@ -185,7 +182,6 @@
   font-size: var(--text-control);
 }
 
-/* Briefing and reviews share one panel anatomy: header row, then bordered list rows. */
 .project-briefing,
 .project-reviews {
   display: grid;

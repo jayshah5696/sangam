@@ -12,8 +12,6 @@ const test = base.extend<{ htmlJavascriptEnabled: boolean }>({
     const response = await request.get('/api/v1/settings/html-javascript')
     expect(response.ok(), await response.text()).toBeTruthy()
     const original = htmlPolicy.parse(await response.json())
-    // The existing isolated preview host is blocked by WebKit's CSP handling.
-    // Exercise the real safe-preview policy there without relaxing its sandbox.
     const enabled = browserName !== 'webkit'
     if (enabled !== original.enabled) {
       const changed = await request.put('/api/v1/settings/html-javascript', {
@@ -86,7 +84,6 @@ test('brand and tree counts keep visible labels in accessible names', async ({ p
   const tree = page.locator('.sangam-file-tree')
   const row = tree.getByRole('treeitem', { name: folder })
   const drafts = tree.getByRole('treeitem', { name: /^Drafts\b/ })
-  // The shared suite can leave hundreds of drafts above this virtualized row.
   await expect(drafts).toBeVisible()
   if ((await drafts.getAttribute('aria-expanded')) === 'true') await drafts.click()
   await expect(row).toBeVisible()
@@ -97,19 +94,14 @@ test('brand and tree counts keep visible labels in accessible names', async ({ p
     await expect(row).toHaveAccessibleName(`${folder} ${documents}`)
     await expect(folderCount).toHaveText(String(documents))
     await expect(folderCount).toBeVisible()
-    // A reload can change the loaded page of drafts in the shared workspace.
-    // Its accessible name must match the count that is actually visible.
     await expect(draftCount).toHaveText(/^[1-9]\d*$/)
     await expect(drafts).toHaveAccessibleName(`Drafts ${await draftCount.innerText()}`)
     await expect(draftCount).toBeVisible()
-    // Focus this interaction regression on names. The primary-routes test
-    // retains the full WCAG scan, including the seeded count rows.
     const results = await new AxeBuilder({ page }).withRules(['label-content-name-mismatch']).analyze()
     expect(results.violations).toEqual([])
     await expectNoHorizontalOverflow(page)
   }
   await checkNames(2)
-  // A collapse and re-expansion must retain the count and the row's name.
   await row.click()
   await row.click()
   await checkNames(2)
@@ -125,7 +117,6 @@ test('brand and tree counts keep visible labels in accessible names', async ({ p
   await checkNames(3)
 
   if (testInfo.project.name === 'chromium-desktop') {
-    // The sidebar becomes a drawer at 1100px. Include the minimum width too.
     for (const width of [1101, 1099, 320]) {
       await page.setViewportSize({ width, height: 900 })
       await page.goto('/')
@@ -136,7 +127,6 @@ test('brand and tree counts keep visible labels in accessible names', async ({ p
     await page.setViewportSize({ width: 1440, height: 900 })
   }
 
-  // The same chrome switches its visible brand label on the Settings route.
   await page.goto('/settings')
   await revealSidebar(page)
   await expect(page.getByRole('link', { name: 'Sangam Settings', exact: true })).toBeVisible()
@@ -274,7 +264,6 @@ for (const destination of [
     const settingsNav = page.getByRole('navigation', { name: 'Settings pages' })
     await settingsNav.getByRole('button', { name: /^Operations/ }).click()
     const action = page.getByRole('link', { name: destination.action, exact: true })
-    // Imports is conditional on a configured integration; its direct URL remains valid.
     if (destination.route === '/karakeep' && !(await action.isVisible())) await page.goto(destination.route)
     else await action.click()
     await expect(page.getByRole('heading', { name: destination.heading, exact: true })).toBeVisible()
@@ -320,7 +309,6 @@ test('mobile treats split workbench as single surface switcher with companion ba
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-touch-mobile', 'touch-mobile validation')
 
-  // Create a second document (source)
   const sourcePath = `sources/findings-${randomUUID().slice(0, 8)}.md`
   const sourceResponse = await request.post('/api/v1/documents', {
     headers: { 'Idempotency-Key': randomUUID() },
@@ -335,7 +323,6 @@ test('mobile treats split workbench as single surface switcher with companion ba
   // SAFETY: POST /api/v1/documents returns document entity containing document_id
   const sourceData = (await sourceResponse.json()) as { document_id: string }
 
-  // Seed localStorage workbench layout before navigation
   await page.addInitScript(
     ({ draftId, sourceId }) => {
       localStorage.setItem(
@@ -369,7 +356,6 @@ test('mobile treats split workbench as single surface switcher with companion ba
 
   await page.goto(`/documents/${seededWorkspace.documentId}`)
 
-  // This simulated state is not a capture of the base revision.
   await page.evaluate(() => {
     document.querySelector('.mobile-surface-switcher')?.setAttribute('style', 'display: none !important')
     document.querySelector('.mobile-companion-bar')?.setAttribute('style', 'display: none !important')
@@ -380,38 +366,30 @@ test('mobile treats split workbench as single surface switcher with companion ba
     document.querySelector('.mobile-companion-bar')?.removeAttribute('style')
   })
 
-  // Verify surface switcher is visible with role="tablist"
   const switcher = page.getByRole('tablist', { name: 'Working surfaces' })
   await expect(switcher).toBeVisible()
 
-  // Verify tabs
   const tabs = switcher.getByRole('tab')
   await expect(tabs).toHaveCount(2)
   await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
   await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'false')
 
-  // Verify companion bar
   const companionBar = page.getByRole('region', { name: 'Connected companion surface' })
   await expect(companionBar).toBeVisible()
   const companionButton = companionBar.getByRole('button')
   await expect(companionButton).toContainText('Switch to source:')
 
-  // Capture "after" state on draft surface
   await capture(page, testInfo, 'mobile-312-after-draft')
 
-  // Tap second tab in switcher -> switches to source
   await tabs.nth(1).click()
   await expect(page).toHaveURL(new RegExp(`/documents/${sourceData.document_id}`))
   await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
   await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'false')
 
-  // Verify companion button on source now offers to switch to draft
   await expect(companionBar.getByRole('button')).toContainText('Switch to draft:')
 
-  // Capture "after" state on source surface
   await capture(page, testInfo, 'mobile-312-after-source')
 
-  // Tap companion button -> switches back to draft
   await companionBar.getByRole('button').click()
   await expect(page).toHaveURL(new RegExp(`/documents/${seededWorkspace.documentId}`))
   await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
@@ -423,7 +401,6 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-touch-mobile', 'touch-mobile validation')
 
-  // 1. Workspace with Left Sidebar reveal
   await page.goto(`/documents/${seededWorkspace.documentId}`)
   const revealButton = page.getByRole('button', { name: 'Show workspace sidebar' })
   await expect(revealButton).toBeVisible()
@@ -432,17 +409,14 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
   expect(revealBox!.width).toBeGreaterThanOrEqual(44)
   expect(revealBox!.height).toBeGreaterThanOrEqual(44)
 
-  // Open left sidebar drawer
   await revealButton.click()
   const sidebar = page.getByRole('dialog', { name: 'Workspace sidebar' })
   await expect(sidebar).toBeVisible()
   await capture(page, testInfo, 'mobile-left-sidebar')
 
-  // Close sidebar drawer via hide button
   await sidebar.getByRole('button', { name: 'Hide workspace sidebar' }).click()
   await expect(sidebar).not.toBeVisible()
 
-  // 2. Right Sidebar / Document Inspector Bottom Sheet
   const inspectorToggle = page.getByRole('button', { name: 'Open document inspector' })
   await expect(inspectorToggle).toBeVisible()
   await inspectorToggle.click()
@@ -454,25 +428,21 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
   const inspectorTabs = inspectorTablist.getByRole('tab')
   await expect(inspectorTabs).toHaveCount(6)
 
-  // Check tab touch target height >= 44px
   const firstTabBox = await inspectorTabs.nth(0).boundingBox()
   expect(firstTabBox).not.toBeNull()
   expect(firstTabBox!.height).toBeGreaterThanOrEqual(44)
 
   await capture(page, testInfo, 'mobile-right-inspector')
 
-  // Close inspector
   await inspector.getByRole('button', { name: 'Collapse document inspector' }).click()
   await expect(inspector).not.toBeVisible()
 
-  // 3. Chat UI on mobile
   await page.goto('/chat')
   const chatHeader = page.locator('.workspace-chat-header')
   await expect(chatHeader).toBeVisible()
   await expect(page.getByRole('button', { name: 'Return to workspace' })).toBeVisible()
   await capture(page, testInfo, 'mobile-chat')
 
-  // 4. Settings UI on mobile
   await page.goto('/settings')
   const revealSettingsSidebar = page.getByRole('button', { name: 'Show settings sidebar' })
   await expect(revealSettingsSidebar).toBeVisible()
@@ -481,7 +451,6 @@ test('mobile screen polish: left sidebar, right inspector sheet, chat, and setti
   const settingsSidebar = page.getByRole('dialog', { name: 'Settings sidebar' })
   await expect(settingsSidebar).toBeVisible()
 
-  // Click on "AI & models" category button in the settings sidebar drawer
   await settingsSidebar.getByRole('button', { name: /AI & models/ }).click()
   await expect(page).toHaveURL(/category=models/)
   await expect(page.getByRole('heading', { level: 1, name: 'AI & models' })).toBeVisible()

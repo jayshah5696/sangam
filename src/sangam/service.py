@@ -571,8 +571,6 @@ class DocumentService:
         ).fetchone():
             return False
         normalized_path = self._normalize_path(path) if path is not None else None
-        # Audit strings can be redacted. The original checksum still proves
-        # exact arguments using the immutable source revision, not its new head.
         checksum_matches = stored_request_hash == request_hash(
             {
                 "title": title or f"{source_revision['title']} copy",
@@ -1134,7 +1132,6 @@ class DocumentService:
         new_title = title.strip() if title and title.strip() else f"{source.title} copy"
         pdf_research = getattr(self, "pdf_research", None)
         if pdf_research is None:
-            # PdfResearchService imports DocumentService; load the fallback after startup.
             from sangam.pdf_research import PdfResearchService  # noqa: PLC0415
 
             pdf_research = PdfResearchService(
@@ -1814,7 +1811,6 @@ class DocumentService:
                     now,
                 ),
             )
-            # Metadata is not content: the key binds to the unchanged head revision.
             return Written(current.current_revision_id)
 
         return self._commit(
@@ -1892,8 +1888,6 @@ class DocumentService:
         parameters.extend((limit, offset))
         with self.database.connection() as connection:
             rows = connection.execute(
-                # FTS snippet() would run for every match before LIMIT; passages
-                # are located afterwards for the returned page only.
                 self._document_query(
                     include_content=False,
                     include_search=expression is not None,

@@ -35,6 +35,10 @@ Sangam uses opinionated Oxlint rules vendored in `frontend/tools/oxlint/anti-slo
 6. **No Module Mocking in Application Code (`no-module-mocking`)**:
    - Do not use runtime module mocking hacks in production source code.
 
+7. **No Implementation Comments (`no-comments`)**:
+   - Rejects `//` and non-JSDoc `/* */` comments outside machine directives and `// SAFETY:` justifications, enforcing the per-file ratchet in `frontend/tools/oxlint/comment-ratchet.json`.
+   - Keep JSDoc (`/** ... */`) for public contracts, move non-obvious decisions to `docs/adr/`, and file issues for workarounds via the `delete-comment` skill.
+
 ## Verification Workflow
 
 Run the canonical just recipe:

@@ -53,7 +53,6 @@ async def spooled_pdf_body(request: Request, *, max_bytes: int) -> AsyncIterator
                 raise ValidationError(
                     "PDF exceeds the configured size limit", details={"max_pdf_bytes": max_bytes}
                 )
-            # Wait for disk writes before closing the file on cancellation.
             await run_pdf_io(partial(content.write, chunk))
         await run_pdf_io(lambda: content.seek(0))
         yield content
@@ -79,15 +78,12 @@ class PdfExtractionScheduler:
             try:
                 pending = self.service.pending_extractions(limit=1)
                 if pending:
-                    # The service atomically claims the row before parsing. Two
-                    # workers may see the same row; only its claimant processes it.
                     self.service.extract_text(pending[0], self._stop)
                     continue
             except Exception:
                 logger.exception("PDF queue worker failed")
             self._stop.wait(0.25)
 
-    # Join parser threads within the ownership deadline; cancellation cannot stop them.
     async def close(self, timeout: float) -> None:  # noqa: ASYNC109
         self._stop.set()
         deadline = time.monotonic() + timeout

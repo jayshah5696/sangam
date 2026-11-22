@@ -725,8 +725,6 @@ function PublicationEditor({
     return items
   }
 
-  // Settings changes keep the published revision. Publishing for the first time,
-  // republishing, or "Publish saved draft" names the exact revision readers get.
   const save = useMutation({
     mutationFn: (publishDraft: boolean) => {
       const evidence = getEvidencePayload()

@@ -478,8 +478,6 @@ class SangamMcp:
         self.closing = True
         await self.stack.aclose()
         if self.pending:
-            # A cancelled host wait cannot cancel a SQLite commit on its thread.
-            # Drain it before api.py closes services or releases storage ownership.
             await asyncio.wait_for(
                 asyncio.gather(*self.pending, return_exceptions=True), timeout=10
             )
@@ -812,8 +810,6 @@ class SangamMcp:
             principal,
             execution_key,
             hashlib.sha256(code.encode()).hexdigest(),
-            # A cancelled wait can leave a canonical write finishing on its
-            # thread. Keep those callbacks inside the same admission bound.
             capacity=not self.closing and self.active < 2 and len(self.pending) < 2,
         ):
             cached = self.state.status(principal, execution_key)
@@ -834,7 +830,6 @@ class SangamMcp:
                     raise ValidationError(
                         "Callback limit reached. Stop and inspect execution status."
                     )
-                # Never trust the principal captured at tool entry after a long wait.
                 current = self.principal(token)
                 schema = OPERATIONS[operation_id][0]
                 parsed = schema.model_validate(arguments)

@@ -94,7 +94,6 @@ export function ActionMenu({ label, icon, children, className = '' }: ActionMenu
     }
   }, [open])
 
-  // Let the positioned menu paint before focusing; its initial hidden frame cannot take focus.
   useLayoutEffect(() => {
     if (!open || !position.visible) return
     let frame = requestAnimationFrame(() => {

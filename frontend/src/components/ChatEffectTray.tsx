@@ -39,7 +39,6 @@ type EffectCopy = {
 
 const plural = (count: number, one: string, many = `${one}s`) => (count === 1 ? one : many)
 
-// Every durable capability says the same four things, in one place.
 const EFFECT_COPY = {
   create_document: {
     noun: 'Document creation',
@@ -239,7 +238,6 @@ export function ChatEffectTray({
   const [announcement, setAnnouncement] = useState<string>('')
   const headingId = useId()
 
-  // Track and announce new failures once
   useEffect(() => {
     const unannounced = attentionEffects.filter(
       (effect) => effect.status === 'failed' && !announcedFailureIdsRef.current.has(effect.effect_id),

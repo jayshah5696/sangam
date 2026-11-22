@@ -231,7 +231,6 @@ def test_publication_latest_revision_and_explicit_exposure_are_non_enumerable(
         },
     ).json()
     second_revision = str(updated["current_revision_id"])
-    # Saving the draft does not change what readers see.
     latest = client.get("/api/v1/publications/notes/content").json()
     assert latest["content"] == "# First\n"
     assert latest["revision_id"] == first_revision

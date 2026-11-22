@@ -58,22 +58,18 @@ describe('ClaimMatrixView', () => {
       <ClaimMatrixView evidence={mockEvidence} onOpenPassage={vi.fn()} onUpdateClassification={vi.fn()} />,
     )
 
-    // Table column headers
     expect(screen.getByText('Benchmark Paper')).toBeTruthy()
     expect(screen.getByText('Local Experiment')).toBeTruthy()
 
-    // Claim rows
     expect(screen.getByText('Smaller model is sufficient')).toBeTruthy()
     expect(screen.getByText('Memory fits target machine')).toBeTruthy()
 
-    // Status badges
     const supportsBadges = screen.getAllByRole('button', { name: /Status: Supports/i })
     expect(supportsBadges.length).toBeGreaterThanOrEqual(1)
 
     const challengesBadge = screen.getByRole('button', { name: /Status: Challenges/i })
     expect(challengesBadge).toBeTruthy()
 
-    // Missing pairing cell shows "Not checked"
     expect(screen.getAllByText('Not checked').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -118,18 +114,15 @@ describe('ClaimMatrixView', () => {
     const challengesBadge = screen.getByRole('button', { name: /Status: Challenges/i })
     fireEvent.click(challengesBadge)
 
-    // Modal dialog opens
     expect(screen.getByText('Evidence & Stance Details')).toBeTruthy()
     expect(screen.getByText('In local inference, the smaller model diverged on complex math.')).toBeTruthy()
     expect(screen.getByText('Divergence observed on GSM8K prompts.')).toBeTruthy()
 
-    // Update stance to Assumption
     const assumptionBtn = screen.getByRole('button', { name: 'Assumption' })
     fireEvent.click(assumptionBtn)
 
     expect(onUpdateClassification).toHaveBeenCalledWith('item-2', 'Assumption')
 
-    // Navigate to passage
     const openPassageBtn = screen.getByRole('button', { name: 'Open passage in source' })
     fireEvent.click(openPassageBtn)
 

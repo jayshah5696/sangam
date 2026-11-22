@@ -204,7 +204,6 @@ class ProposalOperations:
                 ):
                     outcome = "rejected"
             except SangamError:
-                # Lost authority cannot establish whether the original mutation committed.
                 pass
             raise McpMutationError(error, key, outcome) from error
         return ProposalWriteResult(
@@ -223,7 +222,6 @@ class ProposalOperations:
         | ProposalDismissApp
         | RevisionReadApp,
     ) -> dict[str, JsonValue]:
-        # Serialize the clean-draft check with every App checkpoint/save.
         with self.state.lock:
             workspace = self.state.read(principal, action.workspace_id)
             reference = SearchHit.model_validate(workspace["document"])

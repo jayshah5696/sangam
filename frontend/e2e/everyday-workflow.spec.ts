@@ -3,7 +3,6 @@ import type { APIRequestContext, Page } from '@playwright/test'
 import { documentSchema, projectDetailSchema, publicationSchema } from '../src/api'
 import { expect, openIfClosed, test } from './fixtures'
 
-// 1x1 transparent PNG.
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
   'base64',
@@ -79,13 +78,11 @@ test('a search result names the passage and opens the editor on it', async ({ pa
   await expect(page).toHaveURL(new RegExp(`/documents/${document.document_id}\\?line=7`))
   await closeInspectorSheet(page)
 
-  // Preview marks the block that holds the passage.
   await page.getByRole('radio', { name: 'preview' }).click()
   await expect(page.locator('.markdown-preview [data-search-target]')).toContainText(
     `Peak memory for ${term}`,
   )
 
-  // The editor selects the matched word on its line.
   await page.getByRole('radio', { name: 'edit' }).click()
   await page.goto('/')
   await (await openSearch(page)).fill(term)
@@ -94,7 +91,6 @@ test('a search result names the passage and opens the editor on it', async ({ pa
     .locator('.search-passage')
     .first()
     .click()
-  // The app closes the drawer and inspector itself; clicking them here would move focus.
   await expect(page.getByRole('dialog', { name: 'Workspace sidebar' })).toBeHidden()
   await expect(page.getByRole('dialog', { name: 'Document inspector' })).toBeHidden()
   await expect(page.locator('.cm-content')).toBeFocused()
@@ -136,7 +132,6 @@ test('a saved view keeps its query and filters and reopens from Home on another 
   await expect(page.getByRole('searchbox', { name: 'Search documents', exact: true })).toHaveValue(term)
   await expect(page.getByRole('article', { name: `Notes ${term}` })).toBeVisible()
 
-  // A fresh browser profile sees the same view: views live on the server.
   const otherDevice = await browser.newContext({ baseURL: test.info().project.use.baseURL })
   const otherPage = await otherDevice.newPage()
   await otherPage.goto('/')
@@ -240,7 +235,6 @@ test('an added image survives moving its document and renders in the preview', a
   await expect(image).toHaveAttribute('src', new RegExp(`/api/v1/documents/${document.document_id}/assets`))
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1)
 
-  // Moving the document to another folder keeps the root-relative reference valid.
   const current = documentSchema.parse(
     await (await request.get(`/api/v1/documents/${document.document_id}`)).json(),
   )

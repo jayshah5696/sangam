@@ -187,7 +187,6 @@ class PublicationService:
             "slug": normalized_slug,
             "access_policy": access_policy,
         }
-        # Only explicit revisions join the fingerprint so earlier retries still match.
         if revision_id is not None:
             fingerprint_fields["revision_id"] = revision_id
         if evidence is not None:

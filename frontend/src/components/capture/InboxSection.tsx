@@ -33,7 +33,6 @@ function inboxState(document: DocumentSummary): InboxState {
 /** Material captured but not yet organized: everything still in the Inbox folder. */
 export function InboxSection({ onCapture }: { onCapture: () => void }) {
   const queryClient = useQueryClient()
-  // Shares the complete document index that the editor already keeps fresh.
   const documents = useQuery({
     queryKey: ['documents', 'all'],
     queryFn: api.listDocuments,

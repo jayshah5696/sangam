@@ -36,8 +36,6 @@ def main() -> None:
     database = Path(os.environ["SANGAM_DATABASE_PATH"])
     report: dict[str, object] = {}
     with httpx.Client(base_url=base + "/api/v1", timeout=10) as client:
-        # Hold bodies incomplete so admission, rather than a fast provider,
-        # controls saturation. One slot is active and one has a waiting deadline.
         body = b'{"type":"threads.list","params":{}}'
         sockets: list[socket.socket] = []
         rejected: list[str] = []
@@ -82,8 +80,6 @@ def main() -> None:
             assert db.execute("SELECT count(*) FROM chat_runs").fetchone()[0] == runs_before
         report["chat_admission"] = {"rejected": rejected, "health_latency_ms": health_ms}
 
-        # Send an oversized chunk without sending the end marker. A response
-        # proves the server rejects immediately instead of awaiting the full body.
         with socket.create_connection((host.hostname, host.port), timeout=5) as connection:
             connection.sendall(
                 b"POST /api/v1/chatkit HTTP/1.1\r\nHost: localhost\r\n"
@@ -161,7 +157,6 @@ def main() -> None:
                     if response.status_code != 503:
                         response.raise_for_status()
                         return response.json()["document_id"]
-                    # Backpressure is explicit; retry the same immutable import key.
                     time.sleep(0.1)
                 raise AssertionError("PDF upload capacity did not become available")
 

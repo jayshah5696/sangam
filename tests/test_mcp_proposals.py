@@ -223,7 +223,6 @@ def test_schema_043_upgrade_preserves_proposals_and_reserved_apply_recovery(sett
                 revision_id=document["current_revision_id"],
                 selected_text="Original",
             )
-            # Seed the actual old-schema reservation and its canonical committed revision.
             services.workspace_access.write_document(
                 principal,
                 document_id=document["document_id"],

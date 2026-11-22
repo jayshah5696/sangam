@@ -39,16 +39,13 @@ Next section continues here.
   })
 
   it('detects source revision updates and superseded PDFs', () => {
-    // Markdown revision change
     const revCheck = checkSourceChanged({ current_revision_id: 'rev-200' }, 'rev-100')
     expect(revCheck.changed).toBe(true)
     expect(revCheck.reason).toContain('updated from revision')
 
-    // Same revision
     const sameCheck = checkSourceChanged({ current_revision_id: 'rev-100' }, 'rev-100')
     expect(sameCheck.changed).toBe(false)
 
-    // Superseded PDF
     const pdfCheck = checkSourceChanged(
       {
         content_type: 'application/pdf',

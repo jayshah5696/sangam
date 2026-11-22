@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getDocument, TextLayer, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist'
-// The bundled PDF.js handler supports opaque App hosts without worker/network CSP grants.
 import 'pdfjs-dist/build/pdf.worker.mjs'
 import type { App } from '@modelcontextprotocol/ext-apps'
 import { z } from 'zod'
@@ -151,7 +150,6 @@ export function PdfPane({
       cancelled = true
       void loading?.destroy()
     }
-    // The byte source is immutable for this revision. Page changes do not reload it.
   }, [document.document_id, document.current_revision_id, call])
 
   useEffect(() => {

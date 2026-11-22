@@ -2,8 +2,6 @@ import { evidenceSourceText } from '../evidenceCitation'
 import { internalDocumentHref } from '../internalLinks'
 import { useMemo } from 'react'
 
-// Plain source text remains selectable without granting an article's iframe
-// same-origin access, script privileges, or authority to submit selections.
 export function SelectableHtmlText({
   content,
   initiallyOpen = false,

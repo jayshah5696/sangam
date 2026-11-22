@@ -282,7 +282,6 @@ def test_revoked_inflight_principal_cannot_apply_and_reservation_remains_dismiss
     )
     original = service.repository.reserve_apply
 
-    # Revoke after the request authenticated and after reservation, before the write.
     def reserve_then_revoke(*args, **kwargs):
         reserved = original(*args, **kwargs)
         identity.revoke_token(principal.token_id)
@@ -641,7 +640,7 @@ def test_repeated_passages_require_an_exact_locator_instead_of_guessing(client, 
     citation = {"document_id": source["document_id"], "snippet": "Repeated quote."}
     with pytest.raises(ValidationError, match="unique|ambiguous"):
         service.create(principal, **arguments, citations=[citation])
-    browser_offset = len(prefix) + 1  # The leading emoji uses two UTF-16 units.
+    browser_offset = len(prefix) + 1
     proposal = service.create(
         principal, **arguments, citations=[{**citation, "quote_start": browser_offset}]
     )

@@ -43,8 +43,6 @@ function subscribe(callback: () => void) {
   }
 }
 
-// All tabs take the same exclusive Web Lock and re-read inside the critical section.
-// Failed reads/writes never mutate the last known collection or the durable bytes.
 async function mutate<T>(
   operation: (items: EvidenceItem[]) => { items: EvidenceItem[]; result: T },
 ): Promise<T> {

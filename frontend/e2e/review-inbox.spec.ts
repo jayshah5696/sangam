@@ -257,8 +257,6 @@ test('revision request prefills the actual ChatPanel and explicit Send persists 
   editorial,
 }, testInfo) => {
   const { proposal } = editorial
-  // Only the external ChatKit web component is replaced. All Sangam requests,
-  // including turn creation and ChatKit message persistence, reach the real server.
   await page.clock.install()
   await page.route('https://cdn.platform.openai.com/deployments/chatkit/chatkit.js', (route) =>
     route.fulfill({
@@ -319,7 +317,6 @@ test('revision request prefills the actual ChatPanel and explicit Send persists 
     await frame.evaluate((host) => host.dispatchEvent(new CustomEvent('editorial:transport-error')))
     await expect(retry).toBeVisible()
     await frame.evaluate((host) => host.dispatchEvent(new CustomEvent('editorial:late-ready')))
-    // Exercise four application polling ticks, not an arbitrary real-time wait.
     await page.clock.runFor(1000)
     await expect(retry).toBeVisible()
     await expect(frame).toHaveAttribute('data-editorial-instance', instance!)

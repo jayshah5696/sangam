@@ -137,7 +137,6 @@ def test_folder_metadata_concurrency_and_path_validation(client: TestClient) -> 
 def test_metadata_sanitization_rejects_null_bytes_and_control_characters(
     client: TestClient,
 ) -> None:
-    # Tag name and color rejecting null bytes and control characters
     bad_tag_name_null = client.post(
         "/api/v1/tags",
         json={"name": "tag\x00invalid", "color": "#ff0000"},
@@ -162,7 +161,6 @@ def test_metadata_sanitization_rejects_null_bytes_and_control_characters(
     )
     assert bad_tag_color_null.status_code == 422
 
-    # Folder category rejecting null bytes and control characters
     bad_folder_cat = client.post(
         "/api/v1/folders",
         json={"path": "projects/sanitized", "category": "Cat\x00egory"},
@@ -180,7 +178,6 @@ def test_metadata_sanitization_rejects_null_bytes_and_control_characters(
     folder_err = bad_folder_cat_ctrl.json()["error"]["message"]
     assert "Folder category cannot contain control characters" in folder_err
 
-    # Document category rejecting null bytes
     doc = client.post(
         "/api/v1/documents",
         json={"title": "Sanitization Doc", "content": "content"},
@@ -361,7 +358,6 @@ def test_folder_rename_end_to_end(client: TestClient, settings) -> None:
     assert doc_res.status_code == 201
     doc = doc_res.json()
 
-    # Move/rename folder
     rename_res = client.post(
         f"/api/v1/folders/{folder['folder_id']}/move",
         json={"path": "reports/archive-2027"},
@@ -371,7 +367,6 @@ def test_folder_rename_end_to_end(client: TestClient, settings) -> None:
     renamed_folder = rename_res.json()
     assert renamed_folder["path"] == "reports/archive-2027"
 
-    # Verify document updated in API and on disk
     doc_id = doc["document_id"]
     doc_after = client.get(
         f"/api/v1/documents/{doc_id}",

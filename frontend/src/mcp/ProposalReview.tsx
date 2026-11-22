@@ -203,7 +203,6 @@ export function ProposalReview({
       if (action.type === 'proposal_apply') await onApplied()
       setAttempt(null)
     } catch (failure) {
-      // Only server-confirmed rejection permits correction. Ambiguous outcomes retain exact arguments.
       if (failure instanceof ReviewError && failure.outcome === 'rejected') setAttempt(null)
       throw failure
     }

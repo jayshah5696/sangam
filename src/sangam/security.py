@@ -242,7 +242,6 @@ _PRIVATE_PEM = re.compile(
 
 
 def sanitize_sensitive_text(value: str) -> str:
-    # Diff lines include +/- prefixes, so redact the complete block across them.
     redacted_pem = _PRIVATE_PEM.sub("[REDACTED]", value)
     redacted_tokens = _TOKEN_PATTERN.sub("[REDACTED]", redacted_pem)
     redacted_uris = _URI_CREDENTIAL_PATTERN.sub(r"\1[REDACTED]:[REDACTED]\4", redacted_tokens)
@@ -308,7 +307,6 @@ class SanitizingLogFilter(logging.Filter):
                     else arg
                     for arg in record.args
                 )
-        # Interpolate first so redaction cannot remove a format placeholder.
         record.msg = sanitize_sensitive_text(record.getMessage())
         record.args = ()
         if record.exc_info and not record.exc_text:
@@ -395,8 +393,6 @@ class Principal:
     token_id: str | None = None
     scopes: tuple[ScopeGrant, ...] = ()
     administrator: bool = False
-    # Where a write came from when it is not a direct request, for example
-    # "chat-effect:eff_123", and who approved it. The activity ledger records both.
     via: str | None = None
     approved_by: str | None = None
 

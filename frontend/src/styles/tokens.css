@@ -1,6 +1,5 @@
 :root, :root[data-theme="midnight"] {
   color-scheme: dark;
-  /* Shared UI system. Keep application chrome on this scale. */
   --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-display: Georgia, "Times New Roman", serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -58,8 +57,6 @@
   }
 }
 
-/* Typography preferences (Settings > Appearance > Typography). These blocks are
-   the sanctioned raw-value zone alongside the defaults above. */
 :root[data-ui-font='inter'] {
   --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -228,7 +225,6 @@
   --dialog-backdrop: rgba(16, 42, 67, 0.48);
 }
 
-/* Indigo Ink dark */
 :root[data-theme="indigo-dark"] {
   color-scheme: dark;
   --app-bg: #0b0c12;
@@ -260,7 +256,6 @@
   --dialog-backdrop: rgba(0, 0, 0, 0.72);
 }
 
-/* Indigo Ink light */
 :root[data-theme="indigo-light"] {
   color-scheme: light;
   --app-bg: #f5f5f9;
@@ -292,7 +287,6 @@
   --dialog-backdrop: rgba(28, 29, 46, 0.5);
 }
 
-/* Moss dark */
 :root[data-theme="moss-dark"] {
   color-scheme: dark;
   --app-bg: #0a0d0b;
@@ -324,7 +318,6 @@
   --dialog-backdrop: rgba(0, 0, 0, 0.72);
 }
 
-/* Moss light */
 :root[data-theme="moss-light"] {
   color-scheme: light;
   --app-bg: #f2f4ee;
@@ -356,7 +349,6 @@
   --dialog-backdrop: rgba(29, 42, 35, 0.5);
 }
 
-/* Ember dark */
 :root[data-theme="ember-dark"] {
   color-scheme: dark;
   --app-bg: #0d0a09;
@@ -388,7 +380,6 @@
   --dialog-backdrop: rgba(0, 0, 0, 0.72);
 }
 
-/* Ember light */
 :root[data-theme="ember-light"] {
   color-scheme: light;
   --app-bg: #f7f1ea;
@@ -420,7 +411,6 @@
   --dialog-backdrop: rgba(46, 33, 26, 0.5);
 }
 
-/* Lagoon dark */
 :root[data-theme="lagoon-dark"] {
   color-scheme: dark;
   --app-bg: #080c0d;
@@ -452,7 +442,6 @@
   --dialog-backdrop: rgba(0, 0, 0, 0.72);
 }
 
-/* Lagoon light */
 :root[data-theme="lagoon-light"] {
   color-scheme: light;
   --app-bg: #eff5f5;
@@ -484,7 +473,6 @@
   --dialog-backdrop: rgba(20, 40, 43, 0.5);
 }
 
-/* Plum dark */
 :root[data-theme="plum-dark"] {
   color-scheme: dark;
   --app-bg: #0c090c;
@@ -516,7 +504,6 @@
   --dialog-backdrop: rgba(0, 0, 0, 0.72);
 }
 
-/* Plum light */
 :root[data-theme="plum-light"] {
   color-scheme: light;
   --app-bg: #f7f2f7;
@@ -548,7 +535,6 @@
   --dialog-backdrop: rgba(42, 26, 43, 0.5);
 }
 
-/* Brass dark */
 :root[data-theme="brass-dark"] {
   color-scheme: dark;
   --app-bg: #0c0b08;
@@ -580,7 +566,6 @@
   --dialog-backdrop: rgba(0, 0, 0, 0.72);
 }
 
-/* Brass light */
 :root[data-theme="brass-light"] {
   color-scheme: light;
   --app-bg: #f6f2e6;

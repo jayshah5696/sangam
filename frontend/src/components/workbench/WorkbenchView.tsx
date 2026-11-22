@@ -212,8 +212,6 @@ function EditorGroupView({ group }: { group: GroupNode }) {
           onCloseGroup={() => void closeGroup()}
         />
       )}
-      {/* The editor remounts per document (keyed), but the inspector is a sibling
-          that persists across tab switches so chat context and drafts survive. */}
       <div
         className={`document-layout tab-document-layout ${isPdf ? 'pdf-document-layout' : ''}`}
         id={showTabStrip ? `editor-panel-${group.id}` : undefined}
@@ -266,8 +264,6 @@ function GroupInspector({ documentId }: { documentId: string }) {
   const documentQuery = useQuery({
     queryKey: ['document', documentId],
     queryFn: () => api.getDocument(documentId),
-    // Keep the previously loaded document visible while switching tabs so the
-    // inspector (and its persistent ChatKit instance) never unmounts on a cache miss.
     placeholderData: keepPreviousData,
   })
   const document = documentQuery.data

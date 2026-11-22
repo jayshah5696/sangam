@@ -559,7 +559,6 @@ class ActivityService:
         connection: sqlite3.Connection | None = None
         try:
             connection = self.database.connect()
-        # Any worker startup failure must mark audit admission unhealthy.
         except Exception as error:  # noqa: BLE001
             self._worker_healthy = False
             self._worker_error = error
@@ -648,7 +647,6 @@ class ActivityService:
                         item.future.set_result(None)
                 last_error = None
                 break
-            # Deliver every commit failure to the producers through their futures.
             except Exception as error:  # noqa: BLE001
                 with suppress(Exception):
                     connection.rollback()
@@ -866,11 +864,9 @@ class ActivityService:
                         needed_bytes > self.max_queue_bytes or needed_bytes > self.max_total_bytes
                     )
 
-                    # Case 1: No expansion needed and no prior waiters
                     if not is_waiter and expansion == 0 and len(self._expansion_waiters) == 0:
                         break
 
-                    # Case 2: Can we expand immediately without waiting?
                     if not is_waiter and len(self._expansion_waiters) == 0:
                         total_in_flight = (
                             self._reserved_producer_bytes
@@ -916,9 +912,6 @@ class ActivityService:
                             )
                             break
 
-                    # Cannot expand immediately.
-                    # Release provisional byte credits to break circular wait,
-                    # and wait fairly in FIFO order.
                     if not is_waiter:
                         self._expansion_waiters.append(waiter_id)
                         is_waiter = True
@@ -929,7 +922,6 @@ class ActivityService:
                             reservation._reserved_bytes = 0
                             self._queue_condition.notify_all()
 
-                    # Check if this waiter is at the head of the fair queue
                     if self._expansion_waiters and self._expansion_waiters[0] == waiter_id:
                         total_in_flight = (
                             self._reserved_producer_bytes
@@ -1624,7 +1616,6 @@ class ActivityService:
             escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             parameters.append(f"%{escaped}%")
         if via:
-            # Changes made through another surface name it in their details, as "chat-effect:<id>".
             conditions.append("json_extract(e.detail_json, '$.via') LIKE ?")
             parameters.append(f"{via}-%")
         if attention:

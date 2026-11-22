@@ -65,7 +65,6 @@ class ResourceSubscriptions:
             previous = await asyncio.to_thread(self.snapshot, token, uris)
         except SangamError as error:
             raise MCPError(INVALID_PARAMS, error.message) from error
-        # Acknowledge only implemented kinds. Catalogs are currently static.
         params.notifications = SubscriptionFilter(resource_subscriptions=uris or None)
         bus = InMemorySubscriptionBus()
         handler = ListenHandler(bus, max_subscriptions=1, max_buffered_events=64)
@@ -77,8 +76,6 @@ class ResourceSubscriptions:
                 try:
                     current = await asyncio.to_thread(self.snapshot, token, uris)
                 except SangamError:
-                    # Expiry, revocation, deletion or loss of access ends this
-                    # stream. Never send stale state under the original grant.
                     handler.close()
                     return
                 except Exception:
