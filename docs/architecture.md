@@ -1,37 +1,82 @@
 # Sangam architecture
 
-Sangam is a small, self-hosted document server for humans and agents. One person and a set of scoped AI agents edit ordinary files through the same revision-aware API. Document updates carry an actor, an expected revision, and an idempotency key. Chat edits to existing documents use human-reviewed proposals. Scoped API tokens can write directly within their grants, and chat's YOLO mode executes supported effects without approval prompts.
+Sangam is a single-user, self-hosted document server for humans and AI agents.
+One human owner and any number of scoped agents work on ordinary files through
+the same revision-aware API. Document edits carry an actor identity, an idempotency key, and an expected
+revision or an HTTP precondition.
+
+Chat proposes edits to existing documents. Review mode leaves them pending for
+human review. YOLO mode attempts to apply chat proposals and runs supported
+effects without approval prompts, subject to the same authorization and revision
+checks. Scoped API tokens can write directly within their grants.
 
 ## Core concepts
 
-- **Document** — the unit of identity: a path (like `research/notes.md`), a content type (`text/markdown`, `text/html`, `application/pdf`), tags/categories, and an immutable revision chain.
-- **Revision** — every save creates a new immutable revision. Diffing, restore, and publication all point at revisions, so history can never be rewritten.
-- **Workspace** — a plain directory tree on disk that mirrors the database. The SQLite database is canonical; files are materialized for portability, grep-ability, and editor access.
-- **Reconciliation** — a service that compares the database against materialized files and reports drift. Conflicts are surfaced in the UI and resolved explicitly, never auto-overwritten.
-- **Publication** — a revision exposed at a stable URL as private, unlisted, or public.
-- **Actor** — `human:jay` or `agent:<name>`. Every change is attributed.
-- **Operation** — one call through `WorkspaceAccessService.audited`. Each operation declares its ledger name and whether it reads or writes (`reads(...)` or `writes(...)` in `access.py`).
+- **Document:** The unit of identity. A document has a path (e.g.,
+  `research/notes.md`), a content type (`text/markdown`, `text/html`, or
+  `application/pdf`), tags and a category, and an immutable revision chain.
+- **Revision:** Every save creates a new immutable revision. Diffs, restores,
+  citations, and publications point at exact revisions, so those references remain stable.
+- **Workspace:** A plain directory tree on disk that mirrors the SQLite
+  database. SQLite is the canonical store. Files are materialized on disk for
+  portability, grep, and external editors.
+- **Reconciliation:** A service that compares SQLite against materialized files
+  on disk and reports drift. Conflicts appear in the UI for explicit resolution
+  and are never silently overwritten.
+- **Publication:** A single pinned revision exposed at a stable custom slug as
+  private, unlisted, or public.
+- **Actor:** An identity string such as `human:jay` or `agent:researcher`.
+  Every change is attributed to an actor.
+- **Operation:** One call through `WorkspaceAccessService.audited`. Each
+  operation declares its ledger name and whether it reads or writes (`reads(...)`
+  or `writes(...)` in `src/sangam/access.py`).
 
 ## Write path
 
-Every change reaches storage through one entry point, and every document change through one protocol:
+Workspace actions share an access and audit boundary. Document writes use a
+common commit path.
 
-1. **Access.** `WorkspaceAccessService.audited` runs each operation under the activity-ledger contract. A write records exactly one ledger row: inside the first transaction it commits, or after it returns if it committed nothing. Denials, conflicts, and failures are recorded too. Reads are recorded only for non-human principals. HTTP routes, chat, organization plans, Karakeep, backups, tokens, and settings enter here. Projects and saved views enter here too. The administrator check also records a denial before any operation runs.
-2. **Document writes.** `WorkspaceAccessService.write_document` is the single path for update, duplicate, tag, materialize, move, delete, restore, and trust changes. HTTP routes, chat proposals, and organization plans all call it with the same request bodies. It authorizes the fresh source and destination paths, requires an expected revision unless HTTP `If-Match`/`If-None-Match` conditions are given, and records the diff.
-3. **Commit pipeline.** `DocumentService._commit` is the one storage protocol. Inside the committing transaction it checks the actor, replays a reused idempotency key, re-checks the expected revision, writes the revision, binds the key, and names the ledger target. PDF bytes live only on disk, so a PDF move, trash, or restore first applies a file step that the pipeline undoes if the commit fails. After the commit it materializes text, removes stale files, and re-indexes search.
-4. **Idempotency.** `IdempotencyStore` owns both key tables. Other modules ask it whether a key committed; none of them query the tables directly.
+1. **Access and audit (`WorkspaceAccessService.audited`).** Every write records
+   exactly one activity-ledger row, either inside the first transaction it
+   commits or after it returns if nothing committed. Denials, conflicts, and
+   failures are recorded as well. Reads are recorded only for non-human
+   principals. HTTP routes, chat, organization plans, projects, saved views,
+   Karakeep imports, backups, tokens, and settings all enter here. Administrator
+   checks also record a denial before any operation runs.
+2. **Document writes (`WorkspaceAccessService.write_document`).** Update,
+   duplicate, tag, materialize, move, delete, restore, and trust changes all
+   share this path with the same request models. It authorizes fresh source and
+   destination paths, requires an expected revision unless HTTP `If-Match` or
+   `If-None-Match` preconditions are supplied, and records the diff.
+3. **Commit pipeline (`DocumentService._commit`).** Inside the committing
+   transaction, the pipeline checks the actor, replays any reused idempotency
+   key, rechecks the expected revision, writes the revision, binds the key, and
+   records the ledger target. Because PDF bytes live only on disk, a PDF move,
+   trash, or restore applies the file step first and undoes it if the database
+   commit fails. After the commit succeeds, the pipeline materializes text
+   files, removes stale files, and updates search indexes. A failed text
+   materialization can leave a committed revision with a pending file write.
+   An identical retry or reconciliation can finish that write.
+4. **Idempotency (`IdempotencyStore`).** One store owns both idempotency tables.
+   Other modules ask it whether a key committed rather than querying those
+   tables directly.
 
-Chat runs outlive the request that started them, so every chat tool call and effect decision first refreshes the run principal's token grants. A token revoked mid-run cannot read, propose, or execute an effect, including in YOLO mode.
+Chat runs outlive the HTTP request that starts them. Before every chat tool call
+and effect decision, the server refreshes the run principal's current token
+grants. A token revoked mid-run cannot read, propose, or execute an effect,
+even in YOLO mode.
 
 ## Trust model
 
-Sangam runs single-user. Everything inside the boundary belongs to one administrator. Three auth modes cover the deployment spectrum:
+Sangam runs for one owner. Everything inside the workspace belongs to one
+administrator. Three authentication modes cover local development through public
+HTTPS deployment.
 
-| Mode | Who authenticates | Typical use |
+| Mode | How requests authenticate | Typical use |
 | --- | --- | --- |
-| `single_user` | No request auth; loopback only | Local development |
+| `single_user` | No request authentication; loopback only | Local development |
 | `trusted_proxy` | A reverse proxy injects a trusted identity header | Tailnet or private network |
-| `cloudflare_access` | Cloudflare Access JWT validated per request (team domain, audience, email) | Public HTTPS |
+| `cloudflare_access` | Per-request Cloudflare Access JWT check (team domain, audience, email) | Public HTTPS |
 
 ```mermaid
 flowchart LR
@@ -47,75 +92,164 @@ flowchart LR
     Agents -->|scoped bearer token| U
 ```
 
-Two rendering zones exist for HTML:
+### HTML rendering zones
 
-- **Safe zone** — workspace documents and published pages are sanitized (DOMPurify) and rendered without scripting.
-- **Trusted preview zone** — interactive HTML/JavaScript executes under `/trusted-preview`. Access is gated by a short-lived HMAC token (`SANGAM_PREVIEW_HMAC_SECRET`, which has a development default). Development permits a same-origin configuration. Production requires an HTTPS preview host isolated from both the publication host and parent origins, a non-default secret, and explicit parent origins. Optional `connect-src` allowances must use HTTPS or WSS.
+Sangam separates static document rendering from interactive JavaScript execution
+into two zones:
 
-Whether saved HTML revisions may execute JavaScript at all is itself a workspace policy: `GET/PUT /api/v1/settings/html-javascript` (on by default, optimistic versioning, every change attributed and recorded). Disabling it makes even trusted previews inert until re-enabled.
+- **Safe zone:** Workspace previews and published pages are sanitized with
+  DOMPurify and rendered without script execution.
+- **Trusted preview zone:** Interactive HTML and JavaScript execute under
+  `/trusted-preview`, gated by a short-lived HMAC token signed with
+  `SANGAM_PREVIEW_HMAC_SECRET`. Development permits a same-origin preview setup.
+  Production requires an isolated HTTPS preview host separate from both the
+  publication host and all parent origins, a non-default secret, and explicit
+  parent origins. Optional `connect-src` allowances must use HTTPS or WSS.
+
+Whether saved HTML revisions may execute JavaScript at all is controlled by a
+versioned workspace setting (`GET/PUT /api/v1/settings/html-javascript`, enabled
+by default). Every change is attributed and recorded in the activity ledger.
+Disabling this setting makes trusted previews inert until it is re-enabled.
 
 ## Data and storage
 
-SQLite is the canonical store: documents, revisions, FTS5 search index, publications, chat threads, activity ledger. Content is also materialized to the workspace directory atomically (write-temp-then-rename), so the file tree is always generation-consistent with the database snapshot it came from.
+SQLite is the canonical store for documents, revisions, FTS5 search indexes,
+publications, projects, chat threads, and the activity ledger. Text documents
+are also materialized to `SANGAM_WORKSPACE_ROOT` atomically (write to a
+temporary file, then rename). Reconciliation repairs pending writes and
+surfaces conflicts with external edits.
 
-Backups are paired artifacts: one SQLite dump plus one workspace tarball taken from the same generation, written to `SANGAM_BACKUP_ROOT`, rotated by count, and periodically self-verified. A backup is only considered ready when verification passes within the configured max age.
+### Attachments
 
-## Search
+Images added to a document are stored once in the workspace's shared
+`attachments/` directory as `<name>-<sha16>.<ext>` and referenced with a
+root-relative path (`/attachments/...`). Moving a document or renaming a folder
+cannot break image links, and pathless drafts can still hold images. Only PNG,
+JPEG, GIF, and WebP are accepted. SVG uploads are rejected.
 
-Full-text search runs on SQLite FTS5 across documents, PDF page text, and annotations. FTS chooses and ranks the documents; Sangam then rescans only the returned page to locate up to three passages per result (`search_matches`): the source (document text, PDF page, annotation, title, path, or metadata), a highlighted snippet, and the exact location (line and nearest heading, PDF page, or annotation). Search results open the editor on that line or the PDF on that page.
+### Paired backups
 
-Images added to a document are stored once in the workspace's shared `attachments/` folder as `<name>-<sha16>.<ext>` and referenced root-relative (`/attachments/...`). The reference never depends on the document's location, so moving a document or renaming its folder cannot break it, and drafts without a location can hold images. Root-relative links render in GitHub, VS Code, and static-site tools that treat the workspace as their root. Only PNG, JPEG, GIF, and WebP are accepted; SVG is refused.
+Backups are paired artifacts written to `SANGAM_BACKUP_ROOT`. Each backup
+contains a SQLite snapshot, a workspace archive from the same generation, and
+a manifest. Sangam verifies sets when created and rotates them by count.
+[Backups and recovery](operations/backups.md) describes freshness checks and
+how to verify artifacts on demand.
 
-Saved views (`/api/v1/saved-views`) store a named search query and filters on the server for the workspace owner, so they follow the owner across devices.
+## Search and saved views
 
-SQLite triggers record changed document IDs in `search_dirty_documents` in the
-same transaction as searchable source changes. Index synchronization reads the
-canonical state and removes that marker in one transaction. Startup repairs
-only pending IDs, so healthy startup does not rebuild the corpus. The migration
-marks existing documents for one initial rebuild. Explicit reindexing remains
-available for maintenance. Changes to indexed fields must also update the
-trigger coverage.
+Full-text search runs on SQLite FTS5 across documents, extracted PDF page text,
+and PDF annotations. FTS ranks candidate documents first. Sangam then rescans
+only the returned page to extract up to three located passages per result
+(`search_matches`). A match can come from document text, a PDF page, an
+annotation, a title, a path, or metadata. Results show highlighted snippets
+with locations such as a heading and line or a PDF page when available. Selecting a result opens
+the editor at that line or the PDF at that page.
 
-## Agent access model
+SQLite triggers record changed document IDs in `search_dirty_documents` inside
+the same transaction as searchable content changes. Index synchronization reads
+canonical state and removes the dirty marker in one transaction. Startup repairs
+only pending markers. The migration that introduces these markers seeds
+existing documents for one initial rebuild. Explicit reindexing
+remains available in Settings for maintenance. Any code change that alters
+indexed fields must update the trigger coverage as well.
 
-Agents never share the human's session. Each agent gets a bearer token created in Settings or via the API with:
+Saved views (`/api/v1/saved-views`) store named search queries and filter sets
+on the server for the workspace owner so they follow the owner across devices.
 
-- **Capabilities** — read, write, publish, and similar scopes
-- **Path boundaries** — token works only under a path prefix (for example `projects/agent-x/`)
-- **Expiry and rotation** — tokens expire, can be rotated and revoked independently
+## Agent access and activity
 
-Every agent mutation must carry the expected revision and an idempotency key. Conflicts return `409` with the current state so the agent can re-read and retry. All agent actions are recorded in an append-only activity ledger visible in the UI.
+External agents never share the human's session. Each agent receives a bearer
+token created in Settings or through `/api/v1/agent-tokens` with:
 
-`GET /api/v1/activity` provides bounded chronological pages and exact filters;
+- **Capabilities:** Fine-grained scopes such as `read`, `search`, `create`,
+  `update`, `move`, `tag`, `restore`, `delete`, `publish`, and `inference`.
+- **Path boundaries:** Optional recursive prefix limits (e.g.,
+  `projects/agent-x/`).
+- **Expiry and rotation:** Independent expiration, rotation, and instant
+  revocation.
+
+For document edits, send the current revision ID or a document validator where
+supported. On HTTP `409` or `412`, re-read before retrying the intended change.
+See [conditional requests](operations/agent-access.md#etags-and-conditional-http-requests)
+for the interaction between revision guards and idempotency keys.
+
+`GET /api/v1/activity` returns bounded chronological pages with exact filters.
 `GET /api/v1/activity/summary` computes bounded outcome, actor, document,
-publication, problem, and token-health aggregates in SQLite. The client never
-derives workspace totals from a page of events. `operation_id` is the only
-durable grouping key and is not a session or run identifier. The ledger is
-currently retained without an automatic deletion policy; retention controls
-require a separate, explicit migration and operating policy.
+publication, problem, and token-health aggregates in SQLite so the UI never
+estimates totals from a single page. `operation_id` is the only durable grouping
+key and is not a session or run ID. The ledger does not currently auto-delete
+old rows; adding retention requires an explicit migration and operating policy.
 
-Chat-grounded edits go further: the assistant produces a **proposal** (a suggested new revision) that the human reviews and applies. Proposals are recoverable and pinned to the revision they were generated from.
+## Projects and persistent reviews
+
+Projects group a Markdown purpose brief, references to existing documents by
+role, collected PDF passages, attached chat conversations, and a saved workbench
+layout. Deleting a project keeps its underlying documents and conversations. See
+[projects.md](projects.md).
+
+Persistent project reviews run as server-owned assignments over a bounded set of
+selected project documents. They survive browser disconnects and server
+restarts, support steering and pause/stop controls, and produce private
+citation-checked findings documents or fresh proposal candidates. See
+[project-assignments.md](project-assignments.md).
 
 ## PDF research
 
-PDFs are imported immutably (SHA-256 tracked), page text is extracted into FTS5 in a background job, and pages are served by byte range. Annotations and notes are pinned to exact pages with optimistic versioning. A PDF can be replaced via `supersedes`, which preserves the old document's identity chain. In the workspace, PDFs participate in organization plans alongside Markdown and HTML: they can be moved, renamed, duplicated (as clean copies without annotations), and moved to managed trash with byte retention and restoration.
+PDFs are imported immutably with SHA-256 tracking. Background workers extract
+page text into FTS5, and pages are served over HTTP byte ranges. Annotations and
+notes pin to exact pages with optimistic versioning. A replacement PDF is a new document linked to the prior PDF by
+`supersedes_document_id` (`--supersedes` in the CLI). PDFs also participate in
+workspace organization plans: they can be moved, renamed, duplicated (without
+annotations), trashed with byte retention, and restored.
 
 ## Publishing
 
-A publication is pinned to one exact revision (`publications.revision_id`) and is private, unlisted, or public with a custom slug at `SANGAM_PUBLICATION_BASE_URL`. Saving the draft does not change what readers see; the editor shows when the published revision differs from the saved draft and links to that comparison. Publishing a newer revision is a deliberate `PATCH /api/v1/publications/{id}` with `revision_id`. Older revisions are readable only after an explicit exposure. Published pages render sanitized HTML. Trusted interactive previews use the separate `/trusted-preview` zone described above.
+A publication pins one exact revision (`publications.revision_id`) at a custom
+slug under `SANGAM_PUBLICATION_BASE_URL` with `private`, `unlisted`, or `public`
+access. Saving a newer draft does not alter what readers see. The editor shows
+when the saved draft differs from the published revision and links to their
+diff. Advancing a publication requires an explicit
+`PATCH /api/v1/publications/{id}` with the new `revision_id`. Older revisions
+stay hidden unless explicitly exposed.
 
-## Chat runtime
+## Chat runtime and experimental MCP
 
-Chat is first-class: the sidebar links straight into **Workspace chat**, and readiness (`/readiness`) fails if the chat runtime cannot start, so "app is up" always means "chat works". Chat uses ChatKit UI with the OpenAI Agents SDK. Connections are provider-neutral: an OpenRouter preset or any OpenAI-compatible endpoint (`base_url` + key). Threads are durable and owner-scoped. Grounding tools let the assistant search the workspace, read documents, inspect stable organization metadata, and draft revision-pinned proposals. Exact organization plans and direct explorer actions share one preflight and execution service behind `WorkspaceAccessService`; neither chat nor the browser writes SQLite or files directly. Review mode pauses every effect for an exact decision. YOLO mode runs every effect, including publication, without approval prompts after the same actor, scope, revision, and path authorization checks pass. Model and permission selection live in Settings. See [chat-capabilities.md](chat-capabilities.md) (and the [lifecycle diagram](assets/chat-capability-lifecycle.html)) for capability descriptors and effect contracts, and [operations/integrations.md](operations/integrations.md) for provider setup.
+Chat pairs the ChatKit UI with the OpenAI Agents SDK and a configured
+OpenAI-compatible provider. Threads are durable and scoped to their owners.
+Check the browser transport and provider configuration separately from
+`/api/v1/readiness`.
+
+Grounding tools search the workspace, read documents, inspect organization
+metadata, and draft revision-pinned proposals. Organization plans and direct
+explorer actions share one preflight and execution path behind
+`WorkspaceAccessService`. Neither chat nor the browser writes SQLite or files
+directly. Review mode pauses each durable effect for an exact decision. YOLO mode applies
+chat proposals and executes effects, including publication, when actor, scope,
+revision, and path checks pass. See [chat-capabilities.md](chat-capabilities.md)
+and the [capability lifecycle diagram](assets/chat-capability-lifecycle.html)
+for details, and [operations/integrations.md](operations/integrations.md) for
+provider setup.
+
+Sangam also ships an optional, experimental MCP server (`SANGAM_MCP_ENABLED=true`)
+that exposes restricted Python Code Mode (`search`, `execute`, `present`), a
+sandboxed MCP App, centralized skills, and server-owned assistant requests over
+the same canonical services and bearer token grants. See [mcp.md](mcp.md).
 
 ## Karakeep bridge
 
-Archived Karakeep bookmarks can be imported selectively as editable Markdown. Provenance (original URL, capture time) is preserved, imports are idempotent, and refreshes surface diffs for review instead of silently overwriting edits.
+Archived Karakeep bookmarks can be imported selectively as editable Markdown.
+Imports preserve provenance (original URL and capture time) and are idempotent.
+Refreshing a bookmark surfaces a diff for review instead of overwriting local
+edits.
 
 ## Recovery
 
-Restore always means: stop writes, restore the paired pair together, run reconciliation, verify. Upgrades are forward-only migrations. Rollback is deploying the previous image digest plus a full paired restore. See [operations/backups.md](operations/backups.md).
+Stop Sangam before restoring the SQLite snapshot and workspace archive from
+the same backup set. Start Sangam, run reconciliation, and verify readiness. Database migrations are forward-only. Rolling back a
+release means deploying the previous signed image digest together with a full
+paired restore. See [operations/backups.md](operations/backups.md).
 
-## Architecture decision records
+## Architecture Decision Records
 
-Non-obvious implementation invariants live in [docs/adr/README.md](adr/README.md) rather than inline code comments.
+Non-obvious implementation invariants and subsystem trade-offs live in
+[docs/adr/README.md](adr/README.md) rather than inline code comments.

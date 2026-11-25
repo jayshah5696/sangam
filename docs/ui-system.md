@@ -23,8 +23,8 @@ conflict.
 - `--text-control` (13px): buttons, inputs, tabs, menu items, and tree rows.
 - `--text-body` (14px): primary UI values and descriptions.
 - `--text-editor` (14px): editable document content.
-- `--text-display-sm` (22–31px, fluid): document route headers in normal and split modes.
-- `--text-display` (36–64px, fluid): full-page heroes such as the welcome and publication pages.
+- `--text-display-sm` (22 to 31 px, fluid): document route headers in normal and split modes.
+- `--text-display` (36 to 64 px, fluid): full-page heroes such as the welcome and publication pages.
 
 Interactive text must not be smaller than `--text-control` (13px). New styles must use
 these semantic tokens instead of hard-coded font sizes. Raw `px`, `rem`, and `clamp()`
@@ -229,26 +229,29 @@ Document properties let you create and apply a tag without leaving the
 document. Enter a name and color, select the new tag, then choose **Save tags**.
 Use Settings for workspace-wide tag management.
 
-## Interaction states
-
-### Chat context controls
+## Chat context controls
 
 Instructions and saved facts open in the shared bounded Chat context dialog.
-Active task context uses a third tab in that dialog. It stays collapsed on the
-chat page. Corrections and source excerpts expand only after an explicit action;
-a source-message link opens the exact source directly. Closing retains correction
-drafts, and Discard resets them. A thread change clears its local task drafts.
-Separate keyboard-accessible tabs keep instruction editors out of fact management.
-Closing it with the close button, Escape, or the backdrop preserves drafts while
-the chat component remains mounted. Drafts do not survive a page reload. Saved
-facts show compact previews and open their editors only on request. Closing an
-editor preserves its draft; Discard changes resets it to the revision that the
-draft started from. A background refresh cannot replace a dirty draft or advance
-its expected revision. Reload saved values is an explicit recovery action.
-Routine status messages use compact anatomy and success notices can be dismissed.
-Closing context controls does not deny an approval, forget a fact, or delete a
-conversation. Pending approvals remain visible in the existing review controls;
-completed actions remain in collapsed history.
+Active task context uses a third tab in that dialog and stays collapsed on the
+chat page. Corrections and source excerpts expand only on explicit action, and a
+source-message link opens the exact source directly.
+
+- Separate keyboard-accessible tabs keep instruction editors separate from fact
+  management.
+- Closing the dialog with the close button, Escape, or backdrop preserves drafts
+  while the chat component remains mounted (drafts do not survive a page reload).
+  Discard resets a draft to the revision it started from, and switching threads
+  clears local task drafts.
+- Saved facts open with compact previews. Open an editor when you need to change
+  a fact.
+- Background refreshes never overwrite a dirty draft or advance its expected
+  revision. **Reload saved values** is an explicit recovery action.
+- Routine status messages use compact anatomy and success notices can be
+  dismissed. Closing context controls never denies an approval, forgets a fact,
+  or deletes a conversation. Pending approvals stay visible in review controls,
+  and completed actions stay in collapsed history.
+
+## Interaction states
 
 Every interactive surface must define the states that apply to it. Reuse the
 shared button, field, row, tab, badge, and `StateMessage` anatomy before creating
@@ -463,37 +466,37 @@ components remain synchronized with native Sangam controls.
 
 ## Verification and screenshots
 
-Run the fast UI gate while working:
+Run the fast frontend gate while working (formatting, build, Oxlint + ESLint +
+UI-system token checks, and Vitest):
 
-```bash
-pnpm --dir frontend run format:check
-pnpm --dir frontend run lint
-pnpm --dir frontend run build
-pnpm --dir frontend run test
+```sh
+just test-frontend
 ```
 
-Before merging an interaction or layout change, run the browser suite. It starts
-an isolated Sangam instance, seeds real API data, checks the primary routes with
-axe, and covers desktop and 390px layouts:
+Before merging an interaction or layout change, run the Playwright browser
+suite. It starts an isolated Sangam instance, seeds real API data, checks the
+primary routes with axe, and covers desktop, narrow desktop at 390 px, and touch-mobile
+layouts:
 
-```bash
-pnpm --dir frontend run test:e2e
+```sh
+just test-e2e
 ```
 
-After those checks pass, refresh the verified README assets and inspect all three
-images before committing them:
+After `just format`, `just test`, and `just test-e2e` pass, refresh the verified
+screenshot assets and visually inspect every updated PNG before committing.
 
-```bash
-pnpm --dir frontend run update:screenshots
+```sh
+just update-screenshots
 ```
 
 This writes `docs/assets/crisp-workspace.png`, `crisp-chat.png`,
-`crisp-workspace-narrow.png`, `crisp-inspector-narrow.png`,
-`crisp-chat-narrow.png`, `crisp-settings.png`, `crisp-settings-narrow.png`, and,
-when the PDF fixture is available, `phase-5-pdf-research-narrow.png`. Do not
+`crisp-settings.png`, `crisp-workspace-narrow.png`,
+`crisp-inspector-narrow.png`, `crisp-chat-narrow.png`,
+`crisp-settings-narrow.png`, and, when their fixtures are available,
+`phase-5-pdf-research-narrow.png` and `phase-4-publishing-narrow.png`. Do not
 hand-edit or crop these screenshots; they are browser output from an isolated
 local fixture.
 
-`pnpm --dir frontend run lint` enforces the compact type, font-family, radius,
-and defined-custom-property rules so a new component cannot quietly introduce
-a parallel UI scale or reference a missing design token.
+`just lint-frontend` enforces the compact type, font-family, radius, and
+defined-custom-property rules so a new component cannot quietly introduce a
+parallel UI scale or reference a missing design token.

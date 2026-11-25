@@ -1,272 +1,422 @@
 # Chat capabilities and durable effects
 
-The experimental [MCP App](mcp.md) uses the same document read/write services.
-Its external-host workspace IDs and draft checkpoints are UI recovery state.
-Internal chat does not control those host views by design. Document search and
-revision-aware editing retain the parity described below.
+Sangam chat is a bounded interface to the document server. The model can invoke
+only capabilities that deterministic application code has already authorized for
+the current run. It cannot grant itself new tools, write SQLite or workspace
+files directly. Sangam's policy determines whether a proposal waits for review
+or proceeds to automatic apply.
 
-MCP assistant requests call the same ChatKit processing path as internal chat,
-with the connection's own inference and document permissions. They preserve
-internal proposal/effect review behavior. Server-owned request handles add
-bounded waiting and recovery; they do not expose broad history or profiles.
-See the [MCP request contract](mcp.md#sangam-assistant-requests).
-The MCP App can create Markdown through the same `create_document` service and
-send messages to this assistant path. Its explicit saved revision, selection,
-and open-tab context follows the same turn-context and current-source checks.
-Proposal review opens the shared apply/dismiss workflow. Other durable effect
-approvals remain in internal chat.
-
-Sangam chat is a bounded interface to the document server. The model may choose from capabilities that deterministic application code has already authorized. It cannot grant itself a tool, write SQLite or the workspace, or turn a proposal into an applied revision. See [architecture.md](architecture.md) for the core trust model and [operations/integrations.md](operations/integrations.md) for provider configuration. To measure changes to this contract, run the eval suite in [chat-evals.md](chat-evals.md).
-
-The [architecture diagram](assets/chat-capability-lifecycle.html) shows the complete request and effect path. A static [reference image](assets/chat-capability-lifecycle.png) is available for reviews and pull requests.
+See [architecture.md](architecture.md) for the core trust model,
+[operations/integrations.md](operations/integrations.md) for provider setup,
+[chat-evals.md](chat-evals.md) for the live evaluation suite, and the
+[capability lifecycle diagram](assets/chat-capability-lifecycle.html) (or static
+[reference image](assets/chat-capability-lifecycle.png)) for the full request
+and effect flow.
 
 ## Runtime contract
 
-`ChatCapability` in `src/sangam/chat_capabilities.py` is the source of truth for model-visible operations. Every descriptor declares:
+`ChatCapability` in `src/sangam/chat_capabilities.py` is the source of truth for
+every model-visible operation. Each capability descriptor declares:
 
-- a stable capability ID and integer version;
-- strict input and result models with unknown fields rejected;
-- one effect class: `read`, `propose`, `write`, or `external`;
-- an approval policy;
-- required Sangam actor capabilities and scope behavior;
-- allowed entry points and document content types;
-- result byte and execution-time limits.
+- A stable capability ID and integer version.
+- Strict input and result models that reject unknown fields.
+- One effect class: `read`, `propose`, `write`, or `external`.
+- An approval policy.
+- Required actor capabilities and path-scope behavior.
+- Allowed chat entry points and supported document content types.
+- Result byte limits and execution timeouts.
 
-The agent tool for each capability lives in `ChatToolset` (`src/sangam/chat_tools.py`), which runs every tool against the run principal's current token grants. Durable `write` and `external` capabilities also register one `DurableEffect` in `ChatEffectService.durable` (`src/sangam/chat_effects.py`): its preflight before approval, its execution after approval, and how to tell that its operation key already committed. Tool telemetry records metadata only.
+Each capability's tool handler lives in `ChatToolset`
+(`src/sangam/chat_tools.py`) and checks the run principal's current token grants
+on every call. Durable `write` and `external` capabilities also register a
+`DurableEffect` in `ChatEffectService.durable` (`src/sangam/chat_effects.py`)
+defining preflight before approval, execution after approval, and how to detect
+whether the operation key already committed. Tool telemetry records metadata
+only.
 
-The registry resolves the tool set for every run from the authenticated principal, `WorkspaceAccessService` policy, chat entry point, attached document, content type, model compatibility, and capability version. Compact document chat and full workspace chat use this same resolver.
+Before every run, the registry resolves the allowed tool set from the
+authenticated principal, `WorkspaceAccessService` policy, chat entry point,
+attached document, content type, model compatibility, and capability version.
+Compact document chat and full workspace chat use this same resolver.
 
-| Effect | Model behavior | Application behavior |
+| Effect class | Model behavior | Application behavior |
 | --- | --- | --- |
-| `read` | May request bounded evidence. | Authorize each read and return revision-aware citations. |
-| `propose` | May prepare an existing-document change. | Store a revision-pinned proposal. A human still applies the diff. |
-| `write` | May request a private workspace mutation. | Persist an exact effect and wait for a digest-bound decision. |
-| `external` | May request an externally visible action. | Persist and review every material target and policy value before execution. |
+| `read` | Requests bounded evidence. | Authorizes each read and returns revision-aware citations. |
+| `propose` | Prepares an edit to an existing document. | Stores a revision-pinned proposal. Review mode waits for explicit apply. YOLO mode attempts to apply chat proposals under the requester's authority. |
+| `write` | Requests a private workspace mutation. | Persists an exact effect and waits for a digest-bound decision. |
+| `external` | Requests an externally visible action (e.g., publishing). | Persists and reviews every material target and policy value before execution. |
 
 ## Turn and retry contract
 
-The browser creates one bounded turn context immediately before it sends a user message. The record includes the entry point, document and revision, selected text and its SHA-256 digest, the active PDF page and selected annotation when present, and creation time. The server attaches the selected model and resolved capability versions when the turn starts.
+Immediately before sending a user message, the browser creates one bounded turn
+context containing the entry point, active document and revision, selected text
+and its SHA-256 digest, active PDF page and selected annotation (when present),
+and creation time. When the turn starts, the server binds the selected model and
+resolved capability versions.
 
-Retries look up the original user-item context. They reuse its document, revision, selection, PDF page, annotation, model, and capability versions, intersected with current authorization. A removed revision fails clearly. Sangam does not silently substitute the document, selection, or default model that happens to be current later.
+Retries load that original user-item context and reuse its document, revision,
+selection, PDF page, annotation, model, and capability versions intersected with
+current authorization. If a referenced revision was removed, the retry fails
+clearly rather than substituting a newer revision or different model.
 
-The context record intentionally excludes provider credentials. Run evidence stores actor, thread, model, status, token counts when available, tool outcomes, latency, citations, safe error classes, and a provider correlation ID. Ordinary prompt, document, selection, and tool-result content is not copied into run evidence.
+Turn contexts never include provider credentials. Run evidence records actor,
+thread, model, status, available token counts, tool outcomes, latency,
+citations, safe error classes, and provider correlation IDs. Ordinary prompt,
+document, selection, and tool-result text is not copied into run evidence.
 
 ## Durable effect contract
 
-Document creation, workspace organization, publication, publication changes, PDF annotations, and project changes follow this sequence:
+Document creation, workspace organization, publication creation and updates, PDF
+annotations, project changes, and chat profile or memory updates all follow one
+durable lifecycle:
 
-1. Validate model arguments with the capability input schema.
-2. Normalize the arguments and calculate a stable digest.
-3. Persist the effect with the requester, run, tool call, capability version, preview, expiry, and stable operation key.
-4. Ask the browser to review the stored effect ID and digest.
-5. Accept an approval only from an administrator and only for the stored digest. Anyone who can see the effect may deny it.
+1. Validate model arguments against the capability's strict input schema.
+2. Normalize arguments and compute a stable approval digest.
+3. Persist the effect with requester, run, tool call, capability version,
+   preview, expiry, and stable operation key.
+4. Present the stored effect ID and digest to the browser for review.
+5. Accept approval only from an administrator and only for the matching digest
+   (a principal who can see the effect may deny it with the matching digest).
 6. Recheck expiry, current authorization, and current resource state.
-7. Execute through `WorkspaceAccessService` with the reserved operation key, as the requester.
-8. Store the resulting resource ID or a safe failure record.
+7. Execute through `WorkspaceAccessService` with the reserved operation key
+   under the requester's authority.
+8. Record the resulting resource ID or a safe failure record.
 
-The browser never performs the domain mutation. The model run stops at the first durable effect and resumes only after the browser returns its stored result. This keeps multi-effect requests sequential, prevents duplicate pending cards, and prevents the assistant from narrating a missing result while approval or YOLO execution is still resolving. Reloading the browser restores pending, completed, and failed effect state from SQLite. Repeating a completed approval returns the original result. If the domain mutation commits before the effect completion write, a retry uses the same operation key and converges on the same resource.
+The browser never performs the domain mutation itself. The model run pauses at
+the first durable effect. The browser returns the stored result to resume the
+run. In YOLO mode Sangam records that result without waiting for a decision.
+This keeps multi-effect turns sequential, avoids duplicate review cards,
+and stops the model from claiming success before execution resolves.
 
-An effect left in `approved` or `executing` state after an interruption is also restored. The UI offers a resume action bound to the stored approval and operation key. Before retrying publication, the server checks whether that operation key already committed: a committed publication is recovered even if the document later changed, while an uncommitted request still has to match the approved revision.
+Reloading the browser restores pending, completed, and failed effect state from
+SQLite. Repeating a completed approval returns the original result. If a domain
+mutation commits before the effect row updates, retrying with the reserved
+operation key converges on the same resource. Interrupted effects left in
+`approved` or `executing` state expose a resume action bound to the stored
+approval and operation key. Before retrying a publication, the server checks
+whether the operation key already committed so a committed publication recovers
+even if the draft later moved ahead, while an uncommitted publication still
+requires the exact approved revision.
 
-Publication approval binds the document ID, exact revision, slug, and access policy. If the document revision changes, execution fails and requires a new effect. Unlisted publication tokens are returned once to the approving browser and are not stored in the chat effect result.
+Publication approval binds the document ID, exact revision ID, slug, and access
+policy. If the document revision changes before commit, execution fails and
+requires a new effect. Unlisted publication tokens are returned once to the
+approving browser and are never stored in the chat effect record.
 
 ### Authority and audit
 
-An approved effect runs with the requester's authority, not the approver's. The approver only consents. Before execution the service rebuilds the requester's principal from the stored requester and token ID (migration 030) and rechecks their current grants. If the requester was removed or their token revoked, execution fails. An administrator approving another actor's effect therefore cannot widen what it may do.
+An approved effect always runs with the requester's authority, never the
+approver's. Before execution, Sangam rebuilds the requester's principal from the
+stored requester and token ID and rechecks current grants. If the requester was
+removed or their token revoked, execution fails. Approving another actor's
+effect cannot widen its permissions.
 
-The activity ledger names both actors. The row carries `via` (`chat-effect:<id>` or the proposal) and `approved_by`. The Activity view has a **Chat** filter (`via=chat`) that lists only chat-originated changes. Projects and saved views write through `WorkspaceAccessService.audited`, so their failures and denials are ledgered like other writes.
-
-A path-scoped token can create documents through chat inside its own prefix. `preflight_create_document` refuses other destinations, and the model is told the prefix it may use.
+The activity ledger records both `via` (`chat-effect:<id>` or the proposal) and
+`approved_by`. The Activity view includes a **Chat** filter (`via=chat`) for
+chat-originated mutations. Projects and saved views enter through
+`WorkspaceAccessService.audited`, so their denials and failures are ledgered
+identically. A path-scoped token can create documents in chat only within its
+own prefix (`preflight_create_document` rejects other paths and informs the
+model of its allowed prefix).
 
 ### Workspace organization
 
-`inspect_workspace_organization` returns at most 100 authorized documents, folders, or tags per page. It includes stable IDs, current revision or metadata versions, exact paths, tags, categories, and folder descendant counts. It never returns document content.
+- `inspect_workspace_organization` returns at most 100 authorized documents,
+  folders, or tags per page with stable IDs, current revision or metadata
+  versions, exact paths, tags, categories, and descendant counts. It never
+  returns document bodies.
+- `apply_workspace_organization_plan` accepts at most 100 exact operations:
+  creating folders, creating tags (administrators only, checked in preflight),
+  materializing pathless drafts, moving documents or folders, replacing
+  metadata, trashing documents, restoring earlier revisions or trashed
+  documents, and duplicating documents. A plan cannot apply a tag it creates
+  because the new tag has no ID until committed; create the tag in one plan,
+  inspect its ID, then apply it in a second plan.
 
-`apply_workspace_organization_plan` accepts at most 100 exact operations. A plan cannot apply a tag it creates, because the new tag has no ID until the plan runs. Create the tag in one plan, inspect the workspace for its ID, then apply it in a second plan. Plans can create folders, create tags (administrators only, checked in preflight), save unmaterialized drafts at workspace paths, move documents or folders, replace document or folder metadata, move documents to Trash, restore a document to an earlier revision or out of Trash, and duplicate a document. Deterministic code normalizes paths and tag sets, rejects duplicate state changes and no-ops, and calculates the approval digest. Before the first write, the service rechecks every source path, destination, revision, metadata version, descendant count, tag ID, collision, and actor capability. Each committed item has a stable child operation key, so interrupted retries converge on the recorded result.
+Deterministic code normalizes paths and tag sets, rejects duplicate changes and
+no-ops, and computes the approval digest. Before writing, the service rechecks
+every source path, destination, revision, metadata version, descendant count,
+tag ID, collision, and actor capability. Each item carries a stable child
+operation key so interrupted retries converge cleanly. Explorer actions, the
+command palette, REST calls, and chat all share this service through
+`WorkspaceAccessService`. Partial results are always shown explicitly.
 
-The explorer, command palette, raw API, and chat all call this service through `WorkspaceAccessService`. A partial result is explicit and never displayed as complete.
+## Parity with the app
 
-### Parity with the app
-
-Chat can do what the app can, through the same services and with the same authority.
+Chat exposes the same user-facing workspace actions through the same services
+and authorization rules:
 
 | In the app | In chat |
 | --- | --- |
-| Search with tag, category, and type filters | `search_workspace` takes the same filters and cites the PDF page of a hit |
-| Open a document with its tags, category, trust level, and links | `read_document` returns the same |
-| Revision history and diff | `read_revision_history` lists revisions or diffs two of them |
+| Search with tag, category, and type filters | `search_workspace` takes the same filters and cites the PDF page of matches |
+| Open a document with tags, category, trust level, and links | `read_document` returns the same metadata and content |
+| Revision history and diff | `read_revision_history` lists revisions or diffs two revisions |
 | Edit, create, publish | `propose_update`, `create_document`, `publish_document` |
-| Withdraw a publication or change its slug, access policy, or published revision | `update_publication`; the version comes from `read_document`, which returns the publication to principals who can publish the document |
-| PDF notes, comments, bookmarks, citation markers | `annotate_pdf`; add, edit, or delete one annotation per review. Highlights need geometry a model cannot supply, so they stay in the app |
-| Move, trash, restore, duplicate, tag, folders | `apply_workspace_organization_plan`; every operation calls `WorkspaceAccessService.write_document` or the folder services |
-| Projects: list and open | `inspect_projects` |
-| Projects: create, add or remove a document | `update_project`, one exact change per review |
-| View and edit personal or project chat instructions | `inspect_chat_profile`, `update_chat_profile`; one versioned entry per person and explicit project scope |
-| List, save, correct, accept, dismiss and forget saved facts | `search_chat_memory`, `update_chat_memory`; the same profile service and exact effect approval |
-| Inspect and correct active task context | `inspect_task_state`, `correct_task_state`; source-linked, versioned fields; exact effect approval for chat corrections |
-| Recall original conversations | `search_chat_history`, `read_chat_history`; bounded actor-owned excerpts, stable project membership and current document access |
-| Research outside sources | `search_web`, `read_web_source`; read-only, offered only when the server enables web research (see below) |
+| Change publication slug, policy, revision, or withdraw | `update_publication` (version comes from `read_document` for principals with publish authority) |
+| PDF notes, comments, bookmarks, citation markers | `annotate_pdf` adds, edits, or deletes one annotation per review (highlights stay in the app because they need selection geometry) |
+| Move, trash, restore, duplicate, tag, folders | `apply_workspace_organization_plan` through `WorkspaceAccessService` |
+| List and open projects | `inspect_projects` |
+| Create projects or attach and detach documents | `update_project`, one exact change per review |
+| View and edit personal or project chat instructions | `inspect_chat_profile`, `update_chat_profile` |
+| List, save, correct, accept, dismiss, and forget saved facts | `search_chat_memory`, `update_chat_memory` |
+| Inspect and correct active task context | `inspect_task_state`, `correct_task_state` |
+| Recall prior conversations | `search_chat_history`, `read_chat_history` |
+| Research outside sources | `search_web`, `read_web_source` (only when web research is enabled) |
 
-Project tools are administrator-only in the app, so a capability with `requires_administrator` is offered only to an administrator. The run's instructions are the shared rules plus the `guidance` of exactly the capabilities the run has, so the assistant is never told about a tool it lacks.
+Capabilities with `requires_administrator` (such as project tools) are offered
+only to administrators. System instructions include only the guidance for tools
+available to that run, so the model is never told about tools it cannot call.
 
-### Web research
+### Unavailable in chat by design
 
-Web research is off by default. Set `SANGAM_WEB_RESEARCH_ENABLED=true` and `SANGAM_BRAVE_SEARCH_API_KEY` to offer `search_web` and `read_web_source`. With it off, the assistant is told web access is unavailable and answers from the workspace only.
+Trust-level changes, agent tokens, provider connections, backups,
+reconciliation, Karakeep imports, binary PDF uploads, publication token
+rotation, and geometric PDF highlights are intentionally excluded from chat.
+They manage credentials, operate on infrastructure, or require binary or
+coordinate input from the browser.
 
-- Both tools are read-only. They need the same `read` authority as other reads and run without approval. Researching never authorizes saving or publishing; those stay separate effects.
-- `search_web` takes a short public query, optional `published_after` and `published_before` dates, and returns a stable source ID, URL, publication date when the provider has one, retrieval time, and a snippet. The query is the only thing sent to the search provider. The assistant is told never to include private workspace text, and an eval checks that queries do not leak seeded private canaries.
-- `read_web_source` reads only a source ID that `search_web` returned in the same chat run, so the assistant cannot fetch arbitrary URLs or cite an ID that was never retrieved. It fetches through the same guarded client as URL capture (HTTP and HTTPS on standard ports, resolved addresses checked, connection pinned, redirects revalidated, size and type limits). PDF sources are not read yet. Page text is returned as `untrusted_content`: it is evidence and never an instruction or a grant.
-- Each run records the sources it retrieved (`chat_web_sources`), including the query, retrieval time, and a hash of the text it read.
-- The assistant is given the server clock in UTC to resolve relative dates. The user's timezone is not known yet.
+## Web research
 
-Not available in chat by design: trust changes, agent tokens, provider connections, backups, reconciliation, Karakeep, and importing PDF bytes. These are administrator operations that hold credentials, operate on infrastructure, or need a binary upload. Chat never rotates a publication token, because that issues a credential, and it cannot create highlight annotations.
+Web research is off by default. Set `SANGAM_WEB_RESEARCH_ENABLED=true` and
+`SANGAM_BRAVE_SEARCH_API_KEY` to enable `search_web` and `read_web_source`. When
+disabled, the assistant is told web access is unavailable and answers from the
+workspace alone.
+
+- **Read-only authority:** Both tools require standard `read` capability and run
+  without approval prompts. Web research never grants permission to save or
+  publish.
+- **Query isolation (`search_web`):** Accepts a short public query and optional
+  `published_after` / `published_before` dates. Returns a stable source ID, URL,
+  provider publication date (when present), retrieval timestamp, and snippet.
+  The search provider receives the query, result limit, and optional date filters. The model is instructed never to send
+  private workspace text, and evals verify canary text stays out of queries.
+- **Guarded fetching (`read_web_source`):** Reads only a source ID returned by
+  `search_web` in the same run, preventing arbitrary URL fetches or invented
+  citations. Fetches use the same SSRF-guarded HTTP client as URL capture
+  (standard HTTP/HTTPS ports, resolved IP checks, pinned connections, redirect
+  revalidation, and size/type caps). PDF web sources are not read yet. Page text
+  is marked `untrusted_content` so it acts only as evidence, never as
+  instructions.
+- **Provenance and time:** Each run records retrieved sources in
+  `chat_web_sources` with query, retrieval time, and content hash. The assistant
+  receives the server clock in UTC to resolve relative dates. Sangam has no
+  user timezone for this purpose.
+
+## Context, instructions, task state, and saved facts
 
 ### Saved instructions
 
-Open **Instructions** in workspace or document chat to edit personal instructions and the selected project's instructions. Project scope uses the stable project ID from the conversation entry point. Document folders and titles never select a project. Project entries are owned by the person who saves them, and project access is checked against its current document membership.
+Open **Instructions** in workspace or document chat to edit personal
+instructions and instructions for the explicitly selected project. Project scope
+always uses the stable project ID from the conversation entry point, never
+folder paths or titles. Project entries belong to the user who saved them and
+check current document membership.
 
-Each entry holds at most 4,000 characters. Saving or clearing requires the current version. A stale save preserves the draft and asks you to reload. Profile mutations use the same audited service through the API and chat. In Review mode, chat shows the full proposed instructions for approval before saving them.
+Each entry holds up to 4,000 characters and requires the current version to save
+or clear; stale saves preserve your draft and prompt you to reload. **Next turn
+only** adds an optional 2,000-character override. Each submitted turn pins the
+applicable instruction sources and versions. Approval continuations retain
+that snapshot and recheck access. **Applied to the latest turn** displays it.
+Clearing the override leaves saved instructions intact. Profile writes use
+one audited service in the API and chat. In Review mode, chat shows the full
+proposed instructions before saving.
 
-**Next turn only** holds an optional 2,000-character override. Each submitted turn pins the applicable sources and their versions. Approval continuations keep that snapshot and recheck access. **Applied to the latest turn** shows the actual snapshot for the thread, including its override. Clearing the composer override does not change saved instructions.
+Precedence order is fixed:
 
-Application policy and tool contracts always apply. The latest user request takes precedence over the override, followed by project instructions and personal instructions. Retrieved documents and web pages cannot change these sources or their precedence. Sangam does not scan filesystem instruction files.
+1. Application policy and tool contracts (cannot be overridden).
+2. Latest user request.
+3. Next-turn override.
+4. Project instructions.
+5. Personal instructions.
+
+Retrieved documents and web pages cannot alter these sources or their
+precedence. Sangam never scans filesystem instruction files.
 
 ### Active task and conversation history
 
-Open **Instructions → Active task** to inspect the thread's task summary, correct
-one field, or read its original source messages. The summary starts when history
-exceeds the recent model context window. Compaction runs inside the current
-request with the selected provider and no tools. It keeps at most 12 fields,
-each with a stable key, a kind, up to 600 characters and up to four source IDs.
-Up to four batches of 12 bounded source excerpts are processed per request.
-If older history exceeds that budget, the UI marks incomplete coverage and the
-agent can retrieve missing details through history tools. Compaction usage is
-included in the run's token counts.
+Open **Instructions -> Active task** to inspect or correct the thread's
+compacted task summary and jump to its original messages. Compaction runs
+automatically inside the current request (with no tools) once history exceeds
+`SANGAM_CHAT_MAX_CONTEXT_MESSAGES`. It maintains up to 12 typed fields (each up
+to 600 characters with up to 4 source IDs) across at most 4 batches of 12
+bounded excerpts per request. When older history exceeds that budget, the UI
+flags incomplete coverage and the model can use history tools to read older
+turns. Compaction token usage is included in the run's totals.
 
-Each update creates a persisted revision. Corrections use the observed version;
-stale saves preserve the editor draft. Empty text dismisses a field and records
-its key so compaction cannot restore it. A thread can retain 12 dismissed keys.
-Closing the dialog or correction editor retains drafts. Discard resets them.
-Source edits or deletion invalidate the summary. The next eligible chat turn
-rebuilds it from current messages. Original transcripts remain available.
+Corrections are versioned and preserve drafts on conflicts. Submitting empty
+text dismisses a field key (up to 12 dismissed keys per thread) so compaction
+will not recreate it. Source edits or deletion invalidate the summary for
+rebuilding on the next turn without deleting original transcripts.
 
-History searches return at most ten owner-scoped excerpts, each limited to
-1,200 characters. Further reads use the original thread/message IDs and a
-bounded character offset. Project filtering uses explicit thread project IDs
-or `project_threads` membership. Folder paths never select conversation scope.
-Current document and project access is checked before excerpts are returned.
-Source links open the conversation's context dialog at that exact message.
-Chat recall excludes the current conversation by default so the current question
-cannot match itself. `include_current_thread=true` searches within it as well.
+`search_chat_history` returns at most 10 owner-scoped excerpts (up to 1,200
+characters each), excluding the current thread unless
+`include_current_thread=true`. `read_chat_history` paginates by thread/message
+ID and character offset. Project filters use explicit project IDs or
+`project_threads` membership and recheck current document and project access.
 
-Task summaries are fallible context. They do not save facts or standing
-instructions, grant authority, approve effects, or start background work.
-Effect IDs and statuses come from live durable records, separately from the
-summary. A completed response does not mean a task or proposed effect completed.
-Reloading a thread restores context without resuming an interrupted request.
+Task summaries are fallible context: they never save facts or standing
+instructions, grant authority, approve effects, or start background work. Live
+effect status always comes from durable effect records. Reloading a thread
+restores its context without restarting an interrupted request. Source links
+open the exact message in the conversation's context dialog.
 
 ### Saved facts
 
-Open **Instructions → Saved facts** to save or manage personal facts and facts for the
-explicitly selected project. Standing preferences remain in Instructions and are never
-copied into fact memory. Facts provide context, not directives or permissions.
+Open **Instructions -> Saved facts** to manage personal facts and facts for the
+explicitly selected project. Standing preferences belong in Instructions, not
+facts. Facts supply context rather than directives or permissions.
 
-Chat uses bounded SQLite FTS queries for relevant active facts. It does not inject every
-saved fact into a new conversation. An empty search lists facts only for explicit memory
-management. Inferred facts must be suggestions; they are excluded from recall until accepted.
-Review mode approves the exact fact, scope, action, source references and observed version.
-Saves are confirmed only after the service returns the persisted result. YOLO retains its
-existing meaning.
+Chat queries relevant active facts via bounded SQLite FTS rather than injecting
+every fact into every turn. Inferred facts are created as suggestions and stay
+excluded from recall until explicitly accepted. Entries hold up to 2,000
+characters, searches return at most 20 items, and **Applied to the latest turn**
+lists the fact IDs and versions read. An empty search lists entries for
+explicit memory management. Review mode binds the exact action, scope, fact,
+source references, and observed version. A correction or forget operation
+removes the obsolete version from the current view. Delivered responses retain
+their original wording.
 
-Entries hold at most 2,000 characters. Lists are paginated and searches return at most 20
-entries. **Applied to the latest turn** lists current fact IDs and versions read for that
-turn. A correction or forget operation removes an obsolete version from this current view.
-It does not rewrite a response already delivered to the user.
+Forgetting or dismissing a fact clears its canonical text and source links,
+removes it from search, and retains a content-free tombstone and hashed
+source-message reference so stale saves cannot reactivate it. An explicit request can save a new fact. Original conversations, durable
+effects, idempotency records, backups, and audit records can retain earlier
+text. Deleting a conversation is a separate action. Task summaries and prior
+messages cannot create or restore saved facts.
 
-Forget and dismiss clear the canonical text and source links, remove it from search, and
-retain a content-free ID/version tombstone and hashed source-message reference. Stale saves
-and attempts to reactivate that ID or source fail. A new explicit request can save a new
-fact. Original conversations, durable effect records, idempotency replay evidence, and
-backups can still contain the earlier text. Forgetting suppresses future profile recall;
-deleting the original conversation is a separate control and does not erase backup or
-audit evidence. Task summaries and historical statements cannot create or restore memory.
+## Autonomy modes and editorial review
 
-### Review and YOLO autonomy
+### Review mode and YOLO mode
 
-The default permission mode is **Review every effect**. It pauses every durable effect for an exact decision. Operators can select **YOLO · run without approval** in AI settings. YOLO executes every effect immediately, including publication. The normal capability and path checks still run, so YOLO removes approval prompts without granting new authority.
+The default permission mode in **Settings -> AI & models** is **Review every
+effect**, which pauses every durable effect for explicit approval. Switching to
+**YOLO · run without approval** runs authorized effects without an approval
+prompt, including publication. It also attempts to apply chat proposals using
+the same revision and authorization checks. A failed apply remains a reviewable
+proposal. Standalone MCP proposals and stale-proposal refresh candidates still
+require explicit apply.
 
-The chat panel shows the active mode. Pending organization plans use a dedicated renderer that lists every operation and its before-and-after state. Completed effects collapse into one expandable summary. **Stop** persists run cancellation, cancels effects that have not started, and aborts the active browser stream. Starting another thread cancels the current run and clears its pending card.
-
-The **Review changes** inbox lists pending and stale document proposals as an editorial review workspace. A proposal includes the proposed wording, an editable wording mode with a live diff, editorial rationale, and any explicit judgment needed. It presents supporting cited passages with direct source links, alongside bounded source documents retrieved during the turn. Reviewers can apply the proposal as drafted or with manual wording adjustments, request a revision, or dismiss it. Older proposals without recorded evidence indicate that no evidence was recorded. A deleted or unauthorized source document is redacted to prevent leaking passages or titles to reviewers who lack permission.
+The chat panel shows the active mode. Pending organization plans list every
+operation's before-and-after state, and completed effects collapse into a single
+expandable summary. **Stop** persists cancellation, cancels unstarted effects,
+and aborts the active stream. Starting a new thread cancels the active run and
+clears its pending card.
 
 ### Exact editorial review
 
-The original agent wording stays in `content`. Sangam stores the exact reviewed wording
-separately in `applied_content`, with its immutable `applied_revision_id`. Apply reserves
-the wording's SHA-256 digest, the reviewing actor, and the first document operation key.
-Only one apply for a proposal can execute at a time. An identical retry by the same actor
-uses the reserved operation key, including after a lost response or interrupted completion.
-A different payload or actor cannot replace an interrupted reservation.
+**Review changes** lists pending and stale document proposals. Each card
+displays the proposed wording, an editable reviewed-wording field with a live
+diff, editorial rationale, explicit judgment notes, validated supporting
+citations with direct links, and retrieved sources from the run. Reviewers can
+apply the proposal as drafted or with manual edits, request a revision, or
+dismiss it. Deleted or unauthorized sources are redacted.
 
-Validation and current authorization checks run inside the reservation lifecycle.
-An uncommitted validation, permission, deletion, or revision failure releases the
-reservation. A revision conflict marks the proposal stale and leaves Dismiss available.
-A committed operation keeps its reservation for recovery, even if the actor's token is
-later revoked. A newly issued token for that actor can resume the exact operation when
-the actor has access again. Recovery reads the committed revision from the operation
-record, rather than using a newer human edit as the applied revision.
+- **Exact wording and reservation:** Original model wording stays in `content`,
+  while applied reviewed wording is stored separately in `applied_content` with
+  its immutable `applied_revision_id`. Applying reserves the wording's SHA-256
+  digest, reviewing actor, and operation key so only one apply runs at a time
+  and exact retries by the same actor reuse the reserved operation key. A
+  different actor or payload cannot replace an interrupted reservation.
+  Validation, authorization, or deletion failures release uncommitted
+  reservations. Revision conflicts mark the proposal stale and leave dismissal
+  available.
+  Committed reservations survive token revocation for recovery once the actor
+  regains access, and recovery reads the exact committed revision from the
+  operation record.
+- **Supporting citations and retrieved sources:** Up to 20 supporting citations
+  are validated against exact authorized revisions (`quote_start` and
+  `quote_end` use UTF-16 offsets to match browser selections; repeated passages
+  require an explicit offset or longer unique quote). An omitted revision ID
+  resolves to the authorized current revision at proposal creation. Sangam
+  checks PDF page and annotation relationships. Use `model_opinion` for
+  interpretations and external claims. The review keeps turn context separate
+  from cited support. The run records up to 50 distinct document, revision, and
+  page references, including reads after proposal creation. The review flags
+  omitted references. Identical wording from different runs keeps distinct
+  proposal IDs and evidence. Older proposals without evidence show that status.
+- **Revision requests:** **Prepare revision request in chat** opens the source
+  thread. The composer includes your feedback, the exact reviewed wording,
+  and the proposal, document, thread, and reviewed revision IDs. Choose **Send** to
+  deliver the request. For stale proposals, the request can target the current
+  revision while retaining the old reviewed revision in the feedback. The
+  original proposal remains available.
 
-Supporting citations are limited to 20. Each citation must quote a passage from an
-authorized document revision. Missing revision IDs resolve to the authorized current
-revision at proposal creation. Sangam checks document, revision, PDF page, and annotation
-relationships and calculates the passage location. `quote_start` and `quote_end` use
-UTF-16 offsets so browser selection and Unicode passages agree.
-Repeated passages require an explicit `quote_start` or a longer unique quote.
-Model interpretations and external claims belong in `model_opinion`. Recorded turn context is displayed
-separately and does not count as cited support.
+## Relationship to experimental MCP
 
-Retrieved sources come from the proposal's run record, including reads after the
-proposal was created. Each run stores at most 50 distinct document, revision, and page
-references. The review shows when additional references were omitted. Identical wording
-in different runs keeps separate proposal identities and evidence. Review responses
-recheck current access before returning source titles and passages.
+The optional, experimental [MCP workspace](mcp.md) uses the same document read
+and write services, and MCP assistant requests run through the same ChatKit
+pipeline with the connection's own inference and document grants, preserving
+proposal and effect review behavior. The bridge provides request handles for
+bounded waiting and recovery. It exposes neither broad history search nor
+chat profiles. MCP workspace IDs and draft checkpoints are
+external-host UI recovery state and are intentionally not controlled by internal
+chat. Proposal review opens the shared apply/dismiss workflow, while other
+durable effect approvals remain in internal chat. See
+[mcp.md#sangam-assistant-requests](mcp.md#sangam-assistant-requests).
 
-**Prepare revision request in chat** opens the proposal's thread and fills ChatPanel's
-composer with feedback, the exact reviewed wording, and the proposal, document, thread,
-and reviewed revision IDs. The reviewer chooses **Send** to deliver it. The original
-proposal remains available. A stale proposal can request a revision against the current
-document while its old reviewed revision remains explicit in the feedback.
+## Add a new capability
 
-## Add a capability
+Follow these steps in order:
 
-Complete these steps in order:
+1. Define one user intent. Split mixed read-and-write behavior into separate
+   capabilities.
+2. Target an existing application-service operation. Add missing domain behavior
+   to the service layer before adding chat code.
+3. Choose the effect class: `propose` for existing-document edits, `write` for
+   private mutations, `external` for externally visible actions.
+4. Define strict, bounded Pydantic input and result models (reject extra fields;
+   set string, collection, byte, and timeout bounds).
+5. Declare actor capabilities, path-scope rules, entry points, content types,
+   and model compatibility.
+6. Choose the approval policy and ensure the review card shows every material
+   argument.
+7. Register the descriptor in `CAPABILITIES`, add the tool to `ChatToolset`, and
+   for durable effects register a `DurableEffect` calling the application
+   service.
+8. Add tests for schema validation, authority, lifecycle, duplicate delivery,
+   stale context, and abuse cases.
+9. Add starter prompts or UI entry points only after the capability works in
+   both compact and full chat.
 
-1. State one user intent. Split mixed read-and-write behavior into separate capabilities.
-2. Choose an existing application-service operation. Add missing domain behavior to the service layer before adding chat code.
-3. Classify the effect. Use `propose` for existing-document edits, `write` for private mutations, and `external` for externally visible changes.
-4. Define strict, bounded input and result models. Reject extra fields. Set string, collection, result-byte, and time limits.
-5. Declare actor capabilities, path-scope behavior, entry points, supported content types, and model requirements.
-6. Choose the approval policy and how the review card renders it. Every material effect argument must be visible.
-7. Register the descriptor in `CAPABILITIES`, add its tool to `ChatToolset`, and, for a durable effect, add its `DurableEffect` entry that calls an existing application service.
-8. Add schema, authority, lifecycle, duplicate-delivery, stale-context, and abuse tests.
-9. Add entry-point copy or starter prompts only after the capability works through both compact and full chat.
-
-Do not use prompt wording as a security boundary. Do not add generic HTTP, URL, filesystem, shell, SQL, or credential tools. Do not write the database or workspace from a tool handler. Do not return unbounded content. Do not hide material arguments from approval. Do not create a retry path with a fresh operation key.
+Never use prompt text as a security boundary. Never add generic HTTP,
+URL, filesystem, shell, SQL, or credential tools. Never write SQLite or workspace
+files directly from a tool handler, return unbounded output, hide material
+arguments from approval, or retry a durable effect with a fresh operation key.
 
 ## Verification
 
-Capability changes must run the backend and frontend gates plus the browser-verification matrix. Tests must prove policy and lifecycle outcomes, not model prose. Maintain adversarial cases in `tests/fixtures/chat_adversarial_cases.json` without live secrets or customer data.
+Capability changes must pass `just test` and the browser verification matrix in
+`just test-e2e`. Tests must prove policy and lifecycle outcomes rather than
+model prose. Keep adversarial test cases in
+`tests/fixtures/chat_adversarial_cases.json` free of live secrets or private
+data.
 
-Required browser coverage includes compact and full chat, exact approval parameters, deny and reload behavior, completed results, keyboard interaction, fine-pointer narrow desktop, and true touch mobile. Report Mobile Safari or physical-device coverage as unverified unless it was actually run.
+Browser coverage must verify compact and full chat, exact approval parameters,
+deny and reload behavior, completed results, keyboard interaction, narrow
+desktop (`390px`), and true touch mobile. Report Mobile Safari or physical
+device checks as unverified unless actually executed.
 
 ## Design references
 
-These sources informed the vocabulary and controls. Sangam does not implement their wire protocols merely because it uses compatible ideas.
+These references informed Sangam's vocabulary and safety boundaries:
 
-- The [OpenAI Agents SDK human-in-the-loop guide](https://openai.github.io/openai-agents-python/human_in_the_loop/) documents per-call approval, serializable paused state, and resume behavior. Sangam persists a smaller domain-specific effect record because `WorkspaceAccessService` owns execution.
-- The [OpenAI Agents SDK usage guide](https://openai.github.io/openai-agents-python/usage/) defines provider-reported request and token accounting. Sangam records the available aggregate counts without prompt content.
-- The [OWASP AI Agent Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html) recommends least-privilege tools, exact action previews, parameter-bound approval, replay protection, independent policy checks, structured audit metadata, and version-controlled adversarial cases.
-- [OWASP LLM06: Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/) separates excessive functionality, permission, and autonomy. Sangam limits all three in the registry and effect service.
-- The [MCP 2026-07-28 release](https://blog.modelcontextprotocol.io/posts/2026-07-28/) uses explicit capability discovery and handles for state that must cross calls. Sangam keeps its internal registry and SQLite IDs; it does not expose its application services through MCP.
-- [AG-UI](https://github.com/ag-ui-protocol/ag-ui) describes typed frontend tools, interrupts, and an observable agent/UI boundary. Sangam keeps ChatKit and a narrow `review_chat_effect` client tool.
-- The [OpenTelemetry GenAI attributes](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/) warn that tool arguments and results may contain sensitive data and define conversation, operation, model, correlation, and token vocabulary. Sangam stores metadata by default and requires no external telemetry service.
+- [OpenAI Agents SDK human-in-the-loop guide](https://openai.github.io/openai-agents-python/human_in_the_loop/):
+  Per-call approval, serializable paused state, and resume behavior. Sangam
+  persists a smaller domain-specific effect record owned by
+  `WorkspaceAccessService`.
+- [OpenAI Agents SDK usage guide](https://openai.github.io/openai-agents-python/usage/):
+  Aggregate request and token accounting without copying prompt text.
+- [OWASP AI Agent Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html):
+  Least-privilege tools, exact previews, parameter-bound approvals, replay
+  protection, independent policy checks, audit metadata, and adversarial cases.
+- [OWASP LLM06: Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/):
+  Constraining functionality, permissions, and autonomy in the registry and
+  effect service.
+- [MCP 2026-07-28 release](https://blog.modelcontextprotocol.io/posts/2026-07-28/):
+  Explicit capability discovery and handles for cross-call state. Internal chat
+  keeps its own registry and SQLite IDs while the optional experimental MCP
+  bridge is documented separately in [mcp.md](mcp.md).
+- [AG-UI](https://github.com/ag-ui-protocol/ag-ui): Typed frontend tools,
+  interrupts, and an observable agent/UI boundary. Sangam uses ChatKit with a
+  narrow `review_chat_effect` client tool.
+- [OpenTelemetry GenAI attributes](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/):
+  Metadata-first telemetry vocabulary without requiring an external collector.
