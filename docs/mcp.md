@@ -1,119 +1,134 @@
 # MCP document workspace
 
-The experimental MCP integration finds Markdown and PDF documents through restricted
-Python and opens them in an MCP App. The App can search for more documents,
-switch between tabs, checkpoint separate drafts, and save through Sangam's
-existing revision-aware write service. The normal UI, REST API, and MCP share
-permissions.
+Sangam includes an experimental MCP server (`SANGAM_MCP_ENABLED=true`) that lets
+external MCP clients search, read, annotate, propose changes to, and edit
+Markdown and PDF documents through restricted Python (**Code Mode**) and a
+sandboxed **MCP App**. Every operation runs through Sangam's canonical
+revision-aware services and enforces the connected bearer token's current
+grants.
+
+## Surface overview
+
+| Layer | Names | Purpose |
+| --- | --- | --- |
+| Model tools | `search`, `execute`, `present` | Discover catalog operations, run restricted Python in a Monty worker, and open permitted documents in the MCP App |
+| App-only tool | `mcp_app` | Typed bridge actions invoked by the sandboxed MCP App (hosts must honor visibility metadata; server still enforces every grant) |
+| Native resources | `sangam://workspace/{workspace_id}`, `sangam://document/{document_id}`, `sangam://execution/{execution_key}`, `sangam://proposal/{proposal_id}`, `sangam://skill/{skill_id}`, `sangam://assistant/{request_key}` | Authorized current-state reads and `subscriptions/listen` invalidation events |
+| Code Mode catalog | `documents.*`, `proposals.*`, `pdf.*`, `skills.*`, `assistant.*`, `conversations.read`, `executions.get` | Async Python functions callable inside `execute` using keyword arguments |
 
 ## Local walkthrough
+
+Run a disposable local demo with built frontend assets, an isolated database and
+workspace, seeded Markdown documents (**Sangam MCP walkthrough** and
+**Walkthrough companion notes**), a five-page PDF, and a registered review
+skill:
 
 ```sh
 just setup
 just mcp-demo
 ```
 
-The command builds the frontend and self-contained App, starts port 8873 with
-an isolated database/workspace, and seeds **Sangam MCP walkthrough** and
-**Walkthrough companion notes**, plus a five-page PDF and a registered review skill. It prints
-the host URL and a mode-0600 disposable key file path, never the key itself.
-Keep that terminal running. Use `just mcp-demo 8874` for another port.
-For the assistant walkthrough, use `just mcp-demo 8873 true`. This gives the
-disposable key the existing inference grant. Sangam must already have a working
-provider and model configuration.
+The command listens on port `8873` and prints the host URL plus a mode-`0600`
+path to a disposable bearer token (never the token itself). Keep that terminal
+open; pressing Ctrl+C stops the server and deletes the temporary workspace and
+key. Use `just mcp-demo 8874` to pick another port, or
+`just mcp-demo 8873 true` to include the `inference` grant for the assistant
+walkthrough (requires a working provider and model configuration in Sangam).
 
-1. Open `http://127.0.0.1:8873/mcp-host.html`.
-2. Paste the key file's contents into **Sangam API key** and select **Connect**.
-   The key can read, search, create, and update only `mcp-demo/`.
-3. Search for `walkthrough` and open the result.
-4. Edit a paragraph and wait for **Draft backed up**. The normal Sangam document
-   still holds its previous saved revision.
-5. Expand **Find documents** inside the App. Search for `companion` and open
-   **Walkthrough companion notes**. Switch tabs to recover the first draft.
-6. Edit the second document, then select **Reopen App**. The server restores
-   the open tabs, active document, and separate acknowledged drafts. Reloading
-   the host and reconnecting with the same actor also restores them.
-7. Select **Save** for each document. **All changes saved** means the canonical
-   service committed that document's revision. Open normal Sangam to check it.
-8. Close a clean tab with its close button. Save or explicitly discard a dirty
-   draft before closing its tab. Arrow keys, Home, and End move between tabs.
-9. Select a different tab's **Compare** button to read it beside the active
-   editor. The pane labels saved content and draft checkpoints separately.
-   On narrow screens, expand **Comparison** to use the document area, then
-   collapse it to return to editing. **Edit this document** selects its tab.
-10. Cursor and scroll locations are saved separately from drafts. Reopening
-    restores each document's location and the comparison reference. Closing a
-    clean tab removes its saved view. **Remove comparison** leaves both tabs open.
-11. Search inside the App for `PDF` and open the walkthrough PDF. Move between
-    pages, change zoom, and search page text. Select a passage and choose
-    **Highlight selected passage**, or save a page note. These use the same
-    annotation service as normal Sangam. The original PDF bytes stay unchanged.
-12. Reopen the App to restore the PDF page, zoom, and scroll location. Save or
-    explicitly discard an unsaved note before changing pages or documents.
-13. Open a Markdown tab and select **Review proposals**, then **New proposal**.
-    Enter a summary and proposed content, then select **Create proposal**. The
-    document stays unchanged. Review the comparison and edit **Reviewed wording**
-    before selecting **Apply proposal**. The result names the saved revision.
-    Create another suggestion and select **Dismiss proposal** to close it without
-    changing the document. Save or discard any document draft before applying.
-14. Select **New document**. Enter a title, a path under `mcp-demo/`, and initial
-    Markdown, then select **Create document**. The new tab opens after creation.
-    The outgoing document's checkpointed draft remains in its own tab.
-15. With the inference-enabled demo, select **Ask Sangam**. Choose the saved active
-    document, a selected saved passage, or saved revisions of the open tabs.
-    Inspect **Included context**, enter a message, and select **Send message**.
-    Follow up in the same conversation or select **New conversation**. A proposed
-    edit opens through its **Review** button and uses the existing apply/dismiss
-    workflow. **Cancel request** stops running work without undoing completed writes.
-16. Add `debug=1` to the host URL to expose **Connection and tool trace**.
+### Try the MCP App step by step
 
-The local host uses Sangam's saved appearance preferences and shared navigation,
-tab, editor, and control styles. Its theme selector uses the existing palettes.
-The App receives color and font tokens through standard MCP host context, including
-updates while a document is open. External hosts can provide the same standard
-theme and style fields. The App does not read browser storage inside its sandbox.
+1. **Connect:** Open `http://127.0.0.1:8873/mcp-host.html`, paste the key
+   file's contents into **Sangam API key**, and select **Connect**. The demo key
+   grants `read`, `search`, `create`, and `update` under `mcp-demo/`.
+2. **Search and draft:** Search for `walkthrough`, open the document, edit a
+   paragraph, and wait for **Draft backed up**. The canonical Sangam document
+   stays at its previous revision until you save.
+3. **Multi-tab drafts and restore:** Expand **Find documents**, search for
+   `companion`, open **Walkthrough companion notes**, edit it, then select
+   **Reopen App**. Reopening (or reloading and reconnecting with the same actor)
+   restores open tabs, active document, separate acknowledged drafts, and cursor
+   and scroll locations. Reopening also restores the comparison reference.
+4. **Save and close tabs:** Select **Save** on each document until **All changes
+   saved** appears, then verify the committed revision in normal Sangam. Clean
+   tabs close directly; dirty tabs must be saved or explicitly discarded first.
+   Arrow keys, Home, and End navigate tabs.
+5. **Compare side by side:** Select **Compare** on another tab to read it beside
+   the active editor (with saved content and draft checkpoints labeled
+   separately). On narrow screens, expand **Comparison** to inspect it and
+   collapse it to resume editing. **Edit this document** switches to that tab,
+   and **Remove comparison** keeps both tabs open.
+6. **Read and annotate PDFs:** Search for `PDF`, open the walkthrough PDF, move
+   across pages, zoom, and search page text. Select text and choose **Highlight
+   selected passage**, or save a page note. Annotations use Sangam's canonical
+   annotation service while original PDF bytes remain immutable. Reopening
+   restores page, zoom, and scroll location. Save or discard an unsaved note
+   before leaving the page or document.
+7. **Create and review proposals:** On a Markdown tab, open **Review proposals**
+   and choose **New proposal** to create a suggestion without altering the saved
+   document. Edit **Reviewed wording** if desired and choose **Apply proposal**
+   (or **Dismiss proposal** on a second suggestion). Save or discard any local
+   document draft before applying.
+8. **Create a document:** Choose **New document**, enter a title, a path under
+   `mcp-demo/`, and Markdown content, and select **Create document**. The new
+   tab opens while existing checkpointed drafts stay intact in their tabs.
+9. **Ask Sangam (inference demo):** With `just mcp-demo 8873 true`, select **Ask
+   Sangam**, pick explicit context (active saved document, saved passage, or
+   saved open-tab revisions), inspect **Included context**, and send a message.
+   Follow up in the same conversation or select **New conversation**. Open a
+   resulting proposal with **Review**. **Cancel request** stops running work
+   and leaves committed writes in place.
+10. **Inspect protocol traffic:** Append `?debug=1` to the host URL to show
+    **Connection and tool trace**.
 
-To see a conflict, keep a checkpointed App draft, save a different revision in
-normal Sangam, then refresh the App. The draft survives, the App shows the new
-saved content for comparison, and a stale Save cannot overwrite it. Discard
-requires confirmation. Unacknowledged edits can still be lost on abrupt teardown.
+To test conflict recovery, keep a checkpointed App draft, save a different
+revision in normal Sangam, and refresh the App. The draft survives alongside the
+new saved revision for comparison, and a stale **Save** cannot overwrite it.
+Discarding a checkpoint requires confirmation. Abrupt teardown can lose edits
+that the server has yet to acknowledge.
 
-The local host uses the official TypeScript MCP client and AppBridge. Search
-runs actual Python in Monty. Search inside the App calls its typed bridge handler
-directly and does not require a model turn. App HTML comes from `resources/read` and runs in an
-opaque-origin `allow-scripts` iframe with network access denied. The key stays
-in host memory. The host permits only the exact built App script hash; normal
-Sangam keeps its existing CSP. No model response or domain operation is simulated.
+### Host and sandbox notes
 
-The App's shared revision comparison bundles the Markdown syntax grammar.
-The main Sangam application retains its full language support. HTTP verification
-checks that the self-contained HTML stays below six million bytes, including its
-PDF parser and comparison renderer. This is a local bundle check, not a limit
-guaranteed by every MCP host.
-
-Press Ctrl+C in the demo terminal to stop and remove the disposable workspace
-and key. Verification artifacts remain under `artifacts/verify-sangam/`.
+The local host uses the official TypeScript MCP client and `AppBridge`, inherits
+Sangam's saved appearance preferences, and pushes color and font tokens to the
+App over standard MCP host context. App HTML is loaded via `resources/read` and
+runs inside an opaque-origin `allow-scripts` iframe with network access denied
+and no browser storage access. The bearer key stays in host memory, and the host
+allows only the exact built App script hash while normal Sangam keeps its own
+CSP. The self-contained App bundles the Markdown comparison grammar and PDF.js
+(local verification checks that the HTML bundle stays under 6 MB; main Sangam
+keeps full language support). App search calls a typed bridge action directly
+and requires no model turn. External hosts can supply the same standard theme
+and style fields.
 
 ## Connect another MCP client
 
-Set `SANGAM_MCP_ENABLED=true` on an existing instance. Connect to `/mcp` or `/mcp/` with
-the same bearer key used for REST. Set `SANGAM_MCP_ALLOWED_HOSTS` for a public
-request hostname and port. This creates no tunnel; remote clients cannot reach
-your machine's localhost automatically. Even single-user mode requires a key.
+Set `SANGAM_MCP_ENABLED=true` and connect to `/mcp` or `/mcp/` with a Sangam
+bearer token. Set `SANGAM_MCP_ALLOWED_HOSTS` when exposing a non-loopback
+hostname and port (Sangam does not create a tunnel). Even `single_user` mode
+requires an explicit bearer token for MCP.
 
-The model tools are `search`, `execute`, and `present`. The typed interaction
-tool `mcp_app` has App-only visibility. Hosts must honor visibility metadata;
-it never substitutes for authorization. Every operation checks current grants.
+### Code Mode tools and catalog
 
-The catalog contains `documents.search`, `documents.read`, `documents.history`,
-`documents.diff`, `documents.create`, `documents.update`, `proposals.list`, `proposals.get`,
-`proposals.create`, `proposals.apply`, `proposals.dismiss`,
-`executions.get`, `pdf.status`, `pdf.pages.read`, `pdf.search`,
-`pdf.annotations.list`, `pdf.annotations.create`, `skills.list`, `skills.get`,
-`skills.read`, `assistant.submit/get/wait/cancel`, and `conversations.read`.
-Discovery returns schemas,
-retry rules, and `next_offset` for further catalog pages. Calls use keyword
-arguments. For example:
+Call `search` to page through catalog operation schemas and retry rules
+(`next_offset` paginates catalog results). Document search also supports
+`offset`. Call `execute` with a caller-retained
+`execution_key` and Python code using keyword arguments; the final expression is
+returned under `output`.
+
+Available catalog functions:
+
+- **Documents:** `documents.search`, `documents.read`, `documents.history`,
+  `documents.diff`, `documents.create`, `documents.update`
+- **Proposals:** `proposals.list`, `proposals.get`, `proposals.create`,
+  `proposals.apply`, `proposals.dismiss`
+- **PDF research:** `pdf.status`, `pdf.pages.read`, `pdf.search`,
+  `pdf.annotations.list`, `pdf.annotations.create`
+- **Centralized skills:** `skills.list`, `skills.get`, `skills.read`
+- **Assistant and conversations:** `assistant.submit`, `assistant.get`,
+  `assistant.wait`, `assistant.cancel`, `conversations.read`
+- **Recovery:** `executions.get`
+
+Example search and update calls:
 
 ```python
 hits = await documents_search(query="walkthrough", limit=10)
@@ -130,82 +145,72 @@ await documents_update(
 )
 ```
 
-Each execute requires a caller-retained `execution_key`. Its final expression
-appears under the small `output` field. Search supports `offset` pagination;
-read results include the revision and a `next_offset` for bounded passages.
+Key document-operation behaviors:
 
-`documents_read(document_id="...", revision_id="...")` reads an exact text
-revision. Its `revision_id` identifies the returned content. Its
-`current_revision_id` and `title` describe current document metadata. Read current
-content again before preparing an update; historical text is not a current read.
-Markdown and HTML return source text under the existing read grant.
+- `documents_read(document_id="...", revision_id="...")` returns bounded text
+  passages with `next_offset`, `revision_id` for the returned text, and current
+  metadata (`current_revision_id`, `title`). Always re-read current content
+  before preparing an update. Markdown and HTML return source text under normal
+  `read` grants.
+- `documents_history(document_id="...", limit=10, cursor="...")` returns
+  metadata-only revision pages (`next_cursor`).
+- `documents_diff(document_id="...", from_revision_id="...", to_revision_id="...")`
+  returns bounded unified diff text (`next_offset` counts characters) plus full
+  addition and deletion counts.
+- `present(document_id="first-id", additional_document_ids=["second-id"])` opens
+  permitted Markdown or PDF documents in the App; `present(layout_id="...")`
+  restores a saved layout. For the legacy `document_id` and `workspace_id`
+  pair, both IDs must refer to the same document. Layout and checkpoint IDs are explicit references,
+  never credentials.
 
-`documents_history(document_id="...", limit=10, cursor="...")` returns revision
-metadata without document bodies. Follow `next_cursor`. Use exact revision IDs
-with `documents_diff(document_id="...", from_revision_id="...", to_revision_id="...")`.
-The diff returns bounded unified text and `next_offset`, with additions/deletions
-for the full comparison. Text offsets count characters. PDF research operations
-remain the way to inspect PDF content and annotations.
+## PDF research in MCP
 
-`present(document_id="first-id", additional_document_ids=["second-id"])`
-opens a set of permitted Markdown or PDF documents. `present(layout_id="layout-id")`
-restores the saved open-document list and active tab. A legacy
-`document_id`/`workspace_id` pair must refer to the same document. Layout and
-document checkpoint IDs are explicit references, not credentials.
-
-PDF operations return bounded page passages, search hits, or annotations. For example:
+PDF operations return bounded page text, search hits, and annotations:
 
 ```python
 page = await pdf_pages_read(document_id="pdf-id", page_number=2)
 page["text"]
 ```
 
-Extraction can still be pending. The response identifies the document resource
-and tells the assistant to check `pdf.status` again. Execute also retains a
-`pending_jobs` field when a program observes pending extraction, even if its
-final expression discards that status. This does not schedule another model turn.
+If text extraction is pending, the response includes the document resource and
+directs the client to check `pdf.status` again, and `execute` retains a `pending_jobs` entry even if the
+program discards that status (without triggering an extra model turn).
 
-The App loads authorized PDF bytes in chunks of at most 64,000 bytes, bound to
-the opened revision. PDF.js and its parsing code are bundled into the App and
-run in the iframe without network access or a separate worker permission.
-Rendering caps canvas size and text-layer items. If rendering fails, the App
-offers extracted page text. Loading a large PDF can still use substantial host
-memory; the existing 100 MB source limit applies.
-Short host frames scroll the App controls while the PDF keeps its own reading
-area. This prevents the header and toolbar from consuming the entire reader.
+In the App, authorized PDF bytes load in revision-bound chunks of at most 64,000
+bytes and render locally with bundled PDF.js without network access or worker
+permissions (canvas size and text-layer items are capped, with extracted text
+fallback on render failure). Large PDFs can use substantial host memory.
+`SANGAM_MAX_PDF_BYTES` still applies and defaults to 100 MB. Short host
+frames scroll App controls independently so the PDF keeps its reading area.
 
-Page notes and text highlights require the existing update permission. Read
-access alone permits viewing and location checkpoints. Annotation retries retain
-the exact operation key and request. Migration `041` records the annotation ID
-with the canonical write transaction, so execution recovery can identify a note
-that committed before a program failed. Document resources include annotation
-changes, so current views refresh notes added through the normal API or UI.
+Creating page notes or highlights requires `update` permission; `read` access
+permits viewing and view-location checkpoints. Retry an annotation with the
+same operation key and arguments. The annotation ID commits with the write so
+a receipt can recover it if execution fails after commit. Document resource
+invalidation refreshes notes added via REST or the main UI.
 
 ## Centralized skills
 
-The catalog also provides `skills.list`, `skills.get`, and `skills.read` through
-the existing execute tool. These discover explicitly registered documents under
-the connection's current read grants, including guidance registered by another
-actor. Internal chat keeps its existing personal/project catalog rules.
-Unregistered Markdown documents do not become skills merely because they can be read.
-
-The demo registers **Walkthrough review skill**. Discover its manifest with:
+Code Mode exposes `skills.list`, `skills.get`, and `skills.read` for explicitly
+registered skill documents readable by the current bearer token (including
+skills registered by other actors; internal chat keeps its own personal and
+project catalog rules). Ordinary readable Markdown files are never treated as
+skills unless registered.
 
 ```python
 catalog = await skills_list(query="walkthrough")
 catalog["items"]
 ```
 
-Each entry includes its stable document identity under `_meta.sangam.skill_id`,
-origin, snapshot URI, original frontmatter, and complete file sizes and SHA-256
-digests. `skills_get(skill_id="document-id")` exports the latest available
-snapshot. `skills_read(uri="skill-file-uri", offset=0, length=1000)` reads a
-bounded passage and returns `next_offset`. Text offsets count characters;
-binary offsets count bytes and binary chunks use base64.
+Each entry provides `_meta.sangam.skill_id`, origin, snapshot URI, frontmatter,
+file sizes, and SHA-256 digests. `skills_get(skill_id="...")` returns the latest
+snapshot, and `skills_read(uri="...", offset=0, length=1000)` reads bounded
+chunks (character offsets for text, byte offsets with base64 output for binary).
 
-Use the existing skill registration UI or `POST /api/v1/chat/skills` with a
-document ID. The registered document becomes `SKILL.md`. Explicit supporting
-documents map to package-relative paths in its frontmatter:
+Register a document via **Settings -> AI & models -> Chat skills** or
+`POST /api/v1/chat/skills`. The registered document becomes `SKILL.md`, and
+supporting canonical text or PDF documents map to package-relative paths in YAML
+frontmatter:
 
 ```yaml
 ---
@@ -219,36 +224,33 @@ sangam:
 Read `references/checklist.md` before preparing the review.
 ```
 
-Mappings support canonical text documents and immutable PDFs. Relative Markdown
-links must have mappings. Paths cannot traverse directories, collide, or replace
-`SKILL.md`. External links remain references. Exporting never runs scripts.
-The initial bounds are 32 files including `SKILL.md`, the configured document
-byte limit per file, and 16 MiB per bundle. Oversized files fail explicitly.
-Catalog pages also respect the configured MCP result limit.
+Skill bundle rules:
 
-Native clients can use the `io.modelcontextprotocol/skills` extension on protocol
-`2026-07-28`: `skills/list`, `skills/get`, and exact file bytes through
-`resources/read`. The pinned SDK's extension interface supplies this adapter.
-Directory reads are not advertised. Native and Code Mode reads use the same
-snapshots; the host decides verification, approval, and activation.
-
-Migration `042` stores manifests and revision references, not editable copies.
-One transaction binds all source revisions. A change to a supporting document
-also creates a new snapshot. Superseded manifests expire after seven days by
-default, using `mcp_result_retention_days`; reads do not extend retention.
-Current snapshots remain available while registered and readable. Expired or
-missing sources require rediscovery. Every read checks all source grants, and
-execution recovery rechecks the same dependencies. Unavailable helpers produce
-bounded diagnostics rather than a partial usable manifest. The service-owned
-`sangam` skill provides MCP operating guidance separately from user registrations.
-The logical `sangam://skill/{skill_id}` resource supports current-state reads and
-the existing authorized URI invalidation stream.
+- Relative Markdown links must have mappings; path traversal, collisions, and
+  replacing `SKILL.md` are rejected. External links stay references, and export
+  never executes scripts.
+- Bundles allow up to 32 files (including `SKILL.md`), `SANGAM_MAX_DOCUMENT_BYTES`
+  per file, and 16 MiB total. Oversized files fail explicitly. Catalog pages
+  also respect `SANGAM_MCP_MAX_RESULT_BYTES`.
+- Native clients can use the `io.modelcontextprotocol/skills` extension on
+  protocol `2026-07-28` (`skills/list`, `skills/get`, and `resources/read`;
+  directory reads are not advertised).
+- Snapshots bind all source revisions atomically. Editing a supporting document
+  produces a new snapshot. Superseded snapshots expire after
+  `SANGAM_MCP_RESULT_RETENTION_DAYS` (default 7 days; reads do not extend TTL).
+  Current snapshots remain available while registered and readable. Rediscover
+  the skill if a snapshot expired or a source disappeared. Every read and
+  recovery rechecks all source grants. Unavailable supporting files produce
+  bounded diagnostics instead of a partial export.
+- The logical `sangam://skill/{skill_id}` resource supports current-state reads
+  and subscription invalidation. The built-in `sangam` skill remains separate
+  from user-registered skills.
 
 ## Document creation
 
-`documents.create` calls the same `WorkspaceAccessService.create_document` as
-REST and chat. It creates Markdown with `title`, `content`, optional `path`, and
-a stable `operation_key`. Existing create grants govern the destination.
+`documents.create` calls `WorkspaceAccessService.create_document` to create
+Markdown with `title`, `content`, optional `path`, and a stable `operation_key`
+under existing `create` grants:
 
 ```python
 created = await documents_create(
@@ -260,26 +262,24 @@ created = await documents_create(
 created
 ```
 
-The result separates `created_revision_id`, the original creation commit, from
-`current_revision_id`, which can change later. Repeating the original key and
-arguments returns the same document. Changed arguments conflict. An interrupted
-execute retains canonical creation evidence in its receipt. A create-only key
-can receive its creation reference without gaining read or update authority.
+The response distinguishes `created_revision_id` from `current_revision_id`.
+Repeating the same key and arguments returns the original document; changing
+arguments conflicts. A create-only token receives its creation reference without
+gaining read or update access. An interrupted execution retains committed
+creation evidence in its receipt.
 
-The App uses a typed `document_create` action over the same operation. A lost
-response retains the original fields and key for **Retry creation**. If creation
-succeeds but opening fails, **Open document** retries navigation rather than
-creation. The form starts from an existing workspace. Code Mode can create the
-first document and then present it. Form text stays local until Create; a forced
-reload can lose an unsent form.
+In the App, **New document** calls the same operation via `document_create`.
+Uncertain responses retain the form fields and key for **Retry creation**, and
+if creation succeeded but opening failed, **Open document** retries navigation
+only. The form opens from an existing workspace. To create the first document,
+use Code Mode and then `present` it. Unsent form text is local until submitted
+and can be lost on forced reload.
 
 ## Sangam assistant requests
 
-Use `assistant.submit` inside Code Mode when the user explicitly wants Sangam's
-configured assistant to do work. The connection needs the existing global
-`inference` grant and current document grants. Inference and the selected model
-must be enabled in Sangam. The default demo key does not include inference;
-`just mcp-demo 8873 true` enables that grant for the disposable walkthrough.
+Use `assistant.submit` inside Code Mode when the user asks Sangam's configured
+assistant to act. The connection needs the global `inference` grant plus current
+document grants, and inference and the chosen model must be enabled in Sangam.
 
 ```python
 request = await assistant_submit(
@@ -291,129 +291,96 @@ request = await assistant_submit(
 request
 ```
 
-The server records the exact request identity before inference. The request uses
-the normal ChatKit processing path, chat admission limits, tool permissions, and
-internal review behavior. MCP adds no approval policy. The default wait returns
-immediately; a requested wait is at most two seconds. Accepted work continues
-when the execute call finishes or its caller disconnects. Python state stays fresh.
+Request contract:
 
-Retain `request_key` and `conversation_id`. Inspect a request with
-`assistant_get(request_key="...")`, or wait briefly with
-`assistant_wait(request_key="...", wait_seconds=2)`. These return bounded answer
-passages with `next_offset`, a run reference, proposal/effect references, and a
-checkable `sangam://assistant/{request_key}` resource. Resource subscriptions use
-the same authorized invalidation path as documents. A program that discards a
-running request's result still returns its reference under `pending_jobs`.
-Completed document effects include the revision ID from their canonical result.
-
-`completed` means the assistant turn finished. Confirm saved revision/effect
-evidence before claiming a requested change was applied. `needs_review` means a
-proposal or effect remains unresolved. Failed, cancelled, and interrupted jobs
-report their own outcome. A successful status lookup does not mean the job succeeded.
-The external host controls whether to schedule another turn.
-
-Reusing the original request key with the same message and context retrieves
-that request. Changed arguments conflict. A lost response never justifies a new
-inference request. `assistant_cancel(request_key="...")` cooperatively cancels
-work and waits for cancellation to settle. It does not undo committed changes.
-Restart marks unfinished requests interrupted and does not replay them.
-
-To continue a known owned conversation, pass its `conversation_id` and a new
-request key to `assistant_submit`. Explicit document context applies to that
-turn. Omitting it selects workspace context while preserving known conversation
-history. `conversations_read(conversation_id="...", cursor="...", limit=5)`
-returns bounded user and assistant messages. Follow `next_cursor`, including
-pages that contain only hidden internal items. For a long message, use its
-`item_id` and `offset` to retrieve the next 1,200 characters. Internal tool and
-profile records are not returned as messages. There is no broad history search.
-
-Starting a model turn requires current inference authority. Reading an owned
-result or conversation and cancelling owned work uses the existing ownership
-and source-access checks. These reads do not require an inference grant.
-Current document/project access includes sources retrieved in
-prior turns, skill catalog descriptions, and activated skill supporting files.
-Cached execute results recheck these references too. An incomplete source
-inventory requires a global read grant. Migration `043` marks older turns
-incomplete because they did not record skill catalog sources. One request can run in a given
-conversation at a time. New requests use existing chat admission and timeout
-limits; retained request identities use the existing MCP receipt quota. Answers
-expire after the existing seven-day result-retention window. Identities and
-canonical conversation/artifact references remain for recovery.
+- **Shared runtime:** Runs through the normal ChatKit pipeline, admission
+  limits, tool permissions, and review policy. YOLO can apply a chat proposal
+  from an assistant request. Direct `proposals.create` calls create pending
+  proposals for explicit review in either mode.
+- **Bounded waiting:** Default wait returns immediately; maximum wait is 2
+  seconds. Accepted work continues after `execute` finishes or disconnects.
+- **Polling and resources:** Retain `request_key` and `conversation_id`. Inspect
+  progress with `assistant_get`, wait briefly with `assistant_wait`, or watch
+  `sangam://assistant/{request_key}`. Lookups return bounded answer passages
+  with `next_offset`, the run reference, and any proposal and effect references.
+  Discarded running request results still appear in
+  `pending_jobs`. Completed document effects include their committed revision
+  ID.
+- **Outcomes:** `completed` means the turn finished (verify revision or effect
+  evidence before claiming a change was saved). `needs_review` means a proposal
+  or durable effect is waiting. Failed, cancelled, and interrupted states report
+  their own status.
+- **Idempotency and cancellation:** Reusing `request_key` with identical
+  arguments retrieves the existing request; changed arguments conflict. Never
+  mint a new key after a lost response. `assistant_cancel` cooperatively stops
+  work without undoing committed writes. Server restarts mark unfinished
+  requests interrupted without replaying them.
+- **Conversations:** Pass `conversation_id` and a fresh `request_key` to
+  continue an owned conversation (omitting `document_id` switches to workspace
+  context). `conversations_read(conversation_id="...", cursor="...", limit=5)`
+  paginates user and assistant messages (use `item_id` and `offset` for 1,200
+  character chunks of long messages). Follow `next_cursor` even when a page
+  contains only hidden internal records. Clients must know a conversation ID.
+- **Access and retention:** Starting a turn requires `inference`; reading or
+  cancelling owned requests checks ownership and current source grants (including
+  prior-turn sources, skill catalog descriptions, and activated skill files)
+  without needing `inference`. Cached execution results recheck these grants.
+  Incomplete source inventories require a global `read` grant. Only one request
+  can run per conversation at a time. Chat admission and timeout limits apply.
+  Request identities count toward the MCP receipt quota. Answers expire after
+  `SANGAM_MCP_RESULT_RETENTION_DAYS`. Compact identities and references to
+  conversations and committed artifacts remain available for recovery.
 
 ### Assistant interaction inside the App
 
-**Ask Sangam** uses typed `assistant_submit`, `assistant_get`, `assistant_cancel`,
-and `assistant_messages` bridge actions over this same service. No additional
-model tool or authorization mode is introduced. New messages need inference;
-reading and cancelling existing owned requests use current source permissions.
+**Ask Sangam** uses typed `assistant_submit`, `assistant_get`,
+`assistant_cancel`, and `assistant_messages` bridge actions over the same
+service. Context is explicit: the active document and any `context_documents`
+from readable open tabs carry exact saved revision IDs (and `selection_text` /
+`pdf_page_number` when a saved passage is selected; Markdown selection mode
+requires a clean document). Every included document is recorded as an access
+dependency before inference. A Markdown selection must occur in the supplied
+revision. Saved-revision modes preserve unsaved edits.
 
-Context is explicit. The active document and optional `context_documents` carry
-exact saved revision IDs. A selected passage also carries `selection_text` and,
-for PDFs, `pdf_page_number`. The server records every included document as an
-access dependency before inference, even if the model never reads it. A narrowed
-key cannot retrieve an answer or conversation that includes an unreadable source.
-The App only accepts additional sources from its readable open tabs. Selected
-Markdown must occur in the supplied revision, and selection mode requires a clean
-document. Other modes use saved revisions while preserving unsaved edits.
-
-The composer shows included references before Send. It retains the original
-message and context while acceptance is uncertain. **Retry submission** first
-looks up that owned request and only resubmits the same key and arguments if it
-does not exist. Reopening the same document workspace restores the last accepted
-request and conversation. Unsent messages remain local and can be lost on forced
-reload. Ordinary navigation blocks until the message is sent or discarded.
-
-Messages are bounded and paginated, with explicit controls for older messages
-and long passages. The App reads the newest page first, using
-`conversations.read(order="desc")`; the existing default remains `asc`.
-Running work refreshes without another model response. A proposal reference
-opens the shared revision review view. Other effect references show their current
-status; effect approval remains in Sangam's existing chat workflow.
+The composer displays included references before sending, retains input for
+**Retry submission** (which looks up the owned key before resubmitting), and
+restores the last accepted request and conversation on reopen. Send or discard
+unsent messages before navigating. A forced reload can lose unsent text.
+Messages paginate
+newest-first via `conversations.read(order="desc")` (Code Mode default remains
+`asc`). Proposal links open the shared review view; other durable effects show
+status and continue to be approved in main Sangam chat.
 
 ## Proposals and review
 
-`proposals_list(document_id="...", limit=10, offset=0)` returns owned proposal
-metadata. A known `conversation_id` is another optional filter. Follow
-`next_offset`. Ownership and literal read-prefix filters run before SQL pagination;
-the metadata query does not load proposal bodies or evidence.
+Code Mode provides full owned-proposal workflows under existing read and update
+grants (without requiring `inference`):
 
-```python
-proposal = await proposals_get(proposal_id="...", length=1000)
-{
-    "wording": proposal["content"],
-    "kind": proposal["content_kind"],
-    "base_revision": proposal["expected_revision_id"],
-    "status": proposal["status"],
-}
-```
-
-The default `content_kind="proposed"` reads the original suggested wording.
-`content_kind="applied"` reads the exact reviewed wording stored by the normal
-apply service. It is available only after apply and names `applied_revision_id`.
-The response also names the current document head and whether the target is in
-Trash. A suggestion is not a saved revision.
-
-Use `offset` and `length` for content passages. Set `include_evidence=True` to
-retrieve authorized context, citations, and retrieved-source references.
-`evidence_included` distinguishes omitted evidence from an empty set. Existing
-source checks redact inaccessible quotations and mark them unavailable. A cached
-execute result that contained private evidence rechecks those source grants.
-For large evidence sets, let the Code Mode program select the required fields
-and citations within its normal output budget.
-
-`sangam://proposal/{proposal_id}` provides the same default bounded read through
-native resources and the existing invalidation observer. Normal Sangam or REST
-apply/dismiss actions update this resource. A read-only key can inspect its own
-permitted proposals without an inference grant. Document access alone does not
-grant access to another actor's proposal. REST proposal listing uses the same
-target-document read filter.
-
-`proposals_create` prepares an owned change against an exact revision without
-changing the document or starting a conversation. It requires existing read and
-update permissions, a summary, the full proposed content, and an `operation_key`.
-Optional rationale and pinned citations use the same validation as chat proposals.
-Creation never applies automatically, including when internal chat autonomy is
-enabled. No inference grant or separate MCP approval grant is needed.
+- `proposals_list(document_id="...", limit=10, offset=0)`: Metadata-only pages
+  filtered by ownership, optional `conversation_id`, and literal read prefixes
+  before SQL pagination. Follow `next_offset` for more results.
+- `proposals_get(proposal_id="...", length=1000)`: Bounded content reads
+  (`content_kind="proposed"` for model wording, `content_kind="applied"` after
+  apply with `applied_revision_id`), target head revision, and Trash status.
+  Pass `include_evidence=True` to load authorized context, citations, and
+  retrieved sources (inaccessible sources are redacted; cached outputs recheck
+  grants). `evidence_included` tells clients whether evidence was requested.
+  Use `offset` and `length` for content passages. For large evidence sets,
+  select the needed fields in Code Mode before returning them.
+  Also exposed at `sangam://proposal/{proposal_id}`.
+- `proposals_create(...)`: Creates an owned suggestion against an exact
+  `expected_revision_id` with `summary`, full `content`, `operation_key`, and
+  optional rationale/citations. Never auto-applies, even in YOLO mode.
+- `proposals_apply(...)`: Commits exact reviewed `content` against
+  `expected_revision_id` using `operation_key`, honoring Sangam's apply
+  reservation and returning `applied_revision_id`. Stale bases conflict instead
+  of rebasing. Recovery keeps the reservation's original key. Retry with that
+  key and the exact reviewed content.
+- `proposals_dismiss(...)`: Dismisses an owned pending or stale proposal under
+  `read` access without creating a revision. Dismissal takes `reason` and
+  `operation_key`. Creation and dismissal use actor-scoped idempotency.
+  Receipts distinguish proposal record writes from document commits. An
+  interrupted apply can already have a committed revision.
 
 ```python
 proposal = await proposals_create(
@@ -426,150 +393,110 @@ proposal = await proposals_create(
 proposal
 ```
 
-Use `proposals_apply(proposal_id="...", expected_revision_id="...",
-content="exact reviewed wording", operation_key="retained-apply-key")` to commit
-the reviewed content. Ownership and current target read/update permissions apply.
-An older base conflicts instead of rebasing. The result names the committed
-`applied_revision_id`; inspect that reference before reporting a saved change.
-The existing apply reservation binds the wording and applying actor. Recovery
-keeps its original operation key even if a later caller supplies a different key.
-Use the original key and exact content for retries.
+In the App, **Review proposals** loads the full proposal and base revision in
+bounded passages into the shared diff and editable wording view. Apply and
+dismiss call the same canonical service and block apply while the workspace has
+an unsaved document draft. After a lost response, the App checks the original
+key. It keeps the exact arguments when the result is uncertain or committed,
+and allows corrections after confirmed rejection. Concurrent changes preserve
+local review edits until reload or discard. Unsubmitted review edits stay
+local. Finish or discard them before navigating or closing the App. External proposals without a chat thread also appear in
+main Sangam's **Review changes** inbox.
 
-`proposals_dismiss(proposal_id="...", reason="...", operation_key="...")`
-dismisses an owned pending or stale proposal under current read access. It creates
-no document revision. Creation and dismissal use the existing actor-scoped
-idempotency namespace. Changed arguments under an existing key conflict.
-Execution failure evidence distinguishes proposal-record writes from document
-commits. An interrupted apply can report its canonical committed revision before
-proposal completion is recorded.
+## Subscriptions and execution recovery
 
-In the App, **Review proposals** opens the current document's owned proposals.
-**New proposal** stores a suggestion; the saved document stays unchanged. Review
-loads the complete proposal and exact base through bounded passages, then uses
-the shared revision comparison and an editable reviewed-content field. Apply and
-dismiss call the same service as Code Mode and REST. The App checks the original
-key after a lost response. It permits correction only after server-confirmed
-rejection, and retains exact arguments for committed or uncertain outcomes.
-Both the App and server block apply while that workspace has a document draft.
-Save or discard the draft first. A concurrent proposal change leaves local review
-edits intact until the user reloads or discards them.
+### Resource subscriptions
 
-Review edits remain local until Create or Apply. Navigation and App teardown
-require finishing or discarding local review edits. A forced browser reload can
-lose those edits; the canonical proposal remains available. Saved document drafts
-continue to use the existing checkpoint and retention rules.
+On protocol `2026-07-28`, clients can subscribe via `subscriptions/listen` to
+explicit `sangam://` URIs. Each stream checks canonical state once per second
+(picking up REST and UI changes too) and emits only the changed URI. Streams do
+not trigger model turns or guarantee every intermediate event; reconnect by
+subscribing again and re-reading current state. Revocation, expiry, or lost
+access ends the stream when its authorization check detects the change.
+Each stream checks its own authority. Workspace resources show the draft and
+saved revision separately. Document resources return metadata.
 
-Migration `044` adds explicit ownership to the existing proposal table, makes
-conversation provenance optional, and preserves proposal IDs, evidence, and apply
-reservations. Proposal changes participate in workspace invalidation and native
-proposal-resource events. The ordinary Sangam review inbox also accepts external
-proposals without a thread. App clicks retain the connected actor's authority.
+Conservative defaults limit the server to 64 active streams, 25 URIs per stream,
+and 64 buffered notifications per stream. Clean App views refresh automatically
+on updates while preserving drafts and conflict state; hosts without
+subscriptions fall back to bounded polling.
 
-## Recovery and persistence
+### Execution isolation and recovery
 
-### Resource changes
+Every `execute` runs fresh in a separate Monty worker with no cross-call state,
+no filesystem/network/shell callbacks, and a sanitized environment with secrets
+stripped.
 
-The native `2026-07-28` protocol supports `subscriptions/listen` for explicit
-`sangam://workspace/{workspace_id}`, `sangam://document/{document_id}`, and
-`sangam://execution/{execution_key}` references. The same authorized reader
-serves resource reads and observes changes. Workspace reads include the draft
-and saved revision separately. Document resources return metadata.
-
-Each stream checks canonical state once per second, including changes made
-through REST or the normal UI. Notifications contain only a changed URI.
-They do not start model work or guarantee delivery of every intermediate state.
-After reconnecting, subscribe again and fetch current state. Revocation, expiry,
-or loss of access ends the stream. Each stream has an independent authority
-check; another subscriber cannot cause private data to cross connections.
-
-The initial bounds are 64 streams per server, 25 resource references per stream,
-and 64 buffered notifications. These are conservative defaults. There is no
-event replay store or second scheduler. The local host negotiates modern MCP
-and forwards fresh workspace snapshots through the Apps bridge. Clean views
-refresh automatically; drafts and explicit conflict resolution are preserved.
-The App retains bounded polling for hosts without resource notifications.
-
-### Execution recovery
-
-Execution starts fresh in a separate Monty worker. There are no interpreter
-variables across calls, filesystem callbacks, general network callbacks, shell,
-or application objects. The launcher clears inherited environment secrets.
-
-Duplicate delivery cannot start another program. Failure returns original write
-keys and committed, rejected, or uncertain outcomes. Earlier writes remain saved.
-Inspect `await executions_get(execution_key="original-key")` in a fresh execution.
-Never replay the full mutating program or replace a write key after losing a
-response. The authenticated `sangam://execution/{execution_key}` resource also
-provides recovery without admitting new Python work, including at receipt quota.
-The same resource works while execution admission is full.
-
-Python can catch a callback exception and continue. An uncaught exception reports
-the error that actually ended the program. Duplicate delivery of an in-flight
-execution returns `status: "running"`, `output_available: false`, and
-`reason: "in_progress"`. Its write list is a snapshot, not a final outcome.
-Inspect the original key again rather than starting another program. A successful
-MCP status lookup does not mean the original program has finished.
-
-Detailed results expire after seven days by default. Compact identity and write
-references remain. Cached output retains source access dependencies, including
-dependencies inherited from earlier executions. Narrowing grants blocks retrieval.
-Restart marks unfinished executions interrupted and never replays them.
-Expired output has `reason: "result_expired"`. Cancellation retains write
-references, including commits that finish after the client stopped waiting.
-Trashing a source document does not erase permitted recovery evidence. Every
-retrieval still authorizes the source's retained metadata under current grants.
-
-App layouts store open documents and an active document under actor ownership.
-Layout changes use their own optimistic version. Each document has a separate
-checkpoint ID and draft version. Search results and tab metadata include only
-currently readable documents. An unavailable tab's acknowledged draft stays
-stored and becomes accessible again only with the required authority.
-
-App checkpoints use actor ownership, workspace IDs, and optimistic versions.
-They create no document revision. Save commits and clears only its own checkpoint;
-replaying an old Save cannot erase a newer draft. Quota failure preserves the
-last acknowledged copy. Drafts survive App closure and restart until Save or
-Discard. Clean layouts expire after 30 inactive days; polling does not renew them.
-A draft protects its complete layout from cleanup. Closing a clean tab frees
-its checkpoint quota. Navigation checkpoints the outgoing draft and temporarily
-disables editing while the active document changes. An unresolved Save must be
-recovered or explicitly discarded before switching documents.
+- **Duplicate delivery:** Re-sending an in-flight `execution_key` returns
+  `status: "running"`, `output_available: false`, and `reason: "in_progress"`
+  without starting a second worker. Never replay a mutating program or change
+  write keys after a lost response.
+- **Inspecting failures:** Call `executions_get(execution_key="original-key")`
+  or read `sangam://execution/{execution_key}` (which works even at receipt
+  quota or when execution admission is full). Receipts report committed,
+  rejected, and uncertain write outcomes. Earlier committed writes remain
+  saved after a later callback fails. Python can catch callback exceptions.
+  An in-flight receipt is provisional. Check the original key again for the
+  final result.
+- **Retention and revocation:** Detailed outputs expire after
+  `SANGAM_MCP_RESULT_RETENTION_DAYS` (`reason: "result_expired"`), while compact
+  receipts remain. Cached results retain source access dependencies and block
+  retrieval if grants narrow, including dependencies inherited from earlier
+  executions. Cancellation retains write references even if a commit finishes
+  after the caller stops waiting. Server restarts mark running executions
+  interrupted without replaying them. Trashing a source document preserves
+  authorized recovery evidence under current grants.
+- **Workspace drafts:** Layouts and per-document checkpoints use optimistic
+  versions under actor ownership and create no document revisions until saved.
+  Save clears its own checkpoint. Replaying an old Save cannot erase a newer
+  draft. Quota failures preserve the last acknowledged copy. Drafts survive
+  App closure and server restarts. A draft on a tab that loses read access
+  stays stored until access returns. Clean layouts expire after
+  `SANGAM_MCP_WORKSPACE_RETENTION_DAYS` (default 30 days). Polling does not renew
+  retention, and dirty drafts protect their layouts. Closing a clean tab frees
+  its checkpoint quota.
+- **Navigation and view state:** The App checkpoints the outgoing draft and
+  disables editing until the active tab changes. Recover or discard an
+  unresolved Save before switching documents. View locations have their own
+  optimistic version and require current read access. Saving a location
+  changes neither the document revision nor the draft version.
 
 ## Limits and current scope
 
-The pool admits two executions without an unbounded queue. Each call has a
-10-second wall deadline, 1-second interpreter budget, 32 MB allocation budget,
-100-frame recursion limit, and 32 host callbacks. Workers have a 512 MiB Unix
-address-space cap and 30-second CPU backstop and are replaced after each checkout.
-These are conservative slice defaults, not measured production capacity. The
-launcher requires Unix resource limits; other platforms are not verified.
-Host callbacks that finish after cancellation continue to occupy admission
-capacity until they settle.
+The Monty worker pool admits 2 concurrent executions without an unbounded queue.
+Each execution enforces:
 
-See [Configuration](configuration.md#mcp) for source/output limits, quotas, and
-retention settings. Existing document byte limits still govern writes and drafts.
+| Guard | Default limit |
+| --- | --- |
+| Wall-clock deadline | 10 seconds |
+| Interpreter CPU budget | 1 second |
+| Allocation budget | 32 MB |
+| Recursion depth | 100 frames |
+| Host callbacks | 32 calls |
+| Worker process caps | 512 MiB Unix address space, 30 s CPU backstop; worker recycled per checkout |
 
-The App uses tabs with one active Markdown editor or PDF reader and an optional
-read-only comparison pane. Select a Markdown tab to edit its content.
-View locations use their own optimistic version and require current read access.
-Saving a location creates no document revision and does not change the draft version.
-Two simultaneous editors, HTML/PDF source editing, binary upload, OAuth issuance, native Tasks,
-other workspace operations remain outside this implementation. See the
-[broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md).
-Local bridge verification does not establish compatibility with every external host.
+These are conservative initial bounds requiring Unix resource limits (other
+platforms are unverified). Host callbacks finishing after cancellation hold
+admission capacity until they settle. See [Configuration](configuration.md#mcp)
+for configurable byte caps, quotas, and retention periods. Document byte
+limits also govern writes and drafts.
+
+Outside current scope: simultaneous multi-pane editing, HTML/PDF source editing,
+binary uploads, OAuth issuance, native MCP Tasks, and other workspace admin
+operations. See the
+[broader technical design](tasks/mcp-sota/02-tech-design-sangam-mcp.md) and
+[ADR 0005](adr/0005-mcp-workspace-bridge-and-app.md). Local host verification
+does not guarantee compatibility with every third-party MCP host.
+
+## Upgrade compatibility
+
+Migrations preserve existing proposal IDs, review evidence, and apply
+reservations when adding ownership and allowing proposals without a chat
+thread. Older assistant turns without a complete source inventory require
+global `read`. Adding App provenance and declared context dependencies also
+preserves earlier assistant request hashes and execution write evidence.
 
 ## Verification
-
-`just verify-mcp-assistant 8899` exercises real configured inference through the
-official MCP client on an isolated server. It verifies request completion after
-execute ends, exact request replay without duplicate inference, known-conversation
-continuation, current-source denial, and a reviewable proposal with no saved change.
-It requires a configured provider and fails if inference is unavailable.
-The check also creates a document through Code Mode and replays it through the
-App action, submits saved selection and open-tab context, restores the accepted
-request from its workspace, and applies the generated proposal through the
-authorized App action. It checks the exact revision through MCP, REST, SQLite,
-and the native resource.
 
 ```sh
 just test
@@ -577,26 +504,25 @@ just verify-mcp
 just test-e2e 'e2e/mcp-workspace.spec.ts'
 ```
 
-`verify-mcp` starts a real isolated server and uses the official Python client
-over HTTP. It verifies authentication, Monty search, App resources, checkpointing,
-failure after commit, duplicate delivery, conflict preservation, revocation,
-multi-document restoration, PDF page reads, annotation recovery and deduplication,
-unchanged PDF bytes, recovery after trashing a dependency, and SQLite
-integrity. It exercises both endpoint spellings with built frontend assets and
-saves `mcp-slice.json` without credentials. CI runs it
-after building the frontend.
-
-Backend integration tests also cover interpreter exhaustion, nested cached-result
-authority, concurrent duplicates, save replay with newer drafts, and application
-restart. They also cover cancellation during an actual blocked document write,
-layout quotas, and migration of existing drafts. They use real workers and
-services. Browser tests use the real client
-and bridge, check persisted content through REST, and cover desktop/narrow
-Chromium, touch-mobile Chromium, and mobile WebKit. Screenshots and walkthrough
-videos go to Playwright artifact directories rather than product baselines.
-The creation and assistant cases cover lost responses, draft preservation,
-accepted-request restoration, follow-up, proposal apply, exact persisted content,
-minimum-width forms, and touch targets. The browser fixture replaces only the
-model provider; the opt-in assistant check separately crosses the live provider
-boundary. Migration `045` preserves old request hashes and execution write
-evidence while adding App provenance and declared source dependencies.
+- `just verify-mcp`: Starts an isolated server with built frontend assets, drives
+  `/mcp` and `/mcp/` through the official Python MCP client, and verifies auth,
+  Monty search, App resources, checkpointing, failure-after-commit recovery,
+  duplicate delivery, conflicts, revocation, multi-tab restore, PDF reads and
+  annotation recovery, and SQLite integrity. It checks exact PDF bytes and
+  recovery after a dependency is trashed. Writes `mcp-slice.json` under
+  `artifacts/verify-sangam/` without credentials. CI runs this check after the
+  frontend build.
+- `just verify-mcp-assistant 8899`: Opt-in live-provider proof verifying
+  background completion, exact request replay, conversation continuation,
+  source-access denial, Code Mode and App document creation, context binding,
+  and proposal apply across MCP, REST, SQLite, and native resources. It
+  requires a configured provider and fails if inference is unavailable. It
+  also checks that the submitted proposal leaves the document unchanged until
+  apply.
+- `just test-e2e 'e2e/mcp-workspace.spec.ts'`: Exercises the real client and
+  `AppBridge` across desktop/narrow Chromium, touch-mobile Chromium, and mobile
+  WebKit (mocking only the model provider; live inference is proved separately
+  by `verify-mcp-assistant`). Captures go to Playwright artifacts. Backend
+  integration tests also cover interpreter exhaustion, cached output grants,
+  concurrent duplicates, cancellation during a write, draft migration, and
+  save replay with newer drafts.

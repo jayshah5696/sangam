@@ -1,87 +1,51 @@
 # Agent access
 
-## Path scopes and conditional HTTP requests
-
-Path grants are recursive prefixes. `docs`, `docs/*`, and `docs/**` grant the
-same subtree, including deeper descendants. Root aliases are `/`, `*`, `**`,
-`/*`, and `/**`. Empty or absent prefixes also grant the root. Malformed
-prefixes such as `//`, `*/*`, and embedded wildcards are rejected. Stored
-literal wildcard prefixes are not rewritten on upgrade. Administrators must
-review and reissue those grants through token settings or the issuance API.
-
-Scoped organization reads filter before pagination. Ancestors outside the
-grant have structural paths and authorized document counts. Their category
-and tags are empty, their metadata version is zero, and their timestamps are
-empty. Global tag enumeration requires a
-global read grant. Organization reads use the normal activity boundary.
-
-Document JSON responses have a strong `ETag` over all represented fields,
-including tags, trust, extraction status, and materialization state. The raw
-and download validators cover the bytes and media type. These validators are
-different contracts. Use the JSON validator for document mutations. The
-`current_revision_id` body field and `X-Sangam-Revision-ID` GET response header
-identify content revisions, not HTTP representations.
-
-GET, raw, and download support `If-Match` and `If-None-Match`. Update, move,
-materialize, delete, restore, duplicate, metadata, and trust support both
-conditions. `If-Match` compares strong tags. `If-None-Match` compares weakly.
-Lists use OR comparison and may contain commas inside quoted tags. Only the
-unquoted `*` is a wildcard. `"*"` is an ordinary tag. Malformed fields return
-422. Empty tags are valid, but empty fields are rejected. An `If-Match`
-failure takes precedence over an `If-None-Match` match. A matching GET cache
-condition returns an empty 304 response with its validator. False mutation
-conditions return 412 with `precondition_failed`.
-
-HTTP conditions do not replace supplied body revision, metadata, or trust
-version guards. Those independent guards still return 409. A revision body
-guard may be omitted when a revision mutation supplies an HTTP condition.
-Metadata and trust still require their body versions. Restore evaluates the
-retained deleted document. Missing resources retain the normal 404 policy.
-
-Authorization precedes condition parsing and replay. Storage rechecks the
-condition after replay lookup inside the committing transaction while the
-document pipeline is coordinated. Identical successful retries keep the
-same request identity, including wildcard requests. Changed bodies or
-headers with the same key return 409. Replay returns the current result and
-repairs pending text materialization. It does not restore an old snapshot.
-
-Audit redaction covers supported token strings in free text and paths, and
-complete private PEM blocks before diff generation. Edit counts still
-describe the original edit. Document content is preserved. Request headers
-are sanitized for request context, but are not newly persisted in the
-activity ledger. Mutation and audit atomicity already existed before this
-repair.
-
-Run `just verify-security 8893` for isolated live HTTP, token, storage, and
-audit-export proof through the canonical behavior harness.
-
-Agents interact with Sangam through the same API as humans, using scoped bearer tokens instead of shared credentials. Agent edits are attributed, revision-checked, idempotent, and reviewable.
+External AI agents work on Sangam through the same API as the human owner,
+authenticating with scoped bearer tokens instead of shared session credentials.
+The activity ledger attributes agent operations to their actors. Sangam checks
+capability and path grants on each request.
 
 ## Discovery endpoints
 
-Every running Sangam instance exposes public, credential-free discovery resources:
+Every running Sangam instance exposes public, credential-free discovery
+resources:
 
-- `GET /llms.txt` — small index pointing agents to interfaces and contracts.
-- `GET /skills/sangam/SKILL.md` — portable agent skill instructions for safe search, read, create, update, conflict recovery, PDF research, and publishing workflows.
-- `GET /api/v1/openapi.json` — machine-readable OpenAPI 3.1 contract with schemas, bearer security, and error examples.
-- `GET /api/v1/docs` — interactive browser reference for exploring routes.
+- `GET /llms.txt`: Short index pointing agents to available interfaces and
+  contracts.
+- `GET /skills/sangam/SKILL.md`: Portable operating skill covering safe search,
+  read, create, update, conflict recovery, PDF research, and publishing.
+- `GET /api/v1/openapi.json`: Machine-readable OpenAPI 3.1 contract with
+  schemas, bearer security definitions, and error shapes.
+- `GET /api/v1/docs`: Interactive browser API reference.
 
-These public resources explain the interface and safe workflows but grant no access. Scoped bearer tokens remain the only identity and capability boundary.
+Discovery requires no Sangam credentials. An upstream proxy can still require
+authentication before forwarding a request.
 
-## Issuing a token
+## Issue a token
 
-Create tokens in **Settings → Agents & access** (or via `POST /api/v1/agent-tokens`). The access-health summary shows active, expired, and soon-to-expire tokens, recent denied attempts, and the latest agent activity without blocking token management if the summary is unavailable. A token specifies:
+Create tokens in **Settings -> Agents & access** or via
+`POST /api/v1/agent-tokens`. The access-health summary at the top of that panel
+shows active, expired, and soon-to-expire tokens, recent denials, and recent
+agent activity without blocking token management if the summary query fails.
 
-- **Actor ID** — becomes the actor (`agent:<name>`) in the activity ledger
-- **Display name & label** — human-readable description of the agent's role
-- **Capabilities** — `read`, `search`, `create`, `update`, `move`, `tag`, `restore`, `delete`, `publish`, `inference`; grant the minimum required set
-- **Path boundary** — optional prefix restricting mutations (e.g., `research/` or `projects/agent-x/`)
-- **Expiry** — optional absolute deadline after which the token is invalid
+Each token defines:
 
-After issuance:
+- **Actor ID:** Written to the activity ledger as `agent:<name>`.
+- **Display name and label:** Human-readable description of the agent's role.
+- **Capabilities:** Grant only what the agent needs from `read`, `search`,
+  `create`, `update`, `move`, `tag`, `restore`, `delete`, `publish`, and
+  `inference`.
+- **Path boundary:** Optional recursive path prefix restricting access (e.g.,
+  `research/` or `projects/agent-x/`).
+- **Expiry:** Optional timestamp after which the token stops working.
 
-1. **Copy token** — copy the secret bearer token immediately and store it in your external agent's secret store as `SANGAM_TOKEN`. Sangam displays the secret once and never stores it in recoverable plaintext.
-2. **Copy agent setup** — copy separate secret-free setup instructions containing the instance URL and discovery curls:
+After creating a token:
+
+1. **Copy token:** Save the secret bearer token immediately in your agent's
+   secret store as `SANGAM_TOKEN`. Sangam shows the secret once and does not
+   store it in recoverable plaintext.
+2. **Copy agent setup:** Copy the separate, secret-free setup snippet with the
+   instance URL and discovery commands:
 
    ```sh
    export SANGAM_API_URL='https://sangam.example.com'
@@ -89,55 +53,141 @@ After issuance:
    curl --fail "$SANGAM_API_URL/api/v1/openapi.json"
    ```
 
-   Provide these instructions to the agent and inject `SANGAM_TOKEN` via its secret manager. Never paste secret tokens into prompts, repositories, or discovery files.
+Inject `SANGAM_TOKEN` through the agent's secret manager. Never paste bearer
+tokens into prompts, repositories, or discovery files.
 
-## Calling the API
+## Call the API and CLI
 
-The REST API lives under `/api/v1`. The `sangam` CLI wraps it:
+The REST API lives under `/api/v1`, and the `sangam` CLI wraps common workflows:
 
 ```sh
 export SANGAM_API_URL=https://sangam.example.com
-export SANGAM_TOKEN=sgm_agt_...
 
 sangam search "write-ahead logs" --limit 20
-sangam read <document_id>
 sangam create --path research/notes.md --title "Notes" --file notes.md
-sangam update <document_id> --expected-revision <rev_id> --file notes.md --summary "Pass 2"
-sangam history <document_id>
-sangam diff <document_id> --from <rev_1> --to <rev_2>
-sangam restore <document_id> --revision <rev_id>
-sangam publish <document_id> --access-policy unlisted --slug notes
+sangam read "$DOCUMENT_ID" --json
+sangam update "$DOCUMENT_ID" --expected-revision "$CURRENT_REVISION_ID" --file notes.md --summary "Pass 2"
+sangam history "$DOCUMENT_ID"
+sangam diff "$DOCUMENT_ID" --from-revision "$OLDER_REVISION_ID" --to-revision "$CURRENT_REVISION_ID"
+sangam restore "$DOCUMENT_ID" "$OLDER_REVISION_ID" --expected-revision "$CURRENT_REVISION_ID"
+sangam publish "$DOCUMENT_ID" notes --access unlisted
 ```
 
-Every mutating call must carry:
+Set `DOCUMENT_ID` and the revision variables from Sangam's responses. Read the
+latest `current_revision_id` before each revision-guarded CLI command. The CLI
+generates a fresh idempotency key for each invocation. To retry an ambiguous
+write with the same key, use REST and retain the exact request.
 
-- **Expected revision** (`expected_revision_id`) — the server rejects with `409 revision_conflict` if the document was modified since you read it. On conflict: re-read, merge intent onto the new current revision, and retry with a fresh key.
-- **Idempotency key** (`Idempotency-Key` header) — ensures retries after network timeouts never double-apply operations.
+For REST document mutations with a revision guard, send
+`expected_revision_id` or a supported `If-Match` or `If-None-Match` header.
+A stale body revision returns `409 revision_conflict`. A failed HTTP
+precondition returns `412 precondition_failed`. Re-read the current document
+and use a new idempotency key for the revised request.
 
-Path boundaries are enforced per request: an operation outside the token's allowed path prefix returns `403 authorization_denied` even if the capability is granted.
+Send the `Idempotency-Key` header where the route requires it. Reuse the key
+and exact request after a network timeout to avoid applying the write twice.
+The document replay response can reflect a newer current revision.
+
+Path boundaries are checked on every request. An operation outside the token's
+prefix returns HTTP `403 forbidden` even when the capability is
+present.
 
 ## Chat proposals
 
-Agents driving the workspace chat produce **proposals**, not direct writes: a suggested revision pinned to the revision it was generated from. The human reviews the diff in the UI and applies or discards it. Proposals survive restarts and remain recoverable. See [docs/chat-capabilities.md](../chat-capabilities.md) for full capability definitions and durable effect contracts.
+Workspace chat creates revision-pinned **proposals** for edits to existing
+documents. Review mode leaves proposals pending. YOLO mode attempts to apply
+them under the requester's current grants. The owner opens **Review changes**
+to apply, edit, request a revision for, or dismiss pending and stale proposals.
+Proposals survive server restarts.
 
-Open **Review changes** in the workspace to inspect pending or stale proposals.
-When a proposal has recorded turn context, the inbox shows its source document,
-revision, selected passage, PDF page, or annotation. The inbox labels older
-proposals without recorded context and sources that are no longer readable
-separately.
-
-The inbox separates cited supporting passages from retrieved sources and recorded
-turn context. You can edit the wording before applying it. **Prepare revision
-request in chat** fills the source thread's composer with your feedback and the
-exact proposal context. Choose **Send** to deliver it. Preparing feedback leaves
-the original proposal available for review.
+The review inbox displays cited supporting passages, retrieved sources, and
+recorded turn context (source document, revision, selected passage, PDF page, or
+annotation) in separate sections. Older proposals without recorded context and
+sources that are no longer readable are labeled explicitly. Choosing
+**Prepare revision request in chat** fills the source thread's composer with
+your feedback and proposal metadata without sending automatically, leaving the
+original proposal available. See [chat-capabilities.md](../chat-capabilities.md)
+for the full contract.
 
 ## Incident response
 
-If a token is compromised:
+If an agent token is exposed or behaves unexpectedly:
 
-1. **Revoke immediately** in **Settings → Agents & access** (or via `DELETE /api/v1/agent-tokens/<token_id>`). Revocation takes effect instantly.
-2. **Review Activity insights** to find recent access, conflict, publication, and other failures. Acknowledging an item removes it from Needs attention without deleting its immutable activity events. A later matching failure appears again automatically.
-3. **Open the Activity view** with the actor and token filters preserved in the URL. Expand an operation to inspect its immutable events, then follow the document or access-management link.
-4. **Restore damaged files** from revision history using `sangam restore` or the document history inspector.
-5. **Rotate related tokens** if shared secret material was potentially exposed.
+1. **Revoke immediately** in **Settings -> Agents & access** or via
+   `DELETE /api/v1/agent-tokens/{token_id}`. Revocation takes effect on the next
+   request and on the next tool call or effect check in any running chat turn.
+2. **Inspect Activity insights** to review recent denials, conflicts,
+   publication changes, and failures. Acknowledging an item clears it from
+   **Needs attention** without deleting immutable ledger rows; a later matching
+   failure reappears automatically.
+3. **Filter the Activity view** by actor and token ID (filters persist in the
+   URL). Expand an operation to inspect its immutable events and follow links to
+   affected documents.
+4. **Restore affected documents** from immutable revision history with
+   `sangam restore` or the document history inspector.
+5. **Rotate related tokens** if any shared secret material may have been
+   exposed.
+
+## Technical reference
+
+### Path scope rules
+
+Path grants are recursive prefixes:
+
+- `docs`, `docs/*`, and `docs/**` grant the same subtree, including nested
+  descendants.
+- `/`, `*`, `**`, `/*`, `/**`, an empty prefix, or an omitted prefix grant root access.
+- Malformed prefixes such as `//`, `*/*`, and embedded wildcards are rejected.
+- Legacy stored literal wildcard prefixes are not rewritten automatically on
+  upgrade. Review and reissue those grants through Settings or the token API.
+
+Scoped organization reads filter before pagination. Ancestor folders outside a
+token's grant appear only as structural paths with authorized document counts;
+their category, tags, and timestamps stay empty and their metadata version is
+`0`. Listing global tags requires a global `read` grant.
+
+### ETags and conditional HTTP requests
+
+Document JSON responses return a strong `ETag` covering all represented fields,
+including tags, trust level, extraction status, and materialization state. Raw
+and download endpoints compute validators over bytes and media type instead. Use
+the JSON `ETag` for document mutations. The `current_revision_id` field and
+`X-Sangam-Revision-ID` header identify content revisions, not HTTP
+representations.
+
+- Supported routes: `GET`, raw, and download endpoints, plus update, move,
+  materialize, delete, restore, duplicate, metadata, and trust mutations all
+  support `If-Match` and `If-None-Match`.
+- Matching semantics: `If-Match` uses strong comparison; `If-None-Match` uses
+  weak comparison. Comma-separated lists evaluate with OR semantics and may
+  contain commas inside quoted tags. Only unquoted `*` acts as a wildcard; `"*"`
+  is treated as an ordinary tag.
+- Error and status codes: Malformed headers and empty header values return HTTP
+  `422` (empty quoted tags are valid). `If-Match` failure takes precedence over
+  `If-None-Match`. A matching `GET` cache condition returns `304` with its
+  validator. Failed mutation preconditions return `412 precondition_failed`.
+- Interaction with body guards: HTTP preconditions do not replace explicit body
+  revision, metadata, or trust version guards, which still return `409`. A
+  revision mutation may omit `expected_revision_id` when supplying an HTTP
+  precondition; metadata and trust updates still require their body version
+  fields. Restore evaluates against the retained deleted document. Missing
+  resources return `404`.
+- Ordering and replay: Authorization runs before precondition parsing and
+  idempotency replay. Storage rechecks preconditions inside the committing
+  transaction after replay lookup. Identical retries keep the same request
+  identity, including wildcard headers. Reusing an idempotency key with a
+  changed body or precondition header returns `409`. Replay returns the current
+  result and repairs pending text materialization without restoring an old
+  snapshot.
+
+### Audit redaction and verification
+
+Audit redaction scrubs supported token strings in free text and paths, plus
+complete private PEM blocks, before diff generation. Edit counts still reflect
+the original edit, and saved document content is preserved unchanged. Request
+headers are sanitized for request context and are not persisted in the activity
+ledger.
+
+Run `just verify-security 8893` to exercise isolated live HTTP requests, scoped
+tokens, conditional headers, storage integrity, and audit redaction through the
+canonical verification harness.

@@ -11,45 +11,54 @@
 </p>
 <!-- markdownlint-enable MD033 -->
 
-A single-user, self-hosted document workspace where a human and identified AI
-agents work with ordinary files through the same small, revision-aware API.
-Every mutation carries an actor, an expected revision, and an idempotency key,
-so concurrent edits recover cleanly, external actions stay reviewable, and AI
-edits arrive as proposals instead of invisible writes.
+Sangam is a single-user, self-hosted document workspace where a human author and
+identified AI agents work on ordinary files through the same revision-aware API.
+Document edits carry an actor identity, an idempotency key, and a revision
+guard. A stale edit returns a conflict or failed precondition. The activity
+ledger records workspace mutations and agent reads. Chat suggests edits to
+existing documents as proposals. Review mode leaves them pending for review.
+YOLO mode can apply them under the requester's authority.
 
 ![Sangam demo: opening a document, searching the workspace, reviewing agent activity](./docs/assets/demo.gif)
 
 [Watch demo video (MP4)](./docs/assets/demo.mp4)
 
-## Features
+## What Sangam does
 
-- **Document workspace** - Markdown and safe HTML editing, Mermaid preview,
-  FTS5 full-text search, immutable revisions with diff/restore, folders, tags,
-  split editor groups
-- **PDF research** - immutable PDF imports with page-text search, annotations,
-  and page-pinned citation links
-- **Publishing** - private, public, or unlisted pages at stable custom slugs
-- **Scoped agent access** - bearer tokens with capabilities, path boundaries,
-  expiry, rotation, and revocation; every instance exposes `/llms.txt`,
-  `/skills/sangam/SKILL.md`, and OpenAPI 3.1 for secret-free discovery
-- **Workspace-grounded chat** - ChatKit plus OpenAI Agents SDK against
-  OpenRouter or any OpenAI-compatible endpoint, with revision-pinned citations
-  and human-reviewed edit proposals
-- **Karakeep bridge** - selective bookmark import as editable Markdown with
-  provenance preserved
-- **Recovery-aware ops** - generation-consistent paired backups, reconciliation
-  of database against materialized files, separate health/readiness endpoints
+- Document workbench for Markdown and safe HTML with Mermaid preview, SQLite
+  FTS5 search with located passages, immutable revisions with diff and restore,
+  folders, tags, and split editor groups.
+- Projects and persistent reviews to group drafts, sources, saved workbench
+  layouts, collected PDF passages, return briefings, and server-owned review
+  assignments.
+- PDF research with immutable PDF imports, background page-text extraction,
+  annotations, and page-pinned citations.
+- Revision-pinned publishing at stable custom slugs as private, unlisted, or
+  public pages.
+- Scoped agent access with bearer tokens limited by capability, path prefix,
+  and expiry. Every instance exposes `/llms.txt`, `/skills/sangam/SKILL.md`,
+  and OpenAPI 3.1 for credential-free discovery.
+- Workspace-grounded chat using ChatKit and the OpenAI Agents SDK against
+  OpenRouter or any OpenAI-compatible endpoint, with revision-pinned citations,
+  approval for durable effects by default, and optional web research.
+- Experimental MCP workspace exposing restricted Python Code Mode, a
+  self-contained MCP App, centralized skills, and assistant requests.
+- Karakeep bookmark bridge for selective import as editable Markdown with
+  preserved source provenance.
+- Recovery-focused operations with generation-consistent paired backups,
+  database-to-file reconciliation, and separate health and readiness endpoints.
 
 ## Quickstart
 
-Requires Docker. The container includes the browser client, API, migrations,
-background workers, and CLI, and runs as unprivileged `10001:10001`.
+Docker is required. The container bundles the web client, API server, database
+migrations, background workers, and CLI, and runs as unprivileged user
+`10001:10001`.
 
 ```sh
-docker compose up   # from the repo root; binds to 127.0.0.1:8000
+docker compose up   # from the repository root; binds to 127.0.0.1:8000
 ```
 
-Or run the published image directly:
+You can also run the published image directly:
 
 ```sh
 docker run --rm -p 127.0.0.1:8000:8000 \
@@ -59,61 +68,76 @@ docker run --rm -p 127.0.0.1:8000:8000 \
   ghcr.io/jayshah5696/sangam:0.14.2
 ```
 
-Then open <http://127.0.0.1:8000>.
+Open <http://127.0.0.1:8000> once the container starts.
+The mounted directories must be writable by UID and GID `10001` inside the
+container.
 
 ## Production deployment
 
-Pin an immutable image digest, set explicit environment
-(`deploy/compose.prod.yaml` fails closed without it), and put Cloudflare Access
-in front of the origin:
-
-```sh
-cosign verify ghcr.io/jayshah5696/sangam@sha256:5ade41bbd0d04c9058baec65173f046dc3f1b70d7b5c89a63b1a4b47cfd32cc0 \
-  --certificate-identity-regexp '^https://github.com/jayshah5696/sangam/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-Full walkthroughs live in [docs/operations/](docs/operations/deploy.md):
-deployment, auth modes, backups and rollback, agent token management, and
-integrations.
+Use `deploy/compose.prod.yaml` with a signed image pinned by digest and an
+authenticated reverse proxy. See [Deployment](docs/operations/deploy.md) for
+required settings, signature verification, and startup checks.
 
 ## Documentation
 
+Browse the full index in [docs/README.md](docs/README.md), or jump straight to a
+topic below.
+
+### Operate and configure
+
 | Doc | Contents |
 | --- | --- |
-| [docs/architecture.md](docs/architecture.md) | Core concepts, trust model, data flow |
+| [docs/operations/deploy.md](docs/operations/deploy.md) | Local dev, Docker, production Compose, and Cloudflare Access |
+| [docs/configuration.md](docs/configuration.md) | Server settings and defaults |
+| [docs/operations/backups.md](docs/operations/backups.md) | Paired backups, restore drills, upgrades, and rollback |
+| [docs/operations/agent-access.md](docs/operations/agent-access.md) | Scoped tokens, discovery endpoints, CLI usage, and incident response |
+| [docs/operations/integrations.md](docs/operations/integrations.md) | Karakeep bridge, ChatKit domain allowlist, LLM providers, and web research |
+
+### Workflows and architecture
+
+| Doc | Contents |
+| --- | --- |
+| [PRODUCT.md](PRODUCT.md) | Target user, core workflows, principles, and non-goals |
+| [docs/architecture.md](docs/architecture.md) | Core concepts, write path, trust model, and storage |
+| [docs/projects.md](docs/projects.md) | Projects, document roles, saved layouts, and API |
+| [docs/project-assignments.md](docs/project-assignments.md) | Persistent project reviews and return briefings |
+| [docs/chat-capabilities.md](docs/chat-capabilities.md) | Chat capabilities, approvals, memory, and editorial review |
+| [docs/mcp.md](docs/mcp.md) | Experimental MCP Code Mode, MCP App, and centralized skills |
+| [.agents/skills/sangam-agent-guide/SKILL.md](.agents/skills/sangam-agent-guide/SKILL.md) | Portable skill for AI agents operating a deployed Sangam instance |
+
+### Contribute and verify
+
+| Doc | Contents |
+| --- | --- |
+| [docs/contributing.md](docs/contributing.md) | Setup, verification gates, and repository conventions |
 | [docs/adr/README.md](docs/adr/README.md) | Architecture Decision Records for non-obvious invariants |
-| [docs/coding-standards.md](docs/coding-standards.md) | Enforced lint, type, and comment rules |
-| [docs/chat-capabilities.md](docs/chat-capabilities.md) | Chat capability, turn context, effect, and evidence contract |
-| [docs/ui-system.md](docs/ui-system.md) | Visual grammar for UI contributions |
-| [docs/configuration.md](docs/configuration.md) | Every `SANGAM_*` environment variable |
-| [docs/operations/deploy.md](docs/operations/deploy.md) | Dev setup, Docker, production, Cloudflare Access |
-| [docs/operations/backups.md](docs/operations/backups.md) | Backup/verify drills, upgrades, rollback |
-| [docs/operations/agent-access.md](docs/operations/agent-access.md) | Scoped tokens, discovery, incident response |
-| [docs/operations/integrations.md](docs/operations/integrations.md) | Karakeep bridge, ChatKit domain allowlist, chat runtime |
-| [docs/contributing.md](docs/contributing.md) | Development setup, conventions, and test gates |
-| [docs/brand.md](docs/brand.md) | Brand identity, logos, and usage guidelines |
-| [.agents/skills/sangam-agent-guide/SKILL.md](.agents/skills/sangam-agent-guide/SKILL.md) | Skill for AI agents operating a deployed Sangam |
+| [docs/api-contract.md](docs/api-contract.md) | OpenAPI compatibility policy, resource limits, and pagination |
+| [docs/coding-standards.md](docs/coding-standards.md) | Enforced Python, TypeScript, CSS, and comment rules |
+| [DESIGN.md](DESIGN.md) and [docs/ui-system.md](docs/ui-system.md) | Design contract, tokens, layout, and visual verification |
+| [docs/brand.md](docs/brand.md) | Brand identity, logos, and SVG rules |
+| [docs/chat-evals.md](docs/chat-evals.md) | Live chat agent evaluation harness |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Development
 
+Use `just` recipes for local setup, serving, and verification:
+
 ```sh
-uv sync --all-groups
-pnpm --dir frontend install
-just serve        # API on :8000, Vite on :5173
-just check        # lint, format, typecheck
-just test         # pytest + vitest
-just test-e2e     # Playwright suite
+just setup      # install locked Python and frontend dependencies
+just serve      # API on 127.0.0.1:8000, Vite on 127.0.0.1:5173
+just test       # Python lint, format, mypy, OpenAPI, pytest + frontend build, lint, vitest
+just test-docs  # docs links, repo references, Mermaid fences, markdownlint
+just test-e2e   # Playwright browser and accessibility suite
+just check      # full local gate: test, test-docs, compose, distribution, package smoke
 ```
 
-See [docs/contributing.md](docs/contributing.md) for conventions and gates.
+See [docs/contributing.md](docs/contributing.md) for conventions and test gates.
 
 ## Security
 
-Sangam is pre-1.0 self-hosted beta software; report vulnerabilities privately
-via [SECURITY.md](SECURITY.md). Agent access is scoped by design; see
-[docs/architecture.md](docs/architecture.md) for the trust model.
+Sangam is pre-1.0 self-hosted software. Report vulnerabilities privately via
+[SECURITY.md](SECURITY.md). See [docs/architecture.md](docs/architecture.md) for
+the trust model.
 
 ## License
 
