@@ -7,6 +7,18 @@ All notable changes to Sangam are documented in this file. Releases follow
 
 See the generated notes attached to each GitHub Release.
 
+## [0.14.3] - 2026-11-25
+
+### Added
+
+- Settings now separates MCP setup from agent token management. Copy client instructions, check a scoped token, or open MCP activity from the setup panel. The token popup offers separate MCP and REST guides (#596).
+- Filter Activity and exports by MCP to review operations attributed to MCP (#596).
+
+### Changed
+
+- MCP starts by default and still requires a scoped bearer token. To opt out, set `SANGAM_MCP_ENABLED=false` and restart Sangam. For hosted access, add the deployment hostname to `SANGAM_MCP_ALLOWED_HOSTS` (#596). See the [MCP setup guide](docs/mcp.md#connect-another-mcp-client).
+- This release adds no database migrations.
+
 ## [0.14.2] - 2026-11-22
 
 ### Fixed
@@ -666,7 +678,8 @@ See the generated notes attached to each GitHub Release.
   GHCR images, blocking vulnerability scans, SBOM and provenance attestations,
   keyless signing, and GitHub Release assets.
 
-[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.14.2...HEAD
+[Unreleased]: https://github.com/jayshah5696/sangam/compare/v0.14.3...HEAD
+[0.14.3]: https://github.com/jayshah5696/sangam/compare/v0.14.2...v0.14.3
 [0.14.2]: https://github.com/jayshah5696/sangam/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/jayshah5696/sangam/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/jayshah5696/sangam/compare/v0.13.7...v0.14.0

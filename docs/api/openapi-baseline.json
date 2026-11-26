@@ -9296,7 +9296,7 @@
   "info": {
     "description": "Revision-aware document workspace API for humans and scoped agents. Read a document immediately before changing it, send its current revision as expected_revision_id, and give every intended mutation an Idempotency-Key.",
     "title": "Sangam API",
-    "version": "0.14.2"
+    "version": "0.14.3"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -39366,6 +39366,6 @@
   },
   "x-sangam-baseline-review": {
     "date": "2026-11-26",
-    "reason": "Expose MCP status in Settings and support MCP activity filtering."
+    "reason": "Release v0.14.3"
   }
 }
