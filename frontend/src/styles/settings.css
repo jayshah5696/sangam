@@ -253,6 +253,7 @@
 .one-time-token span { display: grid; gap: 2px; }
 .one-time-token small { color: var(--muted); font-size: var(--text-meta); }
 .one-time-token code { overflow-x: auto; padding: 9px; border-radius: var(--radius-control); background: var(--surface); font-size: var(--text-meta); }
+.one-time-secret-setup { display: grid; gap: var(--space-1); padding-block-start: var(--space-2); border-block-start: 1px solid var(--line); }
 .token-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .copy-feedback { align-self: center; }
 .agent-token-list { display: grid; gap: 7px; }
@@ -284,10 +285,10 @@
 .settings-nav-items button { grid-template-columns: 18px minmax(0, 1fr) auto; }
 .settings-attention-badge { min-width: 20px !important; display: inline-flex !important; place-content: center; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--danger); color: var(--danger-text); font-size: var(--text-meta); font-weight: 700; }
 .agent-access-health { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-soft); }
-.mcp-access-settings { display: grid; gap: var(--space-3); min-width: 0; padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); }
-.mcp-access-settings .settings-subtitle, .mcp-access-settings p { margin: 0; }
-.mcp-access-settings .settings-subtitle svg { width: var(--icon-control); height: var(--icon-control); }
-.mcp-access-settings p { color: var(--muted); overflow-wrap: anywhere; }
+.mcp-access-settings { border-block-end: 1px solid var(--line); margin-block-end: var(--space-3); }
+.mcp-access-settings > header > svg { width: var(--icon-section); height: var(--icon-section); }
+.mcp-access-settings .settings-panel-body { display: grid; gap: var(--space-3); min-width: 0; }
+.mcp-access-settings .settings-panel-body p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .mcp-access-settings .secondary-action { text-decoration: none; }
 .mcp-access-settings summary { min-height: var(--control-height); align-content: center; cursor: pointer; }
 .mcp-access-check { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-2); }

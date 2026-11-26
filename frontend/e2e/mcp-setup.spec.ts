@@ -4,6 +4,74 @@ import { z } from 'zod'
 
 import { expect, test } from './fixtures'
 
+test('token settings and MCP setup have separate destinations and copy actions', async ({
+  browserName,
+  context,
+  page,
+}, testInfo) => {
+  await page.goto('/settings?category=agents')
+  const setup = page.getByRole('region', { name: 'MCP setup', exact: true })
+  await expect(setup.getByLabel('MCP server URL')).toBeVisible()
+  if (testInfo.project.name === 'chromium-desktop') {
+    await page.screenshot({ path: testInfo.outputPath('agents-access-settings.png'), scale: 'css' })
+  }
+  const sidebarButton = page.getByRole('button', { name: 'Show settings sidebar' })
+  if (await sidebarButton.isVisible()) await sidebarButton.click()
+  const search = page.getByRole('searchbox', { name: 'Search settings' })
+  await search.fill('Agent tokens')
+  await search.press('Enter')
+  const tokens = page.getByRole('region', { name: 'Agent tokens', exact: true })
+  await expect(tokens).toBeFocused()
+  await expect(tokens.getByRole('heading', { name: 'MCP setup' })).toHaveCount(0)
+  await tokens.getByLabel('Actor ID').fill(`agent:mcp-onboarding-${randomUUID().slice(0, 8)}`)
+  const issue = tokens.getByRole('button', { name: 'Issue token' })
+  await issue.press('Enter')
+
+  const popup = page.getByRole('dialog', { name: 'New agent token secret' })
+  await expect(popup.getByRole('button', { name: 'Copy token' })).toBeVisible()
+  await expect(popup).toContainText('This value will not be shown again')
+  const guides = popup.getByRole('group', { name: 'Client setup' })
+  const mcp = guides.getByRole('button', { name: 'Copy MCP setup', exact: true })
+  const rest = guides.getByRole('button', { name: 'Copy REST setup', exact: true })
+  await expect(mcp).toBeVisible()
+  await expect(rest).toBeVisible()
+  if (testInfo.project.name === 'chromium-desktop') {
+    await page.setViewportSize({ width: 320, height: 568 })
+    expect(await popup.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await page.setViewportSize({ width: 1440, height: 900 })
+  }
+  const secret = popup.locator('code')
+  await popup.screenshot({
+    path: testInfo.outputPath('token-client-setup.png'),
+    scale: 'css',
+    mask: [secret],
+    maskColor: '#444',
+  })
+
+  if (browserName === 'chromium') {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    const token = await secret.innerText()
+    await mcp.click()
+    await expect(guides.getByRole('button', { name: 'MCP setup copied' })).toBeVisible()
+    const mcpInstructions = await page.evaluate(() => navigator.clipboard.readText())
+    expect(mcpInstructions).toContain(new URL('/mcp/', page.url()).href)
+    expect(mcpInstructions).toContain('Authorization: Bearer <token>')
+    expect(mcpInstructions).not.toContain(token)
+    await rest.click()
+    await expect(guides.getByRole('button', { name: 'REST setup copied' })).toBeVisible()
+    const restInstructions = await page.evaluate(() => navigator.clipboard.readText())
+    expect(restInstructions).toContain('/api/v1/openapi.json')
+    expect(restInstructions).not.toContain(token)
+  }
+  if (testInfo.project.use.hasTouch) {
+    const access = await popup.getByRole('button', { name: /REST setup/ }).boundingBox()
+    expect(access?.height).toBeGreaterThanOrEqual(44)
+  }
+  await popup.getByRole('button', { name: 'I saved it' }).click()
+  await expect(popup).toBeHidden()
+  await expect(issue).toBeFocused()
+})
+
 test('MCP setup checks a scoped token and links to filtered activity', async ({
   browserName,
   context,

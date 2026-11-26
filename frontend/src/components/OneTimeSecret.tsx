@@ -6,7 +6,7 @@ export function OneTimeSecret({
   description,
   value,
   copyLabel,
-  secondaryCopy,
+  setupCopies = [],
   compact = false,
   icon,
   dismissLabel,
@@ -16,20 +16,21 @@ export function OneTimeSecret({
   description?: string
   value: string
   copyLabel: string
-  secondaryCopy?: { label: string; value: string }
+  setupCopies?: readonly { label: string; copiedLabel: string; value: string }[]
   compact?: boolean
   icon?: ReactNode
   dismissLabel?: string
   onDismiss?: () => void
 }) {
-  const [copyState, setCopyState] = useState<'idle' | 'secret' | 'secondary' | 'failed'>('idle')
+  const [copyState, setCopyState] = useState<{ label: string; status: 'copied' | 'failed' } | null>(null)
+  const copied = copyState?.status === 'copied' ? copyState.label : null
 
-  const copy = async (copyValue: string, success: 'secret' | 'secondary') => {
+  const copy = async (copyValue: string, label: string) => {
     try {
       await navigator.clipboard.writeText(copyValue)
-      setCopyState(success)
+      setCopyState({ label, status: 'copied' })
     } catch {
-      setCopyState('failed')
+      setCopyState({ label, status: 'failed' })
     }
   }
 
@@ -44,35 +45,41 @@ export function OneTimeSecret({
       </div>
       <code>{value}</code>
       <div className="token-actions">
-        <button className="secondary-action" type="button" onClick={() => void copy(value, 'secret')}>
-          {copyState === 'secret' ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
-          {copyState === 'secret' ? 'Copied' : copyLabel}
+        <button className="secondary-action" type="button" onClick={() => void copy(value, copyLabel)}>
+          {copied === copyLabel ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
+          {copied === copyLabel ? 'Copied' : copyLabel}
         </button>
-        {secondaryCopy && (
-          <button
-            className="secondary-action"
-            type="button"
-            onClick={() => void copy(secondaryCopy.value, 'secondary')}
-          >
-            {copyState === 'secondary' ? (
-              <Check size="var(--icon-inline)" />
-            ) : (
-              <Copy size="var(--icon-inline)" />
-            )}
-            {copyState === 'secondary' ? 'Setup copied' : secondaryCopy.label}
-          </button>
-        )}
         {onDismiss && (
           <button className="secondary-action" type="button" onClick={onDismiss}>
             <Check size="var(--icon-inline)" /> {dismissLabel ?? 'Done'}
           </button>
         )}
-        {copyState === 'failed' && (
-          <small className="copy-feedback error-text" role="alert">
-            Clipboard access failed. Copy the value manually.
-          </small>
-        )}
       </div>
+      {setupCopies.length > 0 && (
+        <div className="one-time-secret-setup" role="group" aria-label="Client setup">
+          <small>Client setup</small>
+          <div className="token-actions">
+            {setupCopies.map(({ label, copiedLabel, value: instructions }) => (
+              <button
+                className="secondary-action"
+                key={label}
+                type="button"
+                onClick={() => void copy(instructions, label)}
+              >
+                {copied === label ? <Check size="var(--icon-inline)" /> : <Copy size="var(--icon-inline)" />}
+                {copied === label ? copiedLabel : label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {copyState?.status === 'failed' && (
+        <small className="copy-feedback error-text" role="alert">
+          {copyState.label === copyLabel
+            ? 'Clipboard access failed. Copy the value manually.'
+            : 'Clipboard access failed. Try copying the setup again.'}
+        </small>
+      )}
     </div>
   )
 }

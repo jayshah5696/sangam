@@ -39,15 +39,21 @@ describe('OneTimeSecret', () => {
         title="Copy this token now"
         value="secret-token"
         copyLabel="Copy token"
-        secondaryCopy={{ label: 'Copy agent setup', value: 'export SANGAM_API_URL=https://example.test' }}
+        setupCopies={[
+          {
+            label: 'Copy REST setup',
+            copiedLabel: 'REST setup copied',
+            value: 'export SANGAM_API_URL=https://example.test',
+          },
+        ]}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy agent setup' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy REST setup' }))
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('export SANGAM_API_URL=https://example.test'))
     expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining('secret-token'))
-    expect(screen.getByRole('button', { name: 'Setup copied' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'REST setup copied' })).not.toBeNull()
   })
 
   it('keeps the value visible and reports clipboard failures', async () => {

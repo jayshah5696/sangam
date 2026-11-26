@@ -104,9 +104,10 @@ and style fields.
 
 1. In **Settings → Agents & access → MCP setup**, copy the server URL or the
    setup instructions. Use Streamable HTTP in your MCP client.
-2. Issue a Sangam agent token in the same Settings panel. Start with scoped
+2. Issue a Sangam agent token under **Agent tokens**. Start with scoped
    `read` and `search`. Add `create` or `update` for writes and `inference`
-   if the client should call Sangam's configured assistant.
+   if the client should call Sangam's configured assistant. The token popup
+   also offers **Copy MCP setup** under **Client setup**.
 3. Store the token in your client's secret store. The client sends it as
    `Authorization: Bearer <token>`. MCP requires it even in `single_user` mode.
 4. Use **Check connection** in Settings to verify the token and discover the
