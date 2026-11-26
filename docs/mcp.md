@@ -1,6 +1,6 @@
 # MCP document workspace
 
-Sangam includes an experimental MCP server (`SANGAM_MCP_ENABLED=true`) that lets
+Sangam includes an experimental MCP server, enabled by default, that lets
 external MCP clients search, read, annotate, propose changes to, and edit
 Markdown and PDF documents through restricted Python (**Code Mode**) and a
 sandboxed **MCP App**. Every operation runs through Sangam's canonical
@@ -102,10 +102,27 @@ and style fields.
 
 ## Connect another MCP client
 
-Set `SANGAM_MCP_ENABLED=true` and connect to `/mcp` or `/mcp/` with a Sangam
-bearer token. Set `SANGAM_MCP_ALLOWED_HOSTS` when exposing a non-loopback
-hostname and port (Sangam does not create a tunnel). Even `single_user` mode
-requires an explicit bearer token for MCP.
+1. In **Settings → Agents & access → MCP setup**, copy the server URL or the
+   setup instructions. Use Streamable HTTP in your MCP client.
+2. Issue a Sangam agent token under **Agent tokens**. Start with scoped
+   `read` and `search`. Add `create` or `update` for writes and `inference`
+   if the client should call Sangam's configured assistant. The token popup
+   also offers **Copy MCP setup** under **Client setup**.
+3. Store the token in your client's secret store. The client sends it as
+   `Authorization: Bearer <token>`. MCP requires it even in `single_user` mode.
+4. Use **Check connection** in Settings to verify the token and discover the
+   tool catalog over MCP. This check uses the browser's current origin and
+   does not exercise document grants, the Monty worker, or an external host.
+
+For a non-loopback deployment, add the hostname and port to
+`SANGAM_MCP_ALLOWED_HOSTS`. The server also accepts `/mcp`. Set
+`SANGAM_MCP_ENABLED=false` and restart Sangam to disable both paths. Settings
+reports the running configuration.
+
+Use **View MCP activity** or **Activity → Filters → Made through → MCP** to
+review audited operations attributed to MCP. The filter works with the existing
+actor, token, outcome, date, and export controls. Older audit events without MCP
+attribution remain visible under **Anywhere**.
 
 ### Code Mode tools and catalog
 

@@ -115,13 +115,13 @@ without `SANGAM_BRAVE_SEARCH_API_KEY` fails startup validation.
 
 ## MCP
 
-MCP is experimental, disabled by default, and requires an explicit bearer token
-even in `single_user` mode. See [mcp.md](mcp.md) for the walkthrough and
-contract.
+MCP is experimental and enabled by default. It requires an explicit bearer
+token even in `single_user` mode. Set `SANGAM_MCP_ENABLED=false` and restart
+Sangam to disable it. See [mcp.md](mcp.md) for setup and the connection check.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SANGAM_MCP_ENABLED` | `false` | Mount `/mcp` and start Monty execution workers. |
+| `SANGAM_MCP_ENABLED` | `true` | Mount `/mcp` and enable the Monty worker pool. |
 | `SANGAM_MCP_ALLOWED_HOSTS` | `["127.0.0.1:*","localhost:*","testserver"]` | JSON list of allowed request hostnames and ports. Compose and `.env.example` omit `testserver`. |
 | `SANGAM_MCP_MAX_SOURCE_BYTES` | `16000` | Maximum Python source size per `execute` call in bytes (1,024 to 100,000). |
 | `SANGAM_MCP_MAX_RESULT_BYTES` | `64000` | Maximum serialized output size per `execute` call in bytes (4,096 to 1,000,000). |

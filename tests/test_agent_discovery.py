@@ -12,6 +12,7 @@ def test_public_agent_discovery_points_to_hosted_skill_and_contract(client: Test
     assert response.headers["content-type"].startswith("text/plain")
     assert response.headers["cache-control"] == "public, max-age=300"
     assert response.text.startswith("# Sangam\n")
+    assert "[MCP endpoint](http://testserver/mcp/)" in response.text
     assert "http://testserver/skills/sangam/SKILL.md" in response.text
     assert "http://testserver/api/v1/openapi.json" in response.text
     assert "http://testserver/api/v1/docs" in response.text

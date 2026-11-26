@@ -852,6 +852,8 @@ class IdentityService:
             identity_kind=row["identity_kind"],
             operation_id=principal.operation_id,
             token_id=principal.token_id,
+            via=principal.via,
+            approved_by=principal.approved_by,
             scopes=tuple(
                 ScopeGrant(Capability(scope["capability"]), scope["path_prefix"] or None)
                 for scope in scopes

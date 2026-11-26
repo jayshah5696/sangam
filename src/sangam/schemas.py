@@ -736,6 +736,10 @@ class UpdateDocumentTrust(MutationRequest):
     trust_level: Literal["untrusted", "trusted_interactive"]
 
 
+class McpSettings(BaseModel):
+    enabled: bool
+
+
 class HtmlJavascriptSettings(BaseModel):
     enabled: bool
     version: int = Field(ge=1)

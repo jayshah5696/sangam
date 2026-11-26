@@ -38,6 +38,7 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('../api', () => ({
   api: {
+    getMcpSettings: vi.fn().mockResolvedValue({ enabled: true }),
     listAgentTokens: vi.fn().mockResolvedValue([]),
     issueAgentToken: vi.fn(),
     updateAgentToken: vi.fn(),

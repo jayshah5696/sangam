@@ -151,10 +151,17 @@ const settingsSearchIndex: Array<{
   {
     id: 'agent-access',
     category: 'agents',
-    label: 'Agent access',
-    description: 'Issue scoped, expiring workspace tokens',
+    label: 'Agent tokens',
+    description: 'Issue, scope, rotate, and revoke workspace tokens',
     keywords:
-      'capability token prefix read write publish revoke revoked expired expiring scope permission denied access health',
+      'agent access capability token prefix read write publish revoke revoked expired expiring scope permission denied access health',
+  },
+  {
+    id: 'mcp-setup',
+    category: 'agents',
+    label: 'MCP setup',
+    description: 'Copy the MCP server URL, check a token, or view MCP activity',
+    keywords: 'mcp model context protocol streamable http connect token tools monitoring',
   },
   {
     id: 'access-health',

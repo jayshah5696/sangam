@@ -23,10 +23,9 @@ authentication before forwarding a request.
 
 ## Issue a token
 
-Create tokens in **Settings -> Agents & access** or via
-`POST /api/v1/agent-tokens`. The access-health summary at the top of that panel
-shows active, expired, and soon-to-expire tokens, recent denials, and recent
-agent activity without blocking token management if the summary query fails.
+Create tokens in **Settings > Agents & access > Agent tokens** or via
+`POST /api/v1/agent-tokens`. **Access health** shows active, expired, and
+soon-to-expire tokens, recent denials, and recent agent activity.
 
 Each token defines:
 
@@ -41,11 +40,12 @@ Each token defines:
 
 After creating a token:
 
-1. **Copy token:** Save the secret bearer token immediately in your agent's
+1. Select **Copy token** and save the secret bearer token in your agent's
    secret store as `SANGAM_TOKEN`. Sangam shows the secret once and does not
    store it in recoverable plaintext.
-2. **Copy agent setup:** Copy the separate, secret-free setup snippet with the
-   instance URL and discovery commands:
+2. Under **Client setup**, select **Copy MCP setup** for an MCP client or
+   **Copy REST setup** for the REST API and CLI. Both guides omit the secret.
+   The REST guide includes the instance URL and these discovery commands.
 
    ```sh
    export SANGAM_API_URL='https://sangam.example.com'
@@ -55,6 +55,10 @@ After creating a token:
 
 Inject `SANGAM_TOKEN` through the agent's secret manager. Never paste bearer
 tokens into prompts, repositories, or discovery files.
+
+**MCP setup** in **Agents & access** also offers the server URL and MCP guide.
+**Check connection** verifies the token and tool catalog. **View MCP activity**
+opens the filtered audit history. See [Connect another MCP client](../mcp.md#connect-another-mcp-client).
 
 ## Call the API and CLI
 

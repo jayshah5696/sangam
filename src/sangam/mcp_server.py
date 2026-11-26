@@ -6,6 +6,7 @@ import json
 import sys
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
@@ -497,7 +498,8 @@ class SangamMcp:
         return value.partition(" ")[2].strip()
 
     def principal(self, token: str) -> Principal:
-        return self.services.identity.authenticate(token, operation_id=f"mcp:{uuid4().hex}")
+        principal = self.services.identity.authenticate(token, operation_id=f"mcp:{uuid4().hex}")
+        return replace(principal, via="mcp")
 
     def _register(self) -> None:
         @self.server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))

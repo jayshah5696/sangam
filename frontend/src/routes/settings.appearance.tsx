@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { api, type Folder, type Tag } from '../api'
 import { AgentAccessSettings } from '../components/AgentAccessSettings'
+import { McpAccessSettings } from '../components/McpAccessSettings'
 import { ChatModelSettings } from '../components/ChatModelSettings'
 import { settingsCategories } from '../components/SettingsSidebar'
 import {
@@ -474,7 +475,12 @@ export function WorkspaceSettings() {
           )}
 
           {activeCategory === 'models' && <ChatModelSettings />}
-          {activeCategory === 'agents' && <AgentAccessSettings />}
+          {activeCategory === 'agents' && (
+            <>
+              <McpAccessSettings />
+              <AgentAccessSettings />
+            </>
+          )}
 
           {activeCategory === 'operations' && (
             <SettingsSection

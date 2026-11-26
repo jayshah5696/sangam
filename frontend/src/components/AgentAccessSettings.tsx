@@ -5,6 +5,7 @@ import { Activity, AlertTriangle, Bot, KeyRound, Pencil, RefreshCw, ShieldOff, X
 import { api, type AgentToken, type IssuedAgentToken, type TokenScope } from '../api'
 import { ModalDialog } from './ui/ModalDialog'
 import { OneTimeSecret } from './OneTimeSecret'
+import { mcpSettingsQuery, mcpSetup } from './McpAccessSettings'
 import { StateMessage } from './ui/StateMessage'
 
 type Capability = TokenScope['capability']
@@ -88,7 +89,7 @@ export const tokenPresets: PresetMap = {
   },
   assistant: {
     label: 'Workspace assistant',
-    description: 'Read, search, and spend inference under /agents/**.',
+    description: 'Read and search under /agents/**. Inference can spend the server’s model budget.',
     capabilities: ['read', 'search', 'inference'],
     prefixes: { read: 'agents', search: 'agents', write: 'agents' },
   },
@@ -193,6 +194,7 @@ function prefixesFromScopes(scopes: TokenScope[]): ScopePrefixes {
 export function AgentAccessSettings() {
   const queryClient = useQueryClient()
   const tokens = useQuery({ queryKey: ['agent-tokens'], queryFn: api.listAgentTokens })
+  const mcp = useQuery(mcpSettingsQuery)
   const health = useQuery({
     queryKey: ['activity-summary', 'access-health'],
     queryFn: () =>
@@ -213,6 +215,7 @@ export function AgentAccessSettings() {
   const [editing, setEditing] = useState<AgentToken | null>(null)
   const [rotating, setRotating] = useState<AgentToken | null>(null)
   const [showRevoked, setShowRevoked] = useState(false)
+  const issueButtonRef = useRef<HTMLButtonElement>(null)
   const writePrefixRef = useRef<HTMLInputElement>(null)
   const sensitiveConfirmationRef = useRef<HTMLInputElement>(null)
 
@@ -225,6 +228,9 @@ export function AgentAccessSettings() {
 
   const closeIssuedSecret = () => {
     setIssued(null)
+    if (issued && !issued.rotated_from_token_id) {
+      window.requestAnimationFrame(() => issueButtonRef.current?.focus())
+    }
   }
 
   const focusFirstIssueError = () => {
@@ -304,12 +310,12 @@ export function AgentAccessSettings() {
   })
 
   return (
-    <section className="settings-panel" id="agent-access" tabIndex={-1}>
+    <section className="settings-panel" id="agent-access" tabIndex={-1} aria-labelledby="agent-tokens-title">
       <header>
         <Bot size="var(--icon-section)" />
         <div>
-          <h2>Access credentials</h2>
-          <p>Issue revocable credentials with explicit permissions and workspace boundaries.</p>
+          <h2 id="agent-tokens-title">Agent tokens</h2>
+          <p>Issue, scope, rotate, and revoke tokens for MCP and the REST API.</p>
         </div>
         <span className="scope-badge workspace">Shared workspace</span>
       </header>
@@ -329,10 +335,22 @@ export function AgentAccessSettings() {
               }
               value={issued.token}
               copyLabel="Copy token"
-              secondaryCopy={{
-                label: 'Copy agent setup',
-                value: agentSetupInstructions(),
-              }}
+              setupCopies={[
+                ...(mcp.data?.enabled
+                  ? [
+                      {
+                        label: 'Copy MCP setup',
+                        copiedLabel: 'MCP setup copied',
+                        value: mcpSetup().instructions,
+                      },
+                    ]
+                  : []),
+                {
+                  label: 'Copy REST setup',
+                  copiedLabel: 'REST setup copied',
+                  value: agentSetupInstructions(),
+                },
+              ]}
               icon={<KeyRound size="var(--icon-section)" />}
               dismissLabel="I saved it"
               onDismiss={closeIssuedSecret}
@@ -598,7 +616,7 @@ export function AgentAccessSettings() {
                 </span>
               </div>
             )}
-          <button className="primary-button" disabled={issue.isPending}>
+          <button ref={issueButtonRef} className="primary-button" disabled={issue.isPending}>
             <KeyRound size="var(--icon-inline)" /> {issue.isPending ? 'Issuing…' : 'Issue token'}
           </button>
         </form>

@@ -184,10 +184,14 @@ export function ActivityFilters({
           <select
             aria-label="Made through"
             value={search.via ?? ''}
-            onChange={(event) => onChange({ via: event.target.value === 'chat' ? 'chat' : undefined })}
+            onChange={(event) => {
+              const via = event.target.value
+              onChange({ via: via === 'chat' || via === 'mcp' ? via : undefined })
+            }}
           >
             <option value="">Anywhere</option>
             <option value="chat">Chat</option>
+            <option value="mcp">MCP</option>
           </select>
         </label>
         {search.range === 'custom' && (

@@ -635,7 +635,7 @@ export type ActivityFilters = {
   path?: string
   errorCode?: string
   operationId?: string
-  via?: 'chat'
+  via?: 'chat' | 'mcp'
   attention?: boolean
   since?: string
   until?: string
@@ -1950,6 +1950,9 @@ export const api = {
   },
   async annotationHistory(annotationId: string): Promise<AnnotationEvent[]> {
     return z.array(annotationEventSchema).parse(await request(`/annotations/${annotationId}/history`))
+  },
+  async getMcpSettings() {
+    return z.object({ enabled: z.boolean() }).parse(await request('/settings/mcp'))
   },
   async getHtmlJavascriptSettings(): Promise<HtmlJavascriptSettings> {
     return htmlJavascriptSettingsSchema.parse(await request('/settings/html-javascript'))

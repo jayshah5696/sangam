@@ -230,8 +230,8 @@ and the [capability lifecycle diagram](assets/chat-capability-lifecycle.html)
 for details, and [operations/integrations.md](operations/integrations.md) for
 provider setup.
 
-Sangam also ships an optional, experimental MCP server (`SANGAM_MCP_ENABLED=true`)
-that exposes restricted Python Code Mode (`search`, `execute`, `present`), a
+Sangam enables its experimental MCP server by default. The server exposes
+restricted Python Code Mode (`search`, `execute`, `present`), a
 sandboxed MCP App, centralized skills, and server-owned assistant requests over
 the same canonical services and bearer token grants. See [mcp.md](mcp.md).
 

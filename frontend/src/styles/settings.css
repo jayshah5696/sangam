@@ -169,7 +169,7 @@
 .agent-access-settings { display: grid; gap: 18px; }
 .agent-token-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-soft); }
 .agent-token-form > label { align-self: start; display: grid; gap: 5px; color: var(--muted); font-size: var(--text-label); }
-.agent-token-form input, .activity-filters input, .activity-filters select { height: var(--control-height); min-height: var(--control-height); padding: 0 9px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--text-control); line-height: var(--leading-ui); }
+.agent-token-form input, .mcp-access-field input, .activity-filters input, .activity-filters select { height: var(--control-height); min-height: var(--control-height); padding: 0 var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--text-control); line-height: var(--leading-ui); }
 .activity-filters input, .activity-filters select { width: 100%; min-width: 0; }
 .agent-token-edit-dialog { width: min(50rem, calc(100vw - var(--space-5) * 2)); max-height: calc(100dvh - var(--space-5) * 2); margin: auto; padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--text); box-shadow: var(--shadow-panel); }
 .agent-token-edit-dialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(2px); }
@@ -253,6 +253,7 @@
 .one-time-token span { display: grid; gap: 2px; }
 .one-time-token small { color: var(--muted); font-size: var(--text-meta); }
 .one-time-token code { overflow-x: auto; padding: 9px; border-radius: var(--radius-control); background: var(--surface); font-size: var(--text-meta); }
+.one-time-secret-setup { display: grid; gap: var(--space-1); padding-block-start: var(--space-2); border-block-start: 1px solid var(--line); }
 .token-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .copy-feedback { align-self: center; }
 .agent-token-list { display: grid; gap: 7px; }
@@ -284,6 +285,17 @@
 .settings-nav-items button { grid-template-columns: 18px minmax(0, 1fr) auto; }
 .settings-attention-badge { min-width: 20px !important; display: inline-flex !important; place-content: center; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--danger); color: var(--danger-text); font-size: var(--text-meta); font-weight: 700; }
 .agent-access-health { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-soft); }
+.mcp-access-settings { border-block-end: 1px solid var(--line); margin-block-end: var(--space-3); }
+.mcp-access-settings > header > svg { width: var(--icon-section); height: var(--icon-section); }
+.mcp-access-settings .settings-panel-body { display: grid; gap: var(--space-3); min-width: 0; }
+.mcp-access-settings .settings-panel-body p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.mcp-access-settings .secondary-action { text-decoration: none; }
+.mcp-access-settings summary { min-height: var(--control-height); align-content: center; cursor: pointer; }
+.mcp-access-check { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-2); }
+.mcp-access-field { flex: 1 1 auto; min-width: 0; }
+.mcp-access-field input { width: 100%; min-width: 0; }
+.mcp-access-field input[readonly], .mcp-setup-instructions { font-family: var(--font-mono); }
+.mcp-setup-instructions { white-space: pre-wrap; }
 .agent-health-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
 .agent-health-metrics span { min-width: 0; display: grid; gap: 2px; color: var(--muted); font-size: var(--text-meta); }
 .agent-health-metrics strong { color: var(--text); font-size: var(--text-title); }
@@ -434,6 +446,7 @@
 }
 
 @media (pointer: coarse) {
+  .mcp-access-settings summary { min-height: var(--control-touch); }
   .activity-page button,
   .activity-page a,
   .agent-access-settings button,
