@@ -5,6 +5,7 @@ import { Activity, AlertTriangle, Bot, KeyRound, Pencil, RefreshCw, ShieldOff, X
 import { api, type AgentToken, type IssuedAgentToken, type TokenScope } from '../api'
 import { ModalDialog } from './ui/ModalDialog'
 import { OneTimeSecret } from './OneTimeSecret'
+import { McpAccessSettings } from './McpAccessSettings'
 import { StateMessage } from './ui/StateMessage'
 
 type Capability = TokenScope['capability']
@@ -88,7 +89,7 @@ export const tokenPresets: PresetMap = {
   },
   assistant: {
     label: 'Workspace assistant',
-    description: 'Read, search, and spend inference under /agents/**.',
+    description: 'Read and search under /agents/**. Inference can spend the server’s model budget.',
     capabilities: ['read', 'search', 'inference'],
     prefixes: { read: 'agents', search: 'agents', write: 'agents' },
   },
@@ -314,6 +315,7 @@ export function AgentAccessSettings() {
         <span className="scope-badge workspace">Shared workspace</span>
       </header>
       <div className="settings-panel-body agent-access-settings">
+        <McpAccessSettings />
         {issued && (
           <ModalDialog
             className="one-time-secret-dialog"

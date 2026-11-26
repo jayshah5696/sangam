@@ -1615,7 +1615,10 @@ class ActivityService:
             conditions.append("e.path LIKE ? ESCAPE '\\'")
             escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             parameters.append(f"%{escaped}%")
-        if via:
+        if via == "mcp":
+            conditions.append("json_extract(e.detail_json, '$.via') = ?")
+            parameters.append(via)
+        elif via:
             conditions.append("json_extract(e.detail_json, '$.via') LIKE ?")
             parameters.append(f"{via}-%")
         if attention:

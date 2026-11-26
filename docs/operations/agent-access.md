@@ -56,6 +56,11 @@ After creating a token:
 Inject `SANGAM_TOKEN` through the agent's secret manager. Never paste bearer
 tokens into prompts, repositories, or discovery files.
 
+For an MCP client, use **MCP setup** in the same Settings panel. Copy the MCP
+URL and setup instructions, then store the same scoped token in the client.
+**Check connection** verifies the token and tool catalog. **View MCP activity**
+opens the filtered audit history. See [Connect another MCP client](../mcp.md#connect-another-mcp-client).
+
 ## Call the API and CLI
 
 The REST API lives under `/api/v1`, and the `sangam` CLI wraps common workflows:

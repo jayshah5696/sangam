@@ -157,6 +157,13 @@ const settingsSearchIndex: Array<{
       'capability token prefix read write publish revoke revoked expired expiring scope permission denied access health',
   },
   {
+    id: 'mcp-setup',
+    category: 'agents',
+    label: 'MCP setup',
+    description: 'Copy the MCP server URL, check a token, or view MCP activity',
+    keywords: 'mcp model context protocol streamable http connect token tools monitoring',
+  },
+  {
     id: 'access-health',
     category: 'agents',
     label: 'Access health',

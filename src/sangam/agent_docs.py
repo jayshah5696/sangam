@@ -5,9 +5,14 @@ from __future__ import annotations
 from textwrap import dedent
 
 
-def llms_txt(base_url: str) -> str:
+def llms_txt(base_url: str, *, mcp_enabled: bool) -> str:
     """Return the small, public index agents use to discover Sangam's interfaces."""
     base = base_url.rstrip("/")
+    mcp_access = (
+        f"- [MCP endpoint]({base}/mcp/): Streamable HTTP with the same scoped bearer token."
+        if mcp_enabled
+        else "- MCP is disabled on this instance."
+    )
     return dedent(
         f"""\
         # Sangam
@@ -18,6 +23,7 @@ def llms_txt(base_url: str) -> str:
 
         ## Agent access
 
+        {mcp_access}
         - [Sangam agent skill]({base}/skills/sangam/SKILL.md): Installable instructions for safe search, read, create, update, conflict recovery, PDF research, and publishing workflows.
         - [OpenAPI 3.1 contract]({base}/api/v1/openapi.json): Machine-readable HTTP operations, schemas, bearer authentication, and errors.
         - [Interactive API reference]({base}/api/v1/docs): Browser-based API documentation.

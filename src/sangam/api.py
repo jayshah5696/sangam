@@ -76,6 +76,7 @@ from sangam.schemas import (
     HtmlJavascriptSettings,
     IssuedAgentToken,
     IssuedPublication,
+    McpSettings,
     MoveFolder,
     OperationEvent,
     OrganizationPlanResult,
@@ -761,7 +762,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/llms.txt", response_class=PlainTextResponse, include_in_schema=False)
     def agent_index(request: Request) -> PlainTextResponse:
         return PlainTextResponse(
-            llms_txt(str(request.base_url)),
+            llms_txt(str(request.base_url), mcp_enabled=mcp_runtime is not None),
             media_type="text/plain; charset=utf-8",
             headers={"Cache-Control": "public, max-age=300"},
         )
@@ -879,7 +880,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: str | None = Query(default=None, max_length=500),
         error_code: str | None = Query(default=None, max_length=120),
         operation_id: str | None = Query(default=None, max_length=160),
-        via: str | None = Query(default=None, pattern="^(chat)$"),
+        via: Literal["chat", "mcp"] | None = None,
         attention: bool = Query(default=False),
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
@@ -925,7 +926,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: str | None = Query(default=None, max_length=500),
         error_code: str | None = Query(default=None, max_length=120),
         operation_id: str | None = Query(default=None, max_length=160),
-        via: str | None = Query(default=None, pattern="^(chat)$"),
+        via: Literal["chat", "mcp"] | None = None,
         attention: bool = Query(default=False),
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
@@ -987,7 +988,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: str | None = Query(default=None, max_length=500),
         error_code: str | None = Query(default=None, max_length=120),
         operation_id: str | None = Query(default=None, max_length=160),
-        via: str | None = Query(default=None, pattern="^(chat)$"),
+        via: Literal["chat", "mcp"] | None = None,
         attention: bool = Query(default=False),
         since: str | None = Query(default=None, max_length=40),
         until: str | None = Query(default=None, max_length=40),
@@ -1214,6 +1215,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             require_administrator=require_administrator,
         )
     )
+
+    @app.get("/api/v1/settings/mcp", response_model=McpSettings)
+    def get_mcp_settings(_principal: Principal = admin_dependency) -> McpSettings:
+        return McpSettings(enabled=mcp_runtime is not None)
 
     @app.get("/api/v1/settings/html-javascript", response_model=HtmlJavascriptSettings)
     def get_html_javascript_settings(
